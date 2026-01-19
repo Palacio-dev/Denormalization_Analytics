@@ -1,0 +1,113 @@
+Of course. As a Senior Data Engineer, I will analyze the provided TPC-H schema, identify performance bottlenecks for analytical queries, and then create a denormalized physical schema to address them.
+
+### 1. Deep Analysis of the Relational Model
+
+The provided schema is a classic star/snowflake schema, widely recognized from the TPC-H benchmark. It represents the business operations of a wholesale supplier.
+
+*   **Fact Tables:** The core of the activity is captured in `LINEITEM` (the most granular data, representing items within an order) and `ORDERS` (representing the order headers). `LINEITEM` is the largest and most central table.
+*   **Dimension Tables:** These tables provide context to the fact tables:
+    *   `CUSTOMER`: Information about who placed the order.
+    *   `PART`: Information about the products being sold.
+    *   `SUPPLIER`: Information about the supplier of the parts.
+    *   `NATION` & `REGION`: Geographical information, forming a snowflake relationship with `CUSTOMER` and `SUPPLIER`.
+*   **Bridge Table:** `PARTSUPP` links `PART` and `SUPPLIER`, detailing which suppliers provide which parts and at what cost.
+
+### 2. Potential Performance Issues
+
+Analytical queries on this schema would frequently require joining the massive `LINEITEM` table with multiple dimension tables to aggregate and filter data.
+
+A typical analytical query might be: "Calculate the total revenue for parts of a specific brand, sold to customers in 'EUROPE', grouped by supplier nation in 1996."
+
+This query would require the following joins:
+`LINEITEM` -> `ORDERS` -> `CUSTOMER` -> `NATION` -> `REGION`
+`LINEITEM` -> `PART`
+`LINEITEM` -> `SUPPLIER` -> `NATION`
+
+This involves at least **7 joins**, which can be computationally expensive and slow, especially when `LINEITEM` contains billions of rows.
+
+### 3. Denormalization Strategy
+
+To optimize for such analytical queries, the best approach is to create a single, wide, pre-joined table. This strategy utilizes the following techniques:
+
+1.  **Pre-joined Tables / Collapsing Relations:** We will create one main analytical table by collapsing the `LINEITEM` fact table with its related dimensions (`ORDERS`, `CUSTOMER`, `PART`, `SUPPLIER`, `NATION`, `REGION`). This eliminates the need for expensive join operations at query time.
+2.  **Derivable Data:** We will pre-calculate commonly used metrics like revenue and profit, and extract date components (year, quarter, month) to simplify filtering and grouping.
+
+The new denormalized table, which we'll call `sales_analytics`, will contain one row for each line item of an order, but enriched with all the descriptive attributes from the related tables.
+
+### 4. Denormalized Physical Schema
+
+Here is the SQL `CREATE TABLE` script for the new denormalized physical model. Column names have been prefixed where necessary to avoid ambiguity (e.g., `CUST_NAME` vs. `SUPP_NAME`).
+
+```sql
+CREATE TABLE sales_analytics (
+    -- Lineitem and Order Keys (for traceability)
+    L_ORDERKEY       INTEGER NOT NULL,
+    L_LINENUMBER     INTEGER NOT NULL,
+
+    -- Derived Metrics (Derivable Data)
+    REVENUE          DECIMAL(15,2) NOT NULL, -- L_EXTENDEDPRICE * (1 - L_DISCOUNT)
+    PROFIT           DECIMAL(15,2) NOT NULL, -- (L_EXTENDEDPRICE * (1 - L_DISCOUNT)) - (PS_SUPPLYCOST * L_QUANTITY)
+
+    -- Order Information (From ORDERS table)
+    O_ORDERSTATUS    CHAR(1) NOT NULL,
+    O_TOTALPRICE     DECIMAL(15,2) NOT NULL,
+    O_ORDERDATE      DATE NOT NULL,
+    O_ORDERPRIORITY  CHAR(15) NOT NULL,
+    O_CLERK          CHAR(15) NOT NULL,
+    O_SHIPPRIORITY   INTEGER NOT NULL,
+
+    -- Derived Date Components (Derivable Data)
+    ORDER_YEAR       INTEGER NOT NULL,
+    ORDER_QUARTER    INTEGER NOT NULL,
+    ORDER_MONTH      INTEGER NOT NULL,
+
+    -- Customer Information (From CUSTOMER table)
+    C_CUSTKEY        INTEGER NOT NULL,
+    CUST_NAME        VARCHAR(25) NOT NULL,
+    CUST_ADDRESS     VARCHAR(40) NOT NULL,
+    CUST_PHONE       CHAR(15) NOT NULL,
+    CUST_ACCTBAL     DECIMAL(15,2) NOT NULL,
+    CUST_MKTSEGMENT  CHAR(10) NOT NULL,
+
+    -- Customer's Nation/Region (From NATION and REGION tables)
+    CUST_NATION_NAME CHAR(25) NOT NULL,
+    CUST_REGION_NAME CHAR(25) NOT NULL,
+
+    -- Part Information (From PART table)
+    P_PARTKEY        INTEGER NOT NULL,
+    PART_NAME        VARCHAR(55) NOT NULL,
+    PART_MFGR        CHAR(25) NOT NULL,
+    PART_BRAND       CHAR(10) NOT NULL,
+    PART_TYPE        VARCHAR(25) NOT NULL,
+    PART_SIZE        INTEGER NOT NULL,
+    PART_CONTAINER   CHAR(10) NOT NULL,
+    PART_RETAILPRICE DECIMAL(15,2) NOT NULL,
+
+    -- Supplier Information (From SUPPLIER table)
+    S_SUPPKEY        INTEGER NOT NULL,
+    SUPP_NAME        CHAR(25) NOT NULL,
+    SUPP_ADDRESS     VARCHAR(40) NOT NULL,
+    SUPP_PHONE       CHAR(15) NOT NULL,
+    SUPP_ACCTBAL     DECIMAL(15,2) NOT NULL,
+
+    -- Supplier's Nation/Region (From NATION and REGION tables)
+    SUPP_NATION_NAME CHAR(25) NOT NULL,
+    SUPP_REGION_NAME CHAR(25) NOT NULL,
+
+    -- Part-Supplier Information (From PARTSUPP table)
+    PS_AVAILQTY      INTEGER NOT NULL,
+    PS_SUPPLYCOST    DECIMAL(15,2) NOT NULL,
+
+    -- Core Lineitem Measures (From LINEITEM table)
+    L_QUANTITY       DECIMAL(15,2) NOT NULL,
+    L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,
+    L_DISCOUNT       DECIMAL(15,2) NOT NULL,
+    L_TAX            DECIMAL(15,2) NOT NULL,
+    L_RETURNFLAG     CHAR(1) NOT NULL,
+    L_LINESTATUS     CHAR(1) NOT NULL,
+    L_SHIPDATE       DATE NOT NULL,
+    L_COMMITDATE     DATE NOT NULL,
+    L_RECEIPTDATE    DATE NOT NULL,
+    L_SHIPINSTRUCT   CHAR(25) NOT NULL,
+    L_SHIPMODE       CHAR(10) NOT NULL
+);

@@ -1,0 +1,108 @@
+Of course. As a Senior Database Manager, I have analyzed the provided TPC-H schema. It is a well-structured, normalized schema, excellent for transactional (OLTP) workloads, but it requires numerous joins for analytical (OLAP) queries, which can lead to significant performance degradation.
+
+### Analysis of the Normalized Schema
+
+The provided schema is a classic snowflake schema. The central fact table is `LINEITEM`, which connects to dimensions like `ORDERS`, `PART`, and `SUPPLIER`. These dimensions, in turn, connect to further dimensions; for example, `CUSTOMER` connects to `NATION`, which connects to `REGION`.
+
+A typical analytical query, such as "Calculate the total revenue by customer nation for parts of a specific brand," would require the following joins:
+
+`LINEITEM` -> `ORDERS` -> `CUSTOMER` -> `NATION`
+`LINEITEM` -> `PART`
+
+This chain of five tables can be computationally expensive, especially on large datasets.
+
+### Denormalization Strategy
+
+To optimize for analytical performance, my strategy will focus on the following techniques:
+
+1.  **Collapsing Relations & Pre-joined Tables:** I will create a single, wide fact table, `ANALYTICS_LINEITEM_SUMMARY`, by collapsing the `LINEITEM` table with its most frequently accessed dimension attributes. This pre-joins data from `ORDERS`, `CUSTOMER`, `PART`, `SUPPLIER`, `NATION`, and `REGION`, eliminating the need for these joins at query time.
+2.  **Derivable Data:** I will pre-calculate and store key business metrics that are frequently required in analytical reports, such as `REVENUE` and `PROFIT`. This offloads calculation from query time to data-loading (ETL) time.
+
+This approach creates a denormalized star schema centered around the new summary table. While this increases data redundancy and storage requirements, it drastically reduces query complexity and execution time, which is the primary objective for an analytical database.
+
+---
+
+### Denormalized Physical Schema
+
+Below is the SQL script to create the new denormalized physical schema. This single table is designed to serve as the primary source for most analytical queries, providing a "single source of truth" for sales and supply chain analysis.
+
+```sql
+-- ===================================================================================
+-- DENORMALIZED ANALYTICAL SCHEMA
+-- Author: Senior Database Manager
+-- Objective: Improve analytical query performance by pre-joining tables and
+--            pre-calculating key metrics.
+-- Main Table: ANALYTICS_LINEITEM_SUMMARY
+-- Description: This table collapses the original LINEITEM fact table with key
+--              attributes from the ORDERS, CUSTOMER, PART, SUPPLIER, NATION,
+--              and REGION dimension tables. It is optimized for read-heavy
+--              analytical workloads.
+-- ===================================================================================
+
+CREATE TABLE ANALYTICS_LINEITEM_SUMMARY (
+    -- Primary Key from LINEITEM to maintain uniqueness
+    L_ORDERKEY          INTEGER NOT NULL,
+    L_LINENUMBER        INTEGER NOT NULL,
+
+    -- Measures from LINEITEM
+    L_QUANTITY          DECIMAL(15,2) NOT NULL,
+    L_EXTENDEDPRICE     DECIMAL(15,2) NOT NULL,
+    L_DISCOUNT          DECIMAL(15,2) NOT NULL,
+    L_TAX               DECIMAL(15,2) NOT NULL,
+    PS_SUPPLYCOST       DECIMAL(15,2) NOT NULL, -- From PARTSUPP
+
+    -- << DERIVABLE DATA >> Pre-calculated metrics for faster reporting
+    REVENUE             DECIMAL(15,2) NOT NULL, -- Formula: L_EXTENDEDPRICE * (1 - L_DISCOUNT)
+    PROFIT              DECIMAL(15,2) NOT NULL, -- Formula: (L_EXTENDEDPRICE * (1 - L_DISCOUNT)) - (PS_SUPPLYCOST * L_QUANTITY)
+
+    -- Collapsed Order Information (from ORDERS)
+    O_ORDERDATE         DATE NOT NULL,
+    O_ORDERSTATUS       CHAR(1) NOT NULL,
+    O_ORDERPRIORITY     CHAR(15) NOT NULL,
+    O_SHIPPRIORITY      INTEGER NOT NULL,
+
+    -- Collapsed Part Information (from PART)
+    P_PARTKEY           INTEGER NOT NULL,
+    P_NAME              VARCHAR(55) NOT NULL,
+    P_BRAND             CHAR(10) NOT NULL,
+    P_MFGR              CHAR(25) NOT NULL,
+    P_TYPE              VARCHAR(25) NOT NULL,
+    P_SIZE              INTEGER NOT NULL,
+    P_CONTAINER         CHAR(10) NOT NULL,
+
+    -- Collapsed Supplier Information (from SUPPLIER, NATION, REGION)
+    S_SUPPKEY           INTEGER NOT NULL,
+    S_SUPP_NAME         CHAR(25) NOT NULL,
+    S_SUPP_ACCTBAL      DECIMAL(15,2) NOT NULL,
+    S_NATION_NAME       CHAR(25) NOT NULL,
+    S_REGION_NAME       CHAR(25) NOT NULL,
+
+    -- Collapsed Customer Information (from CUSTOMER, NATION, REGION)
+    C_CUSTKEY           INTEGER NOT NULL,
+    C_CUST_NAME         VARCHAR(25) NOT NULL,
+    C_MKTSEGMENT        CHAR(10) NOT NULL,
+    C_NATION_NAME       CHAR(25) NOT NULL,
+    C_REGION_NAME       CHAR(25) NOT NULL,
+
+    -- Date/Time Attributes from LINEITEM
+    L_SHIPDATE          DATE NOT NULL,
+    L_COMMITDATE        DATE NOT NULL,
+    L_RECEIPTDATE       DATE NOT NULL,
+
+    -- Descriptive Attributes from LINEITEM
+    L_RETURNFLAG        CHAR(1) NOT NULL,
+    L_LINESTATUS        CHAR(1) NOT NULL,
+    L_SHIPINSTRUCT      CHAR(25) NOT NULL,
+    L_SHIPMODE          CHAR(10) NOT NULL,
+
+    -- It's good practice to define a primary key for the new table
+    PRIMARY KEY (L_ORDERKEY, L_LINENUMBER)
+);
+
+-- Note on populating this table:
+-- This table would be populated via an ETL (Extract, Transform, Load) process.
+-- The process would join the original normalized tables, calculate the derived
+-- fields (REVENUE, PROFIT), and insert the results into this summary table.
+-- This process would run periodically (e.g., nightly) to keep the analytical
+-- data fresh.
+```⏎      

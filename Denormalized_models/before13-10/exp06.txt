@@ -1,0 +1,187 @@
+EXPERIMENTO COM RISEN - Analista de dados sênior - harperdb
+
+Com certeza. Como Analista de Dados Sênior, minha abordagem para esta tarefa será metódica, focando na justificativa por trás de cada decisão para garantir que o novo modelo atenda aos requisitos de performance para cargas de trabalho analíticas (OLAP).
+
+---
+
+### **Análise do Modelo Relacional Original (OLTP)**
+
+O esquema fornecido é um modelo relacional clássico e altamente normalizado (provavelmente em 3NF - Terceira Forma Normal).
+
+*   **`users`**: Tabela de dimensão que armazena usuários.
+*   **`entitlements`**: Tabela de dimensão que armazena os detalhes de cada "direito" ou "licença".
+*   **`user_entitlements`**: Tabela de junção (ou tabela de fatos sem métricas) que resolve o relacionamento muitos-para-muitos (N:M) entre usuários e direitos. Um usuário pode ter vários direitos, e um direito pode ser atribuído a vários usuários.
+
+**Vantagens deste modelo (para sistemas transacionais - OLTP):**
+*   **Integridade de Dados:** Não há redundância. Se os detalhes de um `entitlement` mudarem (ex: `inactiveDate`), a alteração é feita em um único local.
+*   **Eficiência de Escrita:** Operações de `INSERT`, `UPDATE` e `DELETE` são rápidas e atômicas.
+*   **Uso Otimizado de Espaço:** Armazena a quantidade mínima de dados necessária.
+
+**Desvantagens (para sistemas analíticos - OLAP):**
+*   **Performance de Leitura:** Quase toda consulta analítica significativa exigirá a junção das três tabelas, o que é computacionalmente caro, especialmente com milhões ou bilhões de linhas na tabela `user_entitlements`.
+
+---
+
+### **Identificação de Consultas Analíticas de Baixa Performance**
+
+Vamos imaginar algumas perguntas de negócio que um analista faria a esta base de dados. Todas elas exigiriam `JOINs` custosos no modelo original.
+
+**Exemplo 1: Contar usuários ativos por tipo de funcionalidade (`featureType`)**
+```sql
+SELECT
+    e.featureType,
+    COUNT(DISTINCT u.id) AS active_users
+FROM
+    users u
+JOIN
+    user_entitlements ue ON u.id = ue.user_id
+JOIN
+    entitlements e ON ue.entitlement_id = e.id
+WHERE
+    e.activeFlag = 1
+    AND CURRENT_DATE BETWEEN e.activeDate AND e.inactiveDate
+GROUP BY
+    e.featureType;
+```
+*Análise de Performance:* Esta consulta requer uma junção tripla. O otimizador do banco de dados provavelmente terá que escanear a tabela `user_entitlements` inteira, que pode ser massiva.
+
+**Exemplo 2: Listar todos os direitos de um pacote específico (`packageType`) que estão prestes a expirar**
+```sql
+SELECT
+    ue.user_id,
+    e.*
+FROM
+    user_entitlements ue
+JOIN
+    entitlements e ON ue.entitlement_id = e.id
+WHERE
+    e.packageType = 'GOLD'
+    AND e.inactiveDate BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 day';
+```
+*Análise de Performance:* Novamente, um `JOIN` entre a tabela de junção e a tabela de detalhes, filtrando por atributos que estão na tabela `entitlements`.
+
+---
+
+### **Técnicas de Desnormalização Avaliadas**
+
+Para resolver o problema dos `JOINs` constantes, a técnica mais eficaz neste cenário é a **pré-junção** ou **achatamento (flattening)** do esquema.
+
+1.  **Pré-junção (Pre-joining):** Vamos combinar as tabelas `users`, `user_entitlements` e `entitlements` em uma única tabela larga. Isso significa que os detalhes de um `entitlement` serão duplicados para cada usuário que o possui.
+2.  **Criação de Colunas Derivadas:** Podemos pré-calcular valores que são frequentemente usados em cláusulas `WHERE` para evitar cálculos em tempo de execução. Um exemplo claro aqui é um indicador de "estado atual" (`is_currently_active`).
+
+**Trade-off:** A desnormalização troca a eficiência de escrita e o espaço de armazenamento por uma performance de leitura drasticamente melhorada. O novo modelo consumirá mais espaço em disco, e as atualizações serão mais complexas (se um `entitlement` mudar, todas as linhas correspondentes na tabela desnormalizada precisarão ser atualizadas). No entanto, para um Data Warehouse ou um Data Mart analítico, onde os dados são carregados em lote (ETL/ELT) e as leituras são a prioridade, este é um sacrifício aceitável e desejável.
+
+---
+
+### **Aplicação: Novo Esquema Físico Desnormalizado (OLAP)**
+
+Com base na análise, proponho a criação de uma única tabela "fato" desnormalizada. Esta tabela conterá todas as informações necessárias para as consultas analíticas, eliminando a necessidade de `JOINs` em tempo de execução.
+
+Abaixo está o arquivo SQL para a criação do novo esquema.
+
+```sql
+-- ===================================================================================
+-- ESQUEMA FÍSICO DESNORMALIZADO PARA PERFORMANCE ANALÍTICA (OLAP)
+--
+-- Tabela: fact_user_entitlements
+--
+-- Objetivo: Combinar as tabelas users, user_entitlements e entitlements em uma
+--           única tabela "achatada" (flattened) para eliminar a necessidade de JOINs
+--           em tempo de execução, acelerando drasticamente as consultas analíticas.
+--
+-- Estratégia:
+-- 1. Pré-junção: Os dados de `entitlements` são duplicados para cada associação
+--    de usuário, criando uma tabela larga.
+-- 2. Coluna Derivada: Adição da coluna `is_currently_active` para simplificar
+--    e acelerar filtros comuns baseados no estado atual do direito.
+--
+-- ===================================================================================
+
+CREATE TABLE fact_user_entitlements (
+    -- Chaves originais para rastreabilidade e granularidade
+    user_id INT NOT NULL,
+    entitlement_id INT NOT NULL,
+
+    -- Atributos desnormalizados da tabela 'entitlements'
+    feature_type VARCHAR(4),
+    package_type VARCHAR(4),
+    active_date DATE,
+    inactive_date DATE,
+    use_limit INT,
+    use_count INT,
+    original_active_flag INT, -- Renomeado para evitar confusão com a coluna derivada
+
+    -- Coluna Derivada para performance de consulta
+    -- Pré-calcula se o direito está ativo no momento do carregamento dos dados (ETL).
+    -- 1 para ativo, 0 para inativo.
+    -- Lógica: (original_active_flag = 1 AND CURRENT_DATE BETWEEN active_date AND inactive_date)
+    is_currently_active BOOLEAN NOT NULL,
+
+    -- Chave Primária da nova tabela, garantindo a unicidade da relação usuário-direito
+    PRIMARY KEY (user_id, entitlement_id)
+);
+
+-- ===================================================================================
+-- SUGESTÕES DE INDEXAÇÃO PARA MELHORAR A PERFORMANCE
+--
+-- Índices devem ser criados nas colunas mais frequentemente usadas em cláusulas
+-- WHERE, GROUP BY e ORDER BY.
+-- ===================================================================================
+
+-- Índice para filtrar rapidamente por tipo de funcionalidade e pacote, comum em relatórios.
+CREATE INDEX idx_fact_entitlements_types ON fact_user_entitlements (feature_type, package_type);
+
+-- Índice na coluna derivada para encontrar rapidamente todos os direitos ativos/inativos.
+-- Este será um índice extremamente utilizado.
+CREATE INDEX idx_fact_entitlements_active_status ON fact_user_entitlements (is_currently_active);
+
+-- Índice em datas para consultas de séries temporais (ex: direitos que expiram em breve).
+CREATE INDEX idx_fact_entitlements_dates ON fact_user_entitlements (active_date, inactive_date);
+
+```
+
+### **Vantagens e Comparação de Consultas**
+
+Com o novo esquema, as consultas analíticas tornam-se muito mais simples e performáticas.
+
+**Exemplo 1 (Revisado): Contar usuários ativos por tipo de funcionalidade**
+
+*   **Consulta Original (com 2 JOINs):**
+    ```sql
+    SELECT e.featureType, COUNT(DISTINCT u.id) FROM users u JOIN user_entitlements ue ON u.id = ue.user_id JOIN entitlements e ON ue.entitlement_id = e.id WHERE e.activeFlag = 1 AND CURRENT_DATE BETWEEN e.activeDate AND e.inactiveDate GROUP BY e.featureType;
+    ```
+*   **Consulta Desnormalizada (sem JOINs):**
+    ```sql
+    SELECT
+        feature_type,
+        COUNT(DISTINCT user_id) AS active_users
+    FROM
+        fact_user_entitlements
+    WHERE
+        is_currently_active = TRUE
+    GROUP BY
+        feature_type;
+    ```
+A nova consulta lê apenas uma tabela e utiliza um filtro simples em uma coluna booleana indexada, resultando em uma melhoria de performance de ordens de magnitude.
+
+**Exemplo 2 (Revisado): Listar direitos de um pacote que expiram em breve**
+
+*   **Consulta Original (com 1 JOIN):**
+    ```sql
+    SELECT ue.user_id, e.* FROM user_entitlements ue JOIN entitlements e ON ue.entitlement_id = e.id WHERE e.packageType = 'GOLD' AND e.inactiveDate BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 day';
+    ```
+*   **Consulta Desnormalizada (sem JOINs):**
+    ```sql
+    SELECT
+        user_id,
+        entitlement_id,
+        feature_type,
+        package_type,
+        inactive_date
+    FROM
+        fact_user_entitlements
+    WHERE
+        package_type = 'GOLD'
+        AND inactive_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 day';
+    ```
+Novamente, a consulta opera em uma única tabela, o que é ideal para bancos de dados analíticos, especialmente os colunares (como Redshift, BigQuery, Snowflake), que são otimizados para escanear um número limitado de colunas em tabelas largas.⏎  

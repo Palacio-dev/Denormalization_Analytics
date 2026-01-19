@@ -1,0 +1,204 @@
+Experimento com script04 - Database Manager sênior e harperdb - RISEN
+
+Excelente desafio. Como um Database Manager sênior, a minha abordagem será metódica, focada nos trade-offs e com o objetivo claro de otimizar para consultas analíticas (OLAP), mesmo que isso implique em custos para operações de escrita (OLTP).
+
+Vamos seguir o plano.
+
+### 1. Análise Profunda do Modelo Relacional (Normalizado)
+
+O esquema fornecido é um exemplo clássico e bem estruturado de um modelo relacional em 3ª Forma Normal (3NF).
+
+*   **`users`**: Tabela de dimensão para usuários. Contém apenas o ID, mas em um cenário real, conteria mais atributos (nome, email, data de cadastro, etc.).
+*   **`entitlements`**: Tabela de dimensão para "direitos" ou "benefícios". Descreve o que é o direito, suas características (`featureType`, `packageType`) e seu ciclo de vida (`activeDate`, `inactiveDate`, `activeFlag`). Também possui métricas de uso (`useLimit`, `useCount`).
+*   **`user_entitlements`**: Esta é uma tabela de junção (ou tabela de fatos, dependendo do contexto). Sua única função é materializar a relação de muitos-para-muitos (N:M) entre `users` e `entitlements`. Um usuário pode ter múltiplos direitos, e um mesmo direito pode ser atribuído a múltiplos usuários.
+
+**Características do Modelo Atual:**
+
+*   **Vantagens (OLTP):**
+    *   **Integridade de Dados:** Altamente íntegro. A alteração de um `entitlement` (ex: estender a `inactiveDate`) requer a atualização de uma única linha na tabela `entitlements`.
+    *   **Sem Redundância:** Os dados de cada `entitlement` são armazenados apenas uma vez, economizando espaço e evitando inconsistências.
+    *   **Eficiência de Escrita:** Inserir ou atualizar relações é rápido e atômico.
+
+*   **Desvantagens (OLAP):**
+    *   **Performance de Leitura:** Quase toda consulta analítica de valor exigirá, no mínimo, um `JOIN` entre as três tabelas, ou pelo menos entre `user_entitlements` e `entitlements`. Para datasets com milhões de usuários e dezenas de milhões de associações, esses `JOINs` se tornam o principal gargalo de performance.
+
+---
+
+### 2. Queries Analíticas que Causariam Problemas de Performance
+
+Vamos imaginar algumas perguntas de negócio que um analista faria a esta base de dados. Todas elas exigiriam `JOINs` custosos no modelo atual.
+
+**Exemplo 1: Contagem de usuários por tipo de feature**
+*Objetivo: Entender quais features são mais populares.*
+
+```sql
+-- Modelo Normalizado
+SELECT
+    e.featureType,
+    COUNT(DISTINCT ue.user_id) AS total_users
+FROM entitlements AS e
+JOIN user_entitlements AS ue ON e.id = ue.entitlement_id
+WHERE e.activeFlag = 1
+GROUP BY e.featureType
+ORDER BY total_users DESC;
+```
+**Problema:** O `JOIN` entre `entitlements` e `user_entitlements` pode ser massivo. O `COUNT(DISTINCT)` também é uma operação computacionalmente cara que se agrava com o `JOIN`.
+
+**Exemplo 2: Análise de coorte de usuários**
+*Objetivo: Para usuários que se cadastraram em um certo período, quais os tipos de pacotes (`packageType`) eles mais possuem?*
+
+```sql
+-- Modelo Normalizado (assumindo que a tabela 'users' tenha um 'creation_date')
+SELECT
+    e.packageType,
+    COUNT(e.packageType) as total_entitlements
+FROM users u
+JOIN user_entitlements ue ON u.id = ue.user_id
+JOIN entitlements e ON ue.entitlement_id = e.id
+WHERE u.creation_date BETWEEN '2023-01-01' AND '2023-01-31'
+GROUP BY e.packageType;
+```
+**Problema:** Agora temos um `JOIN` triplo. A complexidade e o custo para o otimizador de consultas aumentam significativamente.
+
+**Exemplo 3: Detalhes de direitos para um usuário específico**
+*Objetivo: Mostrar em uma tela todos os direitos ativos de um usuário.*
+
+```sql
+-- Modelo Normalizado
+SELECT
+    e.id,
+    e.featureType,
+    e.packageType,
+    e.inactiveDate,
+    e.useLimit,
+    e.useCount
+FROM entitlements AS e
+JOIN user_entitlements AS ue ON e.id = ue.entitlement_id
+WHERE ue.user_id = 12345 AND e.activeFlag = 1;
+```
+**Problema:** Embora seja para um único usuário, essa operação é muito frequente em sistemas. O `JOIN` constante pode sobrecarregar o banco se executado milhares de vezes por minuto.
+
+---
+
+### 3. Técnicas de Desnormalização Avaliadas
+
+Para resolver os problemas de `JOIN` identificados, a técnica mais eficaz aqui é o **"pré-join"** ou **"achatamento" (flattening)** dos dados.
+
+*   **Estratégia:** Criaremos uma única tabela larga (wide table) que combina as informações de `user_entitlements` e `entitlements`. Essencialmente, para cada linha em `user_entitlements`, vamos copiar todos os atributos do `entitlement` correspondente.
+*   **Resultado:** A tabela resultante conterá uma linha para cada direito que um usuário possui, já com todos os detalhes desse direito. Isso elimina a necessidade do `JOIN` mais custoso na hora da consulta.
+*   **Trade-off (Consequência):**
+    *   **Redundância de Dados:** Os detalhes de um `entitlement` popular (ex: `id = 101`) serão duplicados para cada um dos milhares de usuários que o possuem. Isso aumenta drasticamente o uso de armazenamento.
+    *   **Complexidade de Atualização (Write Amplification):** Se a `inactiveDate` do `entitlement` `101` mudar, no modelo normalizado, atualizamos 1 linha. No modelo desnormalizado, teremos que encontrar e atualizar **milhares** de linhas (uma para cada usuário com aquele direito). Por isso, esta tabela desnormalizada não deve ser o sistema de registro (source of truth), mas sim um *agregado analítico*, populado via processos de ETL/ELT a partir do modelo normalizado.
+
+---
+
+### 4. Novo Esquema Físico Desnormalizado (SQL)
+
+Com base na estratégia de "achatamento", criaremos uma nova tabela, que chamarei de `analytics_user_entitlements`. Esta tabela será o nosso "data mart" otimizado para as consultas analíticas.
+
+**Objetivos do Novo Esquema:**
+1.  Eliminar o `JOIN` entre `user_entitlements` e `entitlements`.
+2.  Manter a granularidade de "um direito por usuário".
+3.  Adicionar índices estratégicos para acelerar filtros e agregações comuns.
+
+Abaixo está o DDL SQL para a criação da nova estrutura.
+
+```sql
+/*
+================================================================================
+ ESQUEMA FÍSICO DESNORMALIZADO PARA ANÁLISE DE DADOS (OLAP)
+================================================================================
+
+Tabela: analytics_user_entitlements
+
+Propósito:
+Esta tabela é uma versão desnormalizada ("achatada") que combina dados das tabelas
+'users', 'user_entitlements' e 'entitlements'. O objetivo é eliminar a necessidade
+de JOINs custosos durante consultas analíticas, melhorando drasticamente a performance
+de leitura para relatórios e dashboards.
+
+Estrutura:
+- Contém uma linha para cada par (usuário, direito).
+- Todos os atributos relevantes do 'entitlement' são duplicados em cada linha,
+  evitando a necessidade de consultar a tabela original de 'entitlements'.
+
+Considerações:
+- DADO REDUNDANTE: Esta tabela intencionalmente duplica dados para otimizar a leitura.
+  O custo é um maior uso de armazenamento.
+- ATUALIZAÇÃO: A atualização de um 'entitlement' (ex: mudar sua data de inativação)
+  exigirá a atualização de MÚLTIPLAS linhas nesta tabela. Portanto, esta tabela
+  não deve ser a fonte primária de verdade (OLTP), mas sim um destino populado
+  por um processo de ETL/ELT a partir do modelo normalizado.
+- ÍNDICES: Índices foram adicionados em colunas comumente usadas em cláusulas
+  WHERE, GROUP BY e JOINs (caso precise ser conectada a outras tabelas analíticas).
+
+================================================================================
+*/
+
+CREATE TABLE analytics_user_entitlements (
+    -- Chaves e Identificadores (originários da relação)
+    user_id INT NOT NULL,
+    entitlement_id INT NOT NULL,
+
+    -- Atributos do Entitlement (dados desnormalizados/copiados)
+    activeDate DATE,
+    inactiveDate DATE,
+    useLimit INT,
+    useCount INT,
+    featureType VARCHAR(4),
+    packageType VARCHAR(4),
+    activeFlag INT,
+
+    -- Chave Primária Composta para garantir a unicidade da relação
+    PRIMARY KEY (user_id, entitlement_id)
+);
+
+/*
+================================================================================
+ ÍNDICES PARA OTIMIZAÇÃO DE CONSULTAS ANALÍTICAS
+================================================================================
+
+A escolha de índices é crucial para a performance em uma tabela desnormalizada.
+Os índices abaixo são projetados para acelerar os tipos de queries identificados
+na análise.
+*/
+
+-- Índice para acelerar a busca de todos os direitos de um usuário específico.
+-- Essencial para telas de "meu perfil", "minhas assinaturas", etc.
+CREATE INDEX idx_analytics_user_entitlements_user ON analytics_user_entitlements (user_id);
+
+-- Índice composto para acelerar agregações por tipo de feature, filtrando por ativos.
+-- Ex: "Contar usuários ativos por featureType"
+-- A ordem (activeFlag, featureType) é importante se a filtragem por 'activeFlag'
+-- for muito seletiva (ex: a maioria dos direitos está inativa).
+CREATE INDEX idx_analytics_entitlements_feature_type ON analytics_user_entitlements (featureType, activeFlag, user_id);
+
+-- Índice composto para acelerar agregações por tipo de pacote.
+-- Ex: "Contar usuários por packageType"
+CREATE INDEX idx_analytics_entitlements_package_type ON analytics_user_entitlements (packageType, activeFlag, user_id);
+
+-- Índice para consultas baseadas em tempo (time-series).
+-- Ex: "Quantos direitos foram ativados no último mês?"
+CREATE INDEX idx_analytics_entitlements_activedate ON analytics_user_entitlements (activeDate);
+
+
+-- Exemplo de como a query de contagem de usuários por feature ficaria MUITO mais simples e rápida:
+/*
+-- ANTES (com JOIN)
+SELECT
+    e.featureType,
+    COUNT(DISTINCT ue.user_id) AS total_users
+FROM entitlements AS e
+JOIN user_entitlements AS ue ON e.id = ue.entitlement_id
+WHERE e.activeFlag = 1
+GROUP BY e.featureType;
+
+-- DEPOIS (sem JOIN, na tabela desnormalizada)
+SELECT
+    featureType,
+    COUNT(DISTINCT user_id) AS total_users
+FROM analytics_user_entitlements
+WHERE activeFlag = 1
+GROUP BY featureType;
+*/
+```⏎             

@@ -1,0 +1,206 @@
+EXPERIMENTO COM RISEN - script04 - Database manager sênior - solarwinds
+
+Excelente desafio. Como um Database Manager sênior, a tarefa de transitar de um modelo otimizado para transações (OLTP) para um modelo otimizado para análises (OLAP) é um cenário clássico e fundamental para a performance de Business Intelligence e Data Warehousing.
+
+Vamos seguir a metodologia solicitada.
+
+---
+
+### **1. Análise Profunda do Modelo Relacional (OLTP)**
+
+O esquema fornecido é um exemplo clássico de um modelo relacional em Terceira Forma Normal (3NF).
+
+*   **Tabelas:** `customers`, `orders`, `products`, `order_details`.
+*   **Estrutura:**
+    *   `customers` e `products` são tabelas de dimensão, contendo dados mestres sobre clientes e produtos.
+    *   `orders` é uma tabela de fatos que registra o cabeçalho de um pedido, ligando um cliente a uma data.
+    *   `order_details` é uma tabela de junção (ou tabela de fatos de granularidade fina) que detalha os itens de cada pedido, ligando um pedido a múltiplos produtos com suas respectivas quantidades.
+*   **Pontos Fortes (para OLTP):**
+    *   **Integridade de Dados:** O uso de chaves estrangeiras (`FOREIGN KEY`) garante que não existam pedidos sem clientes ou itens de pedido sem produtos.
+    *   **Minimização de Redundância:** O nome de um cliente ou o preço de um produto é armazenado em um único local. Se o endereço de um cliente mudar, a atualização é feita em uma única linha na tabela `customers`.
+    *   **Eficiência em Escritas (Inserts/Updates/Deletes):** As operações de escrita são rápidas e atômicas, afetando tabelas pequenas e específicas.
+*   **Pontos Fracos (para OLAP - Análise):**
+    *   **Performance de Leitura:** Para obter uma visão completa de uma venda, é necessário realizar múltiplos `JOINs`. Consultas analíticas que agregam milhões de registros se tornam extremamente lentas devido à sobrecarga computacional de combinar essas quatro tabelas repetidamente.
+
+---
+
+### **2. Análise de Queries Analíticas Problemáticas**
+
+Vamos imaginar algumas perguntas de negócio que um analista faria. No modelo atual, elas seriam custosas.
+
+**Query 1: "Qual o faturamento total por cliente no último ano?"**
+
+```sql
+-- Query no modelo relacional (lenta)
+SELECT
+  c.customer_name,
+  SUM(od.quantity * p.price) AS total_revenue
+FROM customers c
+JOIN orders o ON c.customer_id = o.customer_id
+JOIN order_details od ON o.order_id = od.order_id
+JOIN products p ON od.product_id = p.product_id
+WHERE o.order_date >= (CURRENT_DATE - INTERVAL '1 year')
+GROUP BY c.customer_name
+ORDER BY total_revenue DESC;
+```
+*   **Problema:** Requer um `JOIN` entre todas as 4 tabelas. Para um banco de dados com milhões de pedidos, essa operação é muito lenta.
+
+**Query 2: "Quais os 10 produtos mais vendidos (em valor) por mês?"**
+
+```sql
+-- Query no modelo relacional (lenta)
+SELECT
+  TO_CHAR(o.order_date, 'YYYY-MM') AS sales_month,
+  p.product_name,
+  SUM(od.quantity * p.price) AS monthly_product_revenue
+FROM orders o
+JOIN order_details od ON o.order_id = od.order_id
+JOIN products p ON od.product_id = p.product_id
+GROUP BY sales_month, p.product_name
+ORDER BY sales_month, monthly_product_revenue DESC;
+-- (A lógica para pegar o "top 10" por mês exigiria uma window function, adicionando mais complexidade)
+```
+*   **Problema:** Novamente, um `JOIN` de 3 tabelas, com agrupamento e cálculo em tempo de execução. A performance degrada rapidamente com o aumento do volume de dados.
+
+---
+
+### **3. Avaliação de Técnicas de Desnormalização**
+
+Para resolver os problemas acima, aplicaremos as seguintes técnicas:
+
+1.  **Pré-junção de Tabelas (Flattening):** A técnica mais eficaz aqui é criar uma única tabela "achatada" (flat table) que contenha todos os dados necessários para as análises. Em vez de fazer os `JOINs` a cada consulta, nós os fazemos uma única vez durante o processo de carga de dados (ETL - Extract, Transform, Load) para a nova tabela.
+2.  **Redundância de Dados Controlada:** Vamos copiar os dados das tabelas de dimensão (como `customer_name` e `product_name`) para a nossa nova tabela analítica. Embora isso viole a 3NF, elimina a necessidade de `JOINs` em tempo de consulta.
+3.  **Cálculos Pré-agregados:** Podemos calcular valores que são frequentemente usados, como o total de cada linha de pedido (`quantity * price`), e armazená-los diretamente na nova tabela. Isso transfere o custo do cálculo do tempo de leitura (query) para o tempo de escrita (ETL).
+
+A abordagem será criar uma única tabela de fatos desnormalizada, muito semelhante a um *esquema em estrela (star schema)*, mas com as dimensões "embutidas" para máxima simplicidade e performance de leitura.
+
+---
+
+### **4. Aplicação e Criação do Novo Esquema Físico Desnormalizado**
+
+Com base na análise, proponho a criação de uma única tabela, que chamaremos de `analytics_sales`. Esta tabela conterá uma linha para cada item de um pedido (`order_detail`), mas enriquecida com todos os dados relevantes das outras tabelas.
+
+**Considerações Importantes:**
+
+*   **Snapshot de Dados:** A tabela desnormalizada representa um "snapshot" dos dados no momento da venda. Por exemplo, o `product_price` e o `customer_address` armazenados são os que eram válidos *na data do pedido*. Isso é crucial para análises históricas precisas, pois o preço de um produto ou o endereço de um cliente pode mudar ao longo do tempo.
+*   **Processo de Carga (ETL):** Esta tabela não seria populada diretamente pela aplicação transacional. Ela seria alimentada por um processo agendado (diário, por exemplo) que lê os dados do modelo relacional, faz os `JOINs` e cálculos, e insere os resultados na tabela `analytics_sales`.
+*   **Indexação:** A indexação nesta nova tabela é fundamental e deve ser focada nas colunas mais utilizadas em cláusulas `WHERE`, `GROUP BY` e `ORDER BY`, como `order_date`, `customer_id` e `product_id`.
+
+Abaixo está o SQL para criar o novo esquema físico desnormalizado.
+
+---
+
+### **Arquivo SQL: Esquema Físico Desnormalizado para Análise**
+
+```sql
+-- ===================================================================================
+-- ESQUEMA FÍSICO DESNORMALIZADO PARA PERFORMANCE ANALÍTICA (OLAP)
+--
+-- Autor: Senior Database Manager
+-- Objetivo: Consolidar dados de vendas em uma única tabela "achatada" para
+--           eliminar a necessidade de JOINs em tempo de consulta, otimizando
+--           drasticamente a performance de queries analíticas e de BI.
+-- ===================================================================================
+
+-- Drop da tabela se ela já existir, para facilitar a recriação durante o desenvolvimento.
+DROP TABLE IF EXISTS analytics_sales;
+
+-- Criação da tabela principal desnormalizada.
+-- Esta tabela contém uma linha para cada item de produto dentro de um pedido.
+CREATE TABLE analytics_sales (
+  -- Chave primária para a tabela analítica. Pode ser útil para processos de ETL.
+  -- Muitas vezes, a combinação de order_id e product_id (ou o order_detail_id original) pode servir como chave natural.
+  -- Usaremos uma chave substituta (surrogate key) por boas práticas de Data Warehouse.
+  sales_fact_id SERIAL PRIMARY KEY,
+
+  -- Dados originários da tabela 'orders' e 'order_details'
+  order_id INT NOT NULL,
+  order_detail_id INT NOT NULL, -- Mantido para rastreabilidade com o sistema original
+  order_date DATE NOT NULL,
+
+  -- Dados desnormalizados da tabela 'customers'
+  -- Copiamos os atributos mais relevantes do cliente para evitar JOINs.
+  customer_id INT NOT NULL,
+  customer_name VARCHAR(100),
+  customer_email VARCHAR(100),
+  customer_address TEXT, -- O endereço no momento da compra
+
+  -- Dados desnormalizados da tabela 'products'
+  -- Copiamos os atributos do produto, incluindo o preço no momento da venda.
+  product_id INT NOT NULL,
+  product_name VARCHAR(100),
+  product_price_at_sale DECIMAL(10, 2), -- Preço do produto na data da venda (snapshot)
+
+  -- Dados da tabela 'order_details'
+  quantity INT,
+
+  -- Coluna pré-calculada para performance
+  -- Evita a multiplicação (quantity * price) em toda consulta.
+  line_item_total DECIMAL(12, 2) -- (quantity * product_price_at_sale)
+);
+
+-- ===================================================================================
+-- CRIAÇÃO DE ÍNDICES OTIMIZADOS PARA CONSULTAS ANALÍTICAS
+-- ===================================================================================
+
+-- Um índice na data do pedido é quase sempre a otimização mais importante
+-- para relatórios baseados em períodos (diário, mensal, anual).
+CREATE INDEX idx_analytics_sales_order_date ON analytics_sales (order_date);
+
+-- Índices em chaves de dimensão para permitir filtragem e agrupamento rápidos
+-- por cliente ou produto.
+CREATE INDEX idx_analytics_sales_customer_id ON analytics_sales (customer_id);
+CREATE INDEX idx_analytics_sales_product_id ON analytics_sales (product_id);
+
+-- Um índice composto pode acelerar consultas que filtram por data e agrupam
+-- por produto, um cenário muito comum.
+CREATE INDEX idx_analytics_sales_date_product ON analytics_sales (order_date, product_id);
+
+COMMENT ON TABLE analytics_sales IS 'Tabela desnormalizada para análise de vendas. Cada linha representa um item de um pedido, enriquecido com dados de cliente e produto para evitar JOINs e otimizar a performance de leitura.';
+COMMENT ON COLUMN analytics_sales.product_price_at_sale IS 'Snapshot do preço do produto no momento em que a venda foi realizada, garantindo precisão histórica.';
+COMMENT ON COLUMN analytics_sales.line_item_total IS 'Valor pré-calculado (quantity * product_price_at_sale) para acelerar agregações.';
+
+```
+
+### **Como as Queries Problemáticas se Tornam Rápidas**
+
+Com a nova tabela `analytics_sales`, as queries anteriores se tornam muito mais simples e performáticas:
+
+**Query 1 (revisada): "Qual o faturamento total por cliente no último ano?"**
+
+```sql
+-- Query no modelo desnormalizado (rápida)
+SELECT
+  customer_name,
+  SUM(line_item_total) AS total_revenue
+FROM analytics_sales
+WHERE order_date >= (CURRENT_DATE - INTERVAL '1 year')
+GROUP BY customer_name
+ORDER BY total_revenue DESC;
+```
+*   **Benefício:** NENHUM `JOIN` é necessário. A consulta apenas lê uma única tabela, filtra por um campo indexado (`order_date`) e agrega um valor pré-calculado. A performance será ordens de magnitude melhor.
+
+**Query 2 (revisada): "Quais os 10 produtos mais vendidos (em valor) por mês?"**
+
+```sql
+-- Query no modelo desnormalizado (rápida)
+WITH monthly_sales AS (
+  SELECT
+    TO_CHAR(order_date, 'YYYY-MM') AS sales_month,
+    product_name,
+    SUM(line_item_total) AS monthly_product_revenue,
+    RANK() OVER(PARTITION BY TO_CHAR(order_date, 'YYYY-MM') ORDER BY SUM(line_item_total) DESC) as sales_rank
+  FROM analytics_sales
+  GROUP BY sales_month, product_name
+)
+SELECT
+  sales_month,
+  product_name,
+  monthly_product_revenue
+FROM monthly_sales
+WHERE sales_rank <= 10
+ORDER BY sales_month, sales_rank;
+```
+*   **Benefício:** Novamente, a consulta opera em uma única tabela, tornando o `GROUP BY` e a `window function` muito mais eficientes.
+
+Este novo esquema físico está otimizado para o objetivo final: performance máxima em consultas analíticas.⏎

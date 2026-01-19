@@ -1,0 +1,176 @@
+EXPERIMENTO COM RISEN - Engenheiro de dados sênior - harperdb 
+
+Com certeza. Como Engenheiro de Dados Sênior, minha abordagem para esta tarefa será metódica, focando na justificativa por trás de cada decisão para garantir que a solução não apenas funcione, mas seja compreendida em seus fundamentos.
+
+Vamos seguir os passos propostos.
+
+### 1. Análise Profunda do Modelo Relacional
+
+O esquema fornecido é um modelo relacional clássico e bem normalizado (provavelmente em 3NF - Terceira Forma Normal).
+
+*   **`users`**: Tabela de dimensão de usuários. Atualmente, contém apenas o `id`, mas em um sistema real, conteria dados como nome, e-mail, data de cadastro, etc. Serve como a "âncora" para a identidade do usuário.
+*   **`entitlements`**: Tabela de dimensão de "direitos" ou "permissões". Descreve o que é uma permissão, suas características (tipo de feature, tipo de pacote), seu ciclo de vida (`activeDate`, `inactiveDate`, `activeFlag`) e seus limites de uso (`useLimit`, `useCount`).
+*   **`user_entitlements`**: Esta é uma tabela de junção (ou tabela associativa). Sua única função é resolver o relacionamento muitos-para-muitos (N:M) entre `users` e `entitlements`. Um usuário pode ter muitas permissões, e uma mesma permissão (ex: "Acesso Premium") pode ser atribuída a muitos usuários.
+
+**Conclusão da Análise:**
+Este modelo é excelente para um ambiente transacional (OLTP - Online Transaction Processing).
+*   **Integridade dos Dados:** A normalização garante que não haja redundância. A descrição de um `entitlement` existe em um único lugar. Se precisarmos atualizar o `useLimit` de uma permissão, fazemos isso em uma única linha na tabela `entitlements`.
+*   **Eficiência de Escrita:** Adicionar ou remover uma permissão para um usuário é uma operação muito rápida e atômica, envolvendo apenas uma inserção ou exclusão na pequena tabela `user_entitlements`.
+
+No entanto, para um ambiente analítico (OLAP - Online Analytical Processing), este modelo apresenta um gargalo de performance significativo.
+
+### 2. Queries com Potenciais Problemas de Performance
+
+O principal problema é a necessidade constante de `JOINs` para responder a perguntas de negócio. Em um data warehouse com bilhões de registros, esses `JOINs` se tornam extremamente caros.
+
+**Exemplo de Query 1: Contagem de usuários ativos por tipo de feature**
+*Objetivo: Quantos usuários distintos possuem uma permissão ativa do tipo 'PREM' (Premium)?*
+
+```sql
+SELECT
+  e.featureType,
+  COUNT(DISTINCT ue.user_id) AS distinct_users
+FROM entitlements AS e
+JOIN user_entitlements AS ue ON e.id = ue.entitlement_id
+WHERE
+  e.activeFlag = 1
+  AND e.featureType = 'PREM'
+  AND CURRENT_DATE BETWEEN e.activeDate AND e.inactiveDate
+GROUP BY
+  e.featureType;
+```
+*   **Problema:** Requer um `JOIN` entre `entitlements` e `user_entitlements`. O `COUNT(DISTINCT)` sobre a tabela de junção pode ser lento em grandes volumes de dados.
+
+**Exemplo de Query 2: Relatório de permissões para um segmento de usuários**
+*Objetivo: Listar todas as permissões, com seus detalhes, para um conjunto específico de 10.000 usuários.*
+
+```sql
+SELECT
+  u.id AS user_id,
+  e.id AS entitlement_id,
+  e.packageType,
+  e.useLimit,
+  e.useCount
+FROM users AS u
+JOIN user_entitlements AS ue ON u.id = ue.user_id
+JOIN entitlements AS e ON ue.entitlement_id = e.id
+WHERE
+  u.id IN ( ... lista de 10.000 IDs ... );
+```
+*   **Problema:** Este é o clássico `JOIN` de três tabelas. O otimizador do banco de dados precisa decidir a melhor ordem para juntar as tabelas, mas, independentemente da escolha, o custo computacional de combinar milhões de registros de `user_entitlements` com `entitlements` é alto.
+
+### 3. Avaliação de Técnicas de Desnormalização
+
+Para resolver os problemas acima, a principal técnica a ser aplicada é a **"pré-junção" ou achatamento (flattening)**. A ideia é eliminar a necessidade de `JOINs` em tempo de execução, incorporando os dados das tabelas de dimensão diretamente na tabela que representa o evento ou o fato principal.
+
+*   **Técnica Escolhida:** Criaremos uma única tabela larga que combina as informações de `users`, `user_entitlements` e `entitlements`. Cada linha nesta nova tabela representará uma permissão específica atribuída a um usuário específico, contendo todos os detalhes da permissão.
+
+*   **Trade-offs (Consequências):**
+    *   **Vantagem (Performance de Leitura):** As consultas analíticas se tornarão drasticamente mais rápidas, pois se resumirão a simples `SELECT ... WHERE ... GROUP BY` em uma única tabela, sem `JOINs`.
+    *   **Desvantagem (Redundância de Dados):** Os detalhes de um `entitlement` (como `featureType`, `packageType`) serão repetidos para cada usuário que o possui. Isso aumenta o consumo de armazenamento.
+    *   **Desvantagem (Complexidade de Atualização):** Se o `packageType` de um `entitlement` mudar, em vez de atualizar uma única linha no modelo normalizado, teremos que atualizar *todas as linhas* correspondentes a esse `entitlement_id` na nova tabela desnormalizada. Por isso, este modelo é ideal para ambientes analíticos onde os dados são carregados em lote (ETL/ELT) e as atualizações são menos frequentes.
+
+### 4. Aplicação e Criação do Novo Esquema Físico Desnormalizado
+
+Com base na análise, criaremos uma nova tabela, que podemos chamar de `fact_user_entitlements`, seguindo a convenção de nomenclatura de Data Warehousing. Esta tabela "materializa" o resultado dos `JOINs` que identificamos como gargalos.
+
+A tabela `users` original pode ser mantida como uma dimensão (`dim_users`) se contiver outros atributos do usuário, mas para o escopo desta análise, vamos focar em achatar tudo em uma única estrutura para máxima performance nas queries apresentadas.
+
+---
+
+## Esquema Físico Desnormalizado (SQL)
+
+```sql
+-- #############################################################################
+-- ## ESQUEMA FÍSICO DESNORMALIZADO PARA PERFORMANCE ANALÍTICA
+-- ##
+-- ## Autor: Engenheiro de Dados Sênior
+-- ## Data: 24/05/2024
+-- ##
+-- ## Objetivo: Eliminar a necessidade de JOINs para consultas analíticas
+-- ##           comuns sobre as permissões dos usuários.
+-- ##
+-- ## Técnica Aplicada: Achatamento (Flattening) / Pré-junção.
+-- ## A tabela de junção 'user_entitlements' foi eliminada e seus dados
+-- ## foram combinados com os atributos da tabela 'entitlements'.
+-- ##
+-- ## Nome da Tabela: fact_user_entitlements
+-- ## Granularidade: Cada linha representa uma única permissão atribuída a
+-- ##                um único usuário.
+-- #############################################################################
+
+CREATE TABLE fact_user_entitlements (
+    -- Identificadores (mantidos para rastreabilidade e junções com outras dimensões)
+    user_id INT NOT NULL,
+    entitlement_id INT NOT NULL,
+
+    -- Atributos da permissão (desnormalizados da tabela 'entitlements')
+    featureType VARCHAR(4),
+    packageType VARCHAR(4),
+    activeDate DATE,
+    inactiveDate DATE,
+    activeFlag INT,
+    useLimit INT,
+    useCount INT,
+
+    -- Chave Primária: A combinação de usuário e permissão ainda é única.
+    PRIMARY KEY (user_id, entitlement_id)
+);
+
+-- #############################################################################
+-- ## ESTRATÉGIA DE INDEXAÇÃO PARA CONSULTAS ANALÍTICAS
+-- ##
+-- ## Índices são cruciais em tabelas desnormalizadas para evitar full table scans.
+-- ## Os índices abaixo suportam os padrões de consulta mais comuns.
+-- #############################################################################
+
+-- Índice para acelerar filtros por tipo de feature, tipo de pacote e status.
+-- A ordem das colunas é importante, baseada na seletividade e frequência de uso.
+CREATE INDEX idx_entitlements_by_type_status
+ON fact_user_entitlements(featureType, packageType, activeFlag);
+
+-- Índice para acelerar buscas por permissões ativas em um determinado período.
+-- Útil para queries que verificam "quais permissões estão ativas hoje?".
+CREATE INDEX idx_entitlements_by_date_range
+ON fact_user_entitlements(activeDate, inactiveDate);
+
+-- Comentário: Um índice apenas em `user_id` não é estritamente necessário
+-- pois ele já é a primeira coluna da chave primária, o que geralmente
+-- permite que o SGBD o utilize para buscas rápidas por usuário.
+
+```
+
+### Como as Queries Anteriores se Comportariam Agora
+
+**Query 1 (Contagem de usuários ativos por tipo de feature) - Versão Desnormalizada:**
+
+```sql
+-- Sem JOINs, muito mais rápido
+SELECT
+  featureType,
+  COUNT(DISTINCT user_id) AS distinct_users
+FROM fact_user_entitlements
+WHERE
+  activeFlag = 1
+  AND featureType = 'PREM'
+  AND CURRENT_DATE BETWEEN activeDate AND inactiveDate
+GROUP BY
+  featureType;
+```
+
+**Query 2 (Relatório de permissões para um segmento de usuários) - Versão Desnormalizada:**
+
+```sql
+-- Sem JOINs, operação de busca direta e eficiente
+SELECT
+  user_id,
+  entitlement_id,
+  packageType,
+  useLimit,
+  useCount
+FROM fact_user_entitlements
+WHERE
+  user_id IN ( ... lista de 10.000 IDs ... );
+```
+
+Este novo esquema está otimizado para leitura e agregações em larga escala, sacrificando a eficiência de escrita e o espaço de armazenamento, uma troca clássica e fundamental na engenharia de dados para sistemas analíticos.⏎ 
