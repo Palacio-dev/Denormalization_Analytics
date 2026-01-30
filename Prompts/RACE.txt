@@ -18,22 +18,27 @@ RACE FRAMEWORK (Role - Action - Context  - Examples)
 <Context>
 
 <COMMON DENORMALIZATION TECHNIQUES>
-    1 - Pre-joined Tables: Consists of creating tables that are already joined (pre-computed
-        joins) to avoid join operations at runtime. This is useful in queries involving multiple tables
-        that are executed frequently, reducing query complexity and improving performance. arrumar depois
-    2 - Split Tables: Divides a large table into multiple smaller ones, usually to separate rarely
-        accessed data from frequently accessed data. This improves read performance and can
-        reduce index size.
-    3 - Combined Tables: The opposite of Split Tables, it merges data from multiple tables into
-        one. It is used when queries frequently require distributed data, eliminating the need for
-        joins and reducing latency.
-    4 - Derivable Data: Stores data that could be derived or calculated from other columns,
-        such as total sales or a customer's age. This reduces query processing time but increases
-        the risk of inconsistency if not properly managed.
-    5 - Collapsing Relations: Reduces the number of related tables by merging complex
+    1 - Adding Redundant Attributes: Adding redundant attributes is useful when certain queries involving multiple joins
+        are executed frequently. In this technique, a new table is created containing selected attributes from two or more
+        related tables, effectively materializing the result of a join. This allows queries to be executed using a single
+        table access, eliminating join overhead. 
+
+    2 - Adding Derived Attributes: In analytical environments, efficient execution of aggregation functions such as MIN,
+        MAX, SUM, AVG, and COUNT is crucial. Adding derived attributes involves precomputing commonly used
+        aggregated values and storing them directly in a table column. This approach can dramatically reduce query execution
+        time by avoiding repetitive aggregation operations. 
+
+    3 - Collapsing Relations: Consists of reducing the number of related tables by merging complex
         relationships into fewer tables. This technique decreases the need for multiple joins in
         queries and can greatly simplify the data schema in analytical scenarios.
 
+    4 - Vertical Partitioning : Consists of dividing a large table into smaller, more manageable talbes.Should be applied
+        when a table contains many attributes, but only subsets of those attributes are frequently accessed together.
+        For example, in an e-commerce database, some columns may represent physical product characteristics (such as width,
+        height, and weight), while others represent pricing and commercial information. In this case, the original table
+        can be split into two tables: one containing the product ID and physical attributes, and another containing the
+        product ID and pricing-related attributes. This approach reduces unnecessary column access and improves cache
+        efficiency for common queries.
 </COMMON DENORMALIZATION TECHNIQUES>
 
 <Example>
