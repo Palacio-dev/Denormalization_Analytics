@@ -1,0 +1,78 @@
+Here is a set of prompts designed for an LLM, categorized by the user's level of database experience. Each prompt is structured to give the LLM the exact context it needs to generate a high-quality denormalized physical schema. 
+
+### 🟢 Level 1: Beginner
+**User Profile:** Understands basic database concepts (tables, columns, basic relationships) but isn't deeply familiar with database design terminology like "3rd Normal Form" or specific denormalization patterns.
+**Goal of the Prompt:** Focus on the *problem* (slow reads/too many joins) and ask the LLM to explain both the *solution* and the *new code* in simple terms.
+
+**The Prompt:**
+> "I have a relational database, but right now, reading data is too slow because I have to join too many tables together. I want to 'denormalize' it—which means combining some tables or adding duplicate data so I can read it faster.
+> 
+> Here are my current tables and columns:
+> [Insert your current tables or describe them, e.g., "Customers (ID, Name), Orders (ID, Customer_ID, Date), Order_Items (Order_ID, Product_ID, Quantity), Products (ID, Name, Price)"]
+> 
+> The main thing I need to read quickly is: 
+> [Describe what you are trying to view, e.g., "A dashboard showing the customer's name, their total order amount, and the names of the products they bought."]
+> 
+> Please do the following:
+> 1. Explain simply how we can combine or change these tables to make this specific read faster.
+> 2. Write the SQL code to create the new, faster table(s).
+> 3. Tell me what I need to be careful about when I insert or update data in this new setup."
+
+***
+
+### 🟡 Level 2: Intermediate
+**User Profile:** Understands normalization (1NF, 2NF, 3NF), Primary/Foreign keys, and DDL. Knows that denormalization involves calculated fields, flattened tables, or materialized views, but wants the LLM to do the heavy lifting of redesigning the schema.
+**Goal of the Prompt:** Provide the DDL and workload context, and ask for specific denormalization strategies, the new DDL, and a trade-off analysis.
+
+**The Prompt:**
+> "I need to denormalize a physical database schema to optimize it for a read-heavy workload. The current physical model is heavily normalized (3NF), which is causing performance bottlenecks due to excessive complex joins.
+> 
+> Here is my current DDL (Data Definition Language):
+> ```sql
+> [Insert your current CREATE TABLE scripts here]
+> ```
+> 
+> The most critical read queries we need to optimize are:
+> 1. [e.g., Fetching a complete user profile with their latest 5 purchases and lifetime spend]
+> 2. [e.g., Generating a daily sales report aggregating by product category and region]
+> 
+> Please act as a Database Engineer and provide:
+> 1. **Denormalization Strategy:** Suggest specific techniques (e.g., flattening 1-to-1 relationships, adding pre-aggregated columns, creating wide tables, or storing semi-structured JSON).
+> 2. **New Physical Schema:** Provide the optimized SQL DDL for the new denormalized tables.
+> 3. **Trade-off Analysis:** Briefly explain the anomalies or write-performance costs introduced by this denormalization, and how I should handle them (e.g., triggers, application-level updates, or cron jobs)."
+
+***
+
+### 🔴 Level 3: Expert / DBA
+**User Profile:** Database Administrator, Data Architect, or Senior Engineer. Deeply understands storage engines, indexing mechanisms, ACID properties, and distributed systems. Needs production-ready code tailored to a specific database engine.
+**Goal of the Prompt:** Enforce strict constraints, specify the target RDBMS, ask for advanced optimization techniques (like clustered indexes, table partitioning, or materialized views), and request synchronization strategies.
+
+**The Prompt:**
+> "Act as a Senior Database Architect. I am migrating a highly normalized OLTP schema to a read-optimized, denormalized physical model. The system is struggling with read latency under high concurrent load. 
+> 
+> **Context & Environment:**
+> - Target RDBMS: [e.g., PostgreSQL 16 / MySQL 8.0 / SQL Server 2022]
+> - Read/Write Ratio: [e.g., 90% Reads, 10% Writes]
+> - Current Bottleneck: [e.g., CPU spikes from nested loops on massive joins during paginated API requests]
+> 
+> **Current Normalized Schema (DDL):**
+> ```sql
+> [Insert current DDL with existing indexes and constraints]
+> ```
+> 
+> **Target Read Workload:**
+> ```sql
+> [Paste the specific expensive SELECT queries or execution plan summaries]
+> ```
+> 
+> Please generate the following deliverables:
+> 1. **Optimized Physical Schema DDL:** Provide the denormalized DDL. Utilize advanced engine-specific features where applicable (e.g., Materialized Views, JSONB/Document columns for 1-to-N flattening, Array types, or Table Partitioning).
+> 2. **Physical Indexing Strategy:** Include the DDL for the indexes required to support the new denormalized schema (covering indexes, composite indexes, etc.).
+> 3. **Data Synchronization Architecture:** Detail the exact mechanism for keeping this denormalized read-model in sync with the source of truth (e.g., Engine-level Triggers, CDC (Change Data Capture) via Debezium, or async queue workers).
+> 4. **Storage & Maintenance Overhead:** Provide a technical assessment of the impact on table bloat, buffer pool usage, and write amplification."
+
+***
+
+### 💡 Tips for getting the best results:
+*   **Always include constraints:** If you have strict rules (e.g., "I cannot use triggers" or "I must use MySQL 5.7"), state them in the prompt.
+*   **Provide data volume estimates:** If the LLM knows a table has 10,000 rows vs. 10 billion rows, it will suggest vastly different physical models. (Add: *"Assume Table A has X rows and grows by Y per day"* to the intermediate/expert prompts).

@@ -1,0 +1,74 @@
+Here is a comprehensive set of prompts designed to guide an LLM in denormalizing a relational database physical model and generating a new physical schema. 
+
+The prompts are divided by the user's level of database expertise. To use these, you simply need to copy the prompt, replace the bracketed placeholders `[ ]` with your specific details, and paste it into the LLM.
+
+---
+
+### Level 1: Beginner (Focus: Concept Explanation & Simple Execution)
+**Who this is for:** Users who know what a database is and have some tables, but aren't deeply familiar with database design theory, "normal forms," or how to safely combine tables. 
+**Goal of the prompt:** To have the LLM explain *why* it is making certain changes, identify the best targets for denormalization, and provide easy-to-read SQL.
+
+**Prompt Template:**
+> "I have a relational database, and reading data from it has become very slow because my queries have to join too many tables. I want to 'denormalize' it (combine some tables) to make reading the data faster. 
+>
+> Here is my current physical schema (tables and columns):
+> [Insert your current CREATE TABLE statements or describe your tables here]
+>
+> Here is the main information I usually need to read together:
+> [Insert a brief description of what you read, e.g., "I constantly need the Customer's Name, their Order Date, and the Product Name all at once."]
+>
+> Please do the following:
+> 1. Explain in simple terms which tables we should combine or which columns we should duplicate to make reads faster.
+> 2. Explain the downside of doing this (what happens when I need to update data?).
+> 3. Provide the new, updated `CREATE TABLE` SQL code for the denormalized schema. Include basic comments in the SQL explaining the changes."
+
+---
+
+### Level 2: Intermediate (Focus: Query Optimization & Data Integrity Trade-offs)
+**Who this is for:** Users who understand 3rd Normal Form (3NF), foreign keys, and indexes, but need help designing the optimal denormalized structure and handling the resulting data anomalies (redundancy).
+**Goal of the prompt:** To align the new physical schema exactly with specific slow queries, and to generate strategies (like triggers) for keeping the duplicated data in sync.
+
+**Prompt Template:**
+> "I need to optimize the physical model of a normalized relational database specifically for read-heavy workloads. I am willing to sacrifice some write speed and storage space to eliminate expensive `JOIN` operations.
+>
+> Here is my current physical schema:
+> [Insert current DDL/Schema]
+>
+> Here are the specific `SELECT` queries that are currently causing performance bottlenecks:
+> [Insert slow SQL queries]
+>
+> Please perform the following tasks:
+> 1. Analyze the queries and propose a denormalized physical model. Suggest techniques like pre-aggregating data, adding redundant columns, or collapsing 1-to-Many relationships into single wide tables.
+> 2. Generate the new DDL (CREATE TABLE statements) for the denormalized physical schema.
+> 3. Recommend the best physical indexes for this new schema based on the queries provided.
+> 4. Since denormalization introduces data redundancy, provide a strategy (e.g., database triggers, application-level logic, or materialized views) to keep the redundant data synchronized when updates occur."
+
+---
+
+### Level 3: Expert / DBA (Focus: Advanced Architecture, RDBMS-Specific Features & Migration)
+**Who this is for:** Database Administrators, Data Engineers, or Senior Backend Developers. They understand concepts like Star Schemas, OLAP vs. OLTP, Materialized Views, and JSONB payloads.
+**Goal of the prompt:** To treat the LLM as a peer engineer to generate production-ready, highly optimized, RDBMS-specific physical structures and data migration pipelines.
+
+**Prompt Template:**
+> "Act as a Senior Database Architect. I need to refactor a strict 3NF OLTP physical schema into a read-optimized, denormalized model. The target RDBMS is [Insert Database, e.g., PostgreSQL 15 / SQL Server 2022 / Snowflake].
+> 
+> Current constraints: High read concurrency, low latency requirements. Writes happen mostly via background workers or batch processes.
+> 
+> Current 3NF DDL:
+> [Insert current DDL]
+> 
+> Access Patterns / Workload description:
+> [Insert detailed technical description of the read workload, filtering patterns, and aggregation requirements]
+> 
+> Deliverables required:
+> 1. **Denormalized Physical Schema DDL:** Provide production-ready DDL. Utilize advanced RDBMS-specific physical features where appropriate (e.g., Materialized Views, Table Partitioning, JSONB/Document columns for nested sub-records, Array data types).
+> 2. **Physical Optimizations:** Include exact index definitions (e.g., Covering Indexes, Partial Indexes, BRIN, or B-Tree) tailored to the denormalized structure.
+> 3. **ETL/Migration Script:** Write the exact `INSERT INTO ... SELECT` query required to migrate the existing data from the highly normalized schema into the new denormalized physical tables. 
+> 4. **Storage/Performance Analysis:** Briefly outline the expected space complexity increase and potential write-amplification bottlenecks."
+
+---
+
+### 💡 Pro-Tips for getting the best results from the LLM:
+*   **Specify the Database Dialect:** Always tell the LLM if you are using MySQL, PostgreSQL, Oracle, or SQL Server. The physical model (specifically data types and indexing strategies) changes drastically between them.
+*   **Provide Sample Data:** If your schema is complex, providing 2-3 rows of CSV data alongside the prompt helps the LLM understand *what* the data actually looks like, resulting in smarter denormalization choices.
+*   **Iterate:** Denormalization is an art. If the LLM makes the table *too* wide, reply with: *"This is too denormalized and will cause massive lock contention on updates. Roll back the denormalization on the [X] table, but keep [Y] denormalized."*

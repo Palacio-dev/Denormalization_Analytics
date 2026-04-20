@@ -1,0 +1,94 @@
+Here is a comprehensive set of prompts designed to instruct a Large Language Model (LLM) to denormalize a relational database schema. 
+
+The prompts are categorized by the user's level of database expertise, ranging from a beginner who needs step-by-step explanations to an expert DBA looking for production-ready, highly optimized DDL and synchronization strategies.
+
+---
+
+### Level 1: Beginner (Focus on plain English, concepts, and basic structure)
+*For a user who understands their database is slow but doesn't fully grasp the technical trade-offs of denormalization.*
+
+**Prompt Template:**
+> "I have a relational database that is currently organized into many small tables (normalized), but reading data from it is very slow because I have to connect (JOIN) too many tables together. 
+> 
+> Here are my current tables:
+> `[Insert current table definitions or descriptions here]`
+> 
+> The most common information I need to look up together is:
+> `[Describe what data you need to read fast, e.g., "A user's profile along with their most recent order details"]`
+> 
+> Can you help me 'denormalize' this? Please:
+> 1. Suggest a new set of tables where related data is combined so it's faster to read.
+> 2. Write the basic SQL `CREATE TABLE` statements for this new design.
+> 3. Explain to me in simple terms what you changed and why it will be faster.
+> 4. Warn me about any downsides I might face when inserting or updating data in this new design."
+
+---
+
+### Level 2: Intermediate (Focus on standard denormalization techniques and SQL generation)
+*For a user who knows SQL well, understands primary/foreign keys, and wants practical schema generation to reduce JOINs.*
+
+**Prompt Template:**
+> "Please help me denormalize the following physical database schema to optimize it for read-heavy operations. Currently, it is highly normalized, which is causing performance bottlenecks due to excessive JOINs.
+> 
+> **Current Schema (DDL):**
+> `[Insert current CREATE TABLE statements here]`
+> 
+> **Target Database System:** `[e.g., PostgreSQL, MySQL, SQL Server]`
+> 
+> **Key Read Queries to Optimize:**
+> `[Insert 1-3 common SELECT queries or descriptions of the read access patterns]`
+> 
+> Please provide:
+> 1. A new denormalized physical schema (DDL) that flattens the necessary tables to eliminate JOINs for the queries mentioned above.
+> 2. The rationale behind which tables/columns you chose to merge or duplicate.
+> 3. Suggestions for basic indexes (like composite indexes) on the new schema to further improve read speed."
+
+---
+
+### Level 3: Advanced (Focus on specific architectural patterns, constraints, and data integrity)
+*For a software engineer or database developer looking for advanced techniques like pre-aggregation, JSON columns, or materialized views, along with consistency handling.*
+
+**Prompt Template:**
+> "Act as a Database Architect. I need to transform a 3NF (Third Normal Form) physical schema into a denormalized read-optimized physical model. The system has an 80/20 read-to-write ratio.
+> 
+> **Source Schema:**
+> `[Insert Source DDL]`
+> 
+> **Access Patterns / Workload:**
+> `[Detail the specific read patterns, aggregations, and filtering requirements]`
+> 
+> Please generate the new physical schema for `[Target DBMS]` incorporating the following:
+> 1. **Denormalization Strategy:** Apply appropriate techniques such as flattening 1-to-N relationships using JSON/Array data types (if supported by the DBMS), creating pre-aggregated rollup tables, or duplicating columns to avoid lookups.
+> 2. **Optimized DDL:** Provide the exact `CREATE TABLE` and `CREATE INDEX` scripts.
+> 3. **Write-Amplification Mitigation:** Since denormalization introduces data redundancy, explain how to handle data anomalies. Provide a sample trigger, stored procedure, or application-level logic strategy to keep the duplicated read-data in sync when the base data changes.
+> 4. **Trade-off Analysis:** Briefly detail the storage cost vs. compute savings for your proposed model."
+
+---
+
+### Level 4: Expert (Focus on engine-specific optimizations, CQRS, partitioning, and synchronization)
+*For a Lead DBA or Data Architect building highly scalable systems who needs the LLM to act as a sounding board for deep, engine-specific optimizations.*
+
+**Prompt Template:**
+> "You are an expert Database Administrator specializing in high-performance `[Insert Target DBMS, e.g., PostgreSQL 16]`. I am implementing a CQRS architecture and need to design a highly denormalized read-projection physical schema derived from a strictly normalized write-model.
+> 
+> **Write-Model DDL:**
+> `[Insert DDL]`
+> 
+> **Query Workload SLA & Constraints:**
+> - Queries must execute in `< 50ms`.
+> - Data volume is `[e.g., 500 million rows]`.
+> - `[Insert complex filtering/sorting requirements, e.g., "Heavy filtering by date range and tenant_id, sorted by revenue descending"]`
+> 
+> Generate the optimal physical schema for the read model. Your response must include:
+> 1. **Advanced DDL:** The full DDL for the denormalized tables, including engine-specific data types, constraints, and table storage parameters (e.g., FILLFACTOR).
+> 2. **Advanced Indexing:** Appropriate indexes (e.g., Partial, Covering/INCLUDE, BRIN, or GIN indexes depending on the data structures chosen).
+> 3. **Partitioning Strategy:** A table partitioning scheme (e.g., declarative partitioning by Hash or Range) to keep index trees shallow for read speed.
+> 4. **Materialized Views vs. Tables:** Provide a recommendation on whether this should be implemented as a Materialized View with concurrent refreshes, or a physical table updated via asynchronous events (Kafka/Debezium), including the conceptual synchronization SQL."
+
+---
+
+### Bonus: Universal System Prompt
+*If you are using an API or a custom GPT, you can set this as the "System Prompt" before feeding it any of the above user prompts. This ensures the AI behaves correctly regardless of the user's skill level.*
+
+**System Prompt:**
+> "You are an expert Database Architect specializing in schema optimization, query tuning, and physical database design. When asked to denormalize a database, your primary goal is to optimize for read performance while explicitly managing the trade-offs of storage space, write-amplification, and data anomalies. Always output standard, syntactically correct SQL DDL unless a specific dialect is requested. Tailor your explanations to the technical level implied by the user's prompt."
