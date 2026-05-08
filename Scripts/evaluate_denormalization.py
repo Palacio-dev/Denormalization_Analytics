@@ -6,6 +6,7 @@ using BLEU, ROUGE, and METEOR metrics.
 
 import re
 import nltk
+import Levenshtein
 from nltk.translate.bleu_score import sentence_bleu
 from nltk.translate.meteor_score import meteor_score
 from rouge_score import rouge_scorer
@@ -205,7 +206,7 @@ class ModelComparator:
         Uses a multi-stage matching strategy:
         1. Exact name match
         2. Partial name match (substring)
-        3. Type-only match (for remaining unpaired attributes)
+        3. Best Levenshtein distance (for remaining unpaired attributes)
         
         Returns list of (relational_attr, denormalized_attr) tuples
         """
@@ -243,56 +244,35 @@ class ModelComparator:
         rel_paired = [False] * len(rel_columns_list)
         denorm_paired = [False] * len(denorm_columns_list)
         
-        # Stage 1: Exact name match with same type
+        # Find the pair with the best Levenshtein distance
         for i, rel_info in enumerate(rel_columns_list):
+            best_score = float('inf')
+            best_i = i
+            best_j = -1
             if rel_paired[i]:
                 continue
             for j, denorm_info in enumerate(denorm_columns_list):
                 if denorm_paired[j]:
                     continue
-                # Exact name match AND same type
-                if rel_info['name'] == denorm_info['name'] and rel_info['type'] == denorm_info['type']:
-                    rel_comparison = f"{rel_info['name']} {rel_info['type']}"
-                    denorm_comparison = f"{denorm_info['name']} {denorm_info['type']}"
-                    pairs.append((rel_comparison, denorm_comparison))
-                    rel_paired[i] = True
-                    denorm_paired[j] = True
-                    break
+                # Calculate Levenshtein distance (higher is better match)
+                score = Levenshtein.distance(rel_info['name'], denorm_info['name'])
+                if score < best_score:
+                    best_score = score
+                    best_j = j
         
-        # Stage 2: Partial name match (substring) with same type
-        for i, rel_info in enumerate(rel_columns_list):
-            if rel_paired[i]:
+            # Add the best pair to results (only if a match was found)
+            if best_j == -1:
+                # No unpaired denormalized column found for this relational column
                 continue
-            for j, denorm_info in enumerate(denorm_columns_list):
-                if denorm_paired[j]:
-                    continue
-                # Substring match AND same type
-                if (rel_info['name'] in denorm_info['name'] or denorm_info['name'] in rel_info['name']) and \
-                   rel_info['type'] == denorm_info['type']:
-                    rel_comparison = f"{rel_info['name']} {rel_info['type']}"
-                    denorm_comparison = f"{denorm_info['name']} {denorm_info['type']}"
-                    pairs.append((rel_comparison, denorm_comparison))
-                    rel_paired[i] = True
-                    denorm_paired[j] = True
-                    break
-        
-        # Stage 3: Type-only match for remaining unpaired attributes
-        # This handles cases where names are completely different but types match
-        for i, rel_info in enumerate(rel_columns_list):
-            if rel_paired[i]:
-                continue
-            for j, denorm_info in enumerate(denorm_columns_list):
-                if denorm_paired[j]:
-                    continue
-                # Same type only (as a fallback)
-                if rel_info['type'] == denorm_info['type']:
-                    rel_comparison = f"{rel_info['name']} {rel_info['type']}"
-                    denorm_comparison = f"{denorm_info['name']} {denorm_info['type']}"
-                    pairs.append((rel_comparison, denorm_comparison))
-                    rel_paired[i] = True
-                    denorm_paired[j] = True
-                    break
-        
+            
+            rel_info = rel_columns_list[best_i]
+            denorm_info = denorm_columns_list[best_j]
+            rel_comparison = f"{rel_info['name']} {rel_info['type']}"
+            denorm_comparison = f"{denorm_info['name']} {denorm_info['type']}"
+            pairs.append((rel_comparison, denorm_comparison))
+            rel_paired[best_i] = True
+            denorm_paired[best_j] = True
+
         # Validation: Ensure we have the expected number of pairs
         rel_count = len(rel_columns_list)
         denorm_count = len(denorm_columns_list)
@@ -302,7 +282,7 @@ class ModelComparator:
             # This shouldn't happen if all stages work correctly, but log if it does
             unpaired_rel = [rel_columns_list[i]['name'] for i in range(len(rel_columns_list)) if not rel_paired[i]]
             unpaired_denorm = [denorm_columns_list[j]['name'] for j in range(len(denorm_columns_list)) if not denorm_paired[j]]
-            print(f"\n⚠ Warning: Expected {expected_pairs} pairs but found {len(pairs)}")
+            print(f"\n Expected {expected_pairs} pairs but found {len(pairs)}")
             if unpaired_rel:
                 print(f"  Unpaired relational attributes: {', '.join(unpaired_rel)}")
             if unpaired_denorm:
