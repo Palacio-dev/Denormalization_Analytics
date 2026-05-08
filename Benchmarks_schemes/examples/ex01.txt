@@ -1,0 +1,195 @@
+<NORMALIZED MODEL>
+    CREATE TABLE IF NOT EXISTS public."BasicHealthUnit"
+    (
+        "CNES" integer NOT NULL,
+        name character varying(200) COLLATE pg_catalog."default",
+        "IBGE_city_code" integer,
+        CONSTRAINT "BasicHealthUnit_pkey" PRIMARY KEY ("CNES")
+    );
+
+    CREATE TABLE IF NOT EXISTS public."Death"
+    (
+        death_id integer NOT NULL,
+        date date,
+        "time" time without time zone,
+        location_code integer,
+        investigated boolean,
+        basic_cause_id character varying(10) COLLATE pg_catalog."default",
+        time_relative_birth integer,
+        pregnancy_type integer,
+        gestational_age integer,
+        birth_type integer,
+        CONSTRAINT "Death_pkey" PRIMARY KEY (death_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS public."DeathCause"
+    (
+        basic_cause_id character varying(10) COLLATE pg_catalog."default" NOT NULL,
+        description character varying(500) COLLATE pg_catalog."default",
+        CONSTRAINT "DeathCause_pkey" PRIMARY KEY (basic_cause_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS public."Deceased"
+    (
+        deceased_id integer NOT NULL,
+        occupation integer,
+        marital_status integer,
+        age double precision,
+        weight double precision,
+        education_level integer,
+        race_color integer,
+        sex integer,
+        CONSTRAINT "Deceased_pkey" PRIMARY KEY (deceased_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS public."Mother"
+    (
+        mother_id integer NOT NULL,
+        living_children integer,
+        deceased_children integer,
+        education_level integer,
+        age double precision,
+        occupation integer,
+        CONSTRAINT "Mother_pkey" PRIMARY KEY (mother_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS public."Municipality"
+    (
+        "IBGE_city_code" integer NOT NULL,
+        name character varying(200) COLLATE pg_catalog."default" NOT NULL,
+        "GDP" real,
+        "GDP_per_capita" real,
+        population_estimate_2009 double precision,
+        "IBGE_state_code" integer,
+        CONSTRAINT "Municipality_pkey" PRIMARY KEY ("IBGE_city_code")
+    );
+
+    CREATE TABLE IF NOT EXISTS public."State"
+    (
+        "IBGE_state_code" integer NOT NULL,
+        name character varying(200) COLLATE pg_catalog."default",
+        CONSTRAINT "State_pkey" PRIMARY KEY ("IBGE_state_code")
+    );
+
+    ALTER TABLE IF EXISTS public."BasicHealthUnit"
+        ADD FOREIGN KEY ("IBGE_city_code")
+        REFERENCES public."Municipality" ("IBGE_city_code") MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+
+    ALTER TABLE IF EXISTS public."Death"
+        ADD FOREIGN KEY (basic_cause_id)
+        REFERENCES public."DeathCause" (basic_cause_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+
+    ALTER TABLE IF EXISTS public."Death"
+        ADD FOREIGN KEY (death_id)
+        REFERENCES public."Deceased" (deceased_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+
+    ALTER TABLE IF EXISTS public."Death"
+        ADD FOREIGN KEY (location_code)
+        REFERENCES public."Municipality" ("IBGE_city_code") MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+
+    ALTER TABLE IF EXISTS public."Mother"
+        ADD CONSTRAINT "Mother_mother_id_fkey" FOREIGN KEY (mother_id)
+        REFERENCES public."Deceased" (deceased_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+    CREATE INDEX IF NOT EXISTS "Mother_pkey"
+        ON public."Mother"(mother_id);
+
+
+    ALTER TABLE IF EXISTS public."Municipality"
+        ADD CONSTRAINT "Municipality_IBGE_state_code_fkey" FOREIGN KEY ("IBGE_state_code")
+        REFERENCES public."State" ("IBGE_state_code") MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+    END;
+</NORMALIZED MODEL>
+
+
+<DENORMALIZED MODEL>
+    BEGIN;
+        DROP TABLE IF EXISTS "Death";
+
+        CREATE TABLE IF NOT EXISTS "Death"
+        (
+            death_id integer NOT NULL,
+            date date,
+            "time" time without time zone,
+            location_code integer,
+            investigated boolean,
+            cause_id character varying(10),
+            description character varying(500),
+            time_relative_birth integer,
+            pregnancy_type integer,
+            gestational_age integer,
+            birth_type integer,
+            deceased_occupation integer,
+            deceased_marital_status integer,
+            deceased_age double precision,
+            deceased_weight double precision,
+            deceased_education_level integer,
+            deceased_race_color integer,
+            deceased_sex integer,
+            mother_living_children integer,
+            mother_deceased_children integer,
+            mother_education_level integer,
+            mother_age double precision,
+            mother_occupation double precision
+        );
+
+        DROP TABLE IF EXISTS "Location";
+
+        CREATE TABLE IF NOT EXISTS "Location"
+        (
+            "IBGE_city_code" integer NOT NULL,
+            city_name character varying(200) NOT NULL,
+            "GDP" real,
+            "GDP_per_capita" real,
+            population_estimate_2009 double precision,
+            "IBGE_state_code" integer,
+            state_name character varying(200),
+            "basic_health_unit_CNES" integer,
+            basic_health_unit_name character varying(200)
+        );
+        END;
+</DENORMALIZED MODEL>
+
+
+1. Creating a Death Table
+
+Techniques Used: 3 - Collapsing Relations and 1 - Adding Redundant Attributes.
+The ideia as to merge the information from the Mother table, Deceased table , the Death table and the Death cause. All of 
+these tables have information about death, so it makes sense to put them together. Besides, collapse relations is user to
+collapse the one to many relationship between death and death cause.
+
+2. Creating a Consolidated "Location" Dimension
+
+The normalized model separated geographic hierarchy (State → Municipality) and infrastructure (BasicHealthUnit).
+The denormalized model creates a single Location table.
+
+    Techniques Used: 3 - Collapsing Relations and 1 - Adding Redundant Attributes.
+
+    The Idea: The Location table serves as a "Wide Table" or "Flat Dimension." It combines city data, state names,
+    and health unit details into one row per city/unit.
+
+
+It is important to notice that the attibutes "IBGE_city_code" and "location_code" are connected , this way, it is
+possible to get all the information previously possible on the normalized model.

@@ -1,0 +1,221 @@
+<NORMALIZED MODEL>
+    BEGIN;
+
+    CREATE TABLE IF NOT EXISTS public.bioma
+    (
+        id_bioma integer NOT NULL,
+        nome text COLLATE pg_catalog."default" NOT NULL,
+        CONSTRAINT bioma_pkey PRIMARY KEY (id_bioma)
+    );
+
+    CREATE TABLE IF NOT EXISTS public.categoria_manejo
+    (
+        id_manejo integer NOT NULL,
+        categoria text COLLATE pg_catalog."default" NOT NULL,
+        categoria_iucn text COLLATE pg_catalog."default" NOT NULL,
+        plano text COLLATE pg_catalog."default" NOT NULL,
+        CONSTRAINT categoria_manejo_pkey PRIMARY KEY (id_manejo)
+    );
+
+    CREATE TABLE IF NOT EXISTS public.coleta_de_lixo
+    (
+        id_mutirao integer NOT NULL,
+        plastico integer,
+        borracha integer,
+        madeira integer,
+        produtos_texteis integer,
+        papel integer,
+        metal integer,
+        vidro integer,
+        materiais_de_pesca integer,
+        outros_residuos integer,
+        CONSTRAINT coleta_de_lixo_pkey PRIMARY KEY (id_mutirao)
+    );
+
+    CREATE TABLE IF NOT EXISTS public.esfera_administrativa
+    (
+        id_esfera integer NOT NULL,
+        tipo text COLLATE pg_catalog."default" NOT NULL,
+        CONSTRAINT esfera_administrativa_pkey PRIMARY KEY (id_esfera)
+    );
+
+    CREATE TABLE IF NOT EXISTS public.instituicao_organizadora
+    (
+        id_instituicao_organizadora integer NOT NULL,
+        nome text COLLATE pg_catalog."default" NOT NULL,
+        carater text COLLATE pg_catalog."default" NOT NULL,
+        CONSTRAINT instituicao_organizadora_pkey PRIMARY KEY (id_instituicao_organizadora)
+    );
+
+    CREATE TABLE IF NOT EXISTS public.local_de_coleta
+    (
+        id_mutirao integer NOT NULL,
+        nome text COLLATE pg_catalog."default" NOT NULL,
+        CONSTRAINT local_de_coleta_pkey PRIMARY KEY (id_mutirao)
+    );
+
+    CREATE TABLE IF NOT EXISTS public.mutirao_de_limpeza
+    (
+        id_mutirao integer NOT NULL,
+        data_do_ocorrido date NOT NULL,
+        horario_de_inicio time without time zone NOT NULL,
+        numero_aproximado_de_participantes integer,
+        duracao_total time without time zone NOT NULL,
+        id_municipio integer,
+        id_instituicao_organizadora integer,
+        CONSTRAINT mutirao_de_limpeza_pkey PRIMARY KEY (id_mutirao)
+    );
+
+    CREATE TABLE IF NOT EXISTS public.regiao
+    (
+        id_municipio integer NOT NULL,
+        nome text COLLATE pg_catalog."default" NOT NULL,
+        estado text COLLATE pg_catalog."default" NOT NULL,
+        CONSTRAINT regiao_pkey PRIMARY KEY (id_municipio)
+    );
+
+    CREATE TABLE IF NOT EXISTS public.unidade_de_conservacao
+    (
+        id_uc integer NOT NULL,
+        nome text COLLATE pg_catalog."default" NOT NULL,
+        ano_de_criacao integer,
+        area_soma_biomas double precision,
+        area_soma_biomas_continentais double precision,
+        area_marinha double precision,
+        id_bioma integer,
+        id_municipio integer,
+        id_manejo integer,
+        id_esfera integer,
+        CONSTRAINT unidade_de_conservacao_pkey PRIMARY KEY (id_uc)
+    );
+
+    ALTER TABLE IF EXISTS public.coleta_de_lixo
+        ADD CONSTRAINT coleta_de_lixo_id_mutirao_fkey FOREIGN KEY (id_mutirao)
+        REFERENCES public.mutirao_de_limpeza (id_mutirao) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION;
+    CREATE INDEX IF NOT EXISTS coleta_de_lixo_pkey
+        ON public.coleta_de_lixo(id_mutirao);
+
+
+    ALTER TABLE IF EXISTS public.local_de_coleta
+        ADD CONSTRAINT local_de_coleta_id_mutirao_fkey FOREIGN KEY (id_mutirao)
+        REFERENCES public.mutirao_de_limpeza (id_mutirao) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION;
+    CREATE INDEX IF NOT EXISTS local_de_coleta_pkey
+        ON public.local_de_coleta(id_mutirao);
+
+
+    ALTER TABLE IF EXISTS public.mutirao_de_limpeza
+        ADD CONSTRAINT mutirao_de_limpeza_id_instituicao_organizadora_fkey FOREIGN KEY (id_instituicao_organizadora)
+        REFERENCES public.instituicao_organizadora (id_instituicao_organizadora) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION;
+
+
+    ALTER TABLE IF EXISTS public.mutirao_de_limpeza
+        ADD CONSTRAINT mutirao_de_limpeza_id_municipio_fkey FOREIGN KEY (id_municipio)
+        REFERENCES public.regiao (id_municipio) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION;
+
+
+    ALTER TABLE IF EXISTS public.unidade_de_conservacao
+        ADD CONSTRAINT unidade_de_conservacao_id_bioma_fkey FOREIGN KEY (id_bioma)
+        REFERENCES public.bioma (id_bioma) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION;
+
+
+    ALTER TABLE IF EXISTS public.unidade_de_conservacao
+        ADD CONSTRAINT unidade_de_conservacao_id_esfera_fkey FOREIGN KEY (id_esfera)
+        REFERENCES public.esfera_administrativa (id_esfera) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION;
+
+
+    ALTER TABLE IF EXISTS public.unidade_de_conservacao
+        ADD CONSTRAINT unidade_de_conservacao_id_manejo_fkey FOREIGN KEY (id_manejo)
+        REFERENCES public.categoria_manejo (id_manejo) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION;
+
+
+    ALTER TABLE IF EXISTS public.unidade_de_conservacao
+        ADD CONSTRAINT unidade_de_conservacao_id_municipio_fkey FOREIGN KEY (id_municipio)
+        REFERENCES public.regiao (id_municipio) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION;
+
+    END;
+</NORMALIZED MODEL>
+
+
+<DENORMALIZED MODEL>
+    BEGIN;
+
+    CREATE TABLE IF NOT EXISTS public.mutirao_limpeza
+    (
+        id_mutirao integer NOT NULL,
+        data_do_ocorrido date NOT NULL,
+        horario_de_inicio time without time zone NOT NULL,
+        numero_aproximado_de_participantes integer,
+        duracao_total time without time zone NOT NULL,
+        nome_municipio text COLLATE pg_catalog."default",
+        estado text COLLATE pg_catalog."default",
+        nome_local_de_coleta text COLLATE pg_catalog."default",
+        nome_instituicao text COLLATE pg_catalog."default",
+        carater_instituicao text COLLATE pg_catalog."default",
+        plastico integer,
+        borracha integer,
+        madeira integer,
+        produtos_texteis integer,
+        papel integer,
+        metal integer,
+        vidro integer,
+        materiais_de_pesca integer,
+        outros_residuos integer,
+        CONSTRAINT mutirao_limpeza_pkey PRIMARY KEY (id_mutirao)
+    );
+
+    CREATE TABLE IF NOT EXISTS public.unidade_de_conservacao
+    (
+        id_uc integer NOT NULL,
+        nome text COLLATE pg_catalog."default" NOT NULL,
+        ano_de_criacao integer,
+        area_soma_biomas double precision,
+        area_soma_biomas_continentais double precision,
+        area_marinha double precision,
+        nome_bioma text COLLATE pg_catalog."default",
+        nome_municipio text COLLATE pg_catalog."default",
+        estado text COLLATE pg_catalog."default",
+        categoria_manejo text COLLATE pg_catalog."default",
+        categoria_iucn text COLLATE pg_catalog."default",
+        plano_de_manejo text COLLATE pg_catalog."default",
+        esfera_administrativa text COLLATE pg_catalog."default",
+        CONSTRAINT unidade_de_conservacao_pkey PRIMARY KEY (id_uc)
+    );
+    END;
+</DENORMALIZED MODEL>
+
+1. Creating a multirao_limpeza table
+
+Techniques Used: 3 - Collapsing Relations and 1 - Adding Redundant Attributes.
+
+The attibutes from the following table were united in a single table: regiao, local_de_coleta, instituicao_organizadora,
+coleta_de_lixo and multirao_de_limpeza.This way, the one-to-may relationships are collapsed, and redundant attributes
+that would just get searched from a JOIN query are now on the same big table.
+
+2. Creating a unidade_de_conservacao table
+
+Techniques Used: 3 - Collapsing Relations and 1 - Adding Redundant Attributes.
+
+The attibutes from the categoria_manejo table, esfera_administrativa table, bioma talbe and unidade_de_conservacao table 
+were united in a single table. This way, the one-to-may relationships are collapsed, and redundant attributes
+that would just get searched from a JOIN query are now on the same big table.
+
+
+It is important to notice that the tables are connected wuth the "nome_municipio text" attribute and the "estado text" 
+attribute, this way, it is possible to get all the information previously possible on the normalized model.
+

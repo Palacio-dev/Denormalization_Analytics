@@ -1,0 +1,128 @@
+<NORMALIZED MODEL>
+    BEGIN;
+
+    CREATE TABLE IF NOT EXISTS public.consumo_anual
+    (
+        id_consumo integer NOT NULL,
+        id_paises integer NOT NULL,
+        ano integer NOT NULL,
+        porcentagem integer NOT NULL,
+        tipo_energia integer NOT NULL,
+        CONSTRAINT consumo_anual_pkey PRIMARY KEY (id_consumo)
+    );
+
+    CREATE TABLE IF NOT EXISTS public.continente
+    (
+        id_continente integer NOT NULL,
+        nome character varying(50) COLLATE pg_catalog."default" NOT NULL,
+        CONSTRAINT continente_pkey PRIMARY KEY (id_continente)
+    );
+
+    CREATE TABLE IF NOT EXISTS public.emissao_g_efeito_estufa
+    (
+        id_emissao integer NOT NULL,
+        id_paises integer NOT NULL,
+        ano integer NOT NULL,
+        quantidade_emitida bigint NOT NULL,
+        CONSTRAINT emissao_g_efeito_estufa_pkey PRIMARY KEY (id_emissao)
+    );
+
+    CREATE TABLE IF NOT EXISTS public.fonte_energia
+    (
+        id_fonte_energia integer NOT NULL,
+        nome character varying(50)[] COLLATE pg_catalog."default" NOT NULL,
+        CONSTRAINT fonte_energia_pkey PRIMARY KEY (id_fonte_energia)
+    );
+
+    CREATE TABLE IF NOT EXISTS public.paises
+    (
+        id_paises integer NOT NULL,
+        nome character varying(50) COLLATE pg_catalog."default" NOT NULL,
+        fundacao integer NOT NULL,
+        continente integer NOT NULL,
+        CONSTRAINT paises_pkey PRIMARY KEY (id_paises)
+    );
+
+    CREATE TABLE IF NOT EXISTS public.populacao
+    (
+        id_pop integer NOT NULL,
+        id_paises integer NOT NULL,
+        ano integer NOT NULL,
+        quantidade_hab integer NOT NULL,
+        CONSTRAINT populacao_pkey PRIMARY KEY (id_pop)
+    );
+
+    ALTER TABLE IF EXISTS public.consumo_anual
+        ADD CONSTRAINT consumo_anual_id_paises_fkey FOREIGN KEY (id_paises)
+        REFERENCES public.paises (id_paises) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+
+    ALTER TABLE IF EXISTS public.consumo_anual
+        ADD CONSTRAINT consumo_anual_tipo_energia_fkey FOREIGN KEY (tipo_energia)
+        REFERENCES public.fonte_energia (id_fonte_energia) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+
+    ALTER TABLE IF EXISTS public.emissao_g_efeito_estufa
+        ADD CONSTRAINT emissao_g_efeito_estufa_id_paises_fkey FOREIGN KEY (id_paises)
+        REFERENCES public.paises (id_paises) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+
+    ALTER TABLE IF EXISTS public.paises
+        ADD CONSTRAINT paises_continente_fkey FOREIGN KEY (continente)
+        REFERENCES public.continente (id_continente) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+
+    ALTER TABLE IF EXISTS public.populacao
+        ADD CONSTRAINT populacao_id_paises_fkey FOREIGN KEY (id_paises)
+        REFERENCES public.paises (id_paises) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+    END;
+</NORMALIZED MODEL>
+
+<DENORMALIZED MODEL>
+    CREATE TABLE infos_anuais_paises (
+        nome VARCHAR(100),
+        codigo VARCHAR(3),
+        continente VARCHAR(10),
+        ano INTEGER,
+        populacao BIGINT,
+        morte_desastes_naturais INTEGER,
+        pib_per_capita DOUBLE,
+        gee_per_capita DOUBLE,
+        anomalia_temperatura DOUBLE,
+        energia_produzida DOUBLE,
+        fonte_carvao DOUBLE,
+        fonte_nuclar DOUBLE,
+        fonte_gas DOUBLE,
+        fonte_petroleo DOUBLE,
+        fonte_solar DOUBLE,
+        fonte_hidreletrica DOUBLE
+    )
+</DENORMALIZED MODEL>
+
+
+1. Creating the infos_anuais_paises table
+
+Techniques Used: 3 - Collapsing Relations , 1 - Adding Redundant Attributes and 2 - Adding Derived attibutes.
+
+When creating this one big table with all the attibutes, we completely collapse the one to many relationships and are free
+to search information without the need of joins between the tables. Besides that, in the normalized model, you had 
+quantidade_emitida (Greenhouse gases) and quantidade_hab (Population).The denormalized model likelyprecomputes 
+GEE / Population and stores it directly as gee_per_capita.
+
+

@@ -1,0 +1,161 @@
+<NORMALIZED MODEL>
+    DROP TABLE IF EXISTS regiao_escolar CASCADE;
+    CREATE TABLE IF NOT EXISTS regiao_escolar (
+        id_regiao SERIAL PRIMARY KEY,
+        NO_MUNICIPIO VARCHAR(255),
+        SG_UF VARCHAR(2)
+    );
+
+    DROP TABLE IF EXISTS escolas CASCADE;
+    CREATE TABLE escolas (
+        co_entidade INTEGER PRIMARY KEY,
+        no_entidade VARCHAR(255) NOT NULL,
+        tp_dependencia VARCHAR(20),     -- Ex: "Federal", "Estadual", etc.
+        tp_localizacao VARCHAR(20),     -- Ex: "Urbana", "Rural"
+        regiao_id INTEGER NOT NULL REFERENCES regiao_escolar(id_regiao)
+    );
+
+    DROP TABLE IF EXISTS agua CASCADE;
+    CREATE TABLE IF NOT EXISTS agua (
+        agua_id SERIAL PRIMARY KEY,
+        NU_ANO_CENSO INTEGER,
+        CO_ENTIDADE INTEGER,
+        FOREIGN KEY(CO_ENTIDADE) REFERENCES escolas(CO_ENTIDADE),
+        IN_AGUA_REDE_PUBLICA BOOLEAN,
+        IN_AGUA_POCO_ARTESIANO BOOLEAN,
+        IN_AGUA_CACIMBA BOOLEAN,
+        IN_AGUA_FONTE_RIO BOOLEAN,
+        IN_AGUA_INEXISTENTE BOOLEAN
+    );
+
+    DROP TABLE IF EXISTS energia CASCADE;
+    CREATE TABLE IF NOT EXISTS energia (
+        energia_id SERIAL PRIMARY KEY,
+        NU_ANO_CENSO INTEGER,
+        CO_ENTIDADE INTEGER,
+        FOREIGN KEY(CO_ENTIDADE) REFERENCES escolas(CO_ENTIDADE),
+        IN_ENERGIA_REDE_PUBLICA BOOLEAN,
+        IN_ENERGIA_GERADOR_FOSSIL BOOLEAN,
+        IN_ENERGIA_RENOVAVEL BOOLEAN,
+        IN_ENERGIA_INEXISTENTE BOOLEAN
+    );
+
+    DROP TABLE IF EXISTS esgoto CASCADE;
+    CREATE TABLE IF NOT EXISTS esgoto (
+        esgoto_id SERIAL PRIMARY KEY,
+        NU_ANO_CENSO INTEGER,
+        CO_ENTIDADE INTEGER,
+        FOREIGN KEY(CO_ENTIDADE) REFERENCES escolas(CO_ENTIDADE),
+        IN_ESGOTO_REDE_PUBLICA BOOLEAN,
+        IN_ESGOTO_FOSSA_SEPTICA BOOLEAN,
+        IN_ESGOTO_FOSSA_COMUM BOOLEAN,
+        IN_ESGOTO_FOSSA BOOLEAN,
+        IN_ESGOTO_INEXISTENTE BOOLEAN
+    );
+
+    DROP TABLE IF EXISTS infraestrutura CASCADE;
+    CREATE TABLE IF NOT EXISTS infraestrutura (
+        infraestrutura_id SERIAL PRIMARY KEY,
+        NU_ANO_CENSO INTEGER,
+        CO_ENTIDADE INTEGER,
+        FOREIGN KEY(CO_ENTIDADE) REFERENCES escolas(CO_ENTIDADE),
+        IN_AREA_VERDE BOOLEAN,
+        IN_BANHEIRO BOOLEAN,
+        IN_BIBLIOTECA BOOLEAN,
+        IN_LABORATORIO_INFORMATICA BOOLEAN
+    );
+
+    DROP TABLE IF EXISTS internet CASCADE;
+    CREATE TABLE IF NOT EXISTS internet (
+        id SERIAL PRIMARY KEY,
+        NU_ANO_CENSO INTEGER,
+        CO_ENTIDADE INTEGER,
+        FOREIGN KEY(CO_ENTIDADE) REFERENCES escolas(CO_ENTIDADE),
+        IN_INTERNET BOOLEAN,
+        IN_INTERNET_ALUNOS BOOLEAN,
+        IN_INTERNET_ADMINISTRATIVO BOOLEAN,
+        IN_INTERNET_APRENDIZAGEM BOOLEAN,
+        TP_REDE_LOCAL NUMERIC(2,1)
+    );
+
+    DROP TABLE IF EXISTS funcionarios CASCADE;
+    CREATE TABLE IF NOT EXISTS funcionarios (
+        id SERIAL PRIMARY KEY,
+        NU_ANO_CENSO INTEGER,
+        CO_ENTIDADE INTEGER,
+        FOREIGN KEY(CO_ENTIDADE) REFERENCES escolas(CO_ENTIDADE),
+        QT_PROF_SAUDE NUMERIC(7,1),
+        QT_PROF_PSICOLOGO NUMERIC(7,1),
+        QT_PROF_ASSIST_SOCIAL NUMERIC(7,1)
+    );
+
+    DROP TABLE IF EXISTS rendimento_escolar CASCADE;
+    CREATE TABLE IF NOT EXISTS rendimento_escolar (
+        id_rendimento SERIAL PRIMARY KEY,
+        NU_ANO_CENSO INTEGER,
+        CO_ENTIDADE INTEGER,
+        FOREIGN KEY(CO_ENTIDADE) REFERENCES escolas(CO_ENTIDADE),
+        FUNDAMENTAL NUMERIC(4,1),
+        ENSINO_MEDIO NUMERIC(4,1)
+    );
+
+    DROP TABLE IF EXISTS rendimento_enem CASCADE;
+    CREATE TABLE IF NOT EXISTS rendimento_enem (
+        rendimento_enem_id SERIAL PRIMARY KEY,
+        NU_ANO INTEGER,
+        CO_ESCOLA_EDUCACENSO INTEGER,
+        FOREIGN KEY(CO_ESCOLA_EDUCACENSO) REFERENCES escolas(CO_ENTIDADE),
+        NU_MATRICULAS INTEGER,
+        NU_PARTICIPANTES INTEGER,
+        NU_TAXA_PARTICIPACAO NUMERIC(5,2),
+        NU_MEDIA_TOT NUMERIC(5,2),
+        PORTE_ESCOLA VARCHAR(255)
+    );
+</NORMALIZED MODEL>
+
+<DENORMALIZED MODEL>
+    CREATE TABLE IF NOT EXISTS ESCOLAS (
+    NU_ANO_CENSO integer,CO_ENTIDADE integer,
+    IN_AGUA_REDE_PUBLICA boolean,
+    IN_AGUA_POCO_ARTESIANO boolean, 
+    IN_AGUA_CACIMBA boolean,
+    IN_AGUA_FONTE_RIO boolean,
+    IN_AGUA_INEXISTENTE boolean,
+    QT_PROF_SAUDE float,
+    QT_PROF_PSICOLOGO float,
+    QT_PROF_ASSIST_SOCIAL float, 
+    IN_AREA_VERDE boolean,
+    IN_BANHEIRO boolean,
+    IN_BIBLIOTECA boolean,
+    IN_LABORATORIO_INFORMATICA boolean,
+    IN_ENERGIA_REDE_PUBLICA boolean,
+    IN_ENERGIA_GERADOR_FOSSIL boolean,
+    IN_ENERGIA_RENOVAVEL boolean,
+    IN_ENERGIA_INEXISTENTE boolean,
+    IN_ESGOTO_REDE_PUBLICA boolean,
+    IN_ESGOTO_FOSSA_SEPTICA boolean,
+    IN_ESGOTO_FOSSA_COMUM boolean,
+    IN_ESGOTO_FOSSA boolean,
+    IN_ESGOTO_INEXISTENTE boolean,
+    IN_INTERNET boolean,
+    IN_INTERNET_ALUNOS boolean,
+    IN_INTERNET_ADMINISTRATIVO boolean,
+    IN_INTERNET_APRENDIZAGEM boolean,
+    TP_REDE_LOCAL boolean,
+    NU_MATRICULAS float,NU_PARTICIPANTES float,
+    NU_TAXA_PARTICIPACAO float,
+    NU_MEDIA_TOT float,
+    PORTE_ESCOLA text,
+    FUNDAMENTAL float,
+    ENSINO_MEDIO float,
+    NO_ENTIDADE text,
+    TP_DEPENDENCIA text,
+    TP_LOCALIZACAO text,
+    NO_MUNICIPIO text,
+    SG_UF text
+    );
+</DENORMALIZED MODEL>
+
+In this transformation , we see the ONE BIG TABLE approach, where the relationships are collapsed and all the attributes
+are added in the same table, this, we dont need to JOIN multiple tables to get some specific information anymore.
+

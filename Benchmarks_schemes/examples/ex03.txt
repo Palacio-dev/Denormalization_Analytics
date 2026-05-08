@@ -1,0 +1,301 @@
+<NORMALIZED MODEL>
+    BEGIN;
+
+    CREATE TABLE IF NOT EXISTS public."AprovacaoSerie"
+    (
+        "idAprovacaoSerie" serial NOT NULL,
+        serie integer NOT NULL,
+        porcentagem double precision,
+        "idTaxasAprovacao" serial NOT NULL,
+        CONSTRAINT "AprovacaoSerie_pkey" PRIMARY KEY ("idAprovacaoSerie")
+    );
+
+    CREATE TABLE IF NOT EXISTS public."ClassificacaoSocioEconomica"
+    (
+        "idClassificacaoSE" integer NOT NULL,
+        "qtdQuartos" integer NOT NULL,
+        "qtdCelulares" integer NOT NULL,
+        "qtdGeladeiras" integer NOT NULL,
+        "qtdTelevisores" integer NOT NULL,
+        "qtdBanheiros" integer NOT NULL,
+        "idEscolaridadePais" integer NOT NULL,
+        "qtdCarros" integer NOT NULL,
+        "qtdComputadores" integer NOT NULL,
+        CONSTRAINT "ClassificacaoSocioEconomica_pkey" PRIMARY KEY ("idClassificacaoSE")
+    );
+
+    CREATE TABLE IF NOT EXISTS public."Escola"
+    (
+        "idEscola" character varying COLLATE pg_catalog."default" NOT NULL,
+        "idMunicipio" character varying COLLATE pg_catalog."default" NOT NULL,
+        nome character varying COLLATE pg_catalog."default" NOT NULL,
+        "idTipoRede" integer NOT NULL,
+        "idTipoLocalizacao" integer NOT NULL,
+        CONSTRAINT "Escola_pkey" PRIMARY KEY ("idEscola")
+    );
+
+    CREATE TABLE IF NOT EXISTS public."Estado"
+    (
+        uf character varying COLLATE pg_catalog."default" NOT NULL,
+        nome character varying COLLATE pg_catalog."default" NOT NULL,
+        CONSTRAINT "Estado_pkey" PRIMARY KEY (uf)
+    );
+
+    CREATE TABLE IF NOT EXISTS public."IndicadoresAlunos"
+    (
+        "idIndicadoresAlunos" serial NOT NULL,
+        "qtdAlunosInse" integer NOT NULL,
+        "anoMedicao" integer NOT NULL,
+        "idEscola" character varying COLLATE pg_catalog."default" NOT NULL,
+        CONSTRAINT "IndicadoresAlunos_pkey" PRIMARY KEY ("idIndicadoresAlunos")
+    );
+
+    CREATE TABLE IF NOT EXISTS public."Municipio"
+    (
+        "idMunicipio" character varying COLLATE pg_catalog."default" NOT NULL,
+        uf character varying COLLATE pg_catalog."default" NOT NULL,
+        nome character varying COLLATE pg_catalog."default" NOT NULL,
+        "idTipoCapital" integer NOT NULL,
+        CONSTRAINT "Municipio_pkey" PRIMARY KEY ("idMunicipio")
+    );
+
+    CREATE TABLE IF NOT EXISTS public."NivelEscolaridade"
+    (
+        "idEscolaridadePais" integer NOT NULL,
+        escolaridade character varying COLLATE pg_catalog."default" NOT NULL,
+        CONSTRAINT "NivelEscolaridade_pkey" PRIMARY KEY ("idEscolaridadePais")
+    );
+
+    CREATE TABLE IF NOT EXISTS public."NotaIDEB"
+    (
+        "idIdeb" serial NOT NULL,
+        "idEscola" character varying COLLATE pg_catalog."default" NOT NULL,
+        "notaIdeb" double precision,
+        "anoMedicao" integer NOT NULL,
+        CONSTRAINT "NotaIDEB_pkey" PRIMARY KEY ("idIdeb")
+    );
+
+    CREATE TABLE IF NOT EXISTS public."NotaSAEB"
+    (
+        "idSaeb" serial NOT NULL,
+        "idEscola" character varying COLLATE pg_catalog."default" NOT NULL,
+        "notaMatematica" double precision,
+        "notaLinguaPort" double precision,
+        "notaPadronizada" double precision,
+        "anoMedicao" integer NOT NULL,
+        CONSTRAINT "NotaSAEB_pkey" PRIMARY KEY ("idSaeb")
+    );
+
+    CREATE TABLE IF NOT EXISTS public."PorcentagemClassificacaoAlunos"
+    (
+        "idPorcentagem" serial NOT NULL,
+        "idIndicadoresAlunos" serial NOT NULL,
+        "idClassificacaoSE" integer NOT NULL,
+        "porcentagemAlunos" double precision NOT NULL,
+        CONSTRAINT "PorcentagemClassificacaoAlunos_pkey" PRIMARY KEY ("idPorcentagem")
+    );
+
+    CREATE TABLE IF NOT EXISTS public."TaxasAprovacao"
+    (
+        "idTaxasAprovacao" serial NOT NULL,
+        "idEscola" character varying COLLATE pg_catalog."default" NOT NULL,
+        "anoMedicao" integer NOT NULL,
+        total double precision,
+        CONSTRAINT "TaxasAprovacao_pkey" PRIMARY KEY ("idTaxasAprovacao")
+    );
+
+    CREATE TABLE IF NOT EXISTS public."TipoCapital"
+    (
+        "idTipoCapital" integer NOT NULL,
+        nome character varying COLLATE pg_catalog."default" NOT NULL,
+        CONSTRAINT "TipoCapital_pkey" PRIMARY KEY ("idTipoCapital")
+    );
+
+    CREATE TABLE IF NOT EXISTS public."TipoRede"
+    (
+        "idTipoRede" integer NOT NULL,
+        "nomeTipoRede" character varying NOT NULL,
+        PRIMARY KEY ("idTipoRede")
+    );
+
+    CREATE TABLE IF NOT EXISTS public."TipoLocalizacao"
+    (
+        "idTipoLocalizacao" integer NOT NULL,
+        "nomeTipoLocalizacao" character varying NOT NULL,
+        PRIMARY KEY ("idTipoLocalizacao")
+    );
+
+    ALTER TABLE IF EXISTS public."AprovacaoSerie"
+        ADD CONSTRAINT "idTaxasAprovacao" FOREIGN KEY ("idTaxasAprovacao")
+        REFERENCES public."TaxasAprovacao" ("idTaxasAprovacao") MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+
+    ALTER TABLE IF EXISTS public."ClassificacaoSocioEconomica"
+        ADD CONSTRAINT "idEscolaridadePais" FOREIGN KEY ("idEscolaridadePais")
+        REFERENCES public."NivelEscolaridade" ("idEscolaridadePais") MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+
+    ALTER TABLE IF EXISTS public."Escola"
+        ADD CONSTRAINT "idMunicipio" FOREIGN KEY ("idMunicipio")
+        REFERENCES public."Municipio" ("idMunicipio") MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+
+    ALTER TABLE IF EXISTS public."Escola"
+        ADD CONSTRAINT "idTipoRede" FOREIGN KEY ("idTipoRede")
+        REFERENCES public."TipoRede" ("idTipoRede") MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+
+    ALTER TABLE IF EXISTS public."Escola"
+        ADD CONSTRAINT "idTipoLocalizacao" FOREIGN KEY ("idTipoLocalizacao")
+        REFERENCES public."TipoLocalizacao" ("idTipoLocalizacao") MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+
+    ALTER TABLE IF EXISTS public."IndicadoresAlunos"
+        ADD CONSTRAINT "idEscola" FOREIGN KEY ("idEscola")
+        REFERENCES public."Escola" ("idEscola") MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+
+    ALTER TABLE IF EXISTS public."Municipio"
+        ADD CONSTRAINT "Municipio_uf_fkey" FOREIGN KEY (uf)
+        REFERENCES public."Estado" (uf) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+
+    ALTER TABLE IF EXISTS public."Municipio"
+        ADD CONSTRAINT "idTipoCapital" FOREIGN KEY ("idTipoCapital")
+        REFERENCES public."TipoCapital" ("idTipoCapital") MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+
+    ALTER TABLE IF EXISTS public."NotaIDEB"
+        ADD CONSTRAINT "idEscola" FOREIGN KEY ("idEscola")
+        REFERENCES public."Escola" ("idEscola") MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+
+    ALTER TABLE IF EXISTS public."NotaSAEB"
+        ADD CONSTRAINT "idEscola" FOREIGN KEY ("idEscola")
+        REFERENCES public."Escola" ("idEscola") MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+
+    ALTER TABLE IF EXISTS public."PorcentagemClassificacaoAlunos"
+        ADD CONSTRAINT "idClassificacaoSE" FOREIGN KEY ("idClassificacaoSE")
+        REFERENCES public."ClassificacaoSocioEconomica" ("idClassificacaoSE") MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+
+    ALTER TABLE IF EXISTS public."PorcentagemClassificacaoAlunos"
+        ADD CONSTRAINT "idIndicadoresAlunos" FOREIGN KEY ("idIndicadoresAlunos")
+        REFERENCES public."IndicadoresAlunos" ("idIndicadoresAlunos") MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+
+    ALTER TABLE IF EXISTS public."TaxasAprovacao"
+        ADD CONSTRAINT "idEscola" FOREIGN KEY ("idEscola")
+        REFERENCES public."Escola" ("idEscola") MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID;
+
+    END;
+</NORMALIZED MODEL>
+
+
+<DENORMALIZED MODEL>
+    BEGIN;
+
+    CREATE TABLE ClassificacaoSE (
+        idClassificacaoSE INTEGER PRIMARY KEY,
+        qtdQuartosNivelClassificacaoSE INTEGER NOT NULL,
+        qtdCelularesNivelClassificacaoSE INTEGER NOT NULL,
+        qtdGeladeirasNivelClassificacaoSE INTEGER NOT NULL,
+        qtdTelevisoresNivelClassificacaoSE INTEGER NOT NULL,
+        qtdBanheirosNivelClassificacaoSE INTEGER NOT NULL,
+        qtdCarrosNivelClassificacaoSE INTEGER NOT NULL,
+        qtdComputadoresNivelClassificacaoSE INTEGER NOT NULL,
+        escolaridadeNivelClassificacaoSE INTEGER NOT NULL
+    );
+
+    CREATE TABLE Escola (
+        nomeEscola VARCHAR NOT NULL,
+        anoMedicao INTEGER NOT NULL,
+        nomeEstado VARCHAR NOT NULL,
+        nomeMunicipio VARCHAR NOT NULL,
+        tipoCapital VARCHAR NOT NULL,
+        tipoRede VARCHAR NOT NULL,
+        tipoLocalizacao VARCHAR NOT NULL,
+        taxaAprovacaoTotal DOUBLE,
+        taxaAprovacaoPrimeiraSerie DOUBLE,
+        taxaAprovacaoSegundaSerie DOUBLE,
+        taxaAprovacaoTerceiraSerie DOUBLE,
+        taxaAprovacaoQuartaSerie DOUBLE,
+        notaIDEB DOUBLE,
+        notaMatematica DOUBLE,
+        notaLinguaPort DOUBLE,
+        notaPadronizada DOUBLE,
+        qtdAlunosInse INTEGER,
+        porcentagemAlunosNivel1 DOUBLE,
+        porcentagemAlunosNivel2 DOUBLE,
+        porcentagemAlunosNivel3 DOUBLE,
+        porcentagemAlunosNivel4 DOUBLE,
+        porcentagemAlunosNivel5 DOUBLE,
+        porcentagemAlunosNivel6 DOUBLE,
+        porcentagemAlunosNivel7 DOUBLE,
+        porcentagemAlunosNivel8 DOUBLE,
+        idClassificacaoSE INTEGER
+    );
+
+    END;
+</DENORMALIZED MODEL>
+
+1. Creating a Escola table
+
+Techniques Used: 3 - Collapsing Relations and 1 - Adding Redundant Attributes.
+
+The attibutes from the following table were united in a single table: TipoCapital, Estado, Municipio, Escola,
+TipoLocalizacao, TipoRede, NotaSAEB, NotaIDEB, IndicadoresAlunos, PorcentagemClassificacaoAlunos, TaxasAprovacao and 
+AprovacaoSerie .This way, the one-to-may relationships are collapsed, and redundant attributes
+that would just get searched from a JOIN query are now on the same big table.
+
+2. Creating a ClassificacaoSE table
+
+Techniques Used: 3 - Collapsing Relations and 1 - Adding Redundant Attributes.
+
+The table ClassificacaoSocioEconomica and the table NivelEscolaridade turned into a big table with a one-to-many 
+relationship with the Escola table. 
+
+
+It is important to notice that the tables are connected with the "idClassificacaoSE" attribute, which is a relationship
+one-to-many, basically, one "escola" has many "idClassificacaoSE", because it has many students. This way,it is possible
+to get all the information previously possible on the normalized model.
