@@ -1,0 +1,92 @@
+Here is a set of prompts designed for an LLM (like ChatGPT, Claude, etc.) to perform the task of denormalizing a relational database. 
+
+The prompts are categorized by the user's level of database expertise. Each prompt uses prompt engineering best practices (role-playing, clear constraints, and structural formatting).
+
+---
+
+### Level 1: Beginner (Novice Developer / Student)
+**Goal:** The user understands basic tables and queries but needs the LLM to explain *why* denormalization is happening, guide them through the process, and write simple, understandable SQL.
+
+**Prompt Option A: The Educational Guide**
+> "Act as a friendly database mentor. I have a set of database tables that are fully normalized (separated into many tables to avoid duplicating data), but my application is reading data very slowly because it has to join too many tables together. 
+>
+> Here are my current tables:
+> `[Paste your current CREATE TABLE scripts or just list the tables and columns here]`
+> 
+> The most frequent thing I need to read is: `[Explain what you are trying to display, e.g., A user's profile with all their recent order totals]`.
+> 
+> Please do the following:
+> 1. Explain simply how we can 'denormalize' this (combine or duplicate some data) to make reading faster.
+> 2. Show me the new `CREATE TABLE` SQL scripts for this faster, denormalized version.
+> 3. Add simple comments in the SQL explaining what changed."
+
+**Prompt Option B: The "Magic Fix"**
+> "I have a normalized database schema, but I need to optimize it for faster reads (fewer JOINs). 
+> 
+> Current schema:
+> `[Paste Schema]`
+> 
+> Please generate a new physical schema (DDL) that denormalizes this data. Combine tables where it makes sense to speed up read operations. After providing the new SQL, tell me what new problems I need to watch out for now that I have duplicated data."
+
+---
+
+### Level 2: Intermediate (Backend Developer / Junior DBA)
+**Goal:** The user understands normal forms (3NF) and the trade-offs of denormalization (data anomalies, write-amplification). They need practical, production-ready DDL and strategies for keeping data consistent.
+
+**Prompt Option A: Strategy and DDL Generation**
+> "Act as a Database Engineer. I am providing a normalized (3NF) physical database schema below. My read operations are suffering due to heavy JOIN operations. 
+> 
+> Target SQL Dialect: `[e.g., PostgreSQL / MySQL / SQL Server]`
+> Main Read Queries: `[Paste your 1-2 most common/slow SELECT queries here]`
+> Current Schema:
+> `[Paste DDL]`
+> 
+> Please perform the following tasks:
+> 1. Analyze the read queries and suggest 2-3 specific denormalization techniques (e.g., adding redundant columns, pre-calculating aggregates, or collapsing 1-to-1/1-to-many relationships).
+> 2. Write the complete DDL (`CREATE TABLE`) for the new denormalized physical schema.
+> 3. Provide the SQL commands to migrate the data from the old schema to the new schema."
+
+**Prompt Option B: Focus on Trade-offs**
+> "Take the following highly normalized database schema and denormalize it to create a read-heavy physical schema. 
+> `[Paste Schema]`
+> 
+> Requirements:
+> - Output the new DDL.
+> - Include optimal indexes for the new denormalized tables.
+> - Write a brief technical summary of the trade-offs I am making (Read performance gained vs. Write performance lost).
+> - Suggest how I should handle data updates (e.g., application-side logic vs. database triggers) to prevent data anomalies."
+
+---
+
+### Level 3: Expert (Data Architect / Senior DBA)
+**Goal:** The user is likely dealing with high-scale systems. They want to utilize advanced database features (Materialized Views, JSONB, CQRS read-models) and need the LLM to act as a highly technical peer.
+
+**Prompt Option A: Advanced Read-Model Architecture (CQRS/OLAP)**
+> "Act as a Senior Data Architect. I need to design a denormalized read-model (projection) for a high-throughput system based on an existing normalized OLTP physical schema.
+> 
+> RDBMS: `[e.g., PostgreSQL 15]`
+> Current OLTP Schema:
+> `[Paste DDL]`
+> Access Pattern for Read-Model: `[Describe the exact read pattern, e.g., filtering by X, sorting by Y, aggregating Z, 10,000 reads/sec]`.
+> 
+> Output requirements:
+> 1. Design a highly optimized, denormalized physical schema. Feel free to utilize advanced features of the RDBMS (e.g., JSON/JSONB columns for nested data, arrays, or specialized table types).
+> 2. Provide the exact DDL, including covering indexes, partial indexes, or composite indexes tailored to the access pattern.
+> 3. Provide the DDL for a Materialized View approach as an alternative to a standard denormalized table.
+> 4. Outline the write-amplification impact and suggest the best invalidation/refresh strategy (e.g., concurrent refresh, trigger-based, or event-driven via CDC)."
+
+**Prompt Option B: Aggregation and Trigger-Based Syncing**
+> "Review the following normalized physical schema.
+> `[Paste DDL]`
+> 
+> I need to denormalize this specifically by pushing aggregated child data up into the parent tables (e.g., maintaining a `total_order_value` or `last_login_date` directly on the parent row) to eliminate JOINs and GROUP BYs on read.
+> 
+> 1. Generate the updated DDL for the parent tables with the new denormalized columns. Include appropriate indexing.
+> 2. Generate the exact database triggers (using `[Insert SQL Dialect]`) required on the child tables (AFTER INSERT, UPDATE, DELETE) to guarantee that the denormalized aggregate columns in the parent table remain perfectly in sync with the child data. Ensure the triggers handle concurrency/locking safely."
+
+---
+
+### 💡 Tips for the User to get the best results:
+*   **Always specify the SQL dialect:** Syntax for indexes, triggers, and JSON data varies wildly between PostgreSQL, MySQL, SQL Server, and Oracle.
+*   **Provide the Queries:** An LLM cannot optimally denormalize a database if it doesn't know *how* the database is being read. Providing the slow `SELECT` queries is crucial.
+*   **Include Data Volumes:** Telling the LLM "Table A has 100 rows, Table B has 50 million rows" will drastically change the denormalization strategy it suggests.

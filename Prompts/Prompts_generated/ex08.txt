@@ -1,0 +1,92 @@
+Here is a collection of prompts designed to guide a Large Language Model (LLM) through the process of denormalizing a relational database. 
+
+The prompts are categorized by the user's level of database expertise. To use them, simply copy the prompt, fill in the bracketed information `[like this]`, and paste it into the LLM.
+
+---
+
+### Level 1: Beginner (Basic understanding of SQL, new to database design)
+**Goal:** The user needs the LLM to act as a teacher and guide, explaining the concepts simply while doing the heavy lifting of writing the code.
+
+**Prompt 1: The Step-by-Step Guide**
+> "I have a relational database, but my read queries are too slow because I have to `JOIN` too many tables together. I want to 'denormalize' it, which I understand means combining some tables to make reading faster. 
+> 
+> Here is my current database schema (tables and columns):
+> `[Insert current SQL schema here]`
+> 
+> Here are the queries I run most often that need to be faster:
+> `[Insert common SELECT queries or describe what data you fetch]`
+> 
+> Please act as a database tutor. 
+> 1. Explain to me in simple terms which tables we should combine or what redundant data we should add, and why.
+> 2. Provide the new SQL code (DDL) to create this new, faster database structure.
+> 3. Briefly warn me about any downsides this might cause when I try to update or insert new data."
+
+**Prompt 2: The E-commerce/Blog Scenario (Concept to Execution)**
+> "I am building a `[insert app type, e.g., blog / e-commerce store]`. Right now, my tables are highly separated (normalized). For example, I have to join Users, Orders, and Products just to show a user's order history. 
+> 
+> Here is my table structure:
+> `[Insert current SQL schema here]`
+> 
+> Please design a new denormalized physical schema for me that optimizes for reading data quickly. Give me the exact SQL `CREATE TABLE` statements for the new design. Also, show me what the new, simpler `SELECT` query will look like compared to my old one."
+
+---
+
+### Level 2: Intermediate (Familiar with normalization/3NF, joins, and basic indexing)
+**Goal:** The user understands *why* they need to denormalize but wants the LLM to suggest specific architectural patterns and generate production-ready DDL.
+
+**Prompt 1: Pattern Recommendation & DDL Generation**
+> "I need to denormalize a 3NF relational database schema to heavily optimize for read performance. The system is read-heavy (`[Insert read/write ratio, e.g., 90/10]`). 
+> 
+> Here is the current physical schema (DDL):
+> `[Insert current schema]`
+> 
+> Here is the primary read workload (the slow queries):
+> `[Insert slow queries]`
+> 
+> Please provide the following:
+> 1. Propose 2-3 specific denormalization techniques for this schema (e.g., pre-aggregated columns, flattened tables, or materialized views) and recommend the best one.
+> 2. Generate the complete SQL DDL for the recommended denormalized physical schema.
+> 3. Provide the SQL for a trigger or a stored procedure that demonstrates how I can keep this redundant data synchronized when writes/updates occur."
+
+**Prompt 2: The Trade-off Analyzer**
+> "I am planning to flatten my `[Table A]` and `[Table B]` into a single wide table to eliminate a costly `JOIN` that is hurting read performance. 
+> 
+> Current schema: 
+> `[Insert schema]`
+> 
+> Please generate the new denormalized DDL. However, before doing so, analyze the write-amplification and data anomaly risks associated with this specific move. If the risks are too high, suggest an alternative physical design (like an indexed View or JSON column) that improves read speed without sacrificing data integrity."
+
+---
+
+### Level 3: Expert (DBA, Data Architect, Senior Backend Engineer)
+**Goal:** The user needs engine-specific optimizations, migration strategies, and advanced physical storage considerations.
+
+**Prompt 1: Engine-Specific Deep Dive & Migration**
+> "Act as a Senior Database Architect. I need to refactor a highly normalized transactional schema into a denormalized read-optimized physical model for `[Insert RDBMS, e.g., PostgreSQL 15 / MySQL 8.0]`. 
+> 
+> Current DDL and Indexes:
+> `[Insert schema]`
+> 
+> Query Workload Profile:
+> `[Insert query execution plans, EXPLAIN ANALYZE output, or complex queries]`
+> 
+> Deliverables required:
+> 1. **New Physical Schema:** Generate the denormalized DDL utilizing `[Insert RDBMS]` specific features (e.g., JSONB embedding, Materialized Views, Array types, or Table Partitioning) to maximize I/O efficiency for reads.
+> 2. **Indexing Strategy:** Provide the exact DDL for the necessary indexes (B-Tree, Hash, GIN/GiST, Covering Indexes) tailored to the new denormalized structure.
+> 3. **Data Migration Script:** Write a highly efficient, non-blocking `INSERT INTO ... SELECT` or batch-processing SQL script to migrate data from the old normalized tables to the new denormalized schema.
+> 4. **CQRS Consideration:** Briefly outline how this physical schema fits into a CQRS architecture, specifically addressing replication lag and write-syncing."
+
+**Prompt 2: Data Warehousing / Star Schema Transformation**
+> "I am extracting data from our normalized OLTP system to build a read-optimized OLAP Data Warehouse. 
+> 
+> Here is the OLTP physical schema:
+> `[Insert schema]`
+> 
+> Convert this 3NF physical schema into a denormalized Star Schema (Fact and Dimension tables) optimized for aggregations and analytical reads. Generate the DDL for the new schema, define the primary/foreign key relationships, and suggest surrogate keys where appropriate. Lastly, outline an incremental ETL strategy to populate these denormalized tables."
+
+---
+
+### 💡 Tips for getting the best results from the LLM:
+*   **Include Constraints:** If you have strict disk space limits, tell the LLM. Denormalization increases storage size.
+*   **Specify the Dialect:** Always mention if you are using SQL Server, PostgreSQL, MySQL, Oracle, etc. Physical implementation details (like materialized views vs. indexed views) vary wildly between them.
+*   **Provide `EXPLAIN` Plans:** If you have them, paste your query execution plans into the prompt. The LLM can use this to see exactly *where* the bottleneck is (e.g., a specific Nested Loop or Hash Join) and denormalize accordingly.
