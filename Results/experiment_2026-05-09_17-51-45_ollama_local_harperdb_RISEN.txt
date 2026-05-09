@@ -1,0 +1,96 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-09_17-51-45
+Model: ollama_local
+Prompt: RISEN
+Schema: harperdb
+==================================================
+
+<Example5>
+<Normaliz>
+BEGIN;
+
+DROP TABLE IF EXISTS public."Doctors";
+CREATE TABLE IF NOT EXISTS public."Doctors" (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    specialization VARCHAR(100) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    phone_number VARCHAR(50),
+    hospital_id INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+DROP TABLE IF EXISTS public."Patients";
+CREATE TABLE IF NOT EXISTS public."Patients" (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    birth_date DATE,
+    address TEXT,
+    email VARCHAR(255),
+    insurance_plan_id INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+DROP TABLE IF EXISTS public."Appointments";
+CREATE TABLE IF NOT EXISTS public."Appointments" (
+    id SERIAL PRIMARY KEY,
+    doctor_id INT NOT NULL,
+    patient_id INT NOT NULL,
+    appointment_date TIMESTAMP NOT NULL,
+    reason VARCHAR(255),
+    status VARCHAR(50),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+DROP TABLE IF EXISTS public."Medical_Records";
+CREATE TABLE IF NOT EXISTS public."Medical_Records" (
+    id SERIAL PRIMARY KEY,
+    patient_id INT NOT NULL,
+    diagnosis TEXT,
+    treatment_plan TEXT,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+DROP TABLE IF EXISTS public."Insurance_Plans";
+CREATE TABLE IF NOT EXISTS public."Insurance_Plans" (
+    id SERIAL PRIMARY KEY,
+    plan_name VARCHAR(255) NOT NULL,
+    coverage_limit NUMERIC(10, 2) NOT NULL,
+    premium_amount NUMERIC(10, 2) NOT NULL,
+    provider VARCHAR(255) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_doctor_name ON public."Doctors"(name);
+CREATE INDEX IF NOT EXISTS idx_patient_name ON public."Patients"(name);
+CREATE INDEX IF NOT EXISTS idx_appointment_date ON public."Appointments"(appointment_date);
+CREATE INDEX IF NOT EXISTS idx_medical_record_patient ON public."Medical_Records"(patient_id);
+CREATE INDEX IF NOT EXISTS idx_insurance_plan_name ON public."Insurance_Plans"(plan_name);
+
+COMMIT;
+</Normaliz>
+
+<Denormaliz>
+DROP TABLE IF EXISTS public."info_hospital";
+CREATE TABLE IF NOT EXISTS public."info_hospital" (
+    appointment_id INT NOT NULL,
+    doctor_name VARCHAR(255) NOT NULL,
+    doctor_specialization VARCHAR(100) NOT NULL,
+    patient_name VARCHAR(255) NOT NULL,
+    patient_birth_date DATE,
+    patient_address TEXT,
+    patient_email VARCHAR(255),
+    appointment_date TIMESTAMP NOT NULL,
+    reason VARCHAR(255),
+    status VARCHAR(50),
+    diagnosis TEXT,
+    treatment_plan TEXT,
+    notes TEXT,
+    plan_name VARCHAR(255),
+    coverage_limit NUMERIC(10, 2),
+    premium_amount NUMERIC(10, 2),
+    provider VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+</Denormaliz>
+</Example5>
