@@ -29,24 +29,41 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-4. Set the Gemini API key , you can read more about it here : [GEMNI_API](https://ai.google.dev/gemini-api/docs?hl=pt-br)   
-As the scripts use the API of GEMINI, you will have to get an API key and put it into a file named .env in the root of the project.
-In the .env file put:
+4. Set the enviromment
+- In order to run the experiment with the Gemini's API, you first need to set one Gemini API key , you can read more about it here : [GEMNI_API](https://ai.google.dev/gemini-api/docs?hl=pt-br). Once you got acess to a API, create a .env file in the root of the repository and create a variable called GEMINI_API_KEY.
+ ```bash
+	GEMINI_API_KEY="your_gemini_api_key_here"
+```
+ - You can also run the experiment locally with free models available at Ollama. There are two possibilites, running locally with the model qwen3.5:9b or running via the Ollama's API with the model qwen3-coder:480b-cloud. For running locally, you need to download the model on your machine. It can be done with the command in the terminal:
+     
 ```bash
-GEMINI_API_KEY="your_gemini_api_key_here"
+ ollama pull qwen3.5:9b
+```
+Then, run ollama:
+```bash
+ ollama serve
 ```
 
-5. Run the main scripts
+For running via the Ollama's API, you first need to create an account in [Ollama's site](https://ollama.com/) and get an API key. Then, put it on the .env file with the variable OLLAMA_API_KEY.
+ ```bash
+	OLLAMA_API_KEY="your_ollama_api_key_here"
+```
+   
 
-- To generate denormalized models via the Risen pipeline:
-- Important: You have to set the schema that will be denormalized at the top of the Risen.py file giving the path to a txt file. Example below:
+
+5. Run the denormalization experiment
+
+Currently there are 3 available LLM models, 7 prompts and 17 normalziled schemas to run the experiment. You will select one possibility of each when running the experiment.
 
 ```bash
 cd Scripts
-schema_file = "../Benchmarks_schemes/TPC_H.txt"
-python3 Risen.py
+python3 run_experiment.py
 ```
 
+The results are automatically saved in the Results folder.  
+
+6. Evaluate denormalization
+   
 - To evaluate denormalization outputs with available metrics (BLEU, ROUGE, METEOR):
 
 ```bash
@@ -59,7 +76,6 @@ python3 evaluate_denormalization.py   -"Path to the relational model file"  -"Pa
 
 - `Benchmarks_schemes/` — Normalized relational schemas used as input benchmarks for denormalization experiments. Files include schemas for HarperDB, RTA benchmarks, SolarWinds, TPC-H.
 - `Denormalized_models/` — Denormalized relational models produced by the API (organized by experiment / timestamp). These are the outputs generated during model runs.
-- `Metrics/` — Notes and intermediate outputs about the evaluation metrics used (BLEU, ROUGE, METEOR) to measure similarity between generated denormalized models and reference outputs.
 - `Prompts/` — Prompt templates and examples used to interact with the LLMs during experiments. These contain variations used to test prompt engineering strategies.
 - `Reports/` — Evaluation results and human-readable reports produced by `Scripts/evaluate_denormalization.py`.
 - `Scripts/` — Python scripts that run experiments and evaluations. The most relevant scripts:
