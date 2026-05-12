@@ -72,17 +72,6 @@ python3 evaluate_denormalization.py   -"Path to the relational model file"  -"Pa
 -o "Output file for the report (optional)"
 ```
 
-## Repository structure
-
-- `Benchmarks_schemes/` — Normalized relational schemas used as input benchmarks for denormalization experiments. Files include schemas for HarperDB, RTA benchmarks, SolarWinds, TPC-H.
-- `Denormalized_models/` — Denormalized relational models produced by the API (organized by experiment / timestamp). These are the outputs generated during model runs.
-- `Prompts/` — Prompt templates and examples used to interact with the LLMs during experiments. These contain variations used to test prompt engineering strategies.
-- `Reports/` — Evaluation results and human-readable reports produced by `Scripts/evaluate_denormalization.py`.
-- `Scripts/` — Python scripts that run experiments and evaluations. The most relevant scripts:
-    - `RACE.py` — pipeline script used to generate denormalized models via the LLM (RACE pipeline).
-	- `RISEN.py` — pipeline script used to generate denormalized models via the LLM (RISEN pipeline).
-	- `evaluate_denormalization.py` — evaluates generated denormalized models using BLEU / ROUGE / METEOR and produces reports in `Reports/`.
-
 ## Evaluation metrics
 
 This project uses common textual similarity metrics to evaluate the plausibility and fidelity of denormalized outputs:
@@ -91,7 +80,7 @@ This project uses common textual similarity metrics to evaluate the plausibility
 - ROUGE — recall-focused metric family often used for summarization comparisons.
 - METEOR — alignment- and synonym-aware metric that can complement BLEU and ROUGE.
 
-Results and intermediate outputs for these metrics are stored and discussed in the `Metrics/` and `Reports/` folders.
+
 
 
 
