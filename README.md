@@ -8,28 +8,28 @@ Advisor: Professor Breno Bernard Nicolau de França
 
 Follow these steps to run the main scripts locally. The examples below assume a Linux / bash environment.
 
-1. Clone the repository
+1. ### Clone the repository
 
 ```bash
 git clone https://github.com/Palacio-dev/Denormalization_Analytics.git
 cd Denormalization_Analytics
 ```
 
-2. Create and activate a Python virtual environment
+2. ### Create and activate a Python virtual environment
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 ```
 
-3. Install dependencies
+3. ### Install dependencies
 
 ```bash
 pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-4. Set the enviromment
+4. ### Set the enviromment
 - In order to run the experiment with the Gemini's API, you first need to set one Gemini API key , you can read more about it here : [GEMNI_API](https://ai.google.dev/gemini-api/docs?hl=pt-br). Once you got acess to a API, create a .env file in the root of the repository and create a variable called GEMINI_API_KEY.
  ```bash
 	GEMINI_API_KEY="your_gemini_api_key_here"
@@ -51,7 +51,7 @@ For running via the Ollama's API, you first need to create an account in [Ollama
    
 
 
-5. Run the denormalization experiment
+5. ### Run the denormalization experiment
 
 Currently there are 3 available LLM models, 7 prompts and 17 normalziled schemas to run the experiment. You will select one possibility of each when running the experiment.
 
@@ -60,17 +60,147 @@ cd Scripts
 python3 run_experiment.py
 ```
 
-The results are automatically saved in the Results folder.  
+This script provides an interactive CLI for running denormalization experiments
+with three different LLM models, five prompts, and seventeen schemas.
 
-6. Evaluate denormalization
+
+## Available Options
+=================
+
+Models (3 options):
+  1. Gemini 3.1 Pro-Preview (API) - requires GEMINI_API_KEY
+  2. Ollama Qwen (Cloud API) - requires OLLAMA_API_KEY  
+  3. Ollama Qwen (Local) - requires local Ollama instance running
+
+Prompts (5 options):
+  - RACE.txt (framework: Role-Action-Context-Examples)
+  - RISEN.txt (framework: Role-Input-Steps-Expectation-Narrowing)
+  - begginer.txt (beginner-level guidance)
+  - intermediate.txt (intermediate-level guidance)
+  - expert.txt (expert-level guidance)
+
+Schemas (17 options):
+  - All schema files from Experiment_schemes/Train/
+
+## Workflow
+========
+
+1. Run the experiment:
+   python3 run_experiment.py
+
+2. Choose your model (1-3)
+
+3. Choose your prompt (1-5)
+
+4. Choose your schema (1-17)
+
+5. Confirm your selection
+
+6. The LLM will generate the denormalized schema:
+   - Output streams to terminal in real-time
+   - Result is automatically saved to Results/ folder
+
+## Output files
+============
+
+Results are saved as:
+  Results/experiment_YYYY-MM-DD_HH-MM-SS_MODEL_SCHEMA_PROMPT.txt
+
+Each file contains:
+  - Metadata header (timestamp, model, prompt, schema)
+  - Full LLM-generated denormalized schema output
+
+## Example runs
+============
+
+Example 1: Gemini + RACE + harperdb
+  1. Select: 1 (Gemini)
+  2. Select: 3 (RACE.txt)
+  3. Select: Harperdb schema
+  4. Confirm: y
+
+Example 2: Ollama Local + beginner + employees
+  1. Select: 3 (Ollama Local)
+  2. Select: 5 (begginer.txt)
+  3. Select: employees schema
+  4. Confirm: y
+
+## Technical notes
+===============
+
+Schema Injection:
+  - For Gemini: Schema is injected directly into prompt text
+  - For Qwen: Schema is injected directly into prompt text
+  - All prompts use {SCHEMA_CONTENT} placeholder
+
+Result Handling:
+  - LLM output streams to stdout as it's generated
+  - Full result is captured and saved after generation completes
+  - Timestamps are in YYYY-MM-DD_HH-MM-SS format
+
+
+6. ### Evaluate denormalization
    
-- To evaluate denormalization outputs with available metrics (BLEU, ROUGE, METEOR):
+The  evaluate denormalization script automatically evaluates the quality of denormalized SQL models compared to their relational counterparts using NLP metrics (BLEU, ROUGE, METEOR) and structural analysis.
 
+
+## Usage
+
+### Basic Usage
 ```bash
 cd Scripts
-python3 evaluate_denormalization.py   -"Path to the relational model file"  -"Path to the denormalized model file"
--o "Output file for the report (optional)"
+python evaluate_denormalization.py <relational_model.txt> <denormalized_model.txt>
 ```
+
+### With Output File
+```bash
+cd Scripts
+python evaluate_denormalization.py <relational_model.txt> <denormalized_model.txt> -o report.txt
+```
+
+
+
+## What the Script Does
+
+1. **Parses SQL Files**: Reads and parses both SQL model files
+2. **Pairs Identifiers**: Automatically matches equivalent columns between models
+3. **Calculates Completeness**: Evaluates if information was lost or added
+4. **Evaluates Correctness**: Checks data type preservation and semantic consistency
+5. **Computes Metrics**: Calculates BLEU, ROUGE-1, ROUGE-2, ROUGE-L, and METEOR scores
+6. **Generates Report**: Produces a comprehensive evaluation report
+
+## Evaluation Criteria
+
+### Completeness
+- **Ratio = 1.0**: Ideal - no information added or lost
+- **Ratio > 1.0**: Information may have been lost
+- **Ratio < 1.0**: New information may have been added
+
+### Correctness
+- Data type preservation
+- Semantic identifier preservation
+- Constraint preservation
+
+### Metrics
+- **BLEU**: Measures n-gram overlap (scale: 0-1, higher is better)
+- **ROUGE**: Measures recall-oriented similarity (scale: 0-1, higher is better)
+- **METEOR**: Considers synonyms and stemming (scale: 0-1, higher is better)
+
+## Output Format
+
+The script generates a detailed report with:
+1. Model overview (tables and attributes count)
+2. Completeness analysis
+3. Correctness evaluation with issue detection
+4. Pair-by-pair metric comparison
+5. Overall metrics summary
+6. Final conclusion and recommendations
+
+## Notes
+
+- The script automatically downloads required NLTK resources on first run
+- Attribute pairing uses intelligent matching based on column names and types
+- The script handles composite keys and foreign key relationships
 
 ## Evaluation metrics
 
