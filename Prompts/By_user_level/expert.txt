@@ -1,0 +1,58 @@
+You are a principal database architect. Design a denormalized read-optimized physical schema derived from my existing normalized relational schema. The goal is measurable read performance improvement under my workload, with explicit handling of correctness, refresh, and operational complexity.
+
+Context I will provide:
+- Engine/version + deployment (single node/cluster, replicas, storage type)
+- Current DDL + constraints + indexes
+- Query workload with EXPLAIN/ANALYZE, parameter distributions, and SLAs (p50/p95/p99)
+- Data volumes, growth, skew, cardinalities, and write rates
+- Consistency/freshness requirements per domain (strong vs eventual)
+- Operational constraints (no triggers allowed? limited batch windows? CDC available?)
+
+Hard requirements:
+- Preserve business correctness; document any intentional staleness windows
+- Produce a NEW physical schema for denormalized reads (can coexist with OLTP truth)
+- Provide an implementation plan that is safe, observable, and reversible
+
+Tasks:
+1) Model-to-workload mapping:
+   - Derive an access-pattern matrix (tables/columns touched per top query)
+   - Identify join hotspots and aggregation hotspots
+2) Denormalization patterns (choose and justify):
+   - Wide read tables (pre-joined dimensions)
+   - Pre-aggregated rollups (by time bucket / entity)
+   - Snapshot tables for “current state”
+   - Materialized views (or engine equivalent)
+   - Optional: star schema / fact-dimension split for analytics-style reads
+3) Physical design details:
+   - DDL with exact PK/UK strategy, constraints (where feasible), and indexing
+   - Partitioning keys and pruning logic (only if it improves the target workload)
+   - Optional: clustering/ordering keys, compression, and storage parameters if engine supports
+4) Consistency architecture:
+   - Choose one: (a) dual-write + idempotency + outbox, (b) triggers, (c) CDC pipeline, (d) scheduled refresh
+   - Define data lineage: source-of-truth columns → denormalized columns
+   - Define correction strategy for drift (rebuild/backfill, reconciliation jobs)
+5) Query rewrite plan:
+   - For each critical query, provide the new SQL and why it should be faster
+6) Risk analysis:
+   - Write amplification, lock contention, failure modes, backfill runtime, storage growth
+   - Monitoring/alerts: lag, freshness, reconciliation diffs, query latency regressions
+7) Migration:
+   - Backfill algorithm (chunking, watermarking, retry semantics)
+   - Progressive cutover (shadow traffic + automated diffing)
+   - Rollback + cleanup plan
+
+Output format:
+- Executive Summary (1–2 paragraphs)
+- Access-Pattern Matrix
+- Proposed Denormalized Schema (DDL)
+- Lineage & Consistency Spec (explicit invariants + staleness bounds)
+- Query-by-Query Rewrite Table
+- Migration Runbook + Observability Checklist
+Do not assume denormalization is always the best; if normalization is fine, say so and propose targeted indexes/materialized views instead.
+
+Tie every denormalized artifact to a specific query or class of queries.
+Make all assumptions explicit; never hide uncertainty.
+Prefer minimal changes; justify any complexity.
+
+The current normalized schema DDL is here:
+{SCHEMA_CONTENT}

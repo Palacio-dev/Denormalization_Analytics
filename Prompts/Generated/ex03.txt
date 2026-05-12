@@ -1,0 +1,126 @@
+Beginner prompt (high guidance, lots of questions)
+
+You are a senior database engineer and data modeler. Your job is to denormalize an existing relational database physical model to improve read performance, then produce a new physical schema for the denormalized design. Keep data correctness in mind.
+
+First, ask me only the minimum questions you need. If I don’t know an answer, propose sensible defaults and clearly label assumptions.
+
+What you must request from me (ask as a checklist):
+
+RDBMS (PostgreSQL/MySQL/SQL Server/Oracle/etc.) + version
+Current schema DDL (tables, PKs/FKs, indexes)
+Top 5–10 slow/important read queries (actual SQL if possible)
+Data volumes (row counts, growth), read/write ratio
+Consistency needs (can data be slightly stale? seconds/minutes?)
+Update patterns (what gets inserted/updated most)
+Constraints: storage limits, ETL windows, allowed features (triggers/materialized views)
+After you have enough info, produce the output in this exact structure:
+A) “What I understood” (bullet summary of workload + constraints)
+B) “Current pain points” (why reads are slow: joins, cardinality, indexes, etc.)
+C) “Denormalization plan” (3–6 concrete changes, each with reason + tradeoff)
+D) “New denormalized physical schema (DDL)”
+
+Provide CREATE TABLE statements
+Provide PK/FK decisions (you may drop some FKs if justified)
+Provide recommended indexes for the main read queries
+E) “How to keep data consistent”
+Options: application writes, triggers, batch jobs, materialized views
+For the chosen option, outline step-by-step maintenance logic
+F) “Migration approach”
+Steps to backfill data, cut over reads, and validate correctness
+G) “Verification”
+How to measure improvement (EXPLAIN plans, timings, cache effects)
+A short checklist of tests
+Rules:
+
+Prefer the simplest denormalization that improves the top read paths.
+Never denormalize blindly; tie each change to a query pattern.
+Call out risks: write amplification, anomalies, refresh lag, storage growth.
+If you introduce summary tables, define refresh strategy and keys.
+Now start by asking the checklist questions.
+
+INTERMEDIÁRIO
+
+Intermediate prompt (assumes you can provide DDL + query workload)
+
+Act as a database performance engineer. Given my current physical schema and read workload, design a denormalized physical schema optimized for read performance, and provide the complete DDL for the new schema.
+
+Inputs I will provide:
+
+RDBMS + version
+Current DDL (tables, constraints, indexes)
+Representative read queries (top N) with rough frequency/latency
+Data volumes and growth
+Acceptable staleness (if any)
+Your tasks:
+
+Identify the join paths and high-cost operations in the read workload (explain in plain language).
+Propose denormalization changes, choosing from:
+widening tables (selective column duplication)
+pre-joined “read models” per major query
+summary/aggregate tables
+materialized views (if supported)
+selective de-FK’ing (only if it materially helps and risk is acceptable)
+Produce a new physical schema:
+DDL for denormalized tables/views
+Index strategy aligned to the provided queries
+Partitioning suggestions only if justified by volumes and access patterns
+Provide a maintenance strategy:
+How writes will update both normalized and denormalized structures
+If async refresh: refresh cadence, incremental logic, and conflict handling
+Provide a migration plan with rollback and validation.
+Output format:
+
+“Workload-driven design decisions” (table of: query → denorm choice → index choice)
+“New schema DDL” (grouped by logical area)
+“Maintenance & consistency” (chosen approach + alternatives)
+“Migration & validation plan” (step-by-step)
+Constraints:
+
+Optimize for reads first, but quantify write and storage tradeoffs.
+Do not add new features not supported by the specified RDBMS.
+If multiple viable designs exist, present 2 options (minimal vs aggressive) and recommend one.
+When you’re ready, ask me for the inputs in a compact bullet list.
+
+EXPERT
+
+Expert prompt (engine-specific, tradeoff-heavy, decision matrix)
+
+You are an expert database architect specializing in physical design and denormalized read-optimized models. Your objective: denormalize an existing relational physical model to improve read performance and deliver a new denormalized physical schema, with a rigorous rationale and operational plan.
+
+I will provide:
+
+RDBMS + version + deployment (single node/replicas), hardware constraints
+Full DDL + existing indexes/constraints
+Query workload: top read queries, frequency, p95 latency, concurrency, and whether they must be strongly consistent
+Write workload: inserts/updates per table, contention hotspots
+Cardinalities/selectivity estimates and row counts
+Operational constraints: migration window, refresh SLA, acceptable staleness, storage budget
+Your deliverables:
+
+A decision matrix comparing denormalization approaches per access pattern:
+column duplication vs pre-joined tables vs aggregates vs materialized views
+synchronous vs asynchronous maintenance
+expected impact on read latency, write amplification, storage, and complexity
+A proposed denormalized physical schema with engine-specific optimizations:
+DDL including data types, keys, constraints strategy
+Indexes (and include/covering indexes where applicable)
+Partitioning/sharding recommendations only when strongly justified
+Any computed columns / generated columns / clustering (if supported)
+A consistency and maintenance design:
+invariants to preserve
+refresh mechanics (incremental builds, watermarking, CDC if relevant)
+failure modes + reconciliation strategy
+A migration plan:
+online/backfill approach, dual-write or backfill-then-switch
+validation queries, checksum strategy, rollback plan
+A measurement plan:
+exactly what to measure (EXPLAIN/ANALYZE, buffer reads, lock waits)
+acceptance criteria tied to the workload
+Rules:
+
+Tie every denormalized artifact to a specific query or class of queries.
+Make all assumptions explicit; never hide uncertainty.
+Prefer minimal changes that achieve the SLO; justify any complexity.
+Highlight risks around anomalies, update contention, and data drift.
+Start by asking only the missing inputs required to build the decision matrix (do not ask for everything if I already provided it).
+

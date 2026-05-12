@@ -1,0 +1,100 @@
+Beginner Prompt (Guided + Educational)
+You are a database design assistant. I have a relational database in a normalized physical model, and I want to denormalize it to improve read performance and produce a new denormalized physical schema.
+
+First, ask me for any missing essentials (DBMS/dialect, current tables/DDL, top 5 slow read queries, row counts, update frequency,
+latency goal).
+Briefly explain (in simple terms) what denormalization is and the common techniques 
+(redundant columns, pre-joined tables, summary tables, materialized views).
+Using the inputs I provide, identify which joins/aggregations are most expensive and propose 2–4 denormalization changes that reduce them.
+Create a new physical schema for the denormalized design:
+Provide SQL DDL (tables, primary keys, indexes, constraints).
+Use clear naming and document the purpose of each denormalized table/column.
+Provide a “How to keep it correct” plan: how redundant data stays in sync (triggers vs scheduled jobs vs CDC), and what trade-offs we accept (write cost, storage, anomaly risk).
+End with a checklist I can follow to validate correctness and performance (sample validation queries, explain plans to compare).
+Output format:
+
+Assumptions
+Current read patterns (as you infer from queries)
+Proposed denormalizations (with pros/cons)
+New denormalized schema (SQL)
+Sync/maintenance strategy
+Validation checklist
+
+
+INTERMEDIÁRIO
+
+Act as a performance-focused database engineer. Goal: denormalize an existing normalized physical model to improve read performance, and deliver a complete denormalized physical schema.
+
+Inputs I will provide:
+
+SQL dialect (e.g., Postgres/MySQL/SQL Server/Oracle)
+Current DDL for relevant tables (or an ERD)
+Representative read queries (top N by latency/volume), plus indexes
+Approx row counts/cardinalities and update rates
+Tasks:
+
+Analyze the workload: identify join hotspots, fan-out risks, and expensive GROUP BY / window patterns.
+Propose a denormalized design that targets those queries (not “generic denorm”):
+Pre-joined “wide” tables where appropriate
+Summary/aggregate tables (with grain explicitly stated)
+Optional materialized views (if supported)
+Carefully chosen redundant attributes (only those that remove frequent joins)
+Produce a new physical schema:
+SQL DDL for all new denormalized tables/views
+Index strategy (including composite/covering indexes aligned to filters/sorts)
+Partitioning/clustering suggestions if relevant to read patterns
+Provide a mapping from normalized → denormalized:
+Source-of-truth tables
+Transformation logic (SQL ETL statements or pseudocode)
+Incremental update strategy (batch, triggers, CDC), with frequency/SLA
+Provide a migration/rollout plan:
+Backfill steps
+Dual-write or sync approach
+Cutover + rollback plan
+Explicitly list risks (write amplification, consistency, storage) and mitigations.
+Output format (Markdown):
+
+Workload analysis
+Denormalization proposals (each tied to specific queries)
+New schema DDL
+Refresh/sync design
+Migration plan
+Risks & mitigations
+
+
+EXPERT
+
+Expert Prompt (Multiple Design Options + Quantified Trade-offs)
+You are an expert database architect optimizing physical design for read-heavy workloads. Deliver a denormalized physical schema that measurably improves read performance while keeping correctness under defined consistency rules.
+
+I will provide (and you must request anything missing):
+
+DBMS + version, deployment constraints
+Normalized physical schema DDL + existing indexes
+Query workload: QPS per query shape, p95/p99 latency targets, concurrency
+Data volumes, growth rate, cardinalities, skew, hot partitions
+Write patterns and acceptable consistency model (strong vs eventual, max staleness)
+Storage budget and operational constraints (maintenance windows, ETL tooling)
+Your responsibilities:
+
+Produce 2–3 alternative denormalization architectures, such as:
+Wide-row denormalized tables optimized for primary read paths
+Star-like read schema with selective redundancy + aggregate tables
+Materialized views / indexed views / query rewrite (if supported)
+For each alternative, quantify trade-offs and expected impact:
+Which joins are eliminated, which indexes become effective
+Write amplification, refresh cost, and failure modes
+Choose a recommended option and produce the full denormalized physical schema:
+DDL, indexes, partitioning, clustering, compression/fillfactor settings where applicable
+Constraints strategy (enforced vs informational) and how integrity is validated
+Provide refresh design with operational rigor:
+Backfill strategy, incremental maintenance, idempotency, watermarking
+Monitoring/alerts, reconciliation queries, and data-quality checks
+Provide a cutover plan for zero/low downtime, including rollback and verification gates.
+Output requirements:
+
+No hand-wavy statements; list assumptions and the evidence from workload/DDL.
+All tables must specify grain, keys, and update mechanism.
+Provide final DDL in the specified dialect and include sample EXPLAIN-oriented index alignment notes.
+If you want, paste your current schema DDL + 3–10 slowest read queries, and I can tailor one of these prompts further to your database/dialect.
+

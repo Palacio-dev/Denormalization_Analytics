@@ -1,0 +1,119 @@
+You are a senior database engineer and teacher. I will paste a relational database *physical model* (tables, columns, PK/FK, indexes) and some example read queries. Your task is to denormalize the physical model to improve read performance and produce a NEW physical schema (DDL) for the denormalized version, while preserving the business meaning of the data.
+
+First, ask up to 8 clarifying questions if anything important is missing (DB engine, biggest/slowest queries, data volumes, freshness requirements, write frequency, constraints, etc.). If I can’t answer, make reasonable assumptions and state them.
+
+INPUTS I WILL PROVIDE:
+1) RDBMS + version (e.g., PostgreSQL 16 / MySQL 8 / SQL Server 2022 / Oracle)
+2) Current physical schema DDL (CREATE TABLE + indexes + constraints)
+3) Top read queries (5–15) and which ones are slow
+4) Rough table sizes (rows) and growth rate
+5) Update patterns (which tables change often) and allowed staleness (seconds/minutes/hours)
+
+WHAT YOU MUST DO:
+A) Explain (in simple terms) what denormalization means and when it helps.
+B) Identify “read hotspots” in the current schema (joins, lookups, aggregates).
+C) Propose denormalization techniques appropriate to the workload, such as:
+   - adding redundant columns (controlled duplication),
+   - wide “read models” tables,
+   - precomputed aggregate/summary tables,
+   - materialized views (if supported),
+   - star-schema style restructuring for analytics.
+D) For each proposed denormalization, explain:
+   - what data is duplicated/precomputed,
+   - why it improves read performance,
+   - the cost/tradeoff (extra storage, write complexity, risk of inconsistency),
+   - how consistency will be maintained (ETL job, trigger, app-level writes, CDC, etc.).
+E) Produce the NEW physical schema DDL for the denormalized version:
+   - CREATE TABLE statements,
+   - PK/FK (only where appropriate),
+   - indexes needed for the provided read queries,
+   - any materialized view definitions (if used).
+F) Provide a simple migration plan:
+   - backfill steps,
+   - verification queries,
+   - cutover strategy,
+   - rollback approach.
+
+OUTPUT FORMAT:
+1) Assumptions + clarifying questions
+2) Current bottlenecks (based on inputs)
+3) Denormalization plan (step-by-step)
+4) New physical schema (DDL)
+5) Migration + validation checklist
+
+
+INTERMEDIÁRIO
+
+Act as a database performance engineer. Given a relational database *physical schema* and a set of read-heavy workloads, design a denormalized physical model optimized for read performance and provide a NEW physical schema (DDL) for it.
+
+CONTEXT (I will paste):
+- RDBMS + version:
+- Current DDL (tables, constraints, indexes):
+- Workload: top N read queries + frequency + latency targets
+- Data volumes: row counts per table + cardinalities
+- Freshness/consistency requirements (near-real-time vs batch acceptable)
+- Write rates for key tables
+
+TASK:
+1) Workload analysis: map each query to required joins/aggregations and pinpoint expensive patterns.
+2) Propose a denormalized design that minimizes join depth and avoids repeated aggregations:
+   - consolidated “read” tables for the top query shapes,
+   - summary/rollup tables for common aggregates,
+   - selective duplication of dimension attributes,
+   - optional materialized views (if supported).
+3) Provide NEW physical schema DDL:
+   - tables/views/materialized views,
+   - indexes (include covering/composite indexes as needed),
+   - partitioning/clustering guidance if the RDBMS supports it,
+   - constraints only where they don’t harm ingestion/refresh.
+4) Define data maintenance strategy:
+   - how and when denormalized structures are refreshed (batch, incremental, triggers, CDC),
+   - how to handle deletes/updates,
+   - idempotent backfill approach.
+5) Validate: show how each top query is rewritten to use the new schema (example rewritten SQL).
+
+DELIVERABLES:
+- Denormalized schema DDL (copy/paste-ready)
+- Query rewrites for top queries
+- Refresh/maintenance plan with expected operational complexity
+- Risks/tradeoffs and how to monitor correctness/performance
+
+EXPERT
+
+
+You are a principal database architect. Design a denormalized *physical model* to maximize read performance and provide a NEW physical schema (DDL) for it. Preserve semantic correctness; explicitly document any intentional staleness windows.
+
+INPUTS:
+- RDBMS + version + key settings (if relevant)
+- Current physical schema DDL (tables, indexes, constraints)
+- Query workload with frequency distribution (p50/p95 latency targets, concurrency)
+- Data size, growth, and skew; update/delete rates
+- Consistency requirements: transactional vs eventual; allowed staleness per entity
+- Storage/ops constraints (disk budget, batch window, streaming availability)
+
+REQUIREMENTS:
+1) Produce at least 2 denormalization options (e.g., “Wide read tables + incremental maintenance” vs “Summary tables + materialized views”), each with:
+   - which query shapes it accelerates,
+   - expected tradeoffs (write amplification, refresh complexity, anomaly risk),
+   - operational model (batch/incremental/CDC),
+   - failure modes and recovery.
+2) Choose a recommended option and justify it against the workload constraints.
+3) Output NEW physical schema DDL (engine-specific):
+   - denormalized tables and/or materialized views,
+   - indexing strategy (covering/composite; include columns where supported),
+   - partitioning and clustering/ordering strategy,
+   - optional compression/fillfactor/page settings only if clearly beneficial.
+4) Provide a maintenance design:
+   - incremental refresh SQL/pseudocode,
+   - conflict resolution for late-arriving updates,
+   - invariants + reconciliation queries for correctness.
+5) Provide a migration/cutover plan:
+   - dual-write or backfill + switch,
+   - validation gates and rollback.
+
+OUTPUT:
+- Option A (pros/cons + DDL outline)
+- Option B (pros/cons + DDL outline)
+- Recommended option + full copy/paste DDL
+- Maintenance/refresh spec
+- Migration + validation plan

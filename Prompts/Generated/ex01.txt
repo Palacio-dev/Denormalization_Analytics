@@ -1,0 +1,139 @@
+You are a helpful database tutor and performance engineer. My goal is to denormalize an existing relational database physical model to improve read performance, then propose a NEW physical schema for the denormalized version.
+
+First: ask me up to 8 clarifying questions if anything essential is missing (database engine, table sizes, top read queries, update frequency, SLAs, constraints).
+
+Input I will provide (paste blocks below):
+1) Database engine/version:
+2) Current schema DDL (CREATE TABLE + PK/FK + indexes):
+3) 5–15 most important read queries (or endpoints) + rough frequency:
+4) Write/update patterns (which tables change, how often):
+5) Constraints that must remain correct (e.g., “orders must always match customer”, audit rules):
+6) Data volume estimates (rows/table, growth):
+7) “Must not change” items (naming, IDs, retention, etc.):
+
+Your tasks:
+A) Summarize the current normalized design in simple terms (entities + relationships).
+B) Identify read hotspots and explain WHY normalization hurts those reads.
+C) Propose denormalization options (e.g., redundant columns, pre-joined “wide” read tables, summary/aggregate tables, materialized views) and rank them by impact vs. complexity.
+D) Produce a new denormalized physical schema:
+   - DDL for new/changed tables
+   - PKs, indexes, and (if relevant) partitioning
+   - Keep original tables if needed, but clearly mark which are “source of truth” vs “read-optimized”
+E) Explain how data stays consistent:
+   - Options: triggers, app-layer dual writes, CDC/ETL jobs, scheduled refresh
+   - Recommend one approach and justify it for a beginner
+F) Provide a migration plan (safe steps) and a rollback plan.
+G) Provide verification SQL that proves the new schema returns the same results as before for key queries.
+
+Output format:
+1) Clarifying Questions (if needed)
+2) Current Model Summary
+3) Hotspots & Bottlenecks
+4) Recommended Denormalizations (ranked)
+5) New Denormalized Schema (DDL)
+6) Consistency/Refresh Strategy
+7) Migration + Rollback
+8) Verification Queries
+9) Tradeoffs (read gains vs write cost, storage, complexity)
+Do not claim guaranteed performance; describe expected effects and what to measure.
+
+
+
+INTERMEDIÁRIO
+Act as a senior database performance engineer. Denormalize my relational database physical model to optimize read performance and produce a new physical schema.
+
+Assume I care about:
+- Lower p95 latency on read-heavy workloads
+- Preserving correctness for business-critical fields
+- Acceptable write amplification if justified
+
+I will provide:
+- Engine/version
+- Full DDL (tables, constraints, indexes)
+- Workload: top queries with EXPLAIN/EXPLAIN ANALYZE (if available), frequency, and response-time goals
+- Data distribution + cardinalities
+- Concurrency assumptions
+- Update cadence per table
+
+Your tasks:
+1) Workload-driven analysis:
+   - Identify the top 3–7 reads to optimize
+   - For each, list joins, filters, group-bys, and why they’re expensive
+2) Denormalization design:
+   - Propose specific denormalizations (duplicate attributes, precomputed aggregates, “snapshot” fact tables, star-like read model, covering indexes)
+   - For each, quantify expected improvements qualitatively and note write/storage tradeoffs
+3) Produce the new physical schema:
+   - DDL for new/modified tables/views/materialized views (engine-appropriate)
+   - Index strategy (composite indexes aligned to predicates, include/cover columns where supported)
+   - Partitioning/sharding suggestions only if clearly warranted by volume/workload
+4) Consistency strategy:
+   - Choose between synchronous (triggers/dual-write) vs asynchronous (CDC/materialized view refresh/jobs)
+   - Define freshness requirements and failure modes
+5) Migration plan:
+   - Backfill approach
+   - Incremental cutover (shadow reads, compare results, then switch)
+   - Rollback steps
+6) Validation:
+   - Provide SQL comparators for key query results
+   - Provide a measurement checklist (what metrics to collect before/after)
+
+Output:
+- A table mapping {old query} → {new query / new structure}
+- Full DDL for the denormalized schema
+- A clear “source of truth” statement for each data element
+Avoid generic advice; be concrete and tie every schema change to a query pattern.
+
+
+EXPERT
+
+You are a principal database architect. Design a denormalized read-optimized physical schema derived from my existing normalized relational schema. The goal is measurable read performance improvement under my workload, with explicit handling of correctness, refresh, and operational complexity.
+
+Context I will provide:
+- Engine/version + deployment (single node/cluster, replicas, storage type)
+- Current DDL + constraints + indexes
+- Query workload with EXPLAIN/ANALYZE, parameter distributions, and SLAs (p50/p95/p99)
+- Data volumes, growth, skew, cardinalities, and write rates
+- Consistency/freshness requirements per domain (strong vs eventual)
+- Operational constraints (no triggers allowed? limited batch windows? CDC available?)
+
+Hard requirements:
+- Preserve business correctness; document any intentional staleness windows
+- Produce a NEW physical schema for denormalized reads (can coexist with OLTP truth)
+- Provide an implementation plan that is safe, observable, and reversible
+
+Tasks:
+1) Model-to-workload mapping:
+   - Derive an access-pattern matrix (tables/columns touched per top query)
+   - Identify join hotspots and aggregation hotspots
+2) Denormalization patterns (choose and justify):
+   - Wide read tables (pre-joined dimensions)
+   - Pre-aggregated rollups (by time bucket / entity)
+   - Snapshot tables for “current state”
+   - Materialized views (or engine equivalent)
+   - Optional: star schema / fact-dimension split for analytics-style reads
+3) Physical design details:
+   - DDL with exact PK/UK strategy, constraints (where feasible), and indexing
+   - Partitioning keys and pruning logic (only if it improves the target workload)
+   - Optional: clustering/ordering keys, compression, and storage parameters if engine supports
+4) Consistency architecture:
+   - Choose one: (a) dual-write + idempotency + outbox, (b) triggers, (c) CDC pipeline, (d) scheduled refresh
+   - Define data lineage: source-of-truth columns → denormalized columns
+   - Define correction strategy for drift (rebuild/backfill, reconciliation jobs)
+5) Query rewrite plan:
+   - For each critical query, provide the new SQL and why it should be faster
+6) Risk analysis:
+   - Write amplification, lock contention, failure modes, backfill runtime, storage growth
+   - Monitoring/alerts: lag, freshness, reconciliation diffs, query latency regressions
+7) Migration:
+   - Backfill algorithm (chunking, watermarking, retry semantics)
+   - Progressive cutover (shadow traffic + automated diffing)
+   - Rollback + cleanup plan
+
+Output format:
+- Executive Summary (1–2 paragraphs)
+- Access-Pattern Matrix
+- Proposed Denormalized Schema (DDL)
+- Lineage & Consistency Spec (explicit invariants + staleness bounds)
+- Query-by-Query Rewrite Table
+- Migration Runbook + Observability Checklist
+Do not assume denormalization is always the best; if normalization is fine, say so and propose targeted indexes/materialized views instead.

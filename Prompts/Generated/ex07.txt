@@ -1,0 +1,126 @@
+Beginner prompt (guided, explanation-first)
+You are a senior database engineer and teacher. Help me denormalize an existing physical relational database model to improve read performance and then produce a new physical schema for the denormalized version.
+
+What I will provide
+DBMS (e.g., PostgreSQL, MySQL, SQL Server, Oracle): {DBMS}
+Current schema DDL (tables, columns, PK/FK, constraints, indexes if any): {DDL_OR_SCHEMA_DESCRIPTION}
+Typical read queries (top 5–15) + rough frequency/latency targets: {TOP_READ_QUERIES}
+Data volumes (row counts per table) + growth: {VOLUMES}
+Update patterns (how often data changes, which tables are hot): {WRITE_PATTERNS}
+Constraints (storage limits, acceptable staleness, must-keep normalization rules, compliance): {CONSTRAINTS}
+Your job
+Ask me any missing questions (keep it to the minimum needed).
+Briefly explain what denormalization is and when it helps (1–2 paragraphs).
+Identify the biggest join/aggregation bottlenecks in my reads (based on my query list).
+Propose 2–3 denormalization options that reduce joins (e.g., merged tables, duplicated columns, precomputed totals, summary tables/materialized views).
+Pick the best option and justify it in plain language (tradeoffs: storage, write complexity, consistency).
+Produce the new physical schema:
+Tables and columns (with types)
+Primary keys and any foreign keys kept (or explain why removed)
+Indexes (and which queries they support)
+Any partitioning suggestions (only if clearly beneficial)
+Provide a simple “how to keep it updated” plan:
+If using summary tables/materialized views: refresh strategy
+If duplicating data: how it’s written/updated (app writes vs triggers vs ETL)
+Provide a migration outline (high level): create new tables, backfill, validate, cutover.
+Output format
+“Questions”
+“Current pain points”
+“Denormalization options”
+“Recommended denormalized design”
+“New physical schema (DDL for {DBMS})”
+“Update/refresh strategy”
+“Migration plan”
+“Risks & how to monitor performance”
+
+
+INTERMEDIÁRIO
+
+Act as a database performance engineer. I want to denormalize a relational database’s physical model to improve read performance and generate a new physical schema for the denormalized version.
+
+Inputs
+DBMS + version: {DBMS_VERSION}
+Current physical schema (DDL including indexes/constraints): {CURRENT_DDL}
+Representative workload:
+Top read queries with EXPLAIN/plans if available: {READ_QUERIES_AND_PLANS}
+Read/write ratio, concurrency, SLA (p95/p99): {SLA_AND_CONCURRENCY}
+Data distribution: cardinalities, row counts, hottest tenants/partitions: {DATA_DISTRIBUTION}
+Consistency requirements: acceptable staleness (seconds/minutes), transaction boundaries: {CONSISTENCY}
+
+Tasks
+
+Summarize performance drivers (join depth, fan-out, aggregation cost, lookups).
+Propose denormalization patterns mapped to my workload, such as:
+Pre-joined “wide” read models (duplicated dimensions)
+Rollup/aggregate tables (daily/monthly, per-entity)
+Materialized views (if supported)
+“Current state” tables (latest status per entity)
+For each pattern, estimate:
+Read improvement mechanism (fewer joins, smaller working set, index-friendly)
+Write amplification and complexity
+Storage growth
+Consistency risks
+Recommend a target denormalized design and provide:
+Full physical schema DDL (tables, keys, indexes)
+Constraints strategy (which FKs to keep vs drop, and why)
+Index design tied to specific queries
+Partitioning/clustering if justified by access patterns
+Provide a data maintenance approach:
+Incremental updates (triggers/CDC/ETL) vs batch refresh
+Idempotent upserts, late-arriving data handling
+Provide a migration and validation plan:
+Backfill strategy, dual-write or backfill+swap
+Reconciliation queries and correctness checks
+Rollback plan
+Output format
+Workload summary
+Candidate denormalizations (with tradeoff table)
+Recommended denormalized schema (DDL)
+Query-to-index mapping
+Maintenance & refresh design
+Migration + validation checklist
+
+EXPERT
+
+You are the lead database architect. Goal: denormalize the physical relational model to optimize read performance while controlling write amplification and maintaining correctness. Deliver a new denormalized physical schema plus an operational plan.
+
+Context package (I will paste)
+DBMS/engine + deployment details (single node/cluster, storage type): {ENVIRONMENT}
+Full DDL (tables, types, constraints, indexes), plus any query plans: {DDL_AND_PLANS}
+Workload traces or top-N query fingerprints, with p95/p99 latency and QPS: {WORKLOAD}
+Data volumes, skew, multi-tenancy model, retention policies: {DATA_PROFILE}
+Consistency/transactionality requirements, RPO/RTO: {CONSISTENCY_AND_RECOVERY}
+Non-functional constraints (storage budget, maintenance windows, tooling): {NFRS}
+Requirements
+State assumptions and missing info up front; ask only high-impact questions.
+Produce a denormalization proposal that is explicitly query-driven:
+Identify which joins/aggregations to eliminate and why
+Define read models optimized for key endpoints/use cases
+Provide the new physical schema with:
+DDL for the target DBMS
+Key design (surrogate vs natural), uniqueness constraints
+Index strategy (composite, covering, partial/filtered where applicable)
+Partitioning/sharding strategy (if warranted) and pruning logic
+Optional: materialized views/summary tables with refresh mechanics
+Define data correctness strategy:
+Source of truth tables vs derived tables
+Invalidation rules, update propagation, handling deletes/updates
+Exactly-once vs at-least-once update semantics; idempotency keys
+Provide operational design:
+Backfill pipeline, incremental maintenance (CDC/streaming/batch)
+Monitoring: freshness lag, reconciliation checks, performance KPIs
+Failure modes + recovery steps
+Provide an evaluation section:
+Expected performance impact per major query (qualitative + any estimated I/O reductions)
+Storage overhead estimate method
+Risk register with mitigations
+Output format (strict)
+Assumptions & questions
+Bottleneck analysis (by query group)
+Target denormalized read models (overview)
+Physical schema DDL (grouped by: source-of-truth vs derived)
+Index/partition plan (mapped to queries)
+Maintenance pipelines (backfill + incremental)
+Validation & reconciliation SQL examples
+Rollout plan (phased, with rollback)
+Risks & monitoring metrics

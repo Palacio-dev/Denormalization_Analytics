@@ -1,0 +1,124 @@
+Beginner Prompt (guided, minimal assumptions)
+
+You are a senior database engineer and tutor. Help me denormalize an existing physical relational database model to improve
+read performance, then produce a new physical schema for the denormalized version.
+
+First, ask me only the minimum questions you need (bullet list) to proceed, such as:
+
+Which DBMS (PostgreSQL/MySQL/SQL Server/Oracle)?
+Current tables + columns + PK/FK (I can paste CREATE TABLE or a list)
+Top 5–10 slow/important read queries (or the screens/reports they support)
+Approximate data sizes and growth
+Freshness requirements (real-time vs can be delayed)
+Write/update patterns (which tables are frequently updated)
+Constraints I must keep (regulatory, audit, uniqueness rules)
+
+Then, do the following:
+
+1.Summarize the current normalized design in plain language (what each table represents, key relationships).
+2.Identify the read bottlenecks (joins, filters, group-bys) and explain why they’re slow.
+3.Propose 2–3 denormalization options, from “low risk” to “high performance”, clearly stating trade-offs (storage, write complexity, consistency risk).
+4.Choose the best option based on my constraints and workload and explain the decision.
+5.Produce the new physical schema:
+Full DDL (CREATE TABLE ...) for the denormalized tables
+Primary keys and any remaining foreign keys (if you recommend dropping some, explain)
+Indexes needed for the target queries
+Any summary/aggregate tables and what they store
+6.Provide a data migration/backfill approach (high level steps) and how to keep the denormalized data updated (ETL batch, triggers, application updates, or materialized views—pick what fits my DBMS and freshness).
+7.End with a checklist I can use to validate correctness and performance.
+Important: do not invent tables/columns I did not provide—if something is missing, ask. Keep the output copy-pastable and beginner-friendly
+
+
+INTERMEDIÁRIO
+
+Intermediate Prompt (workload-driven, with alternatives + validation)
+
+Act as an expert database performance engineer. I will provide:
+
+DBMS + version
+Current physical schema DDL (tables, PKs, FKs, indexes)
+Key read queries + EXPLAIN/execution stats (if available)
+SLAs (latency targets), concurrency, data volume, and freshness requirements
+Task: Denormalize the physical model to improve read performance and produce a new denormalized physical schema.
+
+Process requirements:
+
+Extract the “read model” from the workload: list the core access patterns (filters, joins, sorting, pagination, aggregates).
+Determine denormalization candidates:
+frequently-joined dimensions (duplicate stable attributes into fact-like tables)
+precomputed aggregates / rollups
+wide “read tables” for critical endpoints
+optional: materialized views (only if supported and appropriate)
+For each candidate, quantify impact qualitatively:
+expected join reduction
+index strategy changes
+write amplification and update complexity
+consistency model (strong vs eventual)
+Produce a final recommended denormalized schema with:
+DDL for tables (and/or materialized views if chosen)
+indexes (including composite indexes aligned to predicates + ordering)
+partitioning strategy if relevant
+constraints strategy (which FKs remain, which become application-managed)
+Provide an incremental migration plan:
+backfill steps
+dual-write or change-data-capture approach (if needed)
+cutover plan + rollback strategy
+Provide a validation plan:
+correctness checks (row counts, reconciliation queries)
+performance checks (before/after query plans)
+monitoring metrics to watch post-deploy
+Output format:
+
+“Assumptions”
+“Workload Summary”
+“Denormalization Options (A/B/C)”
+“Chosen Design”
+“New Physical Schema (DDL)”
+“Migration + Update Strategy”
+“Validation & Monitoring”
+
+
+EXPERT
+
+Expert Prompt (architecture-level, explicit trade-offs, consistency + operations)
+
+You are the principal database architect for a high-throughput system. Your goal is to design a denormalized physical relational schema optimized for a known read workload, while explicitly managing consistency, operational complexity, and long-term maintainability.
+
+Inputs I will provide:
+
+DBMS/version, deployment mode (single node, cluster), hardware constraints
+Current physical schema DDL and existing constraints
+Read/write workload distribution, top queries, concurrency, peak QPS
+Data retention, growth rate, and access “hot spots”
+Freshness budget per read model (e.g., 0s / 5m / 1h)
+Failure tolerance and operational constraints (backfill windows, lock avoidance, migration downtime limits)
+Deliverables:
+
+Workload decomposition:
+Identify bounded contexts / read domains
+Map queries to “read projections”
+Denormalization design:
+Define one or more read-optimized projections (wide tables and/or summary tables)
+Specify the exact duplication rules (source-of-truth columns vs replicated columns)
+Define update propagation (triggers vs CDC vs scheduled ETL), with failure modes and recovery procedures
+Specify consistency guarantees per projection (strong/eventual), and how stale reads are bounded
+Physical schema output:
+Full DDL for denormalized objects (tables, indexes, partitions)
+Storage and indexing rationale per projection (covering indexes, clustering, partial indexes where applicable)
+Constraints strategy: which invariants remain enforced by DB, which move to pipelines/apps, and why
+Operational plan:
+Backfill strategy at scale (chunking, id ranges, checkpointing, parallelism)
+Online migration plan (dual writes, validation gates, cutover)
+Observability (lag metrics, reconciliation jobs, anomaly detection)
+Risk register:
+Data drift risks + mitigation
+Write amplification and lock contention risks
+Rebuild strategy (how to regenerate projections from sources of truth)
+Rules:
+
+Prefer the simplest design that meets the SLA.
+Don’t assume magical consistency: explicitly specify how updates flow and how to detect/repair drift.
+If inputs are insufficient, ask targeted questions; otherwise proceed and state assumptions.
+Output should be structured, technical, and production-ready.
+
+If you tell me which DBMS you’re targeting (Postgres/MySQL/SQL Server/Oracle) and whether you want the prompts in English or Portuguese, I can tailor the wording to that platform’s features (e.g., materialized views, indexed views, partitions, partial indexes).

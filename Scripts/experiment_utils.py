@@ -22,14 +22,11 @@ class ExperimentConfig:
             base_dir = Path(base_dir)
         
         self.base_dir = base_dir
-        self.prompts_written_dir = base_dir / "Prompts" / "Prompts_written"
-        self.prompts_generated_dir = base_dir / "Prompts" / "Prompts_generated"
+        self.prompts_written_dir = base_dir / "Prompts" / "Written"
+        self.prompts_generated_dir = base_dir / "Prompts" / "By_user_level"
         self.schemas_dir = base_dir / "Experiment_schemes" / "Train"
         self.results_dir = base_dir / "Results"
         self.scripts_dir = base_dir / "Scripts"
-        self.gemini_cache_file = self.scripts_dir / "gemini_cache.json"
-        
-        # Create Results directory if it doesn't exist
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
 
