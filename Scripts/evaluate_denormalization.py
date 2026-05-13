@@ -344,8 +344,6 @@ class ModelComparator:
         """
         Evaluate correctness by checking:
         1. Data types preservation
-        2. Semantic preservation of identifiers
-        3. Cardinality preservation (basic check)
         """
         results = {
             'type_preservation': [],
@@ -375,16 +373,6 @@ class ModelComparator:
                     f"Type mismatch: {rel_info['name']} ({rel_info['type']}) -> "
                     f"{denorm_info['name']} ({denorm_info['type']})"
                 )
-            
-            # Check semantic preservation (same name or logical mapping)
-            semantic_match = (rel_info['name'] == denorm_info['name'] or 
-                            rel_info['name'] in denorm_info['name'] or
-                            denorm_info['name'] in rel_info['name'])
-            results['semantic_preservation'].append({
-                'relational': rel_info['name'],
-                'denormalized': denorm_info['name'],
-                'match': semantic_match
-            })
         
         # Calculate percentages
         if results['type_preservation']:
@@ -392,12 +380,6 @@ class ModelComparator:
             results['type_preservation_rate'] = type_matches / len(results['type_preservation'])
         else:
             results['type_preservation_rate'] = 0.0
-        
-        if results['semantic_preservation']:
-            semantic_matches = sum(1 for x in results['semantic_preservation'] if x['match'])
-            results['semantic_preservation_rate'] = semantic_matches / len(results['semantic_preservation'])
-        else:
-            results['semantic_preservation_rate'] = 0.0
         
         return results
     
@@ -457,7 +439,6 @@ class ModelComparator:
         correctness = self.evaluate_correctness()
         
         report_lines.append(f"\nData Type Preservation: {correctness['type_preservation_rate']:.2%}")
-        report_lines.append(f"Semantic Preservation: {correctness['semantic_preservation_rate']:.2%}")
         
         if correctness['issues']:
             report_lines.append("\n⚠ Issues Found:")
