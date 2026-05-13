@@ -1,0 +1,169 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-13_17-15-03
+Model: ollama_local
+Prompt: RACE
+Schema: harperdb
+==================================================
+
+### Analysis of Database Schema Designs
+
+The user provided two examples of schema designs: one for school data (Example 3) and one for country data (Example 4). Both examples demonstrate the trade-offs between **Normalized** (OLTP-style) and **Denormalized** (OLAP/Reporting-style) models.
+
+Below is the analysis of these examples, followed by a new schema design proposal for an **E-Commerce System** to illustrate the trade-offs in a new domain.
+
+---
+
+### 1. Analysis of Example 3 (Schools Data)
+
+#### **Normalized Model (Schools)**
+*   **Structure:** The data is split into `escolas` (Schools), `escola_staff` (Staff), and `rendimento_escolar` (Student Performance).
+*   **Key Characteristics:**
+    *   **High Integrity:** Each entity (School, Staff, Student) is in its own table with Primary Keys (PK) and Foreign Keys (FK).
+    *   **Scalability:** Adding a new attribute (e.g., `School Location`) to a school is done in one place.
+    *   **Write Efficiency:** Inserting a new school only requires updating one table.
+    *   **Read Complexity:** To get a complete school profile (staff, students, performance), multiple JOINs are required.
+
+#### **Denormalized Model (Schools)**
+*   **Structure:** A single `ESCOLAS` table containing all attributes: infrastructure (labs, gym), staff counts, and student performance metrics.
+*   **Key Characteristics:**
+    *   **High Read Efficiency:** Querying for a school's full profile requires a single SELECT statement.
+    *   **Snapshot in Time:** The table represents a specific moment in time. It is not transactional.
+    *   **Write Overhead:** Updating a school's performance metric requires inserting a new row (or updating a history table), not modifying existing rows directly.
+    *   **Data Redundancy:** If multiple schools have the same number of labs, this column might be stored in every row (if the metric is school-specific) or a single column might be used for an aggregate.
+    *   **Complexity:** Maintaining consistency (e.g., if a staff member leaves, how do you update the `escola_staff` count? You must use triggers or stored procedures).
+
+#### **Summary for Example 3**
+The **Normalized** model is ideal for managing the school's operational data (admissions, HR, daily updates). The **Denormalized** model is ideal for generating school reports (e.g., "List of all schools with >10 labs and >100 staff").
+
+---
+
+### 2. Analysis of Example 4 (Countries Data)
+
+#### **Normalized Model (Countries)**
+*   **Structure:** `Paises` (Countries), `Populacao` (Population details), `Governo` (Government details).
+*   **Key Characteristics:**
+    *   **Granularity:** Population data (e.g., "Total Population", "Age 0-14") is normalized into dimension-like columns.
+    *   **Relational Integrity:** A country can have multiple governments or population changes over time (if using `Populacao` as a history table).
+    *   **Write Safety:** Adding a new government attribute is localized to the `Governo` table.
+
+#### **Denormalized Model (Countries)**
+*   **Structure:** A single `PAISES` table with columns for `Total_Pop`, `Male_Female_0to14`, `Government_Type`, etc.
+*   **Key Characteristics:**
+    *   **Wide Table:** Designed for fast reporting.
+    *   **Snapshot:** The `PAISES` table likely represents the state of a country at a specific point in time.
+    *   **Simplicity:** Queries are simple.
+    *   **Redundancy:** The `Populacao` table might store population counts that are duplicated across years if not handled correctly.
+
+#### **Summary for Example 4**
+The **Normalized** model is suitable for a demographic research system where population is tracked over time. The **Denormalized** model is suitable for a global dashboard showing a snapshot of countries' economic and social indicators.
+
+---
+
+### 3. Comparative Summary
+
+| Feature | Normalized Model | Denormalized Model |
+| :--- | :--- | :--- |
+| **Primary Use** | Transactional Systems (OLTP) | Analytical Systems (OLAP) |
+| **Read Speed** | Slower (requires JOINs) | Fast (wide tables) |
+| **Write Speed** | Fast (small tables) | Slower (requires data aggregation) |
+| **Storage** | Efficient (minimal redundancy) | Inefficient (duplicated data) |
+| **Data Integrity** | High (FKs enforce consistency) | Risk of inconsistency |
+| **Maintenance** | Easier to add fields | Requires data cleaning |
+
+---
+
+### 4. New Schema Design Proposal: E-Commerce System
+
+Since the user requested a new database schema design without specific requirements, I will create a schema for an **E-Commerce Store**. This is a common domain where the trade-off is highly relevant.
+
+#### **Design Rationale**
+1.  **Normalized Model:** Suitable for the operational system (Orders, Inventory, Customers).
+2.  **Denormalized Model:** Suitable for the analytics system (Sales Dashboard, Customer Segmentation).
+
+I will provide **SQL** for the schema design.
+
+#### **Schema 1: Normalized (Operational System)**
+
+This schema follows standard 3NF principles.
+
+```sql
+-- 1. Customers Table
+CREATE TABLE customers (
+    customer_id INT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    signup_date DATE
+);
+
+-- 2. Products Table
+CREATE TABLE products (
+    product_id INT PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    category VARCHAR(100),
+    price DECIMAL(10, 2) NOT NULL,
+    stock_quantity INT DEFAULT 0
+);
+
+-- 3. Orders Table
+CREATE TABLE orders (
+    order_id INT PRIMARY KEY,
+    customer_id INT,
+    order_date TIMESTAMP NOT NULL,
+    status VARCHAR(50) DEFAULT 'pending',
+    FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
+);
+
+-- 4. Order Items Table (Relates Orders to Products)
+CREATE TABLE order_items (
+    item_id INT PRIMARY KEY,
+    order_id INT NOT NULL,
+    product_id INT NOT NULL,
+    quantity INT NOT NULL,
+    price_at_purchase DECIMAL(10, 2) NOT NULL, -- Captures price at the time of purchase
+    FOREIGN KEY (order_id) REFERENCES orders(order_id),
+    FOREIGN KEY (product_id) REFERENCES products(product_id)
+);
+```
+
+#### **Schema 2: Denormalized (Analytics/Reporting System)**
+
+This schema aggregates data for fast reporting on sales and customer behavior.
+
+```sql
+-- 5. Analytics: Customer Orders Summary (Denormalized)
+-- Combines customer info, order info, and total spending in one row per customer
+CREATE VIEW vw_customer_sales AS
+SELECT 
+    c.customer_id,
+    c.name,
+    c.email,
+    COUNT(o.order_id) AS total_orders,
+    SUM(oi.quantity * oi.price_at_purchase) AS total_spent,
+    MAX(o.order_date) AS last_order_date,
+    GROUP_CONCAT(DISTINCT p.name) AS purchased_products -- (Note: This might need aggregation function depending on DB)
+FROM customers c
+JOIN orders o ON c.customer_id = o.customer_id
+JOIN order_items oi ON o.order_id = oi.order_id
+JOIN products p ON oi.product_id = p.product_id
+GROUP BY c.customer_id, c.name, c.email;
+```
+
+**Note on View Usage:** The `vw_customer_sales` view is denormalized. It is suitable for dashboards but not for transactional processing.
+
+#### **Comparison of the New Design**
+
+*   **Normalized:** Allows us to track individual product prices over time (using `price_at_purchase`). If a product's price changes, we don't retroactively change old orders; we just keep the old price for historical accuracy.
+*   **Denormalized:** Provides a single table (`vw_customer_sales`) that shows exactly what a customer bought and how much they spent, without needing to JOIN multiple tables.
+
+---
+
+### 5. Conclusion
+
+The choice between Normalized and Denormalized models depends on the use case:
+
+*   **Use Normalized** if you need to manage data integrity, handle high write volume, or track history (e.g., inventory management).
+*   **Use Denormalized** if you need fast reads, complex reporting, or analytics (e.g., sales dashboards).
+
+This design demonstrates how a system can use both models (Operational DB + Data Warehouse) to balance the needs of real-time transactions and business intelligence.
+
+Let me know if you need further modifications or a specific implementation in a particular database system (e.g., PostgreSQL, MySQL).
