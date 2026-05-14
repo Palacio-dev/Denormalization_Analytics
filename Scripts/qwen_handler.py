@@ -70,7 +70,11 @@ class QwenHandler:
             response = self.client.generate(
                 model=self.model,
                 prompt=formatted_prompt,
-                stream=False,  # Get full response at once
+                options={
+                    "temperature": 1.0,
+                    "top_p": 0.65,
+                    "top_k": 10,
+                }
             )
             
             response_text = response.get("response", "")
