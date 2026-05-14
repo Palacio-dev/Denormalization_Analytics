@@ -1,0 +1,162 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_14-50-17
+Model: gemini
+Prompt: expert
+Schema: chinook
+==================================================
+
+### Executive Summary
+
+To significantly improve read performance for your digital media storefront and analytics dashboards, I have designed a denormalized, read-optimized physical schema derived from your 3NF Chinook-style relational model. The current normalized schema requires up to 5-way joins for simple catalog browsing and 7-way joins for sales analytics, leading to CPU bottlenecks and high buffer cache churn under concurrent read workloads. 
+
+The proposed architecture introduces a **Wide Catalog Dimension** for storefront browsing, a **Flattened Sales Fact** table for customer history/analytics, and a **Pre-aggregated Sales Rollup** for dashboarding. Assuming operational constraints of **no triggers** and the **availability of CDC (Change Data Capture)**, these read models will be materialized as standard tables updated asynchronously via a CDC pipeline (e.g., Debezium + Kafka/Flink or logical replication). This guarantees isolation between OLTP writes and OLAP/Storefront reads, introduces a documented sub-second staleness window, and allows for safe, reversible deployment without altering the existing source-of-truth tables.
+
+---
+
+### 1. Access-Pattern Matrix
+
+To justify the denormalization, I have inferred the three most critical read workloads based on standard media store operations.
+
+| Query Class | Target Workload | Tables Touched (Normalized) | Columns Required | Hotspots & Bottlenecks |
+| :--- | :--- | :--- | :--- | :--- |
+| **Q1: Catalog Browse** | Storefront UI displaying tracks, albums, artists, and genres. | `Track`, `Album`, `Artist`, `Genre`, `MediaType` | Track.Name, Album.Title, Artist.Name, Genre.Name, Media.Name, Price | **Join Hotspot:** 4-way join per page load. High random I/O if indexes aren't perfectly cached. |
+| **Q2: Order History** | Customer portal viewing past invoices and purchased tracks. | `Invoice`, `InvoiceLine`, `Track`, `Album`, `Artist` | InvoiceDate, Total, Track.Name, Album.Title, Artist.Name, Quantity, UnitPrice | **Join Hotspot:** 4-way join. Frequent traversal from Invoice -> Line -> Track -> Album. |
+| **Q3: Sales Analytics** | Internal dashboards showing revenue by genre/artist over time. | `Invoice`, `InvoiceLine`, `Track`, `Genre`, `Artist` | InvoiceDate, Quantity, UnitPrice, Genre.Name, Artist.Name | **Aggregation Hotspot:** Grouping millions of rows requires scanning and joining 5 tables on the fly. |
+
+---
+
+### 2. Denormalization Patterns
+
+**1. Wide Read Table (Pre-joined Dimension): `read_catalog_tracks`**
+*   *Justification:* Resolves Q1. By flattening `Track`, `Album`, `Artist`, `Genre`, and `MediaType` into a single wide row, storefront queries become single-table `SELECT`s. 
+*   *Strategy:* Type 1 SCD (Overwrite). If an artist changes their name, the CDC pipeline updates all their tracks in this table.
+
+**2. Flattened Snapshot Table (Fact): `read_sales_invoices`**
+*   *Justification:* Resolves Q2 and serves as the base for Q3. Pre-joins `InvoiceLine` with `Invoice`, `Customer`, and `Track` hierarchies. 
+*   *Strategy:* Immutable snapshot. We capture the dimension names (Artist, Genre) *at the time of the invoice*. This prevents historical invoices from changing if an artist later rebrands, preserving financial correctness.
+
+**3. Pre-aggregated Rollup: `read_agg_sales_monthly`**
+*   *Justification:* Resolves Q3. Dashboards don't need line-level detail. Pre-calculating revenue and quantity by Month and Genre reduces millions of rows to a few hundred, making dashboard load times instantaneous.
+
+---
+
+### 3. Physical Design Details (DDL)
+
+The following DDL creates the read-optimized schema. I have utilized **Table Partitioning** for the fact table to optimize analytics queries by date, and specific indexing strategies for the target workloads.
+
+```sql
+BEGIN;
+
+-- ============================================================================
+-- 1. WIDE CATALOG DIMENSION (For Storefront Browsing - Q1)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.read_catalog_tracks
+(
+    "TrackId" integer NOT NULL,
+    "TrackName" character varying(200) NOT NULL,
+    "AlbumId" integer,
+    "AlbumTitle" character varying(160),
+    "ArtistId" integer,
+    "ArtistName" character varying(120),
+    "GenreId" integer,
+    "GenreName" character varying(120),
+    "MediaTypeId" integer,
+    "MediaTypeName" character varying(120),
+    "Composer" character varying(220),
+    "Milliseconds" integer NOT NULL,
+    "Bytes" integer,
+    "UnitPrice" numeric(10, 2) NOT NULL,
+    "LastUpdated" timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "PK_read_catalog_tracks" PRIMARY KEY ("TrackId")
+);
+
+-- Indexes for filtering and sorting on the storefront
+CREATE INDEX "IDX_read_catalog_ArtistId" ON public.read_catalog_tracks ("ArtistId");
+CREATE INDEX "IDX_read_catalog_GenreId" ON public.read_catalog_tracks ("GenreId");
+-- GiST/GIN index could be added here if full-text search on TrackName is required.
+
+-- ============================================================================
+-- 2. FLATTENED SALES FACT (For Order History & Analytics Base - Q2, Q3)
+-- Partitioned by InvoiceDate (Range) to allow partition pruning on time-series queries
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.read_sales_invoices
+(
+    "InvoiceLineId" integer NOT NULL,
+    "InvoiceId" integer NOT NULL,
+    "InvoiceDate" timestamp without time zone NOT NULL,
+    "CustomerId" integer NOT NULL,
+    "CustomerCountry" character varying(40),
+    "TrackId" integer NOT NULL,
+    "TrackName" character varying(200) NOT NULL,
+    "AlbumTitle" character varying(160),
+    "ArtistName" character varying(120),
+    "GenreName" character varying(120),
+    "UnitPrice" numeric(10, 2) NOT NULL,
+    "Quantity" integer NOT NULL,
+    "LineTotal" numeric(10, 2) GENERATED ALWAYS AS ("UnitPrice" * "Quantity") STORED,
+    CONSTRAINT "PK_read_sales_invoices" PRIMARY KEY ("InvoiceDate", "InvoiceLineId") 
+    -- Note: Partition key must be part of the PK in Postgres
+) PARTITION BY RANGE ("InvoiceDate");
+
+-- Create initial partitions (Operational plan must include cron to create future partitions)
+CREATE TABLE public.read_sales_invoices_2023 PARTITION OF public.read_sales_invoices
+    FOR VALUES FROM ('2023-01-01') TO ('2024-01-01');
+CREATE TABLE public.read_sales_invoices_2024 PARTITION OF public.read_sales_invoices
+    FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
+
+-- Indexes for customer history lookups and track-level analytics
+CREATE INDEX "IDX_read_sales_CustomerId" ON public.read_sales_invoices ("CustomerId");
+CREATE INDEX "IDX_read_sales_TrackId" ON public.read_sales_invoices ("TrackId");
+
+-- ============================================================================
+-- 3. PRE-AGGREGATED ROLLUP (For Dashboards - Q3)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.read_agg_sales_monthly
+(
+    "SalesMonth" date NOT NULL, -- Stored as YYYY-MM-01
+    "GenreName" character varying(120) NOT NULL,
+    "TotalQuantity" integer NOT NULL DEFAULT 0,
+    "TotalRevenue" numeric(15, 2) NOT NULL DEFAULT 0.00,
+    "LastRefreshed" timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "PK_read_agg_sales_monthly" PRIMARY KEY ("SalesMonth", "GenreName")
+);
+
+COMMIT;
+```
+
+---
+
+### 4. Consistency Architecture & Lineage
+
+Since triggers are disallowed to protect OLTP write latency, we will utilize a **CDC (Change Data Capture)** pipeline (e.g., Debezium reading the Postgres WAL) feeding an stream processor or a micro-batch ETL process to populate these tables.
+
+*   **Lineage Mapping:**
+    *   `read_catalog_tracks` $\leftarrow$ CDC Upserts keyed by `TrackId`. Any update to `Artist`, `Album`, or `Genre` triggers a downstream join in the stream processor and an `INSERT ... ON CONFLICT DO UPDATE` in this table.
+    *   `read_sales_invoices` $\leftarrow$ CDC Append-only. When an `InvoiceLine` is created, the pipeline joins the *current* state of Track/Album/Artist and inserts the row. Updates to historical invoices are ignored (preserving point-in-time correctness).
+    *   `read_agg_sales_monthly` $\leftarrow$ Micro-batch. An hourly cron job runs an `INSERT ... ON CONFLICT DO UPDATE` aggregating data from `read_sales_invoices` for the current month.
+
+*   **Staleness Window:** Explicitly documented as **< 5 seconds** for catalog updates (CDC latency) and **up to 1 hour** for the monthly sales rollup.
+
+---
+
+### 5. Risk Analysis & Operational Plan
+
+**1. Write Amplification & Storage Growth**
+*   *Risk:* Updating an `Artist.Name` now requires updating potentially thousands of rows in `read_catalog_tracks`. Storage footprint increases due to string duplication (Artist names, Genre names).
+*   *Mitigation:* Storage is cheap; CPU time spent joining is expensive. The CDC pipeline absorbs the write amplification asynchronously, shielding the OLTP application. 
+
+**2. Lock Contention & Failure Modes**
+*   *Risk:* Long-running backfills or heavy CDC updates could lock read tables.
+*   *Mitigation:* `read_catalog_tracks` uses row-level locks (`ON CONFLICT DO UPDATE`). For massive schema changes, we use a **Blue/Green table swap**: build `read_catalog_tracks_new`, backfill it, and swap names inside a transaction.
+
+**3. Implementation & Backfill Plan (Safe & Reversible)**
+1.  Deploy the new DDL (zero impact on existing tables).
+2.  Run a one-time backfill script (e.g., `INSERT INTO read_catalog_tracks SELECT ...`) during off-peak hours.
+3.  Enable the CDC pipeline to begin tailing the WAL and applying upserts.
+4.  Modify the application read paths one by one to point to the `read_*` tables behind feature flags.
+5.  *Reversibility:* If the read tables become corrupted or lag spikes, simply toggle the feature flag back to the normalized queries.
+
+**4. Monitoring & Alerts**
+*   **Freshness/Lag:** Monitor the CDC consumer offset lag. Alert if lag exceeds 30 seconds.
+*   **Reconciliation:** Run a daily asynchronous job comparing `SUM(Total)` in `Invoice` vs `SUM(LineTotal)` in `read_sales_invoices`. Alert on any drift > $0.00.
+*   **Query Latency:** Monitor p95/p99 read latencies on the new tables to ensure the expected performance regressions (due to missing indexes or bad query plans) do not occur.

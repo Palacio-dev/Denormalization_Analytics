@@ -1,0 +1,113 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_15-38-44
+Model: gemini
+Prompt: intermediate
+Schema: harperdb
+==================================================
+
+As a Senior Database Performance Engineer, I approach this by first understanding the implicit queries your application runs, identifying the bottlenecks in your current 3rd Normal Form (3NF) schema, and then flattening the model to eliminate joins and disk fetches during critical read paths.
+
+Here is the workload analysis, denormalization design, and the new physical DDL.
+
+### 1. Workload-Driven Analysis
+
+In an entitlements system, read workloads vastly outnumber writes. The system is likely hammered by two primary query patterns:
+1. **The Authorization Check (Microsecond Latency Required):** *"Can User X use Feature Y right now?"* 
+   * **Current Cost:** Requires starting at `user_entitlements`, joining to `entitlements`, and evaluating multiple predicates (`activeFlag = 1`, `CURRENT_DATE BETWEEN activeDate AND inactiveDate`, and `useCount < useLimit`). 
+   * **The Bottleneck:** The Join. In a high-throughput API, traversing the many-to-many (M:N) mapping table to fetch the entitlement rules for every single user action causes CPU and memory overhead.
+2. **The User Profile Load (Millisecond Latency Required):** *"Show all active packages/features for User X."*
+   * **Current Cost:** Joins `user_entitlements` to `entitlements` and filters by `user_id` and `activeFlag`.
+3. **Analytics/Billing (Background):** *"How many uses of Package Z happened today?"*
+
+**Denormalization Candidates:**
+* The `users` table is currently a stub (just an ID). It adds zero value to the read path.
+* The `user_entitlements` mapping table and `entitlements` table should be **merged**. In 99% of SaaS architectures, an entitlement is granted to a *single* user or tenant. The M:N schema is often an over-normalized anti-pattern. Even if entitlements are shared, for read-heavy workloads, we must pre-join these attributes.
+
+### 2. Denormalization Design
+
+To achieve sub-millisecond reads while preserving the correctness of the highly mutable `useCount` field, I propose the following design:
+
+* **Pre-joined "Wide" Table (`user_entitlements_wide`):** We will collapse `user_entitlements` and `entitlements` into a single table. This completely eliminates the join. 
+* **Handling Business-Critical Correctness (`useCount`):** Because `useCount` is updated frequently, using a Materialized View is dangerous (it will serve stale data and allow users to bypass limits). By making our new wide table the *primary physical table*, we guarantee strong consistency for `useCount` while still optimizing the read path.
+* **Covering Indexes for Auth Checks:** We will create a composite index specifically aligned to the Auth Check query predicates. We put equality checks first (`user_id`, `featureType`, `activeFlag`), and use an `INCLUDE` (or covering) clause for the remaining fields (`useCount`, `useLimit`, `activeDate`, `inactiveDate`). This allows the database engine to perform an **Index-Only Scan**, meaning it never even has to read the actual table data from disk to authorize a user.
+* **Partitioning:** We will Hash partition the new wide table by `user_id`. This ensures that all entitlements for a specific user live on the same physical page/shard, preventing hot spots and allowing linear scaling of the read workload.
+* **Summary Table (`agg_package_usage_daily`):** To prevent analytical queries from scanning the highly transactional wide table, we will introduce an aggregate table with a grain of `(date, packageType, featureType)`.
+
+### 3. New Physical Schema (PostgreSQL / Modern SQL DDL)
+
+Here is the denormalized, read-optimized physical schema.
+
+```sql
+-- -----------------------------------------------------------------------------
+-- 1. THE DENORMALIZED WIDE TABLE (Replaces entitlements & user_entitlements)
+-- -----------------------------------------------------------------------------
+-- We collapse the M:N relationship into a single partitioned table.
+-- This eliminates all joins for authorization checks and profile loads.
+
+CREATE TABLE user_entitlements_wide (
+    entitlement_id INT,
+    user_id INT NOT NULL,
+    featureType VARCHAR(4) NOT NULL,
+    packageType VARCHAR(4) NOT NULL,
+    activeFlag INT NOT NULL DEFAULT 1,
+    activeDate DATE NOT NULL,
+    inactiveDate DATE NOT NULL,
+    useLimit INT NOT NULL,
+    useCount INT NOT NULL DEFAULT 0,
+    
+    -- Primary key ensures correctness and prevents duplicate entitlement IDs
+    PRIMARY KEY (user_id, entitlement_id)
+) PARTITION BY HASH (user_id);
+
+-- Create partitions (Example: 4 partitions for distribution. Adjust based on scale)
+CREATE TABLE user_entitlements_wide_p0 PARTITION OF user_entitlements_wide FOR VALUES WITH (MODULUS 4, REMAINDER 0);
+CREATE TABLE user_entitlements_wide_p1 PARTITION OF user_entitlements_wide FOR VALUES WITH (MODULUS 4, REMAINDER 1);
+CREATE TABLE user_entitlements_wide_p2 PARTITION OF user_entitlements_wide FOR VALUES WITH (MODULUS 4, REMAINDER 2);
+CREATE TABLE user_entitlements_wide_p3 PARTITION OF user_entitlements_wide FOR VALUES WITH (MODULUS 4, REMAINDER 3);
+
+
+-- -----------------------------------------------------------------------------
+-- 2. INDEX STRATEGY (The Secret Sauce for Read Latency)
+-- -----------------------------------------------------------------------------
+
+-- Index A: The "Auth Check" Covering Index
+-- Query Pattern: WHERE user_id = ? AND featureType = ? AND activeFlag = 1
+-- Why this works: Equality predicates are in the B-Tree root. The INCLUDE clause 
+-- stores the highly mutable `useCount` and date ranges in the index leaf nodes. 
+-- The DB can authorize a user via an Index-Only Scan without touching the heap.
+CREATE INDEX idx_auth_check_covering 
+ON user_entitlements_wide (user_id, featureType, activeFlag)
+INCLUDE (useCount, useLimit, activeDate, inactiveDate);
+
+-- Index B: The "User Profile" Index
+-- Query Pattern: WHERE user_id = ? AND activeFlag = 1
+-- Why this works: Quickly retrieves all active packages/features for a user's dashboard.
+CREATE INDEX idx_user_profile_list 
+ON user_entitlements_wide (user_id, activeFlag);
+
+
+-- -----------------------------------------------------------------------------
+-- 3. ANALYTICS / SUMMARY TABLE
+-- -----------------------------------------------------------------------------
+-- Grain: 1 row per package, per feature, per day.
+-- Why: Offloads heavy aggregations (e.g., "How many active features in Package X?") 
+-- from the highly transactional user_entitlements_wide table.
+
+CREATE TABLE agg_feature_usage_daily (
+    usage_date DATE NOT NULL,
+    packageType VARCHAR(4) NOT NULL,
+    featureType VARCHAR(4) NOT NULL,
+    total_active_users INT NOT NULL DEFAULT 0,
+    total_uses INT NOT NULL DEFAULT 0,
+    PRIMARY KEY (usage_date, packageType, featureType)
+);
+
+-- Index for fast time-series analytics filtering by package
+CREATE INDEX idx_agg_usage_package 
+ON agg_feature_usage_daily (packageType, usage_date DESC);
+```
+
+### Summary of Performance Gains:
+1. **Zero Joins:** The `users` and `user_entitlements` tables are gone from the read path. What used to be a 3-table join is now a single-table lookup.
+2. **Index-Only Scans:** By using the `INCLUDE` clause on `idx_auth_check_covering`, the database engine resolves the authorization check entirely in memory from the index data structure.
+3. **Safe Mutations:** Because we didn't use a Materialized View for the transactional data, when the application runs `UPDATE user_entitlements_wide SET useCount = useCount + 1`, it is strongly consistent and immediately reflected in the covering index for the next read.

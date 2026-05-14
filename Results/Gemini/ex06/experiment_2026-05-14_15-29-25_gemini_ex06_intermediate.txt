@@ -1,0 +1,189 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_15-29-25
+Model: gemini
+Prompt: intermediate
+Schema: ex06
+==================================================
+
+As a senior database performance engineer, I have reviewed your normalized physical model and your initial denormalization draft. 
+
+Your normalized model suffers from deep join chains and a critical design flaw in the `ANO` table (forcing Higher Education metrics like ENADE to be strictly coupled with Basic Education metrics like SAEB/IDEB). Your initial denormalization draft correctly identifies the need to split Higher Education (`Curso`) and Basic Education (`Escola`), but it relies on heavy string-based Primary Keys (like `NOME_MUNICIPIO`) which will degrade index performance, and it lacks advanced read-optimization techniques like partitioning and covering indexes.
+
+Here is the professional, workload-driven denormalization strategy and the resulting physical schema.
+
+---
+
+### 1. Workload-Driven Analysis
+
+In educational datasets (like INEP data in Brazil), read-heavy workloads typically consist of analytical queries:
+*   **Query Pattern A (Geographic Ranking):** "What are the top 10 schools in the state of SP for the year 2022 based on IDEB scores?"
+*   **Query Pattern B (Institutional Analysis):** "Show me the historical ENADE performance of all engineering courses at a specific University (IES)."
+*   **Query Pattern C (City Summaries):** "Compare the average SAEB and ENADE scores across all cities in a specific state."
+
+**High-Cost Operations in the Normalized Model:**
+To answer Query Pattern A, the database must execute a 5-table join: `ESCOLA` → `MUNICIPIO` → `UF` → `ANO` → `IDEB`. This causes high CPU usage, random disk I/O, and memory overhead for hash/merge joins. Furthermore, the `ANO` table acts as a massive bottleneck bridge table.
+
+**Denormalization Candidates:**
+1.  **Flatten the Geographic Hierarchy:** `UF` and `MUNICIPIO` attributes should be embedded directly into the fact tables.
+2.  **Split the Domains:** Separate Basic Education (Escola + IDEB + SAEB) from Higher Education (Curso + IES + ENADE) into distinct "One Big Table" (OBT) structures.
+3.  **Pre-aggregate City Stats:** The `MUNICIPIO` table in your normalized model contained fields like `media_ideb`. These should be isolated into a dedicated summary table to prevent locking and calculation overhead.
+
+---
+
+### 2. Denormalization Design
+
+To achieve sub-millisecond latency on these reads, we will implement a **Star-like / One Big Table (OBT)** read model using the following techniques:
+
+*   **Pre-joined "Wide" Tables (OBT):** We will create `read_escola_avaliacao` and `read_curso_avaliacao`. 
+    *   *Grain:* One row per School per Year, and One row per Course per Year.
+*   **Carefully Chosen Redundant Attributes:** We will keep integer surrogate keys (e.g., `id_municipio`) for fast indexing, but duplicate `sigla_uf`, `nome_uf`, and `nome_municipio` into the wide tables. This completely eliminates geographic joins.
+*   **Partitioning:** Educational data is almost exclusively queried by year or compared year-over-year. We will use **List Partitioning by `ano`**. This allows the database engine to prune entire partitions from disk when a user queries a specific year.
+*   **Index Strategy:** 
+    *   We will use **Composite B-Tree Indexes** aligned exactly to the `WHERE` + `ORDER BY` clauses of our query patterns. For example: `(sigla_uf, ano, nota_ideb DESC)`.
+    *   We will use **Covering Indexes** (`INCLUDE` clauses) for frequently accessed descriptive fields to enable Index-Only Scans.
+
+---
+
+### 3. New Physical Schema (DDL)
+
+Below is the optimized PostgreSQL DDL for your read-heavy analytical database.
+
+```sql
+-- ==============================================================================
+-- 1. CITY SUMMARY TABLE (Precomputed Aggregates)
+-- Grain: 1 row per Municipio
+-- Purpose: Serves dashboards showing city-level macro statistics without 
+--          having to SUM/AVG millions of rows on the fly.
+-- ==============================================================================
+DROP TABLE IF EXISTS read_municipio_resumo CASCADE;
+
+CREATE TABLE read_municipio_resumo (
+    id_municipio INT PRIMARY KEY,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    qtd_habitantes INT,
+    qtd_ies INT,
+    qtd_escolas INT,
+    media_ideb REAL,
+    media_saeb REAL,
+    media_enade REAL,
+    total_participantes INT
+);
+
+-- Index for filtering cities by State
+CREATE INDEX idx_municipio_resumo_uf ON read_municipio_resumo (sigla_uf);
+
+
+-- ==============================================================================
+-- 2. BASIC EDUCATION WIDE TABLE (Escola + IDEB + SAEB)
+-- Grain: 1 row per Escola per Ano
+-- Purpose: Eliminates 5-table joins. Serves all school ranking/filtering queries.
+-- ==============================================================================
+DROP TABLE IF EXISTS read_escola_avaliacao CASCADE;
+
+CREATE TABLE read_escola_avaliacao (
+    -- Primary Identifiers
+    id_escola INT NOT NULL,
+    ano INT NOT NULL,
+    
+    -- Redundant Dimensions (Eliminates Joins)
+    cod_escola INTEGER NOT NULL,
+    nome_escola VARCHAR(100) NOT NULL,
+    rede_escola VARCHAR(100) NOT NULL,
+    id_municipio INT NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    
+    -- IDEB Metrics
+    ideb_rend_1 REAL,
+    ideb_rend_2 REAL,
+    ideb_rend_3 REAL,
+    ideb_rend_4 REAL,
+    ideb_ind_rend REAL,
+    ideb_nota REAL,
+    
+    -- SAEB Metrics
+    saeb_nota_mat REAL,
+    saeb_nota_port REAL,
+    saeb_nota_padrao REAL,
+
+    PRIMARY KEY (id_escola, ano)
+) PARTITION BY LIST (ano);
+
+-- Create partitions for active years (Engine will prune these during queries)
+CREATE TABLE read_escola_avaliacao_2021 PARTITION OF read_escola_avaliacao FOR VALUES IN (2021);
+CREATE TABLE read_escola_avaliacao_2022 PARTITION OF read_escola_avaliacao FOR VALUES IN (2022);
+CREATE TABLE read_escola_avaliacao_2023 PARTITION OF read_escola_avaliacao FOR VALUES IN (2023);
+
+-- INDEX STRATEGY FOR ESCOLA
+-- Pattern: "Top schools in a State by IDEB score for a specific year"
+CREATE INDEX idx_escola_uf_ano_ideb 
+    ON read_escola_avaliacao (sigla_uf, ano, ideb_nota DESC)
+    INCLUDE (nome_escola, nome_municipio); -- Allows Index-Only Scans for leaderboards
+
+-- Pattern: "Find schools in a specific city and order by SAEB Math score"
+CREATE INDEX idx_escola_mun_ano_saeb 
+    ON read_escola_avaliacao (id_municipio, ano, saeb_nota_mat DESC);
+
+
+-- ==============================================================================
+-- 3. HIGHER EDUCATION WIDE TABLE (Curso + IES + ENADE)
+-- Grain: 1 row per Curso per Ano
+-- Purpose: Eliminates 6-table joins. Serves all university/course ranking queries.
+-- ==============================================================================
+DROP TABLE IF EXISTS read_curso_avaliacao CASCADE;
+
+CREATE TABLE read_curso_avaliacao (
+    -- Primary Identifiers
+    id_curso INT NOT NULL,
+    ano INT NOT NULL,
+    
+    -- Redundant Dimensions (Eliminates Joins)
+    nome_curso VARCHAR(100) NOT NULL,
+    id_ies INT NOT NULL,
+    codigo_ies INT NOT NULL,
+    sigla_ies VARCHAR(20),
+    nome_ies VARCHAR(100) NOT NULL,
+    rede_ies VARCHAR(100) NOT NULL,
+    id_municipio INT NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    
+    -- ENADE Metrics
+    enade_total_inscritos INT,
+    enade_total_concluintes INT,
+    enade_nota_bruta_ce REAL,
+    enade_nota_padronizada_ce REAL,
+    enade_nota_bruta_fg REAL,
+    enade_nota_padronizada_fg REAL,
+    enade_nota_continua REAL,
+    enade_nota_faixa REAL,
+
+    PRIMARY KEY (id_curso, ano)
+) PARTITION BY LIST (ano);
+
+-- Create partitions for active years
+CREATE TABLE read_curso_avaliacao_2021 PARTITION OF read_curso_avaliacao FOR VALUES IN (2021);
+CREATE TABLE read_curso_avaliacao_2022 PARTITION OF read_curso_avaliacao FOR VALUES IN (2022);
+CREATE TABLE read_curso_avaliacao_2023 PARTITION OF read_curso_avaliacao FOR VALUES IN (2023);
+
+-- INDEX STRATEGY FOR CURSO
+-- Pattern: "Top courses in a State by ENADE score"
+CREATE INDEX idx_curso_uf_ano_enade 
+    ON read_curso_avaliacao (sigla_uf, ano, enade_nota_continua DESC)
+    INCLUDE (nome_curso, sigla_ies, nome_municipio);
+
+-- Pattern: "Historical performance of courses within a specific University (IES)"
+CREATE INDEX idx_curso_ies_ano 
+    ON read_curso_avaliacao (id_ies, ano, enade_nota_faixa DESC);
+
+-- Pattern: "Search for a specific course by name within a state"
+CREATE INDEX idx_curso_nome_uf 
+    ON read_curso_avaliacao (sigla_uf, nome_curso);
+```
+
+### Why this is vastly superior for read performance:
+1. **Zero Joins Required:** A query like `SELECT nome_escola, ideb_nota FROM read_escola_avaliacao WHERE sigla_uf = 'SP' AND ano = 2022 ORDER BY ideb_nota DESC LIMIT 10;` requires **0 joins**.
+2. **Index-Only Scans:** Because of the `INCLUDE (nome_escola, nome_municipio)` clause on the indexes, the database doesn't even need to read the table data from the disk. It can satisfy the entire top-10 leaderboard query directly from the index structure in memory.
+3. **Partition Pruning:** If a user queries `ano = 2022`, the database engine completely ignores the files on disk for 2021 and 2023, instantly cutting disk I/O by a massive percentage depending on how many years of history you hold.

@@ -1,0 +1,152 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_14-55-01
+Model: gemini
+Prompt: expert
+Schema: employees
+==================================================
+
+### Executive Summary
+
+The provided normalized schema (based on the classic "employees" dataset) relies heavily on Type 2 Slowly Changing Dimensions (SCD) using `from_date` and `to_date`. While excellent for preserving history, this design severely degrades read performance for "current state" queries. Retrieving a simple employee profile with their current department, title, and salary requires a 5-table join with multiple date-range filters, leading to high CPU usage and buffer cache thrashing under concurrent workloads.
+
+To resolve this, I propose a **Read-Optimized Snapshot Architecture** utilizing PostgreSQL Materialized Views. This design introduces a wide "current state" employee directory table and a pre-aggregated departmental metrics table. By decoupling the read workload from the historical OLTP tables, we eliminate complex joins and date filtering for the most common queries. This approach requires zero changes to your existing OLTP application, utilizes `CONCURRENTLY` refreshes to prevent read locks, and accepts a defined staleness window (e.g., 15 minutes to 24 hours, depending on business requirements) in exchange for sub-millisecond read latencies.
+
+---
+
+### 0. Explicit Assumptions
+Because specific queries and operational constraints were not provided, I have designed this architecture based on the following explicit assumptions:
+*   **Workload**: 80% of reads are "Current State" lookups (Employee Directory, Profile pages) and Departmental Summaries. 20% are historical audits (which will continue to use the normalized schema).
+*   **Current Record Convention**: Active records are denoted by `to_date = '9999-01-01'` (standard for this dataset).
+*   **Operational Constraints**: No triggers allowed (to protect OLTP write latency). A 15-minute to 1-hour data staleness window is acceptable for directory reads and analytical rollups.
+*   **Engine**: PostgreSQL (inferred from the provided DDL).
+
+---
+
+### 1. Access-Pattern Matrix
+
+| Query Class | Target Workload / Query | Tables Touched (Normalized) | Hotspots & Bottlenecks |
+| :--- | :--- | :--- | :--- |
+| **Q1: Profile Lookup** | "Get current dept, title, and salary for Employee X" | `employee`, `department_employee`, `department`, `title`, `salary` | 5-table join; multiple `to_date = '9999-01-01'` filters defeat simple PK lookups. |
+| **Q2: Directory Search** | "Search active employees by last name, show title/dept" | `employee`, `title`, `department_employee`, `department` | Index intersections on names and dates; high CPU for sorting/filtering. |
+| **Q3: Dept Rollup** | "Current headcount and total salary expense per department" | `department`, `department_employee`, `salary` | Heavy aggregation over millions of rows; hash joins on dates. |
+
+---
+
+### 2. Denormalization Patterns
+
+1.  **Snapshot Table for "Current State" (Wide Read Table)**: 
+    *   *Artifact*: `read_schema.mv_employee_current_profile`
+    *   *Justification*: Resolves Q1 and Q2. Pre-joins all dimensions for active records only. Converts a 5-table join with date filters into a single-table point lookup or simple index scan.
+2.  **Pre-aggregated Rollup (Entity Bucket)**:
+    *   *Artifact*: `read_schema.mv_department_metrics_current`
+    *   *Justification*: Resolves Q3. Department metrics change slowly but are expensive to calculate. Pre-calculating these reduces an OLAP-style query to a simple `SELECT *` (O(1) time complexity).
+
+---
+
+### 3. Physical Design Details (DDL)
+
+We will place the read-optimized schema in a dedicated schema (`employees_read`) to cleanly separate OLTP and OLAP concerns.
+
+```sql
+BEGIN;
+
+CREATE SCHEMA IF NOT EXISTS employees_read;
+
+-- ==============================================================================
+-- 1. WIDE READ TABLE: Current Employee Profile
+-- Resolves Q1 & Q2
+-- ==============================================================================
+CREATE MATERIALIZED VIEW employees_read.mv_employee_current_profile AS
+SELECT 
+    e.id AS employee_id,
+    e.first_name,
+    e.last_name,
+    e.gender,
+    e.hire_date,
+    d.id AS department_id,
+    d.dept_name AS department_name,
+    t.title AS current_title,
+    s.amount AS current_salary
+FROM employees.employee e
+-- INNER JOINs assume data integrity (every active employee has a dept, title, salary)
+-- Use LEFT JOIN if your business logic allows active employees without these.
+INNER JOIN employees.department_employee de 
+    ON e.id = de.employee_id AND de.to_date = '9999-01-01'
+INNER JOIN employees.department d 
+    ON de.department_id = d.id
+INNER JOIN employees.title t 
+    ON e.id = t.employee_id AND t.to_date = '9999-01-01'
+INNER JOIN employees.salary s 
+    ON e.id = s.employee_id AND s.to_date = '9999-01-01';
+
+-- UNIQUE index is REQUIRED to allow REFRESH MATERIALIZED VIEW CONCURRENTLY
+CREATE UNIQUE INDEX idx_mv_emp_profile_pk 
+    ON employees_read.mv_employee_current_profile(employee_id);
+
+-- Secondary indexes for Directory Search (Q2)
+CREATE INDEX idx_mv_emp_profile_name 
+    ON employees_read.mv_employee_current_profile(last_name, first_name);
+CREATE INDEX idx_mv_emp_profile_dept 
+    ON employees_read.mv_employee_current_profile(department_id);
+
+
+-- ==============================================================================
+-- 2. PRE-AGGREGATED ROLLUP: Current Department Metrics
+-- Resolves Q3
+-- ==============================================================================
+CREATE MATERIALIZED VIEW employees_read.mv_department_metrics_current AS
+SELECT 
+    d.id AS department_id,
+    d.dept_name AS department_name,
+    COUNT(e.employee_id) AS current_headcount,
+    SUM(e.current_salary) AS total_salary_expense,
+    ROUND(AVG(e.current_salary), 2) AS avg_salary
+FROM employees.department d
+LEFT JOIN employees_read.mv_employee_current_profile e 
+    ON d.id = e.department_id
+GROUP BY 
+    d.id, 
+    d.dept_name;
+
+-- UNIQUE index for concurrent refresh
+CREATE UNIQUE INDEX idx_mv_dept_metrics_pk 
+    ON employees_read.mv_department_metrics_current(department_id);
+
+COMMIT;
+```
+
+---
+
+### 4. Consistency Architecture
+
+**Data Lineage:**
+*   `employee.id` → `mv_employee_current_profile.employee_id` (Source of Truth)
+*   `salary.amount` (where `to_date='9999-01-01'`) → `mv_employee_current_profile.current_salary`
+*   `mv_employee_current_profile` → `mv_department_metrics_current` (Chained dependency)
+
+**Refresh Strategy (Implementation Plan):**
+Because triggers are disallowed, we will use a cron-based orchestrator (e.g., pg_cron, Airflow, or an external Lambda) to execute the following script at a defined interval (e.g., every 15 minutes).
+
+```sql
+-- Safe, observable, and reversible refresh process
+-- CONCURRENTLY ensures read queries are not blocked during the refresh.
+REFRESH MATERIALIZED VIEW CONCURRENTLY employees_read.mv_employee_current_profile;
+REFRESH MATERIALIZED VIEW CONCURRENTLY employees_read.mv_department_metrics_current;
+```
+*Staleness Window*: Data will be stale by up to `Refresh Interval + Refresh Execution Time`. The application UI should explicitly state "Data as of [Timestamp]" if business users require exact precision.
+
+---
+
+### 5. Risk Analysis & Operational Complexity
+
+| Risk Factor | Assessment & Mitigation |
+| :--- | :--- |
+| **Write Amplification** | **Low.** OLTP writes are completely unaffected. Write amplification only occurs in batches during the MV refresh. PostgreSQL handles this by writing to a new transient table and swapping pointers, generating temporary WAL bloat. |
+| **Lock Contention** | **None.** By using `REFRESH MATERIALIZED VIEW CONCURRENTLY`, we avoid `ACCESS EXCLUSIVE` locks. Readers will continue to query the old snapshot until the new one is fully committed. |
+| **Storage Growth** | **Low to Medium.** We are duplicating the *current* state. In a typical employee database, current state is a small fraction of the historical data. Expect roughly ~100-150 bytes per active employee. |
+| **Failure Modes** | If the refresh job fails, the views simply become staler. The application will not crash. **Mitigation**: Monitor the timestamp of the last successful refresh. |
+
+**Monitoring & Alerting Strategy:**
+1.  **Freshness Alert**: Create a lightweight heartbeat table or query `pg_stat_user_tables`. Alert if `last_analyze` or `last_autoanalyze` on the MVs is older than `[Interval] * 2`.
+2.  **Reconciliation Diffs**: Run a daily midnight job comparing `COUNT(*)` of `employee` where `to_date='9999-01-01'` against `COUNT(*)` in `mv_employee_current_profile`. Alert if diff > 0.
+3.  **Query Latency**: Monitor p95 latency for Q1/Q2/Q3. If latency regresses, check if the application accidentally reverted to querying the normalized `employees` schema.

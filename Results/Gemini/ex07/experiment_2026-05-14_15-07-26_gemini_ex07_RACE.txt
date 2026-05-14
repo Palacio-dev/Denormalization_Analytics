@@ -1,0 +1,111 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_15-07-26
+Model: gemini
+Prompt: RACE
+Schema: ex07
+==================================================
+
+As a Senior Data Engineer, I have reviewed the provided normalized relational model. In analytical environments (OLAP), highly normalized schemas (like Snowflake or 3NF) often introduce severe performance bottlenecks due to the high number of `JOIN` operations required to resolve queries. 
+
+Here is the execution of the 6-step RACE framework to transform your operational database into a high-performance analytical schema.
+
+---
+
+### **Step 1: Deep Analysis of the Normalized Model**
+The provided SQL script represents a highly normalized operational schema (approaching 3NF/Snowflake) for managing Power Plants (`Usina`). 
+* **Central Fact/Entity:** `Usina` (Power Plant).
+* **Direct Dimensions:** `Proprietarios` (Owners) and `Rios` (Rivers).
+* **Snowflake Dimensions:** `Localizacoes` (Locations) which branches out to `Municipios` (Municipalities) twice (for `municipio1` and `municipio2`), which in turn branches out to `Estados` (States).
+* **Redundancies/Anomalies:** I noticed that latitude and longitude are stored in both the `Usina` table (`lat`, `long`) and the `Localizacoes` table (`latitude`, `longitude`). In a denormalized model, this should be consolidated.
+
+### **Step 2: Frequent Queries / Workload Context**
+Since this is a read-heavy analytical workload, we can infer the following frequent queries and bottlenecks:
+1. **Geospatial & Regional Aggregations:** "What is the total power capacity (`potkw`) by State (`uf`) or Municipality?"
+   * *Bottleneck:* Requires joining `Usina` → `Localizacoes` → `Municipios` (twice) → `Estados`. This 5-table join is highly inefficient for massive aggregations.
+2. **Owner & River Profiling:** "Which owners have the most power plants on a specific river?"
+   * *Bottleneck:* Requires joining `Usina` → `Proprietarios` and `Usina` → `Rios`.
+3. **Time-Series Analysis:** "How has power capacity evolved over time based on the `iniciop` (start date) across different stages (`estagio`)?"
+
+### **Step 3: Evaluate Common Denormalization Techniques**
+Based on the workload context, I evaluated the provided techniques:
+* **1 - Adding Redundant Attributes:** Highly applicable. We should bring `uf` and `municipio` names directly into the central table to avoid traversing the location hierarchy.
+* **2 - Adding Derived Attributes:** We could pre-calculate the "age" of the power plant based on `iniciop`, but for modern analytical databases, columnar aggregations on the fly are usually fast enough. We will skip this to maintain data freshness unless specifically requested.
+* **3 - Collapsing Relations:** **Highly Applicable.** This is the core of our strategy. We will collapse `Proprietarios`, `Rios`, `Localizacoes`, `Municipios`, and `Estados` into a single entity.
+* **4 - Vertical Partitioning:** Not necessary here. The total number of columns after collapsing will be around 15-20, which is perfectly manageable for a single table, especially in columnar formats (Parquet, BigQuery, ClickHouse, etc.).
+
+### **Step 4: Design Multiple Possible Denormalized Schemas**
+
+**Design A: Star Schema (Partial Denormalization)**
+* Create a `Fact_Usina` table.
+* Collapse `Localizacoes`, `Municipios`, and `Estados` into a single `Dim_Localizacao` table.
+* Keep `Dim_Proprietario` and `Dim_Rio` as separate tables.
+* *Pros:* Reduces the worst joins (the snowflake location hierarchy).
+* *Cons:* Still requires 3 `JOIN` operations for a holistic query.
+
+**Design B: One Big Table (OBT) / Complete Flattening**
+* Collapse **all** tables into a single `Usina_Analytics` table.
+* *Pros:* Zero `JOIN` operations. Maximum read performance for analytical engines. Excellent for BI tools (Tableau, PowerBI) which perform best on flat, wide tables.
+* *Cons:* Data redundancy (e.g., repeating owner names and river names), but storage is cheap in analytical environments, whereas compute (JOINs) is expensive.
+
+### **Step 5: Evaluate and Choose the Most Consistent Schema**
+For a **read-heavy analytical workload**, **Design B (One Big Table)** is the undisputed winner. 
+
+In modern Data Warehousing, the OBT approach eliminates join overhead entirely, allowing the database engine to utilize columnar compression and vectorization to scan millions of rows in milliseconds. We will resolve the `lat`/`long` duplication by keeping a single definitive pair of coordinates.
+
+### **Step 6: Design the New Denormalized Schema**
+Here is the optimized physical schema using the One Big Table (OBT) approach. All foreign keys and constraints have been removed to prioritize read speed and bulk-insert performance.
+
+```sql
+BEGIN;
+
+-- Drop the analytical table if it exists to allow idempotency
+DROP TABLE IF EXISTS public."Usina_Analytics" CASCADE;
+
+-- Create the One Big Table (OBT) for Analytical Workloads
+CREATE TABLE IF NOT EXISTS public."Usina_Analytics" (
+    -- Core Identifiers
+    id_usina INTEGER PRIMARY KEY,
+    nome_usina VARCHAR NOT NULL,
+    estagio VARCHAR,
+    
+    -- Collapsed Dimension: Proprietario
+    nome_proprietario VARCHAR,
+    
+    -- Collapsed Dimension: Rio
+    nome_rio VARCHAR NOT NULL,
+    
+    -- Collapsed Snowflake Dimension: Localizacao -> Municipio -> Estado
+    municipio_principal VARCHAR NOT NULL,
+    uf_principal CHAR(2) NOT NULL,
+    municipio_secundario VARCHAR,
+    uf_secundario CHAR(2),
+    
+    -- Consolidated Geospatial Data (Resolved redundancy between Usina and Localizacoes)
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    
+    -- Metrics / Facts
+    potencia_kw FLOAT,
+    potencia_fisica FLOAT,
+    
+    -- Timestamps
+    data_inicio_operacao DATE,
+    data_atualizacao DATE
+);
+
+-- Create Indexes for frequent analytical filtering
+-- Note: In columnar DBs (like Redshift/BigQuery) indexes aren't used this way, 
+-- but if this is PostgreSQL for analytics, B-Tree indexes on heavily filtered columns are crucial.
+CREATE INDEX IF NOT EXISTS idx_usina_uf ON public."Usina_Analytics" (uf_principal);
+CREATE INDEX IF NOT EXISTS idx_usina_estagio ON public."Usina_Analytics" (estagio);
+CREATE INDEX IF NOT EXISTS idx_usina_rio ON public."Usina_Analytics" (nome_rio);
+CREATE INDEX IF NOT EXISTS idx_usina_proprietario ON public."Usina_Analytics" (nome_proprietario);
+
+COMMIT;
+```
+
+### **Summary of Improvements:**
+1. **Zero Joins:** A query grouping power capacity by State and River now requires `0` joins, down from `6`.
+2. **Simplified Naming:** Columns were renamed for better readability in BI tools (e.g., `potkw` -> `potencia_kw`, `iniciop` -> `data_inicio_operacao`).
+3. **Resolved Ambiguity:** The duplicate latitude/longitude columns from the normalized model were consolidated into a single, reliable source of truth. 
+4. **Targeted Indexing:** Added indexes on low-cardinality and frequently filtered columns (`uf_principal`, `estagio`, `nome_rio`) to speed up `WHERE` and `GROUP BY` clauses in standard RDBMS environments.

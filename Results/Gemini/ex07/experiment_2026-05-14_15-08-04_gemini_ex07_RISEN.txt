@@ -1,0 +1,42 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_15-08-04
+Model: gemini
+Prompt: RISEN
+Schema: ex07
+==================================================
+
+```sql
+BEGIN;
+
+CREATE SCHEMA IF NOT EXISTS public AUTHORIZATION ava_um_usr;
+SET search_path TO public, public;
+
+-- Drop normalized tables as they are collapsed into a single denormalized table
+DROP TABLE IF EXISTS public."Usina" CASCADE;
+DROP TABLE IF EXISTS public."Rios" CASCADE;
+DROP TABLE IF EXISTS public."Proprietarios" CASCADE;
+DROP TABLE IF EXISTS public."Municipios" CASCADE;
+DROP TABLE IF EXISTS public."Estados" CASCADE;
+DROP TABLE IF EXISTS public."Localizacoes" CASCADE;
+
+-- Create the denormalized ONE BIG TABLE
+CREATE TABLE IF NOT EXISTS public."Usina" (
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR NOT NULL,
+    proprietario VARCHAR,
+    munic1 VARCHAR NOT NULL,
+    uf1 CHAR(2) NOT NULL,
+    munic2 VARCHAR,
+    uf2 CHAR(2),
+    rio VARCHAR NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    iniciop DATE,
+    atualizacao DATE,
+    lat DOUBLE PRECISION,
+    long DOUBLE PRECISION,
+    estagio VARCHAR
+);
+
+COMMIT;
+```

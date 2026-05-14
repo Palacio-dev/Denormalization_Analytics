@@ -1,0 +1,90 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_13-51-07
+Model: gemini
+Prompt: RISEN
+Schema: HFC
+==================================================
+
+```sql
+BEGIN;
+
+DROP TABLE IF EXISTS public.tombo_analitico;
+
+-- Applying "Collapsing Relations" and "Adding Derived Attributes" techniques
+-- This single wide table materializes the heavy joins between the main 'tombos' table 
+-- and its numerous taxonomic, geographic, and institutional dimensions.
+CREATE TABLE IF NOT EXISTS public.tombo_analitico
+(
+    -- Core Tombo Attributes
+    hcf bigint NOT NULL,
+    data_tombo timestamp with time zone,
+    data_coleta_dia bigint,
+    data_coleta_mes bigint,
+    data_coleta_ano bigint,
+    numero_coleta bigint,
+    latitude double precision,
+    longitude double precision,
+    altitude double precision,
+    situacao character varying(50),
+    ativo boolean,
+    rascunho boolean,
+    unicata boolean,
+    observacao text COLLATE pg_catalog."default",
+    nomes_populares text COLLATE pg_catalog."default",
+    descricao text COLLATE pg_catalog."default",
+    nome_cientifico text COLLATE pg_catalog."default",
+    taxon character varying(45) COLLATE pg_catalog."default",
+    
+    -- Taxonomy Dimension (Collapsed Relations)
+    reino character varying(200) COLLATE pg_catalog."default",
+    familia character varying(200) COLLATE pg_catalog."default",
+    sub_familia character varying(300) COLLATE pg_catalog."default",
+    genero character varying(200) COLLATE pg_catalog."default",
+    especie character varying(200) COLLATE pg_catalog."default",
+    sub_especie character varying(255) COLLATE pg_catalog."default",
+    variedade character varying(200) COLLATE pg_catalog."default",
+    autor_especie character varying(200) COLLATE pg_catalog."default",
+    
+    -- Environment & Location Dimension (Collapsed Relations)
+    local_coleta_descricao text COLLATE pg_catalog."default",
+    cidade_nome character varying(255) COLLATE pg_catalog."default",
+    estado_sigla character(4) COLLATE pg_catalog."default",
+    pais_nome character varying(255) COLLATE pg_catalog."default",
+    solo character varying(300) COLLATE pg_catalog."default",
+    relevo character varying(300) COLLATE pg_catalog."default",
+    vegetacao character varying(300) COLLATE pg_catalog."default",
+    fase_sucessional character varying(200) COLLATE pg_catalog."default",
+    
+    -- Institution & People Dimension (Collapsed Relations)
+    herbario_nome character varying(200) COLLATE pg_catalog."default",
+    herbario_sigla character varying(80) COLLATE pg_catalog."default",
+    coletor_principal character varying(255) COLLATE pg_catalog."default",
+    coletores_complementares character varying(1000) COLLATE pg_catalog."default",
+    
+    -- Derived Attributes (Pre-calculated Aggregations to avoid GROUP BYs)
+    qtd_fotos integer DEFAULT 0,
+    qtd_identificadores integer DEFAULT 0,
+    qtd_alteracoes integer DEFAULT 0,
+    possui_colecao_anexa boolean DEFAULT false,
+    
+    CONSTRAINT tombo_analitico_pkey PRIMARY KEY (hcf)
+);
+
+-- Creating indexes to optimize the most frequent analytical filtering and grouping queries
+CREATE INDEX IF NOT EXISTS idx_tombo_analitico_taxonomia 
+    ON public.tombo_analitico(familia, genero, especie);
+
+CREATE INDEX IF NOT EXISTS idx_tombo_analitico_localizacao 
+    ON public.tombo_analitico(pais_nome, estado_sigla, cidade_nome);
+
+CREATE INDEX IF NOT EXISTS idx_tombo_analitico_coleta 
+    ON public.tombo_analitico(data_coleta_ano, data_coleta_mes);
+
+CREATE INDEX IF NOT EXISTS idx_tombo_analitico_herbario 
+    ON public.tombo_analitico(herbario_sigla);
+
+CREATE INDEX IF NOT EXISTS idx_tombo_analitico_coletor 
+    ON public.tombo_analitico(coletor_principal);
+
+END;
+```

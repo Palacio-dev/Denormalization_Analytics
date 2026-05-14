@@ -1,0 +1,118 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_15-35-36
+Model: gemini
+Prompt: expert
+Schema: ex10
+==================================================
+
+### Executive Summary
+
+As requested, I have designed a read-optimized, denormalized physical schema derived from your highly normalized OLTP model. The target workload is clearly analytical (OLAP), focusing on yearly environmental, demographic, and energy metrics per country. 
+
+To achieve measurable read performance improvements, we are moving from a 6-table snowflake/star hybrid to a **One Big Table (OBT)** pattern (`infos_anuais_paises`). This eliminates expensive multi-table joins and runtime aggregations (such as calculating `gee_per_capita` or pivoting energy sources). Given the granularity of the data is yearly (`ano`), real-time Change Data Capture (CDC) is unnecessary. We will implement a **Daily Batch Refresh** strategy via an idempotent ETL pipeline, introducing an intentional and acceptable staleness window of up to 24 hours.
+
+---
+
+### 1. Model-to-Workload Mapping
+
+Based on the proposed denormalized structure, I have inferred the following top queries and mapped them to the access patterns.
+
+#### Access-Pattern Matrix
+
+| Target Query / Access Pattern | Tables Touched (Normalized) | Columns Touched | Hotspots Eliminated |
+| :--- | :--- | :--- | :--- |
+| **Q1: Global Yearly Dashboard** (Fetch all metrics for a specific year across all countries) | `paises`, `continente`, `populacao`, `emissao_g_efeito_estufa` | `ano`, `nome`, `quantidade_hab`, `quantidade_emitida` | **Join Hotspot:** 4-way join eliminated. **Compute Hotspot:** `gee_per_capita` pre-calculated. |
+| **Q2: Country Historical Trend** (Fetch all years for a specific country to plot charts) | `paises`, `populacao`, `emissao_g_efeito_estufa`, `consumo_anual`, `fonte_energia` | `id_paises`, `ano`, `porcentagem`, `tipo_energia` | **Join Hotspot:** 5-way join eliminated. **Pivot Hotspot:** Energy rows pivoted to columns. |
+| **Q3: Continent Energy Mix** (Aggregate energy sources by continent for a given year) | `paises`, `continente`, `consumo_anual`, `fonte_energia` | `continente.nome`, `ano`, `porcentagem`, `tipo_energia` | **Aggregation Hotspot:** Summing pivoted columns is vastly faster than grouping by unpivoted rows. |
+
+---
+
+### 2. Denormalization Patterns Applied
+
+1.  **Wide Read Table (One Big Table - OBT):** We collapse `paises`, `continente`, `populacao`, and `emissao_g_efeito_estufa` into a single flat structure. Justification: Disk space is cheap; CPU time spent on joins for analytical queries is expensive.
+2.  **Pre-calculated Derived Attributes:** `gee_per_capita` is computed during write-time (`emissao_g_efeito_estufa.quantidade_emitida / populacao.quantidade_hab`). Justification: Prevents redundant division operations on every read query.
+3.  **Row-to-Column Pivoting:** The `consumo_anual` table stores energy types as rows. We pivot these into explicit columns (`fonte_carvao`, `fonte_solar`, etc.). Justification: BI tools and columnar engines perform significantly better when metrics are explicitly columnar rather than requiring complex `CASE WHEN` aggregations at runtime.
+
+---
+
+### 3. Physical Design Details (PostgreSQL DDL)
+
+*Assumptions:* The workload filters heavily by `ano` (Year) and `continente`. We will use **Declarative Partitioning** by year to enable partition pruning, drastically reducing I/O for year-specific queries.
+
+```sql
+BEGIN;
+
+-- 1. Create the partitioned denormalized table
+CREATE TABLE IF NOT EXISTS public.infos_anuais_paises (
+    id_paises integer NOT NULL,          -- Retained for deterministic updates/upserts
+    ano integer NOT NULL,                -- Partition key
+    nome character varying(100) NOT NULL,
+    codigo character varying(3),         -- ISO code (Assumed external enrichment)
+    continente character varying(50) NOT NULL,
+    populacao bigint,
+    morte_desastres_naturais integer,    -- Assumed external enrichment
+    pib_per_capita double precision,     -- Assumed external enrichment
+    gee_per_capita double precision,     -- Derived: quantidade_emitida / quantidade_hab
+    anomalia_temperatura double precision, -- Assumed external enrichment
+    energia_produzida double precision,  -- Assumed external enrichment
+    fonte_carvao double precision,       -- Pivoted from consumo_anual
+    fonte_nuclear double precision,      -- Pivoted from consumo_anual
+    fonte_gas double precision,          -- Pivoted from consumo_anual
+    fonte_petroleo double precision,     -- Pivoted from consumo_anual
+    fonte_solar double precision,        -- Pivoted from consumo_anual
+    fonte_hidreletrica double precision, -- Pivoted from consumo_anual
+    ultima_atualizacao timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Composite Primary Key required for partitioned tables in Postgres
+    CONSTRAINT infos_anuais_paises_pkey PRIMARY KEY (ano, id_paises)
+) PARTITION BY RANGE (ano);
+
+-- 2. Create Partitions (Example for recent years, to be automated via script/pg_partman)
+CREATE TABLE public.infos_anuais_paises_2022 PARTITION OF public.infos_anuais_paises FOR VALUES FROM (2022) TO (2023);
+CREATE TABLE public.infos_anuais_paises_2023 PARTITION OF public.infos_anuais_paises FOR VALUES FROM (2023) TO (2024);
+CREATE TABLE public.infos_anuais_paises_2024 PARTITION OF public.infos_anuais_paises FOR VALUES FROM (2024) TO (2025);
+
+-- 3. Read-Optimized Indexing
+-- Index for Q2 (Country Historical Trend)
+CREATE INDEX idx_infos_anuais_paises_id ON public.infos_anuais_paises (id_paises);
+
+-- Index for Q3 (Continent Aggregations)
+CREATE INDEX idx_infos_anuais_paises_continente ON public.infos_anuais_paises (continente);
+
+-- Note: No index on 'ano' alone is needed because partition pruning handles year-level filtering automatically.
+
+COMMIT;
+```
+
+---
+
+### 4. Consistency Architecture & Lineage
+
+Because the grain is yearly, we will use a **Nightly Batch Window** to refresh this table. Triggers and CDC are explicitly avoided to prevent operational complexity and write-amplification on the OLTP database.
+
+**Data Lineage & Assumptions:**
+*   `nome` $\leftarrow$ `paises.nome`
+*   `continente` $\leftarrow$ `continente.nome` (via `paises.continente`)
+*   `populacao` $\leftarrow$ `populacao.quantidade_hab`
+*   `gee_per_capita` $\leftarrow$ `emissao_g_efeito_estufa.quantidade_emitida / populacao.quantidade_hab`
+*   `fonte_*` $\leftarrow$ Pivoted from `consumo_anual.porcentagem` joined with `fonte_energia.nome`.
+*   *External Fields:* `codigo`, `morte_desastres_naturais`, `pib_per_capita`, `anomalia_temperatura`, `energia_produzida` were not in the provided normalized DDL. **Assumption:** These will be injected via the ETL pipeline from a secondary source (e.g., World Bank API or flat files).
+
+**Refresh Strategy (Idempotent Upsert):**
+The ETL process will run daily. It will calculate the derived fields and execute an `INSERT ... ON CONFLICT (ano, id_paises) DO UPDATE` to safely overwrite records without downtime. Intentional staleness window: **24 hours**.
+
+---
+
+### 5. Risk Analysis & Implementation Plan
+
+#### Risks & Mitigations
+1.  **Write Amplification:** *Low Risk.* Because updates happen in a nightly batch and the data is partitioned by year, we are only rewriting the current year's partition. Historical partitions remain untouched.
+2.  **Data Anomalies (Division by Zero):** *Medium Risk.* When calculating `gee_per_capita`, if `populacao` is 0 or missing, the ETL will crash. *Mitigation:* ETL must use `NULLIF(populacao.quantidade_hab, 0)` to yield a `NULL` instead of a fatal error.
+3.  **Storage Growth:** *Low Risk.* Denormalization increases footprint, but environmental data aggregated by country/year is exceptionally small (approx. 200 countries * 100 years = 20,000 rows). Storage cost is negligible.
+4.  **Schema Rigidity (Pivoted Columns):** *Medium Risk.* If a new energy source is added to `fonte_energia` (e.g., "Geothermal"), the denormalized table requires a schema change (`ALTER TABLE ADD COLUMN fonte_geotermica`). *Mitigation:* Document this as standard operating procedure for the data engineering team.
+
+#### Implementation & Observability Plan
+1.  **Phase 1: Dual-Write / Backfill.** Deploy the DDL. Run a backfill script to populate historical data. The application continues reading from the normalized tables.
+2.  **Phase 2: Observability.** Implement a daily reconciliation query: `SELECT SUM(populacao) FROM infos_anuais_paises WHERE ano = 2023` vs `SELECT SUM(quantidade_hab) FROM populacao WHERE ano = 2023`. Alert if the diff > 0.
+3.  **Phase 3: Cutover.** Switch read traffic in the BI layer/application to `infos_anuais_paises`.
+4.  **Phase 4: Reversibility.** If read latency regressions occur (unlikely), simply revert the application read endpoints back to the normalized views. The normalized source-of-truth is never dropped.

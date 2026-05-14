@@ -1,0 +1,88 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_15-13-55
+Model: gemini
+Prompt: RACE
+Schema: harperdb
+==================================================
+
+As a Senior Data Engineer, I will apply the RACE framework to analyze your normalized relational schema and design an optimized, denormalized physical model tailored for read-heavy analytical workloads.
+
+### 1 - Deep Analysis of the Provided SQL Script
+The provided schema represents a classic many-to-many relationship normalized into three tables:
+*   **`users`**: A simple entity table containing only the user `id`.
+*   **`entitlements`**: Contains the details of a specific right/feature, including lifecycle dates (`activeDate`, `inactiveDate`), usage metrics (`useLimit`, `useCount`), and categorization (`featureType`, `packageType`, `activeFlag`).
+*   **`user_entitlements`**: The junction table resolving the many-to-many relationship between users and entitlements.
+
+**Current Bottlenecks:** To get a simple analytical answer like "Which users are actively using feature 'X'?", the database engine must perform a 3-table JOIN (`users` ↔ `user_entitlements` ↔ `entitlements`). In a large-scale analytical environment (OLAP), these joins cause massive memory overhead and slow down aggregations. Furthermore, the `users` table is essentially empty of attributes, making its participation in joins purely structural rather than informative.
+
+### 2 - Frequent Queries / Workload Context
+Since the context is a read-heavy analytical workload, we can infer the following heavy queries:
+1.  **Usage Analytics:** Calculating total `useCount` vs `useLimit` per `packageType` or `featureType`.
+2.  **Churn/Expiration Analysis:** Finding users whose entitlements are expired or expiring soon (`inactiveDate`).
+3.  **Feature Adoption:** Counting distinct users per `featureType`.
+4.  **Active User Filtering:** Filtering massive datasets where `activeFlag = 1` and `useCount < useLimit`.
+
+### 3 - Evaluation of Denormalization Techniques
+1.  **Adding Redundant Attributes:** *Highly Applicable.* We can move the `user_id` directly alongside the entitlement details.
+2.  **Adding Derived Attributes:** *Highly Applicable.* Analytical queries will frequently calculate remaining uses (`useLimit - useCount`) or check if the entitlement is currently valid. Precomputing these saves CPU cycles during heavy aggregations.
+3.  **Collapsing Relations:** *Highly Applicable.* The 3-table structure can be completely collapsed into a single table. The `users` table has no additional attributes, so it can be safely absorbed.
+4.  **Vertical Partitioning:** *Not Applicable.* The `entitlements` table is relatively narrow (8 columns). Splitting it would introduce unnecessary complexity without significant performance gains.
+
+### 4 - Designing Multiple Possible Schemas
+*   **Option A (Pure Collapse):** Merge `users`, `user_entitlements`, and `entitlements` into a single table `user_entitlements_fact`. This eliminates all joins.
+*   **Option B (Collapse + Derived Attributes):** Same as Option A, but we add precomputed analytical columns like `remaining_uses` and `is_expired` to speed up WHERE clauses and aggregations.
+*   **Option C (Aggregated User Fact):** Group everything by `user_id` (e.g., `total_active_entitlements`, `total_usage`). This is great for user-level metrics but destroys the granularity needed to analyze specific `featureTypes` or `packageTypes`.
+
+### 5 - Evaluating and Choosing the Most Consistent Schema
+**Option B** is the clear winner for an analytical database (Data Warehouse / OLAP). 
+By collapsing the three tables into one, we completely eliminate the JOIN overhead. By adding derived attributes, we optimize the most frequent mathematical operations and conditional filters (e.g., checking remaining usage or expiration status). We retain the exact granularity of the original model (1 row per user per entitlement) while maximizing read performance.
+
+### 6 - Design of the New Denormalized Schema
+
+Here is the optimized, denormalized physical schema:
+
+```sql
+BEGIN;
+
+-- Drop original normalized tables if they exist
+DROP TABLE IF EXISTS user_entitlements CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS entitlements CASCADE;
+
+-- Create the new collapsed and denormalized analytical table
+CREATE TABLE denormalized_user_entitlements (
+    user_id INT NOT NULL,
+    entitlement_id INT NOT NULL,
+    
+    -- Original Entitlement Attributes
+    activeDate DATE,
+    inactiveDate DATE,
+    useLimit INT,
+    useCount INT,
+    featureType VARCHAR(4),
+    packageType VARCHAR(4),
+    activeFlag INT,
+    
+    -- Derived Attributes for Analytical Performance
+    remainingUses INT,        -- Precomputed: (useLimit - useCount)
+    isExpired BOOLEAN,        -- Precomputed: TRUE if CURRENT_DATE > inactiveDate
+    isLimitReached BOOLEAN,   -- Precomputed: TRUE if useCount >= useLimit
+    
+    -- Composite Primary Key to maintain data integrity
+    PRIMARY KEY (user_id, entitlement_id)
+);
+
+-- Recommended Indexes for Analytical Workloads
+-- Index for filtering by feature/package types
+CREATE INDEX idx_feature_package ON denormalized_user_entitlements(featureType, packageType);
+
+-- Index for filtering active users and valid entitlements quickly
+CREATE INDEX idx_active_status ON denormalized_user_entitlements(activeFlag, isExpired, isLimitReached);
+
+END;
+```
+
+### Summary of Improvements:
+1. **Zero Joins:** Queries analyzing user behavior against features now hit a single table, drastically reducing I/O and memory usage.
+2. **Precomputed Logic:** Columns like `remainingUses` and `isExpired` shift the computation burden from *Read-time* (Query) to *Write-time* (ETL/Ingestion), which is the gold standard for read-heavy analytical workloads.
+3. **Targeted Indexing:** Added composite indexes tailored for the most likely analytical slicing and dicing (by feature type and active status).

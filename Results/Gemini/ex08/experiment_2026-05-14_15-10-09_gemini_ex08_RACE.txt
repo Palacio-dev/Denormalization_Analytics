@@ -1,0 +1,204 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_15-10-09
+Model: gemini
+Prompt: RACE
+Schema: ex08
+==================================================
+
+As a Senior Data Engineer, I have reviewed the normalized physical model provided. I noticed that a draft of a denormalized model was included at the end of your prompt. While that draft is a good starting point, combining both academic enrollments and employment records into a single fact table (`fato_aluno_trajetoria`) can create a dangerous **Cartesian product** (if a student has 2 enrollments and 3 jobs, it generates 6 rows, skewing aggregations). 
+
+To build a truly robust analytical environment, I will walk through the 6 steps of the framework to design an optimal, safe, and highly performant denormalized schema.
+
+---
+
+### 1 - Deep Analysis of the Provided SQL Script
+The normalized model consists of 10 tables representing three distinct domains:
+1. **Student & Academic Domain:** `aluno_ifb`, `curso_ifb`, `matricula_ifb`.
+2. **Professional/Employment Domain:** `vinculo_empregaticio`, `remuneracao`, `localizacao` (for job location).
+3. **School Context Domain:** `escola`, `localizacao` (for school location), `desempenho_enem`, `indicadores_escolares`, `participacao_enem`.
+
+**Current Bottlenecks:** 
+- The model is highly normalized (3NF). 
+- `matricula_ifb` and `vinculo_empregaticio` act as separate transaction/event tables, both pointing to `aluno_ifb`.
+- School metrics are split across 4 different tables (`escola`, `desempenho`, `indicadores`, `participacao`), requiring massive JOINs just to get a unified view of a school's performance in a given year.
+
+### 2 - Frequent Queries / Workload Context
+In an analytical, read-heavy workload (OLAP) for an educational institution, the most frequent queries will likely be:
+- *“What is the average salary (`remuneracao`) of students who graduated from courses (`curso_ifb`) in schools with high ENEM scores (`desempenho_enem`)?”*
+- *“How does the school dropout rate (`indicadores_escolares`) correlate with the student's employment status (`vinculo_empregaticio`)?”*
+
+**JOIN Bottleneck:** Answering the first query currently requires joining **8 tables**: `remuneracao` $\rightarrow$ `vinculo_empregaticio` $\rightarrow$ `aluno_ifb` $\rightarrow$ `matricula_ifb` $\rightarrow$ `curso_ifb` $\rightarrow$ `escola` $\rightarrow$ `desempenho_enem` $\rightarrow$ `localizacao`. This will severely degrade performance on large datasets.
+
+### 3 - Evaluate Common Denormalization Techniques
+- **1 - Adding Redundant Attributes:** Highly applicable. We should bring `uf` and `municipio` directly into the school and employment tables to eliminate the `localizacao` table entirely.
+- **2 - Adding Derived Attributes:** We can pre-calculate some flags, but the primary focus should be on flattening the structure.
+- **3 - Collapsing Relations:** **Crucial here.** We can collapse `remuneracao` directly into `vinculo_empregaticio`. We can also collapse all school indicator tables into a single yearly school dimension.
+- **4 - Vertical Partitioning:** Not strictly necessary, but we *must* logically partition the fact tables to avoid the Cartesian product mentioned earlier. Academic facts and Employment facts should remain separate but share dimensions.
+
+### 4 - Design Multiple Possible Schemas
+**Option A: One Big Table (OBT)**
+- Everything is merged into a single table. 
+- *Pros:* Zero JOINs.
+- *Cons:* Massive data duplication. If a student has 3 enrollments and 4 jobs, their data is duplicated 12 times. Aggregating salaries or enrollments becomes extremely difficult without complex `COUNT(DISTINCT)` logic.
+
+**Option B: The Single Trajectory Fact (Prompt's Draft)**
+- `fato_aluno_trajetoria` + `dim_escola_indicadores_anuais`.
+- *Pros:* Reduces tables to 2.
+- *Cons:* Suffers from the same Cartesian product risk as Option A regarding enrollments vs. jobs.
+
+**Option C: Multi-Fact Dimensional Model (Conformed Star Schema)**
+- `dim_escola_anual`: Collapses all school metrics and locations.
+- `fato_matricula_enriquecida`: Collapses student, course, and enrollment data.
+- `fato_emprego_enriquecido`: Collapses employment, remuneration, and location data.
+- *Pros:* Eliminates the Cartesian product risk. Reduces the 10-table model to just 3 highly performant tables. Queries only require a maximum of 1 or 2 JOINs.
+
+### 5 - Evaluate and Choose the Best Schema
+**Option C** is the absolute best choice for a Senior Data Engineering architecture. It perfectly balances the performance gains of denormalization (reducing 8-table joins to 1-table or 2-table joins) while maintaining data integrity and accurate aggregations. 
+
+We will create:
+1. **`dim_escola_anual`**: A dimension table that acts as a snapshot of a school's infrastructure and performance per year.
+2. **`fato_matricula_academica`**: A fact table containing everything about the student, their enrollment, and the course.
+3. **`fato_vinculo_profissional`**: A fact table containing everything about the student's job, salary, and company location.
+
+### 6 - Design the New Denormalized Schema
+
+Here is the optimized, denormalized physical schema using PostgreSQL syntax:
+
+```sql
+BEGIN;
+
+-- ==============================================================================
+-- 1. DIMENSION: dim_escola_anual
+-- Techniques: Collapsing Relations & Adding Redundant Attributes
+-- Combines: escola, localizacao, desempenho_enem, indicadores_escolares, participacao_enem
+-- Grain: 1 row per School per Year
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.dim_escola_anual (
+    co_escola_educacenso VARCHAR(50) NOT NULL,
+    nu_ano INTEGER NOT NULL,
+    
+    -- School & Location Attributes
+    no_escola_educacenso VARCHAR(200),
+    tp_dependencia_adm_escola SMALLINT,
+    tp_localizacao_escola SMALLINT,
+    inse VARCHAR(10),
+    uf_escola VARCHAR(2),
+    municipio_escola VARCHAR(100),
+    porte_escola VARCHAR(50),
+    
+    -- Indicadores Escolares
+    nu_taxa_permanencia NUMERIC(6, 2),
+    nu_taxa_aprovacao NUMERIC(5, 2),
+    nu_taxa_reprovacao NUMERIC(5, 2),
+    nu_taxa_abandono NUMERIC(5, 2),
+    pc_formacao_docente NUMERIC(5, 2),
+    
+    -- Participacao ENEM
+    nu_matriculas_enem INTEGER,
+    nu_participantes_nec_esp_enem INTEGER,
+    nu_participantes_enem INTEGER,
+    nu_taxa_participacao_enem NUMERIC(5, 2),
+    
+    -- Desempenho ENEM
+    nu_media_cn_enem NUMERIC(6, 2),
+    nu_media_ch_enem NUMERIC(6, 2),
+    nu_media_lp_enem NUMERIC(6, 2),
+    nu_media_mt_enem NUMERIC(6, 2),
+    nu_media_red_enem NUMERIC(6, 2),
+    
+    CONSTRAINT dim_escola_anual_pkey PRIMARY KEY (co_escola_educacenso, nu_ano)
+);
+
+-- ==============================================================================
+-- 2. FACT: fato_matricula_academica
+-- Techniques: Collapsing Relations & Adding Redundant Attributes
+-- Combines: matricula_ifb, aluno_ifb, curso_ifb
+-- Grain: 1 row per Enrollment
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.fato_matricula_academica (
+    id_matricula SERIAL NOT NULL,
+    
+    -- Student Attributes (Redundant but avoids JOIN to dim_aluno)
+    id_aluno INTEGER NOT NULL,
+    data_nascimento DATE,
+    idade INTEGER,
+    sexo CHARACTER(1),
+    nacionalidade VARCHAR(50),
+    raca VARCHAR(50),
+    portador_deficiencia BOOLEAN,
+    
+    -- Enrollment Attributes
+    ano_matricula VARCHAR(20),
+    co_ciclo_matricula VARCHAR(50),
+    periodo VARCHAR(30),
+    situacao_matricula VARCHAR(50),
+    tipo_cota VARCHAR(50),
+    atestado_baixarenda VARCHAR(20),
+    unidade_ensino VARCHAR(100),
+    co_escola_educacenso VARCHAR(50), -- FK to dim_escola_anual
+    
+    -- Course Attributes
+    co_curso VARCHAR(50),
+    no_curso VARCHAR(200),
+    co_tipo_curso VARCHAR(10),
+    tipo_curso VARCHAR(100),
+    co_tipo_nivel VARCHAR(10),
+    ds_tipo_nivel VARCHAR(100),
+    ds_eixo_tecnologico VARCHAR(200),
+    modalidade_ensino VARCHAR(100),
+    carga_horaria INTEGER,
+    
+    CONSTRAINT fato_matricula_academica_pkey PRIMARY KEY (id_matricula)
+);
+
+-- ==============================================================================
+-- 3. FACT: fato_vinculo_profissional
+-- Techniques: Collapsing Relations & Adding Redundant Attributes
+-- Combines: vinculo_empregaticio, remuneracao, localizacao
+-- Grain: 1 row per Job/Employment Bond
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.fato_vinculo_profissional (
+    id_vinculo SERIAL NOT NULL,
+    id_aluno INTEGER NOT NULL, -- Link back to student (can join with fato_matricula_academica)
+    
+    -- Employment Attributes
+    ano_rais INTEGER,
+    razao_social VARCHAR(200),
+    tipo_vinculo_empregaticio VARCHAR(200),
+    data_admissao_declarada DATE,
+    tempo_emprego INTEGER,
+    motivo_desligamento VARCHAR(200),
+    mes_desligamento VARCHAR(20),
+    indicador_vinculo_ativo BOOLEAN,
+    
+    -- Location Attributes (Collapsed from localizacao)
+    uf_empresa VARCHAR(2),
+    municipio_empresa VARCHAR(100),
+    
+    -- Remuneration Attributes (Collapsed from remuneracao)
+    vl_remun_media_nom NUMERIC(10, 2),
+    vl_remun_media_sm NUMERIC(10, 2),
+    vl_remun_dezembro_nom NUMERIC(10, 2),
+    vl_remun_dezembro_sm NUMERIC(10, 2),
+    qtd_hora_contr INTEGER,
+    vl_ultima_remuneracao_ano NUMERIC(10, 2),
+    vl_salario_contratual NUMERIC(10, 2),
+    
+    CONSTRAINT fato_vinculo_profissional_pkey PRIMARY KEY (id_vinculo)
+);
+
+-- ==============================================================================
+-- INDEXES FOR ANALYTICAL PERFORMANCE
+-- ==============================================================================
+CREATE INDEX idx_fato_mat_aluno ON public.fato_matricula_academica(id_aluno);
+CREATE INDEX idx_fato_mat_escola ON public.fato_matricula_academica(co_escola_educacenso);
+CREATE INDEX idx_fato_vinc_aluno ON public.fato_vinculo_profissional(id_aluno);
+CREATE INDEX idx_dim_escola_uf ON public.dim_escola_anual(uf_escola);
+
+END;
+```
+
+### Why this is the superior model:
+1. **No Cartesian Products:** By keeping `fato_matricula_academica` and `fato_vinculo_profissional` separate, calculating the average salary of a student doesn't accidentally multiply by the number of courses they took.
+2. **Massive I/O Reduction:** A query analyzing the impact of school infrastructure on student salaries now only requires joining `fato_vinculo_profissional` $\rightarrow$ `fato_matricula_academica` $\rightarrow$ `dim_escola_anual` (2 JOINs instead of 8).
+3. **Columnar/Analytical Friendly:** This wide-table format is highly optimized for modern columnar OLAP databases (like Redshift, BigQuery, or PostgreSQL with columnar extensions), where wide tables with redundant string attributes compress exceptionally well.

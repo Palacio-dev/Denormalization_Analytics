@@ -1,0 +1,130 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_14-56-57
+Model: gemini
+Prompt: RACE
+Schema: ex02
+==================================================
+
+Here is the comprehensive analysis and the new denormalized physical schema design based on the RACE framework, optimized for read-heavy analytical workloads.
+
+### 1 - Deep Analysis of the Provided SQL Creation Script
+The provided normalized model is highly fragmented, resembling a Snowflake schema. 
+* **1:1 Relationships (Over-normalization):** The tables `coleta_de_lixo` and `local_de_coleta` share the exact same primary key (`id_mutirao`) as `mutirao_de_limpeza`. In an analytical context, separating these creates unnecessary JOIN overhead for data that has a strict 1-to-1 relationship.
+* **Small Lookup Dimensions:** Tables like `bioma`, `esfera_administrativa`, `categoria_manejo`, `instituicao_organizadora`, and `regiao` act as small dimension tables. Keeping them normalized requires up to 4 or 5 JOINs per query just to retrieve descriptive names (e.g., biome name, municipality name, state).
+* **Disconnected Fact Tables:** There are two main analytical "facts" or entities here: Cleanup Events (`mutirao_de_limpeza`) and Conservation Units (`unidade_de_conservacao`). They only share a geographical link (`id_municipio` in `regiao`).
+
+### 2 - Frequent Queries / Workload Context
+In a read-heavy analytical environment tracking environmental cleanups and conservation efforts, the most frequent queries will likely involve heavy aggregations and filtering by dimensions.
+* **Q1 (Waste Aggregation):** *What is the total amount of plastic, glass, and total waste collected per state and municipality over the last 5 years?* (Currently requires joining `mutirao_de_limpeza`, `coleta_de_lixo`, and `regiao`).
+* **Q2 (Event Profiling):** *Which types of institutions (carater) organize the most cleanup events and gather the most participants in coastal regions?* (Requires joining `mutirao_de_limpeza`, `instituicao_organizadora`, and `regiao`).
+* **Q3 (Conservation Profiling):** *What is the total marine and continental area of conservation units grouped by Biome and Management Category (IUCN)?* (Requires joining `unidade_de_conservacao`, `bioma`, and `categoria_manejo`).
+* **Bottlenecks:** The primary bottlenecks will be the repetitive JOINs to the `regiao` table to group by state/city, and the 1:1 JOINs to `coleta_de_lixo` to sum up waste metrics.
+
+### 3 - Evaluation of Common Denormalization Techniques
+* **1 - Adding Redundant Attributes:** **Highly Applicable.** Bringing `nome` and `estado` from the `regiao` table directly into the fact tables will eliminate the most common JOIN. The same applies to bringing descriptive names from `bioma`, `instituicao_organizadora`, etc.
+* **2 - Adding Derived Attributes:** **Highly Applicable.** Analytical queries will frequently ask for the *total* amount of waste collected. Precomputing a `total_residuos` column (sum of plastic, rubber, wood, etc.) will save compute resources during aggregations.
+* **3 - Collapsing Relations:** **Crucial.** The 1:1 tables (`coleta_de_lixo` and `local_de_coleta`) must be collapsed into `mutirao_de_limpeza`. The dimension tables should also be collapsed into their respective fact tables to create "One Big Table" (OBT) structures.
+* **4 - Vertical Partitioning:** **Not Applicable.** In modern analytical databases (especially columnar ones), wide tables are preferred. Splitting the tables would re-introduce the JOINs we are trying to eliminate.
+
+### 4 - Design of Multiple Possible Denormalized Schemas
+* **Option A: Star Schema (Partial Denormalization)**
+  * Collapse `coleta_de_lixo` and `local_de_coleta` into a `Fato_Mutirao` table.
+  * Keep `Dim_Regiao`, `Dim_Instituicao`, `Dim_Bioma`, etc., as separate dimension tables.
+  * *Pros:* Reduces 1:1 joins, maintains a clean dimensional model.
+  * *Cons:* Still requires JOINs for geographical and categorical aggregations, which can be costly on massive datasets.
+* **Option B: One Big Table (OBT) / Full Denormalization**
+  * Create two wide tables: `analytical_mutirao_limpeza` and `analytical_unidade_conservacao`.
+  * Embed all dimensional attributes (municipality name, state, biome name, institution character) directly into these two tables.
+  * Add derived attributes (e.g., `total_residuos_coletados`).
+  * *Pros:* Zero JOINs required for >90% of analytical queries. Maximum read performance.
+  * *Cons:* Data redundancy (e.g., repeating the state name). This is perfectly acceptable and standard in analytical/OLAP workloads.
+
+### 5 - Evaluation and Selection
+**Option B** is the superior choice for a read-heavy analytical workload. Storage is cheap, but compute (JOINs) is expensive. By creating two wide, fully denormalized tables, we allow analysts and BI tools to query the data with simple `SELECT ... FROM ... GROUP BY` statements, drastically reducing query execution time. We will also utilize **Technique 2** to add a `total_residuos_coletados` derived column.
+
+### 6 - Final Denormalized Schema Design
+
+```sql
+<DENORMALIZED MODEL>
+BEGIN;
+
+-- Table 1: Fully Denormalized Cleanup Events (Mutirão de Limpeza)
+-- Techniques: Collapsing Relations (1:1 and N:1), Adding Redundant Attributes, Adding Derived Attributes
+CREATE TABLE IF NOT EXISTS public.analytical_mutirao_limpeza
+(
+    id_mutirao integer NOT NULL,
+    data_do_ocorrido date NOT NULL,
+    horario_de_inicio time without time zone NOT NULL,
+    duracao_total time without time zone NOT NULL,
+    numero_aproximado_de_participantes integer,
+    
+    -- Collapsed from local_de_coleta
+    nome_local_de_coleta text COLLATE pg_catalog."default",
+    
+    -- Collapsed from regiao
+    nome_municipio text COLLATE pg_catalog."default",
+    estado text COLLATE pg_catalog."default",
+    
+    -- Collapsed from instituicao_organizadora
+    nome_instituicao text COLLATE pg_catalog."default",
+    carater_instituicao text COLLATE pg_catalog."default",
+    
+    -- Collapsed from coleta_de_lixo
+    plastico integer DEFAULT 0,
+    borracha integer DEFAULT 0,
+    madeira integer DEFAULT 0,
+    produtos_texteis integer DEFAULT 0,
+    papel integer DEFAULT 0,
+    metal integer DEFAULT 0,
+    vidro integer DEFAULT 0,
+    materiais_de_pesca integer DEFAULT 0,
+    outros_residuos integer DEFAULT 0,
+    
+    -- Derived Attribute: Pre-calculated total waste for faster aggregations
+    total_residuos_coletados integer GENERATED ALWAYS AS (
+        COALESCE(plastico, 0) + COALESCE(borracha, 0) + COALESCE(madeira, 0) + 
+        COALESCE(produtos_texteis, 0) + COALESCE(papel, 0) + COALESCE(metal, 0) + 
+        COALESCE(vidro, 0) + COALESCE(materiais_de_pesca, 0) + COALESCE(outros_residuos, 0)
+    ) STORED,
+
+    CONSTRAINT analytical_mutirao_limpeza_pkey PRIMARY KEY (id_mutirao)
+);
+
+-- Table 2: Fully Denormalized Conservation Units (Unidade de Conservação)
+-- Techniques: Collapsing Relations (N:1), Adding Redundant Attributes
+CREATE TABLE IF NOT EXISTS public.analytical_unidade_conservacao
+(
+    id_uc integer NOT NULL,
+    nome_uc text COLLATE pg_catalog."default" NOT NULL,
+    ano_de_criacao integer,
+    area_soma_biomas double precision,
+    area_soma_biomas_continentais double precision,
+    area_marinha double precision,
+    
+    -- Collapsed from bioma
+    nome_bioma text COLLATE pg_catalog."default",
+    
+    -- Collapsed from regiao
+    nome_municipio text COLLATE pg_catalog."default",
+    estado text COLLATE pg_catalog."default",
+    
+    -- Collapsed from categoria_manejo
+    categoria_manejo text COLLATE pg_catalog."default",
+    categoria_iucn text COLLATE pg_catalog."default",
+    plano_de_manejo text COLLATE pg_catalog."default",
+    
+    -- Collapsed from esfera_administrativa
+    tipo_esfera_administrativa text COLLATE pg_catalog."default",
+
+    CONSTRAINT analytical_unidade_conservacao_pkey PRIMARY KEY (id_uc)
+);
+
+-- Indexes for analytical filtering and grouping
+CREATE INDEX IF NOT EXISTS idx_mutirao_estado ON public.analytical_mutirao_limpeza(estado);
+CREATE INDEX IF NOT EXISTS idx_mutirao_data ON public.analytical_mutirao_limpeza(data_do_ocorrido);
+CREATE INDEX IF NOT EXISTS idx_uc_estado ON public.analytical_unidade_conservacao(estado);
+CREATE INDEX IF NOT EXISTS idx_uc_bioma ON public.analytical_unidade_conservacao(nome_bioma);
+
+END;
+</DENORMALIZED MODEL>
+```

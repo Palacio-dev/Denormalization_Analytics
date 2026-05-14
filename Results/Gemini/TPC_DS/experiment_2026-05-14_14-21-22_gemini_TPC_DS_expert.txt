@@ -1,0 +1,158 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_14-21-22
+Model: gemini
+Prompt: expert
+Schema: TPC_DS
+==================================================
+
+### Executive Summary
+
+The provided schema represents a classic normalized OLTP/source system for a multi-channel retail environment (Store, Catalog, Web), heavily inspired by the TPC-DS benchmark. In its current 3NF-like state, analytical queries require expensive, high-volume joins between header tables, line-item tables, and return tables. 
+
+To optimize for read-heavy analytical workloads, I am proposing a **Wide-Table Fact Architecture** combined with **Pre-Aggregated Rollups**. We will collapse the header and line-item tables into channel-specific wide tables, and left-join the returns data directly into the sales line items. This eliminates the two most expensive join hotspots (Header ↔ Line Item, and Sales ↔ Returns) at query time. We will rely on an hourly micro-batch ELT process to populate these tables, accepting a documented staleness window of up to 60 minutes in exchange for a 10x–50x improvement in read latency and significantly reduced compute costs.
+
+---
+
+### 1. Access-Pattern Matrix
+
+To design the physical schema, I modeled the standard analytical workload for an omnichannel retail business. 
+
+| Top Query Class | Tables Touched (Current Schema) | Target Denormalized Artifact | Optimization Achieved |
+| :--- | :--- | :--- | :--- |
+| **Q1: Net Sales by Channel & Date** | `s_purchase`, `s_purchase_lineitem`, `s_store_returns` (x3 channels) | `rollup_daily_channel_sales` | **O(1) lookup** via pre-aggregated daily rollup. No joins. |
+| **Q2: Item Affinity / Market Basket** | `s_purchase`, `s_purchase_lineitem` | `denorm_store_sales` | Eliminates Header ↔ Line Item join. Partition pruned by Date. |
+| **Q3: Return Rate Analysis** | `s_purchase_lineitem`, `s_store_returns` | `denorm_store_sales` | Eliminates outer join. Returns are natively embedded in the sales row. |
+| **Q4: Inventory Depletion** | `s_inventory`, `s_purchase_lineitem` | `denorm_inventory_snapshot` | Partitioned by date, clustered by item for fast time-series scans. |
+
+**Identified Hotspots in Current Schema:**
+1. **Join Hotspot:** `s_purchase` ↔ `s_purchase_lineitem` (1:N). Every line item requires a lookup to the header for the date and store ID.
+2. **Join Hotspot:** `s_purchase_lineitem` ↔ `s_store_returns` (1:0..1). Calculating net sales requires massive outer joins.
+3. **Aggregation Hotspot:** Summing `plin_quantity` and `plin_sale_price` across millions of rows grouped by `purc_purchase_date`.
+
+---
+
+### 2. Denormalization Patterns Justification
+
+1. **Wide Read Tables (Pre-joined Header + Line Item + Returns)**
+   * *Why:* Analytical engines (columnar) excel at scanning wide tables. By flattening the header (`s_purchase`) and the line item (`s_purchase_lineitem`), we eliminate a massive hash join. Furthermore, by left-joining `s_store_returns` into this wide table, we calculate "Net Sales" instantly at read time.
+2. **Pre-Aggregated Rollups (`rollup_daily_channel_sales`)**
+   * *Why:* Executive dashboards usually look at daily/weekly trends, not individual transactions. A daily rollup table reduces billions of rows to a few thousand, making dashboard load times sub-second.
+3. **Data Type Optimization**
+   * *Why:* The source schema uses `char(10)` for dates. The denormalized schema converts these to native `DATE` types to enable partition pruning and native date math.
+
+---
+
+### 3. Physical Design Details (DDL)
+
+*Assumptions: Target engine is a modern columnar data warehouse (e.g., Snowflake, BigQuery, Databricks) or a robust analytical RDBMS (PostgreSQL with partitioning). DDL uses standard ANSI SQL with common analytical extensions.*
+
+#### A. Wide Fact Tables (Example: Store Sales)
+```sql
+-- Denormalized Store Sales (Header + Line Item + Returns)
+CREATE TABLE denorm_store_sales
+(
+    -- Primary Keys
+    purchase_id             BIGINT NOT NULL,
+    line_number             INT NOT NULL,
+    
+    -- Header Dimensions (from s_purchase)
+    store_id                CHAR(16),
+    customer_id             CHAR(16),
+    purchase_date           DATE NOT NULL,      -- Converted from CHAR(10)
+    purchase_time           INT,
+    register_id             INT,
+    clerk_id                INT,
+    
+    -- Line Item Facts (from s_purchase_lineitem)
+    item_id                 CHAR(16),
+    promotion_id            CHAR(16),
+    quantity                INT,
+    sale_price              NUMERIC(7,2),
+    coupon_amt              NUMERIC(7,2),
+    gross_sales_amt         NUMERIC(10,2),      -- Derived: quantity * sale_price
+    
+    -- Return Facts (from s_store_returns)
+    -- Nullable: NULL means the item was not returned
+    is_returned             BOOLEAN DEFAULT FALSE,
+    return_date             DATE,
+    return_qty              INT,
+    return_amt              NUMERIC(7,2),
+    return_reason_id        CHAR(16),
+    
+    -- Constraints
+    CONSTRAINT pk_denorm_store_sales PRIMARY KEY (purchase_date, purchase_id, line_number)
+)
+PARTITION BY RANGE (purchase_date); 
+-- Engine specific: e.g., Snowflake CLUSTER BY (store_id, item_id)
+-- PostgreSQL: CREATE TABLE ... PARTITION OF ...
+```
+*(Note: Similar tables must be created for `denorm_catalog_sales` and `denorm_web_sales`. Web sales lacks a returns table in the source DDL, so return columns would be omitted there).*
+
+#### B. Inventory Snapshot
+```sql
+CREATE TABLE denorm_inventory_snapshot
+(
+    invn_date               DATE NOT NULL,      -- Converted from CHAR(10)
+    warehouse_id            CHAR(16) NOT NULL,
+    item_id                 CHAR(16) NOT NULL,
+    qty_on_hand             INT,
+    
+    CONSTRAINT pk_denorm_inventory PRIMARY KEY (invn_date, warehouse_id, item_id)
+)
+PARTITION BY RANGE (invn_date);
+-- Engine specific clustering: CLUSTER BY (item_id)
+```
+
+#### C. Pre-Aggregated Rollup (Materialized View or Batch Table)
+```sql
+CREATE TABLE rollup_daily_channel_sales
+(
+    sales_date              DATE NOT NULL,
+    channel                 VARCHAR(10) NOT NULL, -- 'STORE', 'CATALOG', 'WEB'
+    store_or_site_id        CHAR(16),
+    item_id                 CHAR(16),
+    
+    total_quantity_sold     BIGINT,
+    total_gross_sales       NUMERIC(15,2),
+    total_return_quantity   BIGINT,
+    total_return_amt        NUMERIC(15,2),
+    total_net_sales         NUMERIC(15,2),        -- Derived: gross - returns
+    
+    CONSTRAINT pk_rollup_daily PRIMARY KEY (sales_date, channel, store_or_site_id, item_id)
+)
+PARTITION BY RANGE (sales_date);
+```
+
+---
+
+### 4. Consistency Architecture & Implementation Plan
+
+**Operational Constraints Assumed:** No triggers on the OLTP system. CDC (Change Data Capture) is available and streams to a staging area. Batch windows are available hourly.
+
+**Data Lineage Example (`denorm_store_sales`):**
+*   `purchase_date` ← `CAST(s_purchase.purc_purchase_date AS DATE)`
+*   `gross_sales_amt` ← `s_purchase_lineitem.plin_quantity * s_purchase_lineitem.plin_sale_price`
+*   `is_returned` ← `CASE WHEN s_store_returns.sret_purchase_id IS NOT NULL THEN TRUE ELSE FALSE END`
+
+**Refresh Strategy (Hourly Micro-Batch ELT):**
+1. **Append-Only Sales:** Sales headers and line items are generally immutable. We `INSERT` new sales into the wide tables hourly based on the `purchase_date`.
+2. **Upserting Returns (The Complexity):** Returns happen *after* the sale. When a return arrives in staging, we must update the historical sale record. 
+   * *Implementation:* We use an hourly `MERGE` statement. We match on `purchase_id` and `line_number`. If a match is found, we update the `return_*` columns.
+3. **Rollup Refresh:** After the wide tables are updated, we rebuild the `rollup_daily_channel_sales` for the affected `sales_date` partitions using a `DELETE` + `INSERT` (or engine-native Materialized View refresh).
+
+**Staleness Window:** Data in the read-optimized schema will be up to **60 minutes stale**. Business users must be informed that real-time intraday tracking requires querying the operational system, while the data warehouse is for finalized hourly/daily analytics.
+
+---
+
+### 5. Risk Analysis & Observability
+
+| Risk Vector | Analysis & Mitigation |
+| :--- | :--- |
+| **Write Amplification** | **High Risk.** A return requires updating a massive historical fact table. *Mitigation:* Because the table is partitioned by `purchase_date`, the `MERGE` statement must be optimized to prune partitions. We must extract the original `purchase_date` of the return to ensure the `MERGE` only scans the specific partition where the sale occurred. |
+| **Storage Growth** | **Medium Risk.** Denormalizing `store_id`, `customer_id`, and `purchase_date` onto every line item increases raw data size. *Mitigation:* Modern columnar databases use dictionary encoding and run-length encoding (RLE). Because `purchase_date` and `store_id` have low cardinality per block, compression will easily negate the storage penalty. |
+| **Failure Modes (Orphaned Returns)** | **Low Risk.** A return might arrive in CDC before the sale record (due to distributed system race conditions). *Mitigation:* The ELT process must place orphaned returns into a Dead Letter Queue (DLQ) table and retry them in the next hourly batch. |
+
+**Monitoring & Alerts Required:**
+1. **Freshness Lag:** Alert if `MAX(purchase_date)` in `denorm_store_sales` is more than 2 hours behind `CURRENT_TIMESTAMP()`.
+2. **Reconciliation Diffs:** Run a daily automated query comparing `SUM(sale_price)` in the source `s_purchase_lineitem` vs `SUM(sale_price)` in `denorm_store_sales`. Alert if variance > $0.00.
+3. **Query Latency Regressions:** Monitor the P90 execution time of the daily rollup build. If it exceeds 15 minutes, the `MERGE` strategy may need to be replaced with a full partition overwrite strategy.

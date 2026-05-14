@@ -1,0 +1,178 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_15-28-20
+Model: gemini
+Prompt: expert
+Schema: ex06
+==================================================
+
+### Executive Summary
+
+As a Principal Database Architect, I have reviewed your normalized schema and your initial denormalization strategy. The normalized model, while theoretically sound for OLTP, introduces severe read-latency bottlenecks for analytical queries due to deep 5-to-7-way joins (e.g., `UF` → `MUNICIPIO` → `IES` → `CURSO` → `ANO` → `ENADE`). Furthermore, the normalized `ANO` table contains a logical domain entanglement: it links `curso` (Higher Education) to `saeb`/`ideb` (Basic Education exams), whereas these belong to `escola`. 
+
+To guarantee measurable read performance improvements, I propose adopting a **Domain-Specific Wide Table (One Big Table - OBT)** architecture. We will split the read models into two distinct analytical domains: **Basic Education** (Schools, SAEB, IDEB) and **Higher Education** (Courses, IES, ENADE). This eliminates join hotspots entirely, aligns with the natural query boundaries, and leverages **List Partitioning by Year (`ano`)** to drastically reduce I/O. Because educational census data (INEP) is typically released in annual batches, we will utilize a safe, observable "Partition Swap" (Blue/Green) refresh strategy, eliminating the need for complex real-time CDC.
+
+---
+
+### 1. Model-to-Workload Mapping
+
+**Assumption:** The workload consists of heavy analytical reads (OLAP) aggregating educational performance by region, institution, and year. Data is updated infrequently (e.g., annually or semesterly).
+
+#### Access-Pattern Matrix
+
+| Target Query / Access Pattern | Tables Touched (Normalized) | Join Hotspots | Aggregation Hotspots |
+| :--- | :--- | :--- | :--- |
+| **Q1: Higher Ed Performance** (Avg ENADE score by State, City, IES, and Course over time) | `UF`, `MUNICIPIO`, `IES`, `CURSO`, `ANO`, `ENADE` | `ANO` ↔ `CURSO` ↔ `ENADE` | `GROUP BY sigla_uf, ano` |
+| **Q2: Basic Ed Performance** (Avg SAEB/IDEB score by School, Network, and City over time) | `UF`, `MUNICIPIO`, `ESCOLA`, `ANO`*, `SAEB`, `IDEB` | `ANO` ↔ `SAEB` ↔ `IDEB` | `GROUP BY cod_escola, ano` |
+| **Q3: Regional Summary** (Total participants, avg scores by City/State) | `UF`, `MUNICIPIO` | `UF` ↔ `MUNICIPIO` | `GROUP BY sigla_uf` |
+
+*\*Note: The normalized `ANO` table lacks an `id_escola` foreign key. The ETL process must resolve this logical gap when populating the read models.*
+
+---
+
+### 2. Denormalization Patterns
+
+1.  **Wide Read Tables (One Big Table / OBT)**: 
+    *   *Justification*: Disk storage is cheap; CPU/Memory for 6-way joins on millions of rows is expensive. By pre-joining all dimensional data (State, City, Institution) into the fact records (Scores by Year), we reduce query execution from complex hash-joins to simple sequential scans or index-only scans.
+2.  **Domain Split (Fact-Dimension hybrid)**:
+    *   *Justification*: Forcing `ESCOLA` and `CURSO` into a single table creates massive sparsity (NULLs for ENADE in school rows, NULLs for IDEB in course rows). Splitting them into `read_fact_escola_anual` and `read_fact_curso_anual` preserves business correctness and data density.
+3.  **Pre-aggregated Rollups**:
+    *   *Justification*: `read_dim_municipio` serves as a fast-lookup snapshot for city/state-level metrics, preventing the need to aggregate millions of school/course rows for high-level dashboards.
+
+---
+
+### 3. Physical Design Details (DDL)
+
+*Engine Assumption: PostgreSQL (adaptable to Snowflake/BigQuery/SQL Server).*
+*Optimization: Partitioned by `ano` for partition pruning during time-series queries.*
+
+```sql
+-- ==============================================================================
+-- 1. REGIONAL DIMENSION (Pre-joined UF + Municipio)
+-- Used for high-level geographic queries and dashboard dropdowns.
+-- ==============================================================================
+DROP TABLE IF EXISTS read_dim_municipio CASCADE;
+
+CREATE TABLE read_dim_municipio (
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    id_municipio INT NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    qtd_habitantes INT,
+    qtd_ies INT,
+    qtd_escolas INT,
+    media_ideb REAL,
+    media_saeb REAL,
+    media_enade REAL,
+    total_participantes INT,
+    last_refreshed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (sigla_uf, id_municipio)
+);
+
+-- Index for fast text search on city names
+CREATE INDEX idx_read_dim_mun_nome ON read_dim_municipio(nome_municipio);
+
+-- ==============================================================================
+-- 2. BASIC EDUCATION WIDE TABLE (Escola + Saeb + Ideb)
+-- Partitioned by Year. Pre-joined with geography.
+-- ==============================================================================
+DROP TABLE IF EXISTS read_fact_escola_anual CASCADE;
+
+CREATE TABLE read_fact_escola_anual (
+    ano INT NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    cod_escola INTEGER NOT NULL,
+    nome_escola VARCHAR(100) NOT NULL,
+    rede_escola VARCHAR(100) NOT NULL,
+    
+    -- IDEB Metrics
+    ideb_rend_1 REAL,
+    ideb_rend_2 REAL,
+    ideb_rend_3 REAL,
+    ideb_rend_4 REAL,
+    ideb_ind_rend REAL,
+    ideb_nota REAL,
+    
+    -- SAEB Metrics
+    saeb_nota_mat REAL,
+    saeb_nota_port REAL,
+    saeb_nota_padrao REAL,
+    
+    PRIMARY KEY (ano, cod_escola)
+) PARTITION BY LIST (ano);
+
+-- Create partitions for current/expected years (Automated via operational scripts)
+CREATE TABLE read_fact_escola_2022 PARTITION OF read_fact_escola_anual FOR VALUES IN (2022);
+CREATE TABLE read_fact_escola_2023 PARTITION OF read_fact_escola_anual FOR VALUES IN (2023);
+
+-- Indexes for analytical filtering
+CREATE INDEX idx_escola_uf_rede ON read_fact_escola_anual(sigla_uf, rede_escola);
+CREATE INDEX idx_escola_cod ON read_fact_escola_anual(cod_escola);
+
+-- ==============================================================================
+-- 3. HIGHER EDUCATION WIDE TABLE (Curso + IES + Enade)
+-- Partitioned by Year. Pre-joined with geography.
+-- ==============================================================================
+DROP TABLE IF EXISTS read_fact_curso_anual CASCADE;
+
+CREATE TABLE read_fact_curso_anual (
+    ano INT NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    codigo_ies INT NOT NULL,
+    nome_ies VARCHAR(100) NOT NULL,
+    sigla_ies VARCHAR(20),
+    rede_ies VARCHAR(100) NOT NULL,
+    id_curso INT NOT NULL,
+    nome_curso VARCHAR(100) NOT NULL,
+    
+    -- ENADE Metrics
+    enade_total_inscritos INT,
+    enade_total_concluintes INT,
+    enade_nota_bruta_ce REAL,
+    enade_nota_padronizada_ce REAL,
+    enade_nota_bruta_fg REAL,
+    enade_nota_padronizada_fg REAL,
+    enade_nota_continua REAL,
+    enade_nota_faixa REAL,
+    
+    PRIMARY KEY (ano, codigo_ies, id_curso)
+) PARTITION BY LIST (ano);
+
+-- Partitions
+CREATE TABLE read_fact_curso_2022 PARTITION OF read_fact_curso_anual FOR VALUES IN (2022);
+CREATE TABLE read_fact_curso_2023 PARTITION OF read_fact_curso_anual FOR VALUES IN (2023);
+
+-- Indexes for analytical filtering
+CREATE INDEX idx_curso_uf_ies ON read_fact_curso_anual(sigla_uf, codigo_ies);
+CREATE INDEX idx_curso_nome ON read_fact_curso_anual(nome_curso);
+```
+
+---
+
+### 4. Consistency Architecture
+
+**Data Lineage & Source of Truth:**
+*   `UF` & `MUNICIPIO` → `read_dim_municipio`
+*   `ESCOLA`, `SAEB`, `IDEB`, `ANO` → `read_fact_escola_anual`
+*   `IES`, `CURSO`, `ENADE`, `ANO` → `read_fact_curso_anual`
+
+**Refresh Strategy (Batch Window):**
+Because educational data does not change intra-day, **CDC (Change Data Capture) is explicitly rejected** to avoid unnecessary operational complexity. 
+1.  **Staleness Window**: Intentional staleness of up to 24 hours (or aligned with the external data release schedule).
+2.  **Implementation Plan (Safe & Reversible)**:
+    *   We will use a **Shadow Table / Partition Swap** pattern.
+    *   ETL writes new data into a staging table: `read_fact_curso_staging_2024`.
+    *   Once validation passes, we attach it to the main table: `ALTER TABLE read_fact_curso_anual ATTACH PARTITION read_fact_curso_staging_2024 FOR VALUES IN (2024);`.
+    *   *Reversibility*: If data is corrupt, simply `DETACH PARTITION` and drop it. Zero downtime for read queries.
+
+---
+
+### 5. Risk Analysis & Operational Complexity
+
+| Risk Factor | Assessment & Mitigation |
+| :--- | :--- |
+| **Write Amplification & Storage** | **Moderate.** Denormalizing strings (`nome_municipio`, `nome_escola`) increases storage footprint. *Mitigation*: Storage is cheap. If using a columnar engine (e.g., ClickHouse/Snowflake) or Postgres TOAST compression, the redundant strings compress exceptionally well (often >80% ratio). |
+| **Lock Contention** | **Low.** Read tables are heavily decoupled from OLTP writes. By using partition swapping, write locks are held for milliseconds during the `ATTACH PARTITION` metadata operation. Read queries are never blocked. |
+| **Data Quality (The `ANO` Anomaly)** | **High.** The original normalized schema forces `id_curso`, `id_saeb`, and `id_ideb` into the same `ANO` record. *Mitigation*: The ETL pipeline populating these read tables must explicitly separate the Higher Ed logic from the Basic Ed logic to prevent cross-joining errors. |
+| **Monitoring & Alerts** | **Required.** Implement automated reconciliation queries post-ETL. Alert if `SUM(enade_total_inscritos)` in `read_fact_curso_anual` deviates by >1% from the normalized `ENADE` table for a given year. Monitor query latency regressions via `pg_stat_statements`. |

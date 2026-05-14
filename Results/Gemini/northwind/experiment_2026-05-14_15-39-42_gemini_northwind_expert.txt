@@ -1,0 +1,170 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_15-39-42
+Model: gemini
+Prompt: expert
+Schema: northwind
+==================================================
+
+### Executive Summary
+
+To optimize read performance for your Northwind-style e-commerce/ERP database, we must transition from the current highly normalized (3NF) OLTP schema to a **hybrid denormalized read architecture**. The current schema requires up to 6-way joins to answer basic sales or customer queries, causing CPU and memory bottlenecks under heavy read concurrency. 
+
+I propose a two-pronged approach: a **Star Schema** (Fact and Dimension tables) for analytical slicing/dicing of sales data, and **Wide-Column Materialized Views** for high-throughput, low-latency application reads (e.g., Customer 360 dashboards and Product Catalogs). Because operational constraints often prohibit triggers due to write-amplification, this design assumes a **micro-batch ELT/Refresh architecture** (e.g., 15-minute cron intervals) using PostgreSQL's `CONCURRENTLY` refresh capabilities to ensure zero read-locking during updates. Intentional staleness is capped at 15 minutes, which is standard for these business domains.
+
+---
+
+### 1. Explicit Assumptions
+*   **Workload:** 70% Reads / 30% Writes. Writes are primarily single-row inserts/updates to `orders` and `order_details`.
+*   **Constraints:** No triggers allowed on the OLTP tables (to protect write latency). CDC (Change Data Capture) is not currently deployed. We have a 15-minute micro-batch window available.
+*   **Engine:** PostgreSQL (inferred from `pg_catalog."default"` and `bytea` in your DDL).
+*   **Staleness SLA:** Business users accept up to 15 minutes of data staleness for dashboards and catalogs.
+
+---
+
+### 2. Access-Pattern Matrix
+
+| Target Query / Workload | Tables Touched (Current) | Hotspots & Bottlenecks | Proposed Denormalized Artifact |
+| :--- | :--- | :--- | :--- |
+| **Q1: Sales Dashboard** (Revenue by Date, Category, Region, Rep) | `orders`, `order_details`, `products`, `categories`, `employees`, `region` | 6-way join; on-the-fly math `(qty * price * (1-discount))` | `fact_sales` (Partitioned Table), `dim_product`, `dim_employee` |
+| **Q2: Customer 360 UI** (Profile, Lifetime Value, Last Order) | `customers`, `orders`, `order_details` | Aggregating lifetime orders per customer; repeated string lookups | `mv_customer_360` (Pre-aggregated Materialized View) |
+| **Q3: Product Catalog UI** (List products with Category & Supplier) | `products`, `categories`, `suppliers` | 3-way join for every catalog page load | `mv_product_catalog` (Wide Read Table) |
+
+---
+
+### 3. Denormalization Patterns & Justification
+
+1.  **Fact-Dimension Split (`fact_sales`):** 
+    *   *Why:* Analytical queries group by time, product, or employee. A partitioned fact table at the `order_details` grain pre-calculates the `net_revenue` and resolves the many-to-many relationship.
+2.  **Pre-aggregated Rollups (`mv_customer_360`):**
+    *   *Why:* The Customer 360 page loads frequently. Computing Lifetime Value (LTV) on the fly requires scanning all historical orders. Pre-aggregating this into a single row per customer yields O(1) reads.
+3.  **Wide Read Tables (`mv_product_catalog`):**
+    *   *Why:* The product catalog is the most read entity. Pre-joining Category and Supplier names eliminates joins entirely for the frontend API.
+
+---
+
+### 4. Physical Design Details (DDL)
+
+*Note: The DDL uses PostgreSQL syntax. We cast `real` to `numeric` during denormalization to prevent floating-point aggregation errors.*
+
+```sql
+BEGIN;
+
+-- ==============================================================================
+-- ARTIFACT 1: PRODUCT CATALOG (Wide Read Table)
+-- Target: Q3 (Product Catalog UI)
+-- Refresh: MATERIALIZED VIEW
+-- ==============================================================================
+CREATE MATERIALIZED VIEW public.mv_product_catalog AS
+SELECT 
+    p.product_id,
+    p.product_name,
+    p.quantity_per_unit,
+    p.unit_price,
+    p.units_in_stock,
+    p.discontinued,
+    c.category_name,
+    s.company_name AS supplier_name,
+    s.country AS supplier_country
+FROM public.products p
+LEFT JOIN public.categories c ON p.category_id = c.category_id
+LEFT JOIN public.suppliers s ON p.supplier_id = s.supplier_id;
+
+-- Unique index required for REFRESH MATERIALIZED VIEW CONCURRENTLY
+CREATE UNIQUE INDEX uk_mv_product_catalog_id ON public.mv_product_catalog(product_id);
+-- Index for category filtering
+CREATE INDEX idx_mv_product_catalog_category ON public.mv_product_catalog(category_name);
+
+
+-- ==============================================================================
+-- ARTIFACT 2: CUSTOMER 360 (Pre-aggregated Rollup)
+-- Target: Q2 (Customer 360 UI)
+-- Refresh: MATERIALIZED VIEW
+-- ==============================================================================
+CREATE MATERIALIZED VIEW public.mv_customer_360 AS
+SELECT 
+    c.customer_id,
+    c.company_name,
+    c.contact_name,
+    c.city,
+    c.country,
+    COUNT(DISTINCT o.order_id) AS total_orders,
+    MAX(o.order_date) AS last_order_date,
+    COALESCE(SUM(od.quantity * od.unit_price * (1 - od.discount))::numeric(12,2), 0) AS lifetime_value
+FROM public.customers c
+LEFT JOIN public.orders o ON c.customer_id = o.customer_id
+LEFT JOIN public.order_details od ON o.order_id = od.order_id
+GROUP BY 
+    c.customer_id, c.company_name, c.contact_name, c.city, c.country;
+
+CREATE UNIQUE INDEX uk_mv_customer_360_id ON public.mv_customer_360(customer_id);
+-- Index for top-customer queries
+CREATE INDEX idx_mv_customer_360_ltv ON public.mv_customer_360(lifetime_value DESC);
+
+
+-- ==============================================================================
+-- ARTIFACT 3: FACT SALES (Star Schema Fact Table)
+-- Target: Q1 (Sales Dashboards)
+-- Refresh: Batch UPSERT (Simulated via Table, not MV, to allow Partitioning)
+-- ==============================================================================
+-- We use declarative partitioning by order_date to allow partition pruning 
+-- on time-series queries (e.g., "Sales in Q3 2023").
+CREATE TABLE public.fact_sales (
+    order_id smallint NOT NULL,
+    product_id smallint NOT NULL,
+    customer_id character varying(5),
+    employee_id smallint,
+    order_date date NOT NULL,
+    shipped_date date,
+    quantity smallint,
+    unit_price numeric(10,2),
+    discount numeric(4,2),
+    net_revenue numeric(12,2), -- Pre-calculated: qty * price * (1-discount)
+    ship_country character varying(15),
+    CONSTRAINT pk_fact_sales PRIMARY KEY (order_date, order_id, product_id)
+) PARTITION BY RANGE (order_date);
+
+-- Example Partitions (You would automate partition creation in production)
+CREATE TABLE public.fact_sales_1996 PARTITION OF public.fact_sales FOR VALUES FROM ('1996-01-01') TO ('1997-01-01');
+CREATE TABLE public.fact_sales_1997 PARTITION OF public.fact_sales FOR VALUES FROM ('1997-01-01') TO ('1998-01-01');
+CREATE TABLE public.fact_sales_1998 PARTITION OF public.fact_sales FOR VALUES FROM ('1998-01-01') TO ('1999-01-01');
+
+-- Indexes for dimensional slicing
+CREATE INDEX idx_fact_sales_customer ON public.fact_sales(customer_id);
+CREATE INDEX idx_fact_sales_product ON public.fact_sales(product_id);
+CREATE INDEX idx_fact_sales_employee ON public.fact_sales(employee_id);
+
+COMMIT;
+```
+
+---
+
+### 5. Consistency Architecture & Implementation Plan
+
+**Data Lineage:**
+*   `mv_product_catalog` ← `products`, `categories`, `suppliers`
+*   `mv_customer_360` ← `customers`, `orders`, `order_details`
+*   `fact_sales` ← `orders`, `order_details`
+
+**Refresh Strategy (Safe & Reversible):**
+1.  **Materialized Views:** Deploy a pg_cron job or external scheduler (Airflow/EventBridge) to execute:
+    `REFRESH MATERIALIZED VIEW CONCURRENTLY public.mv_customer_360;`
+    `REFRESH MATERIALIZED VIEW CONCURRENTLY public.mv_product_catalog;`
+    *Because we use `CONCURRENTLY`, read queries are never blocked during the refresh.*
+2.  **Fact Table:** Run a micro-batch UPSERT script every 15 minutes that queries `orders` where `updated_at > last_run` (Note: You will need to add an `updated_at` column to `orders` in the OLTP schema, or rely on a high-watermark `order_id` if they are strictly insert-only).
+3.  **Reversibility:** Application read-paths can be toggled via feature flags. If the denormalized views fail or lag, the application falls back to the legacy 3NF queries.
+
+---
+
+### 6. Risk Analysis & Observability
+
+| Risk Vector | Assessment & Mitigation |
+| :--- | :--- |
+| **Write Amplification** | **Low.** By avoiding triggers and using async MVs/Batch, the OLTP insert/update latency remains completely unaffected. |
+| **Lock Contention** | **Low.** `REFRESH ... CONCURRENTLY` uses a snapshot and background diffing. It requires a brief exclusive lock only at the very end of the transaction to swap pointers. |
+| **Storage Growth** | **Medium.** We are duplicating data. However, Northwind-scale (or even 100x Northwind) is negligible. At TB scale, we would apply `pglz` or `LZ4` compression on the `fact_sales` partitions. |
+| **Failure Modes** | If the cron job fails, data becomes stale. **Mitigation:** The application continues to serve reads (highly available, but eventually consistent). |
+
+**Monitoring & Alerts Required:**
+1.  **Freshness Lag:** Monitor the execution time of the `REFRESH` commands. Alert if `now() - last_refresh_time > 20 minutes`.
+2.  **Reconciliation Diffs:** Run a nightly Data Quality (DQ) query comparing `SUM(net_revenue)` in `fact_sales` vs `SUM(quantity * unit_price * (1-discount))` in `order_details`. Alert if diff > $0.00.
+3.  **Query Latency:** Monitor p95 read latency on the new MVs. It should drop from hundreds of milliseconds (legacy joins) to <10ms.

@@ -1,0 +1,191 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_14-33-17
+Model: gemini
+Prompt: intermediate
+Schema: TPC_H
+==================================================
+
+As a senior database performance engineer, I recognize this schema immediately: it is the classic **TPC-H benchmark schema**. It is highly normalized (3NF) and designed to test the limits of OLAP (Online Analytical Processing) engines by forcing massive, complex joins across millions or billions of rows. 
+
+To optimize this for a read-heavy, low-latency workload, we must pivot from a 3NF model to a **Star Schema** with a **Wide Fact Table** and **Pre-aggregated Summary Tables**.
+
+Here is the workload-driven analysis, denormalization design, and the resulting physical DDL.
+
+---
+
+### 1. Workload-Driven Analysis
+
+**Join Paths & High-Cost Operations:**
+1. **The `LINEITEM` to `ORDERS` Join:** This is the most expensive operation in the workload. Every time you want to analyze sales by order date, customer, or order status, the database must join the massive `LINEITEM` table to the large `ORDERS` table.
+2. **Geographical Snowflaking (`CUSTOMER`/`SUPPLIER` $\rightarrow$ `NATION` $\rightarrow$ `REGION`):** To group sales by a customer's region or a supplier's nation, the engine must perform a 3-table lookup. While `NATION` and `REGION` are tiny, joining them against millions of customers/suppliers during a massive scan burns CPU cycles and pollutes memory.
+3. **On-the-fly Revenue Calculations:** Queries constantly calculate `L_EXTENDEDPRICE * (1 - L_DISCOUNT)` and `L_EXTENDEDPRICE * (1 - L_DISCOUNT) * (1 + L_TAX)`. Doing this math row-by-row at read time adds significant CPU latency.
+4. **Date Filtering:** Almost all analytical queries filter on `L_SHIPDATE` or `O_ORDERDATE`. Scanning the entire `LINEITEM` table to find a specific month's data is an I/O bottleneck.
+
+**Denormalization Candidates:**
+* Collapse `NATION` and `REGION` directly into `CUSTOMER` and `SUPPLIER`.
+* Merge `ORDERS` and `LINEITEM` into a single "Wide" Fact Table.
+* Precompute revenue and tax calculations at the row level.
+
+---
+
+### 2. Denormalization Design
+
+**1. Pre-joined "Wide" Fact Table (`FACT_ORDER_LINE`)**
+We will merge `ORDERS` and `LINEITEM`. By bringing `O_ORDERDATE`, `O_CUSTKEY`, and `O_ORDERSTATUS` down to the line-item grain, we completely eliminate the largest join in the database. We will also add precomputed columns for `NET_REVENUE` and `TOTAL_CHARGE`.
+
+**2. Flattened Dimensions (`DIM_CUSTOMER`, `DIM_SUPPLIER`)**
+We will embed the `NATION_NAME` and `REGION_NAME` directly into the Customer and Supplier tables. This removes the need for the `NATION` and `REGION` tables entirely for read queries, reducing a 3-table join to a simple dimension lookup.
+
+**3. Summary / Aggregate Table (`AGG_DAILY_REGION_SALES`)**
+Dashboards rarely need line-item granularity. We will create a daily aggregate table rolled up by `O_ORDERDATE` and `REGION_NAME`. The grain is exactly: *Date + Region + Market Segment*.
+
+**4. Partitioning & Indexing Strategy**
+* **Partitioning:** We will partition the massive `FACT_ORDER_LINE` table by `L_SHIPDATE` (Range Partitioning). This allows the database to completely ignore irrelevant partitions (Partition Pruning) when querying specific timeframes.
+* **Covering Indexes:** We will use composite indexes with `INCLUDE` clauses. For example, an index on `L_SHIPDATE` that *includes* the precomputed revenue columns means the database can answer revenue queries directly from the B-Tree index without touching the table heap.
+
+---
+
+### 3. New Physical Schema (DDL)
+
+*Note: The following DDL uses standard SQL with PostgreSQL-style extensions for partitioning and covering indexes, which are widely supported in modern RDBMS.*
+
+```sql
+-- ====================================================================
+-- 1. DIMENSION TABLES (Flattened / Denormalized)
+-- ====================================================================
+
+-- Combines CUSTOMER, NATION, and REGION
+CREATE TABLE DIM_CUSTOMER ( 
+    C_CUSTKEY       INTEGER NOT NULL,
+    C_NAME          VARCHAR(25) NOT NULL,
+    C_ADDRESS       VARCHAR(40) NOT NULL,
+    C_PHONE         CHAR(15) NOT NULL,
+    C_ACCTBAL       DECIMAL(15,2) NOT NULL,
+    C_MKTSEGMENT    CHAR(10) NOT NULL,
+    C_NATION_NAME   CHAR(25) NOT NULL, -- Denormalized from NATION
+    C_REGION_NAME   CHAR(25) NOT NULL, -- Denormalized from REGION
+    C_COMMENT       VARCHAR(117) NOT NULL,
+    CONSTRAINT PK_DIM_CUSTOMER PRIMARY KEY (C_CUSTKEY)
+);
+
+-- Combines SUPPLIER, NATION, and REGION
+CREATE TABLE DIM_SUPPLIER ( 
+    S_SUPPKEY       INTEGER NOT NULL,
+    S_NAME          CHAR(25) NOT NULL,
+    S_ADDRESS       VARCHAR(40) NOT NULL,
+    S_PHONE         CHAR(15) NOT NULL,
+    S_ACCTBAL       DECIMAL(15,2) NOT NULL,
+    S_NATION_NAME   CHAR(25) NOT NULL, -- Denormalized from NATION
+    S_REGION_NAME   CHAR(25) NOT NULL, -- Denormalized from REGION
+    S_COMMENT       VARCHAR(101) NOT NULL,
+    CONSTRAINT PK_DIM_SUPPLIER PRIMARY KEY (S_SUPPKEY)
+);
+
+-- PART remains largely unchanged, but renamed for consistency
+CREATE TABLE DIM_PART ( 
+    P_PARTKEY       INTEGER NOT NULL,
+    P_NAME          VARCHAR(55) NOT NULL,
+    P_MFGR          CHAR(25) NOT NULL,
+    P_BRAND         CHAR(10) NOT NULL,
+    P_TYPE          VARCHAR(25) NOT NULL,
+    P_SIZE          INTEGER NOT NULL,
+    P_CONTAINER     CHAR(10) NOT NULL,
+    P_RETAILPRICE   DECIMAL(15,2) NOT NULL,
+    P_COMMENT       VARCHAR(23) NOT NULL,
+    CONSTRAINT PK_DIM_PART PRIMARY KEY (P_PARTKEY)
+);
+
+-- ====================================================================
+-- 2. WIDE FACT TABLE (Pre-joined & Pre-calculated)
+-- ====================================================================
+
+-- Combines ORDERS and LINEITEM. 
+-- Partitioned by L_SHIPDATE to optimize the most common time-series filters.
+CREATE TABLE FACT_ORDER_LINE ( 
+    -- Lineitem Keys
+    L_ORDERKEY      INTEGER NOT NULL,
+    L_LINENUMBER    INTEGER NOT NULL,
+    L_PARTKEY       INTEGER NOT NULL,
+    L_SUPPKEY       INTEGER NOT NULL,
+    
+    -- Denormalized from ORDERS (Eliminates massive Join)
+    O_CUSTKEY       INTEGER NOT NULL,
+    O_ORDERDATE     DATE NOT NULL,
+    O_ORDERSTATUS   CHAR(1) NOT NULL,
+    O_ORDERPRIORITY CHAR(15) NOT NULL,
+    O_SHIPPRIORITY  INTEGER NOT NULL,
+
+    -- Lineitem Metrics
+    L_QUANTITY      DECIMAL(15,2) NOT NULL,
+    L_EXTENDEDPRICE DECIMAL(15,2) NOT NULL,
+    L_DISCOUNT      DECIMAL(15,2) NOT NULL,
+    L_TAX           DECIMAL(15,2) NOT NULL,
+    
+    -- PRECOMPUTED AGGREGATES (Saves CPU at read time)
+    L_NET_REVENUE   DECIMAL(15,2) GENERATED ALWAYS AS (L_EXTENDEDPRICE * (1 - L_DISCOUNT)) STORED,
+    L_TOTAL_CHARGE  DECIMAL(15,2) GENERATED ALWAYS AS (L_EXTENDEDPRICE * (1 - L_DISCOUNT) * (1 + L_TAX)) STORED,
+
+    -- Lineitem Attributes
+    L_RETURNFLAG    CHAR(1) NOT NULL,
+    L_LINESTATUS    CHAR(1) NOT NULL,
+    L_SHIPDATE      DATE NOT NULL,
+    L_COMMITDATE    DATE NOT NULL,
+    L_RECEIPTDATE   DATE NOT NULL,
+    L_SHIPINSTRUCT  CHAR(25) NOT NULL,
+    L_SHIPMODE      CHAR(10) NOT NULL,
+
+    CONSTRAINT PK_FACT_ORDER_LINE PRIMARY KEY (L_ORDERKEY, L_LINENUMBER, L_SHIPDATE)
+) PARTITION BY RANGE (L_SHIPDATE);
+
+-- Example Partitions (You would generate these dynamically or via scripts)
+CREATE TABLE FACT_ORDER_LINE_1998_01 PARTITION OF FACT_ORDER_LINE FOR VALUES FROM ('1998-01-01') TO ('1998-02-01');
+CREATE TABLE FACT_ORDER_LINE_1998_02 PARTITION OF FACT_ORDER_LINE FOR VALUES FROM ('1998-02-01') TO ('1998-03-01');
+
+-- ====================================================================
+-- 3. AGGREGATE / SUMMARY TABLES
+-- ====================================================================
+
+-- Grain: Daily per Region per Market Segment
+-- Eliminates joining Fact to Customer for high-level dashboarding
+CREATE MATERIALIZED VIEW AGG_DAILY_REGION_SALES AS
+SELECT 
+    f.O_ORDERDATE,
+    c.C_REGION_NAME,
+    c.C_MKTSEGMENT,
+    SUM(f.L_QUANTITY) AS TOTAL_QUANTITY,
+    SUM(f.L_NET_REVENUE) AS TOTAL_NET_REVENUE,
+    SUM(f.L_TOTAL_CHARGE) AS TOTAL_CHARGES,
+    COUNT(*) AS ORDER_LINE_COUNT
+FROM FACT_ORDER_LINE f
+JOIN DIM_CUSTOMER c ON f.O_CUSTKEY = c.C_CUSTKEY
+GROUP BY 
+    f.O_ORDERDATE,
+    c.C_REGION_NAME,
+    c.C_MKTSEGMENT;
+
+-- ====================================================================
+-- 4. INDEXING STRATEGY
+-- ====================================================================
+
+-- 1. Covering Index for Pricing Summary Report (TPC-H Q1 equivalent)
+-- Aligned to predicates (SHIPDATE) and covers all required outputs so the heap is never touched.
+CREATE INDEX IDX_FACT_SHIPDATE_COVERING 
+ON FACT_ORDER_LINE (L_SHIPDATE, L_RETURNFLAG, L_LINESTATUS)
+INCLUDE (L_QUANTITY, L_EXTENDEDPRICE, L_DISCOUNT, L_TAX, L_NET_REVENUE, L_TOTAL_CHARGE);
+
+-- 2. Foreign Key Indexes for Dimension Lookups
+CREATE INDEX IDX_FACT_CUSTKEY ON FACT_ORDER_LINE (O_CUSTKEY);
+CREATE INDEX IDX_FACT_PART_SUPP ON FACT_ORDER_LINE (L_PARTKEY, L_SUPPKEY);
+
+-- 3. Order Date Index (For queries filtering on Order Date rather than Ship Date)
+CREATE INDEX IDX_FACT_ORDERDATE ON FACT_ORDER_LINE (O_ORDERDATE)
+INCLUDE (L_NET_REVENUE);
+
+-- 4. Aggregate View Index
+CREATE UNIQUE INDEX IDX_MV_DAILY_REGION 
+ON AGG_DAILY_REGION_SALES (O_ORDERDATE, C_REGION_NAME, C_MKTSEGMENT);
+```
+
+### Why this guarantees correctness and lowers latency:
+1. **Correctness:** We use `GENERATED ALWAYS AS ... STORED` for the revenue columns. This guarantees that `L_NET_REVENUE` is mathematically perfect at the moment of insertion/update, removing the risk of application-layer calculation drift.
+2. **Latency:** A query asking for "Total Revenue in Europe for Q1 1998" previously required joining `LINEITEM` $\rightarrow$ `ORDERS` $\rightarrow$ `CUSTOMER` $\rightarrow$ `NATION` $\rightarrow$ `REGION` and doing row-by-row math. Now, it either hits the `AGG_DAILY_REGION_SALES` materialized view (returning in milliseconds) or, if deeper granularity is needed, queries `FACT_ORDER_LINE` directly, utilizing partition pruning on `L_SHIPDATE` and joining only to `DIM_CUSTOMER`.

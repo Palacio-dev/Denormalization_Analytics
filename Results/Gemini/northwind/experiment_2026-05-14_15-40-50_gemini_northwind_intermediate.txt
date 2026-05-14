@@ -1,0 +1,169 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_15-40-50
+Model: gemini
+Prompt: intermediate
+Schema: northwind
+==================================================
+
+As a senior database performance engineer, I have analyzed your physical schema. You are using a highly normalized (3NF) model—essentially the classic "Northwind" database. While excellent for minimizing storage and preventing update anomalies, this strict normalization creates significant read-latency bottlenecks due to deep join trees.
+
+Here is the step-by-step denormalization strategy to optimize this schema for a read-heavy workload while preserving point-in-time business correctness.
+
+---
+
+### 1. Workload-Driven Analysis
+
+In an e-commerce/ERP system like this, read workloads typically fall into four high-cost patterns:
+
+*   **Pattern A: Order History & Invoicing (High Cost)**
+    *   *The Problem:* To display a single customer invoice, the database must join 6 tables: `orders` → `order_details` → `products` → `categories` → `customers` → `shippers`.
+    *   *Correctness Risk:* If a product or company changes its name today, joining to the live `products` or `customers` table alters historical invoices.
+*   **Pattern B: Product Catalog Browsing (Medium Cost)**
+    *   *The Problem:* Displaying the product catalog requires joining `products` → `categories` → `suppliers`. This is the most frequently hit page, so even a 3-table join adds up under concurrent load.
+*   **Pattern C: Sales Dashboards & Reporting (Very High Cost)**
+    *   *The Problem:* Calculating "Monthly Sales by Category" requires scanning massive transaction tables (`orders`, `order_details`) and joining them to dimensions (`products`, `categories`), then grouping and summing on the fly.
+*   **Pattern D: Employee Directory & Regions (Medium Cost)**
+    *   *The Problem:* Finding an employee's assigned regions requires traversing a bridge table: `employees` → `employee_territories` → `territories` → `region`.
+
+---
+
+### 2. Denormalization Design
+
+To eliminate these bottlenecks, we will apply the following targeted denormalizations:
+
+**A. Point-in-Time Redundant Attributes (Fixes Pattern A & preserves correctness)**
+*   *Action:* Duplicate `customer_name`, `shipper_name` into `orders`. Duplicate `product_name` into `order_details`.
+*   *Why:* This eliminates joins to `customers`, `shippers`, and `products` for historical invoice reads. More importantly, it "snapshots" the names at the time of the order, preserving legal correctness if the master records change later.
+*   *Action:* Add a precomputed `line_total` to `order_details`.
+
+**B. Flattened Reference Data (Fixes Pattern B)**
+*   *Action:* Duplicate `category_name` and `supplier_name` directly into the `products` table.
+*   *Why:* Category and Supplier names rarely change. Duplicating them allows the product catalog to be served from a single table scan/index seek.
+
+**C. Array Aggregation for Bridge Tables (Fixes Pattern D)**
+*   *Action:* Add `territories_list` (text array) to `employees`.
+*   *Why:* PostgreSQL handles arrays efficiently. By rolling up the 1-to-Many-to-1 territory relationships into an array on the `employees` table, we completely eliminate the need to query `employee_territories`, `territories`, and `region` for directory reads.
+
+**D. Materialized Views for Aggregates & Wide Reads (Fixes Pattern A & C)**
+*   *Action:* Create `mv_sales_daily_rollup` (Grain: Date + Category + Product).
+*   *Why:* Pre-calculates heavy math (`SUM(quantity * price)`) so dashboards query a tiny, pre-aggregated table.
+*   *Action:* Create `mv_invoice_wide` (Grain: Order Line Item).
+*   *Why:* A star-like flattened read model for API endpoints that need everything about an order instantly.
+
+---
+
+### 3. The New Physical Schema (PostgreSQL DDL)
+
+Below is the DDL to apply these denormalizations to your existing PostgreSQL database.
+
+```sql
+BEGIN;
+
+-- ============================================================================
+-- 1. BASE TABLE MODIFICATIONS (Redundant Columns & Computed Fields)
+-- ============================================================================
+
+-- Add snapshot columns to Orders to eliminate Customer and Shipper joins
+ALTER TABLE public.orders
+    ADD COLUMN customer_name character varying(40),
+    ADD COLUMN shipper_name character varying(40);
+
+-- Add snapshot columns to Order Details to eliminate Product joins
+-- Add a computed column to eliminate on-the-fly math for line totals
+ALTER TABLE public.order_details
+    ADD COLUMN product_name character varying(40),
+    ADD COLUMN line_total real GENERATED ALWAYS AS (quantity * unit_price * (1 - discount)) STORED;
+
+-- Flatten Product Catalog to eliminate Category and Supplier joins
+ALTER TABLE public.products
+    ADD COLUMN category_name character varying(15),
+    ADD COLUMN supplier_name character varying(40);
+
+-- Flatten Employee Territories into arrays to eliminate bridge table joins
+ALTER TABLE public.employees
+    ADD COLUMN territories_list text[],
+    ADD COLUMN regions_list text[];
+
+-- ============================================================================
+-- 2. MATERIALIZED VIEWS (Read-Optimized Models)
+-- ============================================================================
+
+-- WIDE TABLE: Pre-joined Invoice Lines for instantaneous order lookups
+-- Grain: One row per order line item
+CREATE MATERIALIZED VIEW public.mv_invoice_wide AS
+SELECT 
+    o.order_id,
+    o.order_date,
+    o.customer_id,
+    o.customer_name,
+    o.shipper_name,
+    o.ship_city,
+    o.ship_country,
+    od.product_id,
+    od.product_name,
+    od.unit_price,
+    od.quantity,
+    od.discount,
+    od.line_total,
+    p.category_name
+FROM public.orders o
+JOIN public.order_details od ON o.order_id = od.order_id
+JOIN public.products p ON od.product_id = p.product_id;
+
+-- AGGREGATE TABLE: Daily Sales Rollup for Dashboards
+-- Grain: One row per Date, Category, and Product
+CREATE MATERIALIZED VIEW public.mv_sales_daily_rollup AS
+SELECT 
+    o.order_date,
+    p.category_name,
+    od.product_name,
+    SUM(od.quantity) AS total_quantity_sold,
+    SUM(od.line_total) AS total_revenue,
+    COUNT(DISTINCT o.order_id) AS total_orders
+FROM public.orders o
+JOIN public.order_details od ON o.order_id = od.order_id
+JOIN public.products p ON od.product_id = p.product_id
+GROUP BY 
+    o.order_date,
+    p.category_name,
+    od.product_name;
+
+-- ============================================================================
+-- 3. INDEXING STRATEGY (Aligned to Filters, Sorts, and Covering Reads)
+-- ============================================================================
+
+-- Cover the Product Catalog query (Filter by category, sort by name, return details)
+CREATE INDEX idx_products_catalog 
+    ON public.products (category_id, product_name) 
+    INCLUDE (unit_price, units_in_stock, supplier_name, category_name);
+
+-- Optimize Order History lookups by Customer (Sort by date descending)
+CREATE INDEX idx_orders_customer_history 
+    ON public.orders (customer_id, order_date DESC)
+    INCLUDE (order_id, customer_name, shipper_name, freight);
+
+-- Optimize Order Details lookup (Covering index for the line items)
+CREATE INDEX idx_order_details_covering 
+    ON public.order_details (order_id)
+    INCLUDE (product_id, product_name, quantity, unit_price, discount, line_total);
+
+-- Indexes for the Materialized Views to ensure fast UI rendering
+CREATE UNIQUE INDEX idx_mv_invoice_wide_pk 
+    ON public.mv_invoice_wide (order_id, product_id);
+
+CREATE INDEX idx_mv_invoice_wide_customer 
+    ON public.mv_invoice_wide (customer_id, order_date DESC);
+
+CREATE UNIQUE INDEX idx_mv_sales_daily_pk 
+    ON public.mv_sales_daily_rollup (order_date, category_name, product_name);
+
+CREATE INDEX idx_mv_sales_daily_category 
+    ON public.mv_sales_daily_rollup (category_name, order_date DESC);
+
+COMMIT;
+```
+
+### Implementation Notes for your Engineering Team:
+1. **Data Hydration**: You will need to run `UPDATE` statements to backfill the new redundant columns (e.g., `UPDATE products p SET category_name = c.category_name FROM categories c WHERE p.category_id = c.category_id;`).
+2. **Write-Path Adjustments**: Your application's write-path (or database triggers) must be updated. When an order is placed, the application must insert the *current* `product_name` into `order_details` and the *current* `customer_name` into `orders`. 
+3. **MV Refresh Strategy**: The materialized views should be refreshed asynchronously. `REFRESH MATERIALIZED VIEW CONCURRENTLY mv_sales_daily_rollup;` can be run via a cron job (e.g., pg_cron) every hour or night, depending on your business's tolerance for stale dashboard data. Because we added `UNIQUE INDEX`es to the MVs, PostgreSQL can refresh them concurrently without locking read queries.

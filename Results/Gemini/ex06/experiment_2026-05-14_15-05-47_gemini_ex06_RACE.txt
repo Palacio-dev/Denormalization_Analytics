@@ -1,0 +1,149 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_15-05-47
+Model: gemini
+Prompt: RACE
+Schema: ex06
+==================================================
+
+As a Senior Data Engineer, I have reviewed the provided normalized relational model and the initial denormalization attempt. 
+
+While the provided denormalized model is on the right track by reducing joins, it mixes dimensional and fact concepts (e.g., naming a table `Escola` but giving it a primary key of `codigo_escola + ano`, which actually makes it a Fact table). Furthermore, the original normalized model contains a severe architectural flaw in the `ANO` table that must be addressed.
+
+Here is the execution of the 6-step RACE framework to deliver a highly optimized, enterprise-grade analytical schema.
+
+---
+
+### 1. Deep Analysis of the Provided SQL Creation Script
+* **High Fragmentation:** The schema is highly normalized (Snowflake-like). To get the ENADE score of a course in a specific state, a query must traverse 6 tables (`ENADE` -> `ANO` -> `CURSO` -> `IES` -> `MUNICIPIO` -> `UF`).
+* **Architectural Flaw in `ANO` Table:** The `ANO` table incorrectly forces a 1:1:1:1 relationship between `id_curso`, `id_enade`, `id_saeb`, and `id_ideb`. In reality, **Basic Education** (SAEB, IDEB) belongs to `ESCOLA`, while **Higher Education** (ENADE) belongs to `CURSO/IES`. Forcing them into a single junction table creates false relationships and massive data sparsity.
+* **Pre-aggregated Data:** The `MUNICIPIO` table already contains derived attributes (`media_ideb`, `media_saeb`, `media_enade`). This is good for analytics but requires careful maintenance if underlying scores change.
+
+### 2. Frequent Queries / Workload Context
+In a read-heavy analytical workload for educational data, analysts and BI tools (like PowerBI, Tableau, or Metabase) will typically run queries such as:
+* **Trend Analysis:** *"What is the historical evolution of SAEB and IDEB scores for state-level schools in a specific municipality?"*
+* **Ranking & Filtering:** *"Top 10 Higher Education Courses (IES) with the highest ENADE scores in the state of SP for 2023."*
+* **Macro Aggregations:** *"Average ENADE vs. IDEB performance grouped by State and Network (Public vs. Private)."*
+
+**Bottlenecks:** The primary bottlenecks are the massive `JOIN` operations required to traverse the hierarchy from the exam score up to the State (`UF`) level.
+
+### 3. Evaluation of Denormalization Techniques
+* **Vertical Partitioning (Crucial):** We must split the database into two distinct business domains: **Basic Education** and **Higher Education**. They do not share the same grain.
+* **Collapsing Relations:** We will collapse `UF` and `MUNICIPIO` into the main tables. We will also collapse `IES` and `CURSO`.
+* **Adding Redundant Attributes:** We will push geographic data (`sigla_uf`, `nome_municipio`) and descriptive data (`nome_escola`, `rede`) directly into the fact tables to eliminate lookup joins entirely.
+* **Adding Derived Attributes:** We will maintain a dedicated table for City-level aggregates to serve macro-level dashboards instantly.
+
+### 4. Designing Multiple Possible Schemas
+* **Design A: Traditional Star Schema (Dimensional)**
+  * *Dimensions:* `Dim_Localidade`, `Dim_IES`, `Dim_Escola`, `Dim_Tempo`
+  * *Facts:* `Fato_Enade`, `Fato_Saeb_Ideb`
+  * *Pros:* Standard OLAP design, avoids data duplication in dimensions.
+  * *Cons:* Still requires 2-3 JOINs per query.
+* **Design B: One Big Table (OBT) Architecture**
+  * *Tables:* `OBT_Ensino_Superior`, `OBT_Ensino_Basico`, `Dim_Municipio_Agregados`
+  * *Pros:* Zero JOINs required for domain-specific queries. Maximizes performance in columnar databases and modern BI tools. 
+  * *Cons:* High data redundancy (e.g., repeating city names), but storage is cheap compared to compute costs in analytical environments.
+
+### 5. Evaluating and Choosing the Best Schema
+For a read-heavy analytical workload, **Design B (One Big Table)** is the most consistent and performant choice. Modern analytical databases thrive on wide, flat tables. By partitioning the data into `OBT_Ensino_Basico` and `OBT_Ensino_Superior`, we fix the architectural flaw of the original `ANO` table and provide a structure where BI tools can filter, group, and aggregate with sub-second latency.
+
+---
+
+### 6. Design of the New Denormalized Schema
+
+Below is the optimized physical schema. I have renamed the tables to accurately reflect their analytical nature (OBT) and combined the metrics logically.
+
+```sql
+BEGIN;
+
+-- 1. OBT: Basic Education (Zero-Join table for Basic Ed Analytics)
+-- Techniques: Collapsing Relations, Adding Redundant Attributes, Vertical Partitioning
+DROP TABLE IF EXISTS OBT_Ensino_Basico CASCADE;
+
+CREATE TABLE OBT_Ensino_Basico (
+    ano INTEGER NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100),
+    id_municipio INT,
+    nome_municipio VARCHAR(100) NOT NULL,
+    cod_escola INTEGER NOT NULL,
+    nome_escola VARCHAR(100) NOT NULL,
+    rede_escola VARCHAR(100) NOT NULL,
+    
+    -- IDEB Metrics
+    ideb_rend_1 REAL,
+    ideb_rend_2 REAL,
+    ideb_rend_3 REAL,
+    ideb_rend_4 REAL,
+    ideb_ind_rend REAL,
+    ideb_nota REAL,
+    
+    -- SAEB Metrics
+    saeb_nota_mat REAL,
+    saeb_nota_port REAL,
+    saeb_nota_padrao REAL,
+    
+    PRIMARY KEY (ano, cod_escola)
+);
+
+-- 2. OBT: Higher Education (Zero-Join table for Higher Ed Analytics)
+-- Techniques: Collapsing Relations, Adding Redundant Attributes, Vertical Partitioning
+DROP TABLE IF EXISTS OBT_Ensino_Superior CASCADE;
+
+CREATE TABLE OBT_Ensino_Superior (
+    ano INTEGER NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100),
+    id_municipio INT,
+    nome_municipio VARCHAR(100) NOT NULL,
+    codigo_ies INT NOT NULL,
+    nome_ies VARCHAR(100) NOT NULL,
+    sigla_ies VARCHAR(20),
+    rede_ies VARCHAR(100) NOT NULL,
+    id_curso INT NOT NULL,
+    nome_curso VARCHAR(100) NOT NULL,
+    
+    -- ENADE Metrics
+    enade_total_inscritos INT,
+    enade_total_concluintes INT,
+    enade_nota_bruta_ce REAL,
+    enade_nota_padronizada_ce REAL,
+    enade_nota_bruta_fg REAL,
+    enade_nota_padronizada_fg REAL,
+    enade_nota_continua REAL,
+    enade_nota_faixa REAL,
+    
+    PRIMARY KEY (ano, id_curso)
+);
+
+-- 3. City-Level Aggregates (For Macro Cross-Domain Dashboards)
+-- Techniques: Adding Derived Attributes, Collapsing Relations
+DROP TABLE IF EXISTS Dim_Municipio_Agregados CASCADE;
+
+CREATE TABLE Dim_Municipio_Agregados (
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    id_municipio INT PRIMARY KEY,
+    nome_municipio VARCHAR(100) NOT NULL,
+    qtd_habitantes INT,
+    qtd_ies INT,
+    qtd_escolas INT,
+    
+    -- Derived Attributes pre-calculated for fast macro-analytics
+    media_ideb REAL,
+    media_saeb REAL,
+    media_enade REAL,
+    total_participantes INT
+);
+
+-- Optional: Indexing for common analytical filter paths
+CREATE INDEX idx_obt_basico_uf_mun ON OBT_Ensino_Basico(sigla_uf, nome_municipio);
+CREATE INDEX idx_obt_superior_uf_mun ON OBT_Ensino_Superior(sigla_uf, nome_municipio);
+CREATE INDEX idx_obt_superior_ies ON OBT_Ensino_Superior(codigo_ies);
+
+COMMIT;
+```
+
+### Key Improvements over the Initial Attempt:
+1. **Accurate Naming Conventions:** Tables are named `OBT_Ensino_Basico` and `OBT_Ensino_Superior` rather than `Escola` and `Curso`. This clarifies to other engineers that these are fact-bearing analytical tables, not dimensional entities.
+2. **Domain Separation:** By separating Higher Ed and Basic Ed, we avoid sparse columns and false relationships.
+3. **Macro-Level Table:** The `Dim_Municipio_Agregados` table preserves the pre-calculated metrics from the original model, allowing executives to query city-wide performance without having to scan the granular OBT tables.

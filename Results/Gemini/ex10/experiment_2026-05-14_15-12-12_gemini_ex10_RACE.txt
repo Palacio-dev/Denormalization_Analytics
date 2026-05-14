@@ -1,0 +1,109 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_15-12-12
+Model: gemini
+Prompt: RACE
+Schema: ex10
+==================================================
+
+As a Senior Data Engineer with 15 years of experience in database performance and architecture, I have reviewed your normalized relational model. For read-heavy analytical workloads (OLAP), highly normalized schemas often suffer from severe performance degradation due to the overhead of multi-table joins and on-the-fly aggregations. 
+
+Here is the execution of the 6-step framework to denormalize your database and optimize it for analytical queries.
+
+### 1. Deep Analysis of the Provided SQL Script
+The normalized model consists of 6 tables designed for transactional integrity (OLTP) rather than analytical reads:
+*   **`continente` & `paises`**: Static hierarchical data. To get a country's continent, a JOIN is required.
+*   **`populacao` & `emissao_g_efeito_estufa`**: Time-series data at the `(id_paises, ano)` grain. Stored in separate tables.
+*   **`fonte_energia` & `consumo_anual`**: Represents a many-to-many relationship. Energy consumption is stored as rows (narrow format), meaning a country will have multiple rows per year depending on the energy sources used.
+
+**Current Bottleneck:** To analyze the correlation between a continent's population, its greenhouse gas emissions, and its usage of solar energy in a specific year, the database engine must execute a complex 6-table `JOIN` with grouping and filtering.
+
+### 2. Frequent Queries / Workload Context
+In an analytical environment focusing on global environmental and demographic metrics, the most frequent heavy-read queries will likely be:
+*   *Trend Analysis:* "What is the year-over-year growth of greenhouse gas emissions per capita by continent?"
+*   *Energy Matrix Profiling:* "Which countries have the highest percentage of renewable energy (solar, hydro) vs. fossil fuels (coal, oil)?"
+*   *Correlation:* "Does a higher population strictly correlate with higher emissions, or does the energy source matrix offset this?"
+
+**Bottlenecks:** 
+1. **The Year-Country Grain:** Joining `populacao`, `emissao_g_efeito_estufa`, and `consumo_anual` on `id_paises` and `ano` repeatedly is computationally expensive.
+2. **Row-to-Column Pivoting:** BI tools and analysts usually need energy sources as columns (e.g., `% Solar`, `% Coal`) rather than rows to build dashboards and correlation matrices. Doing this at query time using `CASE WHEN` or `PIVOT` functions drains CPU resources.
+
+### 3. Evaluating Common Denormalization Techniques
+*   **Collapsing Relations (Highly Recommended):** We can merge `continente`, `paises`, `populacao`, and `emissao_g_efeito_estufa` into a single table based on the `(Country, Year)` grain.
+*   **Adding Derived Attributes (Highly Recommended):** 
+    1. Pre-calculating `gee_per_capita` (Emissions / Population) saves the CPU from doing division on millions of rows during runtime.
+    2. Pivoting the `consumo_anual` rows into distinct columns (`fonte_carvao`, `fonte_solar`, etc.) directly in the table.
+*   **Adding Redundant Attributes (Recommended):** Storing the `nome` (Country Name) and `continente` (Continent Name) directly alongside the yearly metrics eliminates the need to join dimension tables.
+*   **Vertical Partitioning (Not Recommended here):** Our goal is to simplify reads. Splitting the data would re-introduce the need for joins, defeating the purpose of an analytical One Big Table (OBT).
+
+### 4. Designing Multiple Possible Denormalized Schemas
+**Option A: Star Schema (Dimensional Model)**
+*   *Fact Table:* `fato_indicadores_anuais` (id_pais, ano, populacao, emissao_total, gee_per_capita)
+*   *Fact Table 2:* `fato_matriz_energetica` (id_pais, ano, id_fonte, porcentagem)
+*   *Dimension:* `dim_pais` (id_pais, nome_pais, nome_continente, fundacao)
+*   *Pros:* Cleaner than 3NF, handles changing dimensions well.
+*   *Cons:* Still requires joins between Facts and Dimensions, and pivoting energy sources is still required at query time.
+
+**Option B: One Big Table (OBT) / Fully Denormalized**
+*   *Table:* `infos_anuais_paises`
+*   *Structure:* Every row represents a unique `(Country, Year)`. All descriptive attributes (Continent, Country Name) are redundantly stored. All metrics (Population, Emissions) and pivoted energy sources (Coal, Solar, etc.) are stored as columns. Derived metrics (Per Capita) are pre-calculated.
+*   *Pros:* Zero joins required. Maximum read performance. Perfect for BI tools (Tableau, PowerBI, Looker).
+*   *Cons:* Data redundancy (continent names repeated), but storage is cheap in modern Data Warehouses compared to compute.
+
+### 5. Evaluating and Choosing the Best Schema
+For a read-heavy analytical workload, **Option B (One Big Table)** is the absolute best choice. Modern columnar databases (like Snowflake, BigQuery, or Redshift) and even PostgreSQL with analytical extensions thrive on wide, denormalized tables. 
+
+By collapsing all relations into `infos_anuais_paises`, we eliminate the N:M relationship complexity of energy sources by pivoting them into derived columns, and we pre-compute critical KPIs like `gee_per_capita`. *(Note: I will also include the extended analytical columns like GDP and natural disasters as requested in your target vision, assuming they are integrated from external sources during the ETL process).*
+
+### 6. Design the New Denormalized Schema
+Here is the final, optimized physical schema for the denormalized model.
+
+```sql
+BEGIN;
+
+DROP TABLE IF EXISTS public.infos_anuais_paises;
+
+-- Creation of the One Big Table (OBT) for Analytical Workloads
+CREATE TABLE public.infos_anuais_paises (
+    -- Redundant Attributes (Collapsing 'paises' and 'continente')
+    nome_pais VARCHAR(100) NOT NULL,
+    codigo_pais VARCHAR(3),
+    continente VARCHAR(50) NOT NULL,
+    ano INTEGER NOT NULL,
+    
+    -- Collapsed Relations (Metrics from 'populacao' and 'emissao_g_efeito_estufa')
+    populacao BIGINT,
+    quantidade_emitida_gee BIGINT,
+    
+    -- Derived Attributes (Pre-calculated KPIs to save CPU at query time)
+    gee_per_capita DOUBLE PRECISION,
+    
+    -- Derived Attributes (Pivoted from 'consumo_anual' and 'fonte_energia')
+    -- Storing percentages or absolute values directly as columns
+    energia_produzida DOUBLE PRECISION,
+    fonte_carvao DOUBLE PRECISION DEFAULT 0,
+    fonte_nuclear DOUBLE PRECISION DEFAULT 0,
+    fonte_gas DOUBLE PRECISION DEFAULT 0,
+    fonte_petroleo DOUBLE PRECISION DEFAULT 0,
+    fonte_solar DOUBLE PRECISION DEFAULT 0,
+    fonte_hidreletrica DOUBLE PRECISION DEFAULT 0,
+
+    -- Extended Analytical Attributes (Integrated from external data marts)
+    morte_desastres_naturais INTEGER,
+    pib_per_capita DOUBLE PRECISION,
+    anomalia_temperatura DOUBLE PRECISION,
+
+    -- Primary Key constraint to ensure data integrity at the grain level
+    CONSTRAINT infos_anuais_paises_pkey PRIMARY KEY (nome_pais, ano)
+);
+
+-- Creating indexes to support the most frequent analytical filtering and grouping
+CREATE INDEX idx_infos_anuais_continente ON public.infos_anuais_paises(continente);
+CREATE INDEX idx_infos_anuais_ano ON public.infos_anuais_paises(ano);
+
+END;
+```
+
+### Summary of Improvements:
+1. **Zero Joins:** A query that previously took 6 joins now requires `0` joins.
+2. **Pre-Aggregation:** `gee_per_capita` is calculated during the ETL insert, meaning BI dashboards load instantly.
+3. **Pivoted Dimensions:** By transforming the `consumo_anual` rows into `fonte_*` columns, analysts can simply `SELECT AVG(fonte_solar)` instead of writing complex `CASE WHEN` aggregations.

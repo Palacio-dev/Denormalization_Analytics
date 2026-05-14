@@ -1,0 +1,150 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_15-37-31
+Model: gemini
+Prompt: expert
+Schema: harperdb
+==================================================
+
+### Executive Summary
+
+As a Principal Database Architect, I have designed a read-optimized physical schema to eliminate the join overhead inherent in your current many-to-many (`users` ↔ `user_entitlements` ↔ `entitlements`) normalized design. Because you did not provide the specific workload and operational constraints in your prompt, I have explicitly defined a set of realistic, high-concurrency assumptions (e.g., low-latency authorization checks, CDC availability, and no-trigger constraints). 
+
+The proposed architecture introduces a **Wide Read Table** (`read_user_entitlements`) that pre-joins user mappings with entitlement metadata and pre-computes access validity. This reduces the critical-path authorization queries from a two-join operation to a single indexed point-lookup, guaranteeing sub-millisecond read latencies. We will utilize an asynchronous Change Data Capture (CDC) pipeline to populate this read model, accepting a documented eventual consistency window (typically < 2 seconds) while isolating the read workload from write-path contention.
+
+---
+
+### Explicit Assumptions (Missing Context)
+Since the workload and constraints were omitted, this design relies on the following explicit assumptions:
+1.  **Workload Q1 (AuthZ Check - 80% of reads):** "Does User X have active access to Feature Y?" (Requires checking dates, flags, and usage limits).
+2.  **Workload Q2 (User Dashboard - 15% of reads):** "List all active entitlements for User X."
+3.  **Workload Q3 (Admin Analytics - 5% of reads):** "Aggregate usage by `packageType`."
+4.  **Operational Constraints:** Target engine is PostgreSQL-compatible. No triggers are allowed on the source schema to protect write latency. A CDC tool (e.g., Debezium + Kafka) is available. 
+5.  **Business Correctness:** A staleness window of ~1-2 seconds is acceptable for reads. Over-provisioning usage by a few counts due to replication lag is an acceptable business risk compared to synchronous lock contention.
+
+---
+
+### 1. Access-Pattern Matrix
+
+| Query Class | Target Entity | Access Pattern | Columns Touched | Hotspot / Bottleneck in Normalized Schema |
+| :--- | :--- | :--- | :--- | :--- |
+| **Q1: AuthZ Check** | User + Feature | Point Lookup (High QPS) | `ue.user_id`, `e.featureType`, `e.activeFlag`, `e.activeDate`, `e.inactiveDate`, `e.useCount`, `e.useLimit` | **Join Hotspot:** Joining 3 tables per API call. CPU overhead on date/limit math. |
+| **Q2: User Dashboard** | User | Range Scan (Med QPS) | `ue.user_id`, `e.id`, `e.packageType`, `e.featureType`, `e.useCount`, `e.useLimit` | **Join Hotspot:** `user_entitlements` to `entitlements`. |
+| **Q3: Analytics** | Package | Aggregation (Low QPS) | `e.packageType`, `e.useCount` | **Aggregation Hotspot:** Full table scan on `entitlements`. |
+
+---
+
+### 2. Denormalization Patterns
+
+**Pattern Chosen: Wide Read Table (Pre-joined Dimension)**
+We will flatten the many-to-many relationship into a single table: `read_user_entitlements`. 
+*   *Justification:* Q1 and Q2 are user-centric. By pre-joining `entitlements` to `user_id`, we eliminate all joins at read time. 
+*   *Pre-computed Rollups:* We will introduce a boolean column `is_valid_access`. Evaluating `activeFlag = 1 AND activeDate <= NOW() AND inactiveDate >= NOW() AND useCount < useLimit` at read-time burns CPU. Pre-computing this at write-time shifts the compute burden to the asynchronous CDC pipeline.
+
+**Pattern Chosen: Engine-Level Materialized View (For Analytics)**
+We will use a standard Materialized View for Q3.
+*   *Justification:* Q3 does not require user-level granularity. A simple asynchronous materialized view over the source `entitlements` table is sufficient and avoids scanning the massive wide table.
+
+---
+
+### 3. Physical Design Details (DDL)
+
+```sql
+-- ==============================================================================
+-- TARGET SCHEMA: PostgreSQL (Read-Optimized)
+-- ==============================================================================
+
+-- 1. Wide Read Table for Q1 (AuthZ) and Q2 (Dashboard)
+CREATE TABLE read_user_entitlements (
+    user_id INT NOT NULL,
+    entitlement_id INT NOT NULL,
+    featureType VARCHAR(4) NOT NULL,
+    packageType VARCHAR(4) NOT NULL,
+    
+    -- Source of truth data (replicated via CDC)
+    activeFlag INT NOT NULL,
+    activeDate DATE,
+    inactiveDate DATE,
+    useLimit INT,
+    useCount INT,
+    
+    -- PRE-COMPUTED: Shifts CPU load from Read to Write path
+    -- Updated by the stream processor when dates/counts change
+    is_valid_access BOOLEAN NOT NULL, 
+
+    -- Exact PK strategy: Composite key guarantees uniqueness per user-entitlement
+    PRIMARY KEY (user_id, entitlement_id)
+) 
+-- Optional: Table clustering if engine supports it (e.g., Postgres CLUSTER)
+-- to physically group user records together on disk for Q2.
+;
+
+-- INDEXING STRATEGY
+-- Index for Q1 (AuthZ Check): "Does user X have access to feature Y?"
+-- Uses a partial index to keep the B-Tree tiny and ultra-fast, storing only active grants.
+CREATE INDEX idx_rue_authz 
+    ON read_user_entitlements (user_id, featureType) 
+    WHERE is_valid_access = TRUE;
+
+-- Index for Q2 (User Dashboard): "List all entitlements for user X"
+-- Covering index prevents heap lookups for dashboard rendering.
+CREATE INDEX idx_rue_dashboard 
+    ON read_user_entitlements (user_id) 
+    INCLUDE (entitlement_id, featureType, packageType, useCount, useLimit);
+
+-- 2. Materialized View for Q3 (Analytics)
+CREATE MATERIALIZED VIEW mv_package_usage AS
+SELECT 
+    packageType,
+    SUM(useCount) as total_uses,
+    COUNT(id) as total_entitlements
+FROM entitlements
+GROUP BY packageType;
+
+-- Index for Q3 fast retrieval
+CREATE UNIQUE INDEX idx_mv_package_usage ON mv_package_usage(packageType);
+```
+
+---
+
+### 4. Consistency Architecture
+
+Data flows from the Normalized Source to the Denormalized Read schema via an Eventual Consistency model.
+
+*   **Data Lineage:**
+    *   `users.id` → `read_user_entitlements.user_id`
+    *   `entitlements.*` → `read_user_entitlements.*`
+    *   Stream Processor Logic: `is_valid_access` = `(activeFlag = 1 AND CURRENT_DATE BETWEEN activeDate AND inactiveDate AND useCount < useLimit)`
+*   **Refresh Mechanism (CDC Pipeline):**
+    1.  **Capture:** Debezium monitors the WAL (Write-Ahead Log) of the source database.
+    2.  **Process:** A stream processor (e.g., Flink or Kafka Streams) consumes changes.
+        *   *If `user_entitlements` changes:* Emit an UPSERT/DELETE to `read_user_entitlements`.
+        *   *If `entitlements` changes:* Emit an UPSERT for **all** `user_id`s associated with that `entitlement_id`.
+    3.  **Apply:** Sink connector writes to the read database.
+    4.  **MV Refresh:** A cron job executes `REFRESH MATERIALIZED VIEW CONCURRENTLY mv_package_usage` every 5 minutes.
+
+---
+
+### 5. Risk Analysis
+
+| Risk Area | Assessment & Mitigation |
+| :--- | :--- |
+| **Write Amplification** | **High Risk.** If `entitlements.useCount` updates frequently, and an entitlement is shared by 10,000 users, one source update triggers 10,000 updates in the wide table. *Mitigation:* If `useCount` is highly volatile, we must remove `useCount` from the wide table and do a 2-step read (AuthZ checks wide table for validity, then checks a fast in-memory cache like Redis for current `useCount`). |
+| **Staleness / Correctness** | **Medium Risk.** CDC lag means a user might successfully authorize a feature slightly after hitting their `useLimit`. *Mitigation:* Document this as a "soft limit" business rule. Implement strict limit enforcement asynchronously at the application layer, or accept the 1-2 second overage window. |
+| **Storage Growth** | **Low Risk.** The wide table duplicates entitlement metadata per user. Given the narrow data types (INT, VARCHAR(4), DATE), the byte footprint per row is ~40 bytes. 100 million grants = ~4GB, which is trivial for modern storage. |
+| **Monitoring & Alerts** | Must implement: <br>1. **Replication Lag Alert:** Trigger if CDC pipeline falls > 5 seconds behind.<br>2. **Reconciliation Job:** A nightly batch script that runs a `MINUS` query between the joined source tables and the wide table to detect drift.<br>3. **Query Latency:** Monitor p99 latency on Q1 to ensure the partial index is being utilized. |
+
+---
+
+### 6. Implementation Plan (Safe & Reversible)
+
+1.  **Phase 1: Schema Deployment & Pipeline Setup (No Impact)**
+    *   Deploy the `read_user_entitlements` table and indexes.
+    *   Deploy the CDC pipeline. Configure it to write to the new table.
+2.  **Phase 2: Backfill**
+    *   Run a batch job to populate `read_user_entitlements` from the current source tables. 
+    *   *Safety:* The CDC pipeline must be configured to handle UPSERTs so it safely overwrites backfilled rows with newer events.
+3.  **Phase 3: Shadow Reads & Verification**
+    *   Modify the application to perform "Shadow Reads": Read from the old normalized schema, asynchronously read from the new denormalized schema, and log any discrepancies in data or latency.
+4.  **Phase 4: Cutover**
+    *   Switch Q1 and Q2 read paths to the new table.
+    *   *Reversibility:* If latency degrades or correctness fails, flip the feature flag back to the normalized read path. The source tables remain the untouched source of truth.

@@ -1,0 +1,170 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_14-44-20
+Model: gemini
+Prompt: expert
+Schema: airplane
+==================================================
+
+### Executive Summary
+
+To achieve measurable read performance improvements for your airline booking system, we must transition from the current 3rd Normal Form (3NF) schema—which requires expensive 4-to-7 table joins for standard operational queries—to a denormalized, read-optimized architecture. Assuming a modern operational environment where database triggers are prohibited due to write-path latency, I have designed a **Command Query Responsibility Segregation (CQRS) inspired physical schema**. 
+
+This design utilizes **Wide Read Tables** for operational lookups and **Pre-aggregated Rollups** for analytics. Because we cannot use triggers, we will assume a **Change Data Capture (CDC)** pipeline (e.g., Debezium + Flink/Kafka Streams) to asynchronously project state from the normalized write-schema to the denormalized read-schema. This introduces an intentional, monitored staleness window (typically < 2 seconds) but completely decouples read latency from write contention, ensuring safe, observable, and reversible implementation.
+
+---
+
+### 1. Model-to-Workload Mapping & Access-Pattern Matrix
+
+Since specific queries were not provided, I have inferred the four most critical read workloads for an airline system based on your DDL. 
+
+| Query Class | Business Intent | Current Tables Touched (Hotspots) | Proposed Denormalized Target |
+| :--- | :--- | :--- | :--- |
+| **Q1: Passenger Itinerary** | "Show my flights, times, and seat assignments for my booking." | `bookings` $\rightarrow$ `tickets` $\rightarrow$ `ticket_flights` $\rightarrow$ `flights` $\rightarrow$ `boarding_passes` (5-table join) | `read_passenger_itineraries` (Single row lookup) |
+| **Q2: Flight Manifest** | "List all passengers, ticket numbers, and boarding status for Flight X." | `flights` $\rightarrow$ `ticket_flights` $\rightarrow$ `tickets` $\rightarrow$ `boarding_passes` (4-table join) | `read_passenger_itineraries` (Single table scan) |
+| **Q3: Flight Search** | "Show flights from City A to City B on Date D, with aircraft details." | `flights` $\rightarrow$ `airports_data` (x2) $\rightarrow$ `aircrafts_data` (4-table join) | `read_flight_schedules` (Single table scan) |
+| **Q4: Route Analytics** | "Show daily revenue and passenger load factor per route." | `bookings` $\rightarrow$ `ticket_flights` $\rightarrow$ `flights` (Massive aggregation) | `read_route_daily_stats` (Pre-aggregated lookup) |
+
+---
+
+### 2. Denormalization Patterns Justification
+
+1.  **Wide Read Tables (Pre-joined Dimensions):** 
+    *   *Artifacts:* `read_passenger_itineraries`, `read_flight_schedules`.
+    *   *Justification:* Resolves Q1, Q2, and Q3. CPU time in the current schema is dominated by hash/nested-loop joins on UUIDs/strings (`ticket_no`, `airport_code`). By pre-joining static dimensions (airports, aircraft) and slowly changing dimensions (passenger info, flight times), we reduce query execution to a single indexed index-scan.
+2.  **Pre-aggregated Rollups (Time/Entity Buckets):**
+    *   *Artifacts:* `read_route_daily_stats`.
+    *   *Justification:* Resolves Q4. Computing revenue requires summing `ticket_flights.amount` grouped by `flights.departure_airport`. Doing this on the fly scans millions of rows. A daily rollup table reduces this to a few rows per day.
+3.  **Partitioning Strategy:**
+    *   *Justification:* Airline data is inherently time-series. Partitioning by `scheduled_departure` allows partition pruning for Q3 and Q4, and enables cheap data lifecycle management (dropping old partitions instead of expensive `DELETE` operations).
+
+---
+
+### 3. Physical Design Details (DDL)
+
+*Assumptions: PostgreSQL 11+ (for native declarative partitioning).*
+
+```sql
+BEGIN;
+
+CREATE SCHEMA IF NOT EXISTS read_optimized;
+
+-- ==============================================================================
+-- 1. WIDE TABLE: Passenger Itineraries (Targets Q1 & Q2)
+-- Grain: One row per passenger per flight segment.
+-- ==============================================================================
+CREATE TABLE read_optimized.read_passenger_itineraries (
+    ticket_no character(13) NOT NULL,
+    flight_id integer NOT NULL,
+    book_ref character(6) NOT NULL,
+    passenger_id character varying(20) NOT NULL,
+    passenger_name text NOT NULL,
+    flight_no character(6) NOT NULL,
+    scheduled_departure timestamp with time zone NOT NULL,
+    departure_airport character(3) NOT NULL,
+    arrival_airport character(3) NOT NULL,
+    fare_conditions character varying(10) NOT NULL,
+    amount numeric(10, 2) NOT NULL,
+    boarding_no integer,          -- Nullable: passenger might not have boarded yet
+    seat_no character varying(4), -- Nullable: seat might not be assigned yet
+    flight_status character varying(20) NOT NULL,
+    
+    -- PK includes scheduled_departure to support partitioning
+    CONSTRAINT read_passenger_itineraries_pkey PRIMARY KEY (scheduled_departure, ticket_no, flight_id)
+) PARTITION BY RANGE (scheduled_departure);
+
+-- Partition creation (Example for one month; operationalize via pg_partman)
+CREATE TABLE read_optimized.read_passenger_itineraries_2023_10 
+    PARTITION OF read_optimized.read_passenger_itineraries 
+    FOR VALUES FROM ('2023-10-01 00:00:00Z') TO ('2023-11-01 00:00:00Z');
+
+-- Indexes for Workloads
+-- Q1: Passenger looking up their itinerary by booking ref or passenger ID
+CREATE INDEX idx_rpi_book_ref ON read_optimized.read_passenger_itineraries (book_ref);
+CREATE INDEX idx_rpi_passenger_id ON read_optimized.read_passenger_itineraries (passenger_id);
+-- Q2: Gate agent pulling the manifest for a specific flight
+CREATE INDEX idx_rpi_flight_id ON read_optimized.read_passenger_itineraries (flight_id);
+
+
+-- ==============================================================================
+-- 2. WIDE TABLE: Flight Schedules (Targets Q3)
+-- Grain: One row per flight.
+-- ==============================================================================
+CREATE TABLE read_optimized.read_flight_schedules (
+    flight_id integer NOT NULL,
+    flight_no character(6) NOT NULL,
+    scheduled_departure timestamp with time zone NOT NULL,
+    scheduled_arrival timestamp with time zone NOT NULL,
+    actual_departure timestamp with time zone,
+    actual_arrival timestamp with time zone,
+    status character varying(20) NOT NULL,
+    
+    -- Denormalized Airport Data (Extracted from JSONB for fast filtering)
+    dep_airport_code character(3) NOT NULL,
+    dep_city_name text NOT NULL, 
+    arr_airport_code character(3) NOT NULL,
+    arr_city_name text NOT NULL,
+    
+    -- Denormalized Aircraft Data
+    aircraft_code character(3) NOT NULL,
+    aircraft_model text NOT NULL,
+    
+    CONSTRAINT read_flight_schedules_pkey PRIMARY KEY (scheduled_departure, flight_id)
+) PARTITION BY RANGE (scheduled_departure);
+
+CREATE TABLE read_optimized.read_flight_schedules_2023_10 
+    PARTITION OF read_optimized.read_flight_schedules 
+    FOR VALUES FROM ('2023-10-01 00:00:00Z') TO ('2023-11-01 00:00:00Z');
+
+-- Indexes for Workloads
+-- Q3: Flight search by route and date (Includes status for index-only scans where possible)
+CREATE INDEX idx_rfs_search ON read_optimized.read_flight_schedules 
+    (dep_airport_code, arr_airport_code, scheduled_departure) INCLUDE (status);
+
+
+-- ==============================================================================
+-- 3. PRE-AGGREGATED ROLLUP: Route Daily Stats (Targets Q4)
+-- Grain: One row per route per day.
+-- ==============================================================================
+CREATE TABLE read_optimized.read_route_daily_stats (
+    flight_date date NOT NULL,
+    departure_airport character(3) NOT NULL,
+    arrival_airport character(3) NOT NULL,
+    total_flights integer NOT NULL DEFAULT 0,
+    total_passengers integer NOT NULL DEFAULT 0,
+    total_revenue numeric(15, 2) NOT NULL DEFAULT 0.00,
+    
+    CONSTRAINT read_route_daily_stats_pkey PRIMARY KEY (flight_date, departure_airport, arrival_airport)
+);
+
+-- Index for querying a specific route over time
+CREATE INDEX idx_rrds_route ON read_optimized.read_route_daily_stats (departure_airport, arrival_airport, flight_date);
+
+COMMIT;
+```
+
+---
+
+### 4. Consistency Architecture & Implementation Plan
+
+Because we are bypassing triggers, we will use an **Event-Driven CDC Architecture**.
+
+*   **Data Lineage Mapping:**
+    *   `read_passenger_itineraries` is an inner join stream of `tickets` $\bowtie$ `ticket_flights` $\bowtie$ `flights`, with a left join to `boarding_passes`.
+    *   `read_flight_schedules` is an inner join stream of `flights` $\bowtie$ `airports_data` $\bowtie$ `aircrafts_data`. JSONB fields (`city`, `model`) are parsed at stream-time to extract localized text (e.g., `->> 'en'`) to save space and CPU on read.
+*   **Implementation Steps (Safe & Reversible):**
+    1.  **Deploy DDL:** Create the `read_optimized` schema. This has zero impact on production.
+    2.  **Backfill:** Run a batch job (e.g., INSERT INTO ... SELECT) during an off-peak window to populate historical partitions.
+    3.  **Start CDC Pipeline:** Enable logical replication/Debezium. The stream processor (Flink/Kafka Streams) consumes changes from the source tables, maintains the joins in state, and upserts (`INSERT ... ON CONFLICT DO UPDATE`) into the read tables.
+    4.  **Shadow Testing:** Route a percentage of read traffic to the new tables and compare results and latency against the old queries.
+    5.  **Cutover:** Switch application read-paths to the `read_optimized` schema.
+
+---
+
+### 5. Risk Analysis & Operational Complexity
+
+| Risk Factor | Assessment & Mitigation |
+| :--- | :--- |
+| **Write Amplification** | **High.** If a flight is delayed (`flights.status` changes), the CDC pipeline must update 1 row in `read_flight_schedules` and ~200 rows in `read_passenger_itineraries`. *Mitigation:* Because updates are asynchronous via CDC, the primary database's write-path is unaffected. The read-replica/table absorbs the IOPS. |
+| **Staleness / Lag** | **Medium.** Reads are eventually consistent. If CDC lags, a passenger might book a ticket but not see it immediately. *Mitigation:* Document an SLA (e.g., 2 seconds). The UI should rely on the synchronous write response for immediate confirmation, using the read tables for subsequent page loads. |
+| **Storage Growth** | **High.** Denormalizing passenger names and airport codes duplicates data heavily. *Mitigation:* We use PostgreSQL table partitioning. We can apply `ALTER TABLE ... SET (toast_tuple_target = 128)` or use columnar storage extensions (like Citus or TimescaleDB) for older partitions if storage costs become prohibitive. |
+| **Monitoring & Alerts** | **Critical.** We must monitor: <br>1. **CDC Lag:** Alert if the timestamp of the last processed Kafka message is > 5 seconds behind `now()`. <br>2. **Reconciliation:** Run a nightly batch job comparing `SUM(total_amount)` in `bookings` vs `SUM(amount)` in `read_passenger_itineraries` to detect silent CDC drops. |

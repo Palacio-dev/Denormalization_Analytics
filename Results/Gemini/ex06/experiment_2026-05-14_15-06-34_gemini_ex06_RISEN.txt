@@ -1,0 +1,71 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_15-06-34
+Model: gemini
+Prompt: RISEN
+Schema: ex06
+==================================================
+
+```sql
+BEGIN;
+
+DROP TABLE IF EXISTS Curso CASCADE;
+DROP TABLE IF EXISTS Escola CASCADE;
+DROP TABLE IF EXISTS Municipio CASCADE;
+
+CREATE TABLE Municipio (
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    qtd_habitantes INT CHECK(qtd_habitantes >= 0),
+    nome_municipio VARCHAR(100) NOT NULL,
+    qtd_ies INT CHECK (qtd_ies >= 0),
+    qtd_escolas INT CHECK (qtd_escolas >= 0),
+    media_ideb REAL,
+    media_saeb REAL,
+    media_enade REAL,
+    total_participantes INT CHECK (total_participantes >= 0),
+    PRIMARY KEY (sigla_uf, nome_municipio)
+);
+
+CREATE TABLE Escola (
+    cod_escola INTEGER NOT NULL,
+    ano_escola INTEGER NOT NULL,
+    nome_escola VARCHAR(100) NOT NULL,
+    rede_escola VARCHAR(100) NOT NULL,
+    ideb_rend_1 REAL,
+    ideb_rend_2 REAL,
+    ideb_rend_3 REAL,
+    ideb_rend_4 REAL,
+    ideb_ind_rend REAL,
+    ideb_nota REAL,
+    saeb_nota_mat REAL,
+    saeb_nota_port REAL,
+    saeb_nota_padrao REAL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    PRIMARY KEY (cod_escola, ano_escola),
+    FOREIGN KEY (sigla_uf, nome_municipio) REFERENCES Municipio(sigla_uf, nome_municipio) ON DELETE CASCADE
+);
+
+CREATE TABLE Curso (
+    codigo_ies INTEGER NOT NULL,
+    nome_curso VARCHAR(100) NOT NULL,
+    ano_enade INTEGER NOT NULL,
+    nome_ies VARCHAR(100) NOT NULL,
+    sigla_ies VARCHAR(20),
+    rede_ies VARCHAR(100) NOT NULL,
+    total_inscritos INTEGER CHECK (total_inscritos >= 0),
+    total_concluintes INTEGER CHECK (total_concluintes >= 0),
+    nota_bruta_ce REAL,
+    nota_padronizada_ce REAL,
+    nota_bruta_fg REAL,
+    nota_padronizada_fg REAL,
+    nota_enade_continua REAL,
+    nota_enade_faixa REAL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    PRIMARY KEY (codigo_ies, nome_curso, ano_enade),
+    FOREIGN KEY (sigla_uf, nome_municipio) REFERENCES Municipio(sigla_uf, nome_municipio) ON DELETE CASCADE
+);
+
+COMMIT;
+```

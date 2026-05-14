@@ -1,0 +1,135 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_13-57-33
+Model: gemini
+Prompt: RACE
+Schema: TPC_DS
+==================================================
+
+As a Senior Data Engineer with 15 years of experience in database performance and analytical modeling, I have analyzed the provided TPC-DS source schema. Below is the execution of the requested steps to transform this highly normalized, transactional schema into a high-performance analytical model.
+
+### 1 - Deep Analysis of the Provided SQL Script
+The provided schema represents a classic retail database divided into three distinct sales channels: **Store**, **Catalog**, and **Web**. 
+* **Header/Line-Item Pattern:** Each channel separates its sales data into a header table (e.g., `s_purchase`) and a line-item table (e.g., `s_purchase_lineitem`). This is a 3NF design typical of OLTP systems to avoid duplicating order-level data.
+* **Returns:** Returns are tracked separately (`s_store_returns`, `s_catalog_returns`) and are linked back to the original sales via composite keys (Order ID + Line Number). Notably, web returns are missing from this specific script, but the pattern remains consistent.
+* **Inventory:** `s_inventory` is a periodic snapshot fact table tracking stock levels per warehouse, item, and date.
+
+### 2 - Frequent Queries / Workload Context
+Since this is an analytical (OLAP) environment, the workload will consist of heavy read queries. Based on the schema, the most likely frequent queries are:
+1. **Omnichannel Sales Analysis:** Aggregating total revenue, quantities sold, and discounts across all channels (Store, Web, Catalog) by date or item.
+2. **Net Sales Calculations:** Calculating Gross Sales minus Returns to find true Net Revenue. In the current model, this requires expensive `LEFT JOIN`s between Line-Items and Returns tables.
+3. **Customer Profiling:** Analyzing a customer's lifetime value across all channels, requiring `UNION`s across the three separate channel tables.
+4. **Join Bottlenecks:** Every simple query currently requires joining Header tables to Line-Item tables. Querying net sales requires joining Header $\rightarrow$ Line-Item $\rightarrow$ Returns.
+
+### 3 - Evaluation of Common Denormalization Techniques
+* **Technique 1: Adding Redundant Attributes:** Highly applicable. We should push header-level attributes (Dates, Customer IDs, Store/Web IDs) down to the line-item level to eliminate Header-to-Line joins.
+* **Technique 2: Adding Derived Attributes:** Highly applicable. We should precompute `gross_sales_amount` (qty * price) and `net_sales_amount` (gross - returns) to save CPU cycles during massive aggregations.
+* **Technique 3: Collapsing Relations:** Highly applicable. We can collapse Header, Line-Item, and Returns into single rows. Furthermore, we can collapse the three separate channels (Store, Catalog, Web) into a single "Omnichannel" fact table.
+* **Technique 4: Vertical Partitioning:** Not strictly necessary for the main sales data, but we will keep `Inventory` separate from `Sales` because they operate at entirely different grains (Transactional vs. Periodic Snapshot).
+
+### 4 - Design Multiple Possible Denormalized Schemas
+**Option A: Channel-Specific Wide Tables**
+* Create `store_sales_denorm`, `catalog_sales_denorm`, and `web_sales_denorm`.
+* *Pros:* Keeps channel-specific attributes isolated (e.g., `web_site_id` vs `store_id`).
+* *Cons:* Still requires expensive `UNION ALL` operations for cross-channel reporting (Omnichannel analytics).
+
+**Option B: Unified Omnichannel Wide Table (The "One Big Table" approach)**
+* Collapse all headers, line-items, returns, and channels into a single `omnichannel_sales_returns_fact` table.
+* Add a `channel_type` column.
+* *Pros:* Maximum read performance. A single table scan can answer almost any sales/returns question. Eliminates `UNION`s and `JOIN`s entirely.
+* *Cons:* Some columns will be sparse (e.g., `catalog_page_number` will be NULL for Web and Store sales). In modern columnar databases, sparse columns compress extremely well, making this a non-issue.
+
+### 5 - Evaluate and Choose the Best Schema
+**Option B** is the clear winner for an analytical workload. Modern OLAP databases (like Snowflake, BigQuery, or Redshift) thrive on wide, denormalized tables. By collapsing the channels and pre-calculating net metrics, we eliminate the primary bottlenecks: multi-table joins and cross-channel unions. 
+
+### 6 - Design the New Denormalized Schema
+
+Below is the DDL for the new denormalized schema. 
+
+```sql
+BEGIN;
+
+-- ============================================================
+--   Table: omnichannel_sales_returns_fact                                
+--   Techniques Applied: 
+--   1. Collapsing Relations: Header + LineItem + Returns + Channels are merged.
+--   2. Adding Redundant Attributes: Order dates, customer IDs duplicated per line.
+--   3. Adding Derived Attributes: gross_sales_amt, net_sales_amt, net_quantity.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS omnichannel_sales_returns_fact
+(
+    -- 1. Transaction Identifiers & Channel
+    channel_type                varchar(10)           not null, -- 'STORE', 'CATALOG', or 'WEB'
+    order_id                    integer               not null, -- Maps to purchase_id / order_id
+    line_number                 integer               not null,
+    item_id                     char(16)              not null,
+    
+    -- 2. Header Attributes (Redundant Attributes pushed down)
+    order_date                  char(10)                      ,
+    order_time                  integer                       ,
+    bill_customer_id            char(16)                      ,
+    ship_customer_id            char(16)                      ,
+    
+    -- 3. Channel-Specific Identifiers (Collapsed into generic columns where possible)
+    facility_id                 char(16)                      , -- Maps to store_id, call_center_id, or web_site_id
+    register_id                 integer                       , -- Store only
+    clerk_id                    integer                       , -- Store only
+    ship_mode_id                char(16)                      , -- Catalog/Web only
+    warehouse_id                char(16)                      , -- Catalog/Web only
+    catalog_page_number         integer                       , -- Catalog only
+    
+    -- 4. Sales Line Item Metrics
+    promotion_id                char(16)                      ,
+    sales_quantity              integer                       ,
+    sales_price                 numeric(7,2)                  ,
+    coupon_amt                  numeric(7,2)                  ,
+    ship_cost                   numeric(7,2)                  ,
+    
+    -- 5. Derived Sales Metrics (Precomputed Aggregations)
+    gross_sales_amt             numeric(10,2)                 , -- (sales_quantity * sales_price)
+    
+    -- 6. Return Metrics (Collapsed Relation - LEFT JOINed during ETL)
+    is_returned                 boolean               default false,
+    return_date                 char(10)                      ,
+    return_reason_id            char(16)                      ,
+    return_qty                  integer                       ,
+    return_amt                  numeric(7,2)                  ,
+    return_tax                  numeric(7,2)                  ,
+    return_fee                  numeric(7,2)                  ,
+    return_ship_cost            numeric(7,2)                  ,
+    refunded_cash               numeric(7,2)                  ,
+    reversed_charge             numeric(7,2)                  ,
+    facility_credit             numeric(7,2)                  , -- Maps to store_credit / merchant_credit
+    
+    -- 7. Derived Net Metrics (Precomputed Aggregations)
+    net_quantity                integer                       , -- (sales_quantity - COALESCE(return_qty, 0))
+    net_sales_amt               numeric(10,2)                   -- (gross_sales_amt - COALESCE(return_amt, 0))
+);
+
+-- ============================================================
+--   Table: inventory_snapshot_fact                                        
+--   Techniques Applied: 
+--   Vertical Partitioning: Kept separate from sales because 
+--   inventory is a periodic snapshot, not a transaction.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS inventory_snapshot_fact
+(
+    invn_warehouse_id           char(16)              not null,
+    invn_item_id                char(16)              not null,
+    invn_date                   char(10)              not null,
+    invn_qty_on_hand            integer               ,
+    
+    -- Derived Attribute: Flag to easily filter out-of-stock items
+    is_out_of_stock             boolean               -- (invn_qty_on_hand <= 0)
+);
+
+-- ============================================================
+-- Indexes for Analytical Performance
+-- (Assuming a traditional RDBMS; if using Columnar/Data Warehouse, 
+--  Sort Keys / Partition Keys would be used instead).
+-- ============================================================
+CREATE INDEX idx_omni_item_date ON omnichannel_sales_returns_fact(item_id, order_date);
+CREATE INDEX idx_omni_customer ON omnichannel_sales_returns_fact(bill_customer_id);
+CREATE INDEX idx_omni_channel ON omnichannel_sales_returns_fact(channel_type);
+
+END;
+```

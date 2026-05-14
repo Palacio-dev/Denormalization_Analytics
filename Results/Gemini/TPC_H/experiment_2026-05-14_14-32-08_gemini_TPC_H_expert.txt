@@ -1,0 +1,183 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_14-32-08
+Model: gemini
+Prompt: expert
+Schema: TPC_H
+==================================================
+
+### Executive Summary
+
+The provided normalized schema is the standard TPC-H benchmark schema, a classic 3rd Normal Form (3NF) design optimized for transactional integrity rather than analytical read performance. Under an analytical (OLAP) workload, this schema suffers from severe read latency due to massive multi-table joins (e.g., traversing `LINEITEM` $\rightarrow$ `ORDERS` $\rightarrow$ `CUSTOMER` $\rightarrow$ `NATION` $\rightarrow$ `REGION`) and repetitive on-the-fly aggregations of revenue metrics. 
+
+To achieve measurable read performance improvements, I propose transitioning to a **hybrid Star Schema with a Wide Fact Table (One Big Table - OBT)** and **Pre-aggregated Materialized Views**. This design eliminates join hotspots at query time by pre-joining dimensional data into the fact table and pre-calculating heavily accessed metrics. 
+**Explicit Assumptions:** 
+1) The workload is read-heavy analytics (TPC-H style). 
+2) Real-time consistency is not required; a 1-hour staleness window via micro-batch ELT/CDC is acceptable. 
+3) The target engine supports table partitioning and columnar compression (e.g., PostgreSQL, Snowflake, Redshift). 
+4) Triggers are disabled to protect OLTP write performance; data is synced via an external orchestrator (e.g., dbt/Airflow).
+
+---
+
+### 1. Model-to-Workload Mapping
+
+Since specific queries were not provided, I have derived three representative analytical query patterns based on standard usage of this schema to anchor the design.
+
+#### Assumed Top Queries
+*   **Q1: Revenue by Geography & Segment:** Total revenue (`L_EXTENDEDPRICE * (1 - L_DISCOUNT)`) grouped by Customer Region, Nation, and Market Segment over a specific date range.
+*   **Q2: Shipping Status & Pricing Summary:** Aggregated quantities, base prices, and discounted prices grouped by `L_RETURNFLAG` and `L_LINESTATUS` for a given `L_SHIPDATE` range.
+*   **Q3: Supplier Profitability:** Revenue and supply cost analysis joining `LINEITEM`, `PART`, `SUPPLIER`, and `NATION`.
+
+#### Access-Pattern Matrix
+
+| Query | Primary Tables Touched | Join Hotspots | Aggregation Hotspots | Filter / Pruning Columns |
+| :--- | :--- | :--- | :--- | :--- |
+| **Q1** | `LINEITEM`, `ORDERS`, `CUSTOMER`, `NATION`, `REGION` | `L_ORDERKEY = O_ORDERKEY`<br>`O_CUSTKEY = C_CUSTKEY`<br>`C_NATIONKEY = N_NATIONKEY` | `SUM(L_EXTENDEDPRICE * (1-L_DISCOUNT))` | `L_SHIPDATE`, `R_NAME`, `C_MKTSEGMENT` |
+| **Q2** | `LINEITEM` | *None (Single table scan)* | `SUM(L_QUANTITY)`, `SUM(L_EXTENDEDPRICE)` | `L_SHIPDATE` |
+| **Q3** | `LINEITEM`, `PART`, `SUPPLIER`, `NATION` | `L_PARTKEY = P_PARTKEY`<br>`L_SUPPKEY = S_SUPPKEY` | `SUM(L_EXTENDEDPRICE - PS_SUPPLYCOST)` | `L_SHIPDATE`, `P_TYPE`, `N_NAME` |
+
+---
+
+### 2. Denormalization Patterns
+
+**Pattern 1: Wide Fact Table (`DENORM_LINEITEM_FACT`)**
+*   *Justification:* Resolves the massive join hotspots in Q1 and Q3. By flattening `ORDERS`, `CUSTOMER`, `PART`, and geographic dimensions directly into the `LINEITEM` grain, queries can scan a single table. 
+*   *Tied to:* Q1, Q2, Q3.
+
+**Pattern 2: Pre-aggregated Rollup (`MV_DAILY_REVENUE_ROLLUP`)**
+*   *Justification:* Resolves the aggregation hotspots in Q1. Computing `SUM(revenue)` across millions of rows per query is CPU-intensive. Rolling this up to a daily grain by Region and Market Segment reduces billions of rows to a few thousand, making dashboard queries sub-second.
+*   *Tied to:* Q1.
+
+**Pattern 3: Flattened Dimension (`DIM_CUSTOMER_GEOGRAPHY`)**
+*   *Justification:* For queries that only need to filter or group customers without hitting the fact table, flattening `CUSTOMER` $\rightarrow$ `NATION` $\rightarrow$ `REGION` prevents repetitive 3-way joins.
+
+---
+
+### 3. Proposed Denormalized Schema (DDL)
+
+*Note: Syntax uses standard SQL with common partitioning extensions.*
+
+```sql
+-- ==============================================================================
+-- 1. FLATTENED DIMENSIONS
+-- ==============================================================================
+
+-- Tied to: Customer profiling queries, dimension filtering
+CREATE TABLE DIM_CUSTOMER_GEOGRAPHY (
+    C_CUSTKEY       INTEGER NOT NULL,
+    C_NAME          VARCHAR(25) NOT NULL,
+    C_MKTSEGMENT    CHAR(10) NOT NULL,
+    C_NATIONKEY     INTEGER NOT NULL,
+    N_NATION_NAME   CHAR(25) NOT NULL,
+    R_REGION_NAME   CHAR(25) NOT NULL,
+    -- Constraints
+    PRIMARY KEY (C_CUSTKEY)
+);
+-- Index for segment filtering
+CREATE INDEX IDX_DIM_CUST_SEGMENT ON DIM_CUSTOMER_GEOGRAPHY(C_MKTSEGMENT);
+
+-- ==============================================================================
+-- 2. WIDE FACT TABLE (One Big Table)
+-- ==============================================================================
+
+-- Tied to: Q1, Q2, Q3 (All granular analytical queries)
+CREATE TABLE DENORM_LINEITEM_FACT (
+    -- Primary Keys from source
+    L_ORDERKEY      INTEGER NOT NULL,
+    L_LINENUMBER    INTEGER NOT NULL,
+    
+    -- Degenerate Dimensions (Order)
+    O_CUSTKEY       INTEGER NOT NULL,
+    O_ORDERDATE     DATE NOT NULL,
+    O_ORDERSTATUS   CHAR(1) NOT NULL,
+    
+    -- Denormalized Customer Geography
+    C_MKTSEGMENT    CHAR(10) NOT NULL,
+    C_NATION_NAME   CHAR(25) NOT NULL,
+    C_REGION_NAME   CHAR(25) NOT NULL,
+    
+    -- Denormalized Part & Supplier
+    L_PARTKEY       INTEGER NOT NULL,
+    P_NAME          VARCHAR(55) NOT NULL,
+    P_TYPE          VARCHAR(25) NOT NULL,
+    L_SUPPKEY       INTEGER NOT NULL,
+    S_NATION_NAME   CHAR(25) NOT NULL,
+    
+    -- Core Facts (Metrics)
+    L_QUANTITY      DECIMAL(15,2) NOT NULL,
+    L_EXTENDEDPRICE DECIMAL(15,2) NOT NULL,
+    L_DISCOUNT      DECIMAL(15,2) NOT NULL,
+    L_TAX           DECIMAL(15,2) NOT NULL,
+    
+    -- Pre-calculated Metrics (Reduces CPU at query time)
+    NET_REVENUE     DECIMAL(15,2) NOT NULL, -- L_EXTENDEDPRICE * (1 - L_DISCOUNT)
+    
+    -- Status & Dates
+    L_RETURNFLAG    CHAR(1) NOT NULL,
+    L_LINESTATUS    CHAR(1) NOT NULL,
+    L_SHIPDATE      DATE NOT NULL,
+    L_COMMITDATE    DATE NOT NULL,
+    
+    -- Constraints
+    PRIMARY KEY (L_ORDERKEY, L_LINENUMBER)
+)
+-- Partitioning by SHIPDATE allows massive I/O pruning for time-series queries (Q1, Q2, Q3)
+PARTITION BY RANGE (L_SHIPDATE);
+
+-- Indexes for frequent filtering/grouping
+CREATE INDEX IDX_FACT_SHIPDATE ON DENORM_LINEITEM_FACT(L_SHIPDATE);
+CREATE INDEX IDX_FACT_REGION_SEGMENT ON DENORM_LINEITEM_FACT(C_REGION_NAME, C_MKTSEGMENT);
+
+-- ==============================================================================
+-- 3. PRE-AGGREGATED ROLLUP (Materialized View)
+-- ==============================================================================
+
+-- Tied to: Q1 (Executive Dashboards)
+CREATE MATERIALIZED VIEW MV_DAILY_REVENUE_ROLLUP AS
+SELECT 
+    L_SHIPDATE,
+    C_REGION_NAME,
+    C_MKTSEGMENT,
+    SUM(L_QUANTITY) AS TOTAL_QUANTITY,
+    SUM(NET_REVENUE) AS TOTAL_NET_REVENUE,
+    COUNT(*) AS TOTAL_LINEITEMS
+FROM DENORM_LINEITEM_FACT
+GROUP BY 
+    L_SHIPDATE,
+    C_REGION_NAME,
+    C_MKTSEGMENT;
+
+CREATE UNIQUE INDEX IDX_MV_ROLLUP_PK ON MV_DAILY_REVENUE_ROLLUP(L_SHIPDATE, C_REGION_NAME, C_MKTSEGMENT);
+```
+
+---
+
+### 4. Consistency Architecture
+
+To maintain correctness without impacting the source OLTP system, we will use an **Asynchronous Micro-Batch Architecture** (1-hour staleness window).
+
+*   **Data Lineage:**
+    *   `DENORM_LINEITEM_FACT.C_REGION_NAME` $\leftarrow$ `REGION.R_NAME` (via `CUSTOMER` $\rightarrow$ `NATION` $\rightarrow$ `REGION`).
+    *   `DENORM_LINEITEM_FACT.NET_REVENUE` $\leftarrow$ `LINEITEM.L_EXTENDEDPRICE * (1 - LINEITEM.L_DISCOUNT)`.
+*   **Refresh Strategy (Implementation Plan):**
+    1.  **Extract/Load:** CDC tools (e.g., Debezium, Fivetran) replicate raw 3NF tables to a staging area in the data warehouse.
+    2.  **Transform (dbt/SQL):** An hourly job runs. 
+        *   *Historical Partitions:* Immutable. `LINEITEM` records where `L_SHIPDATE < CURRENT_DATE - 30` are append-only.
+        *   *Active Partitions:* Mutable. For recent orders (last 30 days), we use a `MERGE` (Upsert) statement to handle updates to `O_ORDERSTATUS` or `L_LINESTATUS`.
+    3.  **MV Refresh:** After the fact table is updated, `REFRESH MATERIALIZED VIEW CONCURRENTLY MV_DAILY_REVENUE_ROLLUP` is executed.
+
+---
+
+### 5. Risk Analysis & Operational Complexity
+
+| Risk Factor | Assessment & Mitigation |
+| :--- | :--- |
+| **Write Amplification** | **High.** If a `CUSTOMER` changes their `C_MKTSEGMENT`, millions of historical `LINEITEM` rows in the wide table theoretically need updating. <br>*Mitigation:* Implement **Slowly Changing Dimensions (SCD Type 2)** logic. We intentionally *do not* update history. The fact table records the segment *at the time of the order*, preserving historical business correctness. |
+| **Storage Growth** | **High.** Repeating string columns (`C_REGION_NAME`, `P_NAME`) across billions of line items inflates storage. <br>*Mitigation:* This design strictly assumes the use of a database engine with **Columnar Storage and Dictionary Compression** (e.g., Parquet, Snowflake, Postgres+Citus). Dictionary compression reduces the repeated strings to tiny integer pointers, entirely neutralizing the storage penalty. |
+| **Backfill Runtime** | **Medium.** Initial population of `DENORM_LINEITEM_FACT` requires a massive 7-way join. <br>*Mitigation:* The backfill must be executed in chunks, partitioned by `L_SHIPDATE` (e.g., inserting one month at a time) to avoid spilling to disk and blowing up `temp` space. |
+| **Staleness / Lag** | **Low/Medium.** Data is up to 1 hour stale. <br>*Mitigation:* Document the SLA explicitly with business stakeholders. Add a metadata column `_last_updated_at` to the fact table. |
+
+#### Monitoring & Alerts
+To ensure this implementation is safe and observable, the following alerts must be configured:
+1.  **Freshness Alert:** Alert if `MAX(L_SHIPDATE)` in `DENORM_LINEITEM_FACT` is more than 2 hours behind the source `LINEITEM` table.
+2.  **Reconciliation Diff:** A daily automated query comparing `SUM(L_EXTENDEDPRICE)` in the raw staging `LINEITEM` table vs `DENORM_LINEITEM_FACT`. An alert triggers if the drift is > 0.00%.
+3.  **Query Latency Regression:** Monitor the P90 execution time of Q1/Q2/Q3. If latency spikes, it indicates partition pruning is failing (e.g., queries not filtering by `L_SHIPDATE`) or statistics need to be analyzed (`ANALYZE DENORM_LINEITEM_FACT`).

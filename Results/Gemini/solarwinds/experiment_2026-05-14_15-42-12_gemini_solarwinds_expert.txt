@@ -1,0 +1,149 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-14_15-42-12
+Model: gemini
+Prompt: expert
+Schema: solarwinds
+==================================================
+
+### Executive Summary
+
+To achieve measurable read performance improvements, we are transitioning from a strictly normalized 3NF schema to a CQRS-inspired read-optimized architecture. The current normalized schema requires a 4-way join to construct a basic customer order receipt, which creates significant CPU and memory overhead under high concurrency. Furthermore, calculating daily sales requires scanning the entire `order_details` table. 
+
+We will introduce two denormalized structures: a **Wide Read Table** for serving customer-facing order history, and a **Pre-Aggregated Rollup** for internal sales dashboards. Because you did not provide specific operational constraints or query workloads in the prompt, I have explicitly defined my assumptions below. The proposed design relies on Change Data Capture (CDC) to maintain an eventual consistency model (acceptable staleness: < 5 minutes), completely avoiding database triggers to minimize write-path latency on the primary operational tables.
+
+### Explicit Assumptions (Context & Constraints)
+*   **Database Engine:** PostgreSQL (inferred from the `SERIAL` and `TEXT` types).
+*   **Workload / Top Queries:**
+    *   *Q1 (Customer App):* Fetch paginated order history and line items for a specific `customer_id` (High concurrency, low latency required).
+    *   *Q2 (Internal Dashboard):* Calculate total revenue and items sold per product, per day (Analytical, medium concurrency).
+*   **Operational Constraints:** CDC (e.g., Debezium + Kafka) is available. No triggers allowed on the source schema. Batch windows are limited, necessitating continuous stream processing.
+*   **Business Correctness Note (Price Snapshotting):** In your current normalized schema, `order_details` references `products.price`. If a product price changes, historical orders will retroactively change their total value. The denormalized schema will fix this by snapshotting the price at the time of the order.
+
+---
+
+### 1. Model-to-Workload Mapping
+
+#### Access-Pattern Matrix
+
+| Query | `customers` | `orders` | `products` | `order_details` | Hotspots / Bottlenecks |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Q1: Customer Order History** | Read (Name) | Read (Date) | Read (Name) | Read (Qty) | **Join Hotspot:** 4-way join (`customers` $\rightarrow$ `orders` $\rightarrow$ `order_details` $\rightarrow$ `products`). |
+| **Q2: Daily Sales Dashboard** | - | Read (Date) | Read (Price) | Read (Qty) | **Aggregation Hotspot:** Grouping by `order_date` requires scanning and joining massive fact tables. |
+
+---
+
+### 2. Denormalization Patterns
+
+**1. Wide Read Table (`read_customer_order_history`)**
+*   *Pattern:* Pre-joined fact-dimension table.
+*   *Justification:* Q1 requires data from all four tables. By flattening this into a single table partitioned by date, we eliminate all joins at read time. A single index seek on `customer_id` will return the entire materialized receipt.
+
+**2. Pre-Aggregated Rollup (`read_daily_product_sales`)**
+*   *Pattern:* Time-bucketed snapshot/rollup.
+*   *Justification:* Q2 calculates daily sales. Instead of calculating `SUM(quantity * price)` across millions of rows on the fly, we maintain a materialized table at the `(order_date, product_id)` grain.
+
+---
+
+### 3. Proposed Denormalized Schema (DDL)
+
+```sql
+-- ==============================================================================
+-- PATTERN 1: WIDE READ TABLE (Tied to Q1: Customer Order History)
+-- ==============================================================================
+CREATE TABLE read_customer_order_history (
+    -- Surrogate PK for the read model
+    read_id BIGSERIAL,
+    
+    -- Source IDs for lineage and updates
+    order_detail_id INT NOT NULL,
+    order_id INT NOT NULL,
+    customer_id INT NOT NULL,
+    product_id INT NOT NULL,
+    
+    -- Denormalized Attributes
+    customer_name VARCHAR(100),
+    order_date DATE NOT NULL,
+    product_name VARCHAR(100),
+    
+    -- Snapshot Metrics (Fixes the historical price bug)
+    quantity INT NOT NULL,
+    unit_price_at_purchase DECIMAL(10,2) NOT NULL,
+    line_total DECIMAL(12,2) GENERATED ALWAYS AS (quantity * unit_price_at_purchase) STORED,
+    
+    -- Metadata
+    last_updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+    -- Constraints
+    CONSTRAINT pk_read_customer_order_history PRIMARY KEY (order_date, read_id),
+    CONSTRAINT uk_source_lineage UNIQUE (order_date, order_detail_id)
+) PARTITION BY RANGE (order_date);
+
+-- Partitioning: Prunes data for queries filtering by date ranges.
+-- Example partition creation (would be automated via pg_partman in production):
+CREATE TABLE read_customer_order_history_y2023m10 PARTITION OF read_customer_order_history
+    FOR VALUES FROM ('2023-10-01') TO ('2023-11-01');
+
+-- Indexing for Q1
+CREATE INDEX idx_read_coh_customer_date 
+    ON read_customer_order_history (customer_id, order_date DESC);
+-- Optional: INCLUDE clause for index-only scans if customer_name isn't strictly needed in the grid
+-- CREATE INDEX idx_read_coh_customer_date ON read_customer_order_history (customer_id, order_date DESC) INCLUDE (product_name, quantity, line_total);
+
+
+-- ==============================================================================
+-- PATTERN 2: PRE-AGGREGATED ROLLUP (Tied to Q2: Daily Sales Dashboard)
+-- ==============================================================================
+CREATE TABLE read_daily_product_sales (
+    order_date DATE NOT NULL,
+    product_id INT NOT NULL,
+    product_name VARCHAR(100), -- Denormalized for zero-join dashboarding
+    
+    total_quantity_sold BIGINT NOT NULL DEFAULT 0,
+    total_revenue DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    
+    last_updated_at TIMESTAMPTZ DEFAULT NOW(),
+    
+    CONSTRAINT pk_read_daily_product_sales PRIMARY KEY (order_date, product_id)
+);
+
+-- Indexing for Q2 (Date range queries)
+CREATE INDEX idx_read_dps_date ON read_daily_product_sales (order_date DESC);
+```
+
+---
+
+### 4. Consistency Architecture
+
+Because triggers are disallowed and batch windows are limited, we will use an **Eventual Consistency via CDC** architecture.
+
+**Data Lineage Mapping:**
+*   `read_customer_order_history.unit_price_at_purchase` $\leftarrow$ `products.price` (Captured at the exact time the `order_details` CDC insert event is processed).
+*   `read_customer_order_history.customer_name` $\leftarrow$ `customers.customer_name`.
+
+**Refresh Mechanism:**
+1.  **Extract:** Debezium monitors PostgreSQL WAL (Write-Ahead Log) for changes to the 4 source tables.
+2.  **Process:** A stream processing engine (e.g., Apache Flink or Kafka Streams) consumes these topics. It joins the `order_details` stream with the `orders`, `customers`, and `products` state stores.
+3.  **Load (Upsert):** The stream processor writes to the denormalized tables using `INSERT ... ON CONFLICT (order_date, order_detail_id) DO UPDATE`.
+4.  **Staleness Window:** Intentional staleness is dictated by the CDC pipeline lag, typically **1 to 5 seconds** under normal load.
+
+---
+
+### 5. Implementation Plan (Safe, Observable, Reversible)
+
+1.  **Phase 1: Provision & CDC Setup (No impact).** Deploy the new DDL. Attach Debezium to the primary database.
+2.  **Phase 2: Backfill.** Run a one-time batch job to populate historical data into the read tables. The stream processor buffers incoming live CDC events during this time.
+3.  **Phase 3: Catch-up & Dual-Write.** The stream processor applies the buffered events. The read tables are now kept in sync with the primary tables in near real-time.
+4.  **Phase 4: Shadow Reads.** Modify the application to route a percentage of Q1/Q2 read traffic to the new tables asynchronously. Compare results (Reconciliation) and log any diffs.
+5.  **Phase 5: Cutover.** Switch application read paths to the denormalized tables. The normalized tables are now strictly used for OLTP writes. Reversal is as simple as flipping a feature flag back to the normalized queries.
+
+---
+
+### 6. Risk Analysis
+
+| Risk Category | Description & Mitigation |
+| :--- | :--- |
+| **Write Amplification** | *Risk:* A customer name change or product name change requires updating thousands of rows in the wide table.<br>*Mitigation:* Acceptable trade-off. E-commerce product/customer names change rarely compared to the volume of order reads. Updates are handled asynchronously by the stream processor, shielding the primary DB from lock contention. |
+| **Storage Growth** | *Risk:* The wide table duplicates string data (`customer_name`, `product_name`), increasing disk usage.<br>*Mitigation:* PostgreSQL TOAST compression will mitigate some text duplication. Partitioning allows older data to be moved to cheaper storage or archived. |
+| **Failure Modes** | *Risk:* The CDC pipeline stalls, causing the read models to become severely stale.<br>*Mitigation:* Implement strict monitoring on Kafka consumer lag. If lag exceeds 5 minutes, the application feature flag can automatically route reads back to the normalized schema (graceful degradation). |
+| **Data Anomalies** | *Risk:* Out-of-order CDC events (e.g., order detail arrives before the order header).<br>*Mitigation:* The stream processor must maintain state and emit the joined record only when the order header is available, or emit a partial record and update it when the header arrives. |
+| **Monitoring/Alerts** | *Alerts to configure:* 1) CDC Pipeline Lag > 60s. 2) Dead Letter Queue (DLQ) depth > 0 (indicates failed upserts). 3) Periodic reconciliation job: `SELECT SUM(quantity) FROM order_details` vs `SELECT SUM(quantity) FROM read_customer_order_history` (must match). |
