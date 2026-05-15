@@ -1,0 +1,239 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_11-20-38
+Model: ollama_api
+Prompt: expert
+Schema: solarwinds
+==================================================
+
+# Executive Summary
+
+This document outlines a **denormalized read-optimized physical schema** derived from the provided normalized relational schema. The goal is to **improve read performance** for common analytical and reporting queries that involve customer orders, product details, and aggregated metrics such as total sales or item counts per order or customer.
+
+The key transformation involves creating **wide read tables**, **pre-aggregated rollups**, and **snapshot tables** that precompute joins and aggregations, reducing query-time complexity. This design assumes that **reads significantly outweigh writes**, and that **data freshness can tolerate a small lag** (e.g., up to 15 minutes) without violating business correctness.
+
+All artifacts are tied directly to specific query patterns (see Access-Pattern Matrix). The proposed changes are **reversible**, **observable**, and maintain **data lineage** through explicit refresh mechanisms.
+
+---
+
+# Access-Pattern Matrix
+
+| Query Type                          | Tables Involved                         | Join Hotspots              | Aggregation Hotspots       |
+|------------------------------------|-----------------------------------------|----------------------------|----------------------------|
+| Order Summary (by Customer)        | orders, customers, order_details        | orders ← customers         | SUM(quantity), COUNT(*)    |
+| Order Line Items (with Product)    | order_details, products                 | order_details ← products   | None                       |
+| Daily Sales Summary                | orders, order_details, products         | Multiple joins             | SUM(quantity * price)      |
+| Customer Lifetime Value            | All                                     | Multiple joins             | SUM(quantity * price)      |
+| Current Open Orders (snapshot)     | orders                                  | None                       | COUNT(open orders)         |
+
+---
+
+# Proposed Denormalized Schema (DDL)
+
+## 1. Wide Read Table: `order_summary`
+
+**Purpose**: Pre-join `orders`, `customers`, and `order_details` to support fast lookups of order-level summaries.
+
+```sql
+CREATE TABLE order_summary (
+    order_id INT PRIMARY KEY,
+    customer_id INT NOT NULL,
+    customer_name VARCHAR(100),
+    customer_email VARCHAR(100),
+    order_date DATE NOT NULL,
+    total_items INT NOT NULL,          -- Precomputed: SUM(quantity)
+    total_value DECIMAL(12,2) NOT NULL -- Precomputed: SUM(quantity * price)
+);
+
+-- Indexes for fast filtering/sorting
+CREATE INDEX idx_order_summary_customer_id ON order_summary(customer_id);
+CREATE INDEX idx_order_summary_order_date ON order_summary(order_date);
+```
+
+> **Refresh Logic**: Populated via batch job or CDC-based pipeline that recomputes per-order summary when any `order_details` record changes.
+
+---
+
+## 2. Pre-Aggregated Rollup: `daily_sales_summary`
+
+**Purpose**: Support daily sales dashboards and time-series analysis without real-time joins.
+
+```sql
+CREATE TABLE daily_sales_summary (
+    order_date DATE PRIMARY KEY,
+    total_orders INT NOT NULL,
+    total_items_sold INT NOT NULL,
+    total_revenue DECIMAL(15,2) NOT NULL
+);
+
+-- Optional partitioning by month if volume justifies
+-- PARTITION BY RANGE (order_date)
+```
+
+> **Refresh Logic**: Incremental aggregation updated daily using batch jobs or incremental materialized view refreshes.
+
+---
+
+## 3. Snapshot Table: `current_open_orders`
+
+**Purpose**: Fast lookup of currently open orders without scanning full history.
+
+```sql
+CREATE TABLE current_open_orders (
+    order_id INT PRIMARY KEY,
+    customer_id INT NOT NULL,
+    customer_name VARCHAR(100),
+    order_date DATE NOT NULL,
+    total_items INT NOT NULL,
+    total_value DECIMAL(12,2) NOT NULL
+);
+
+-- Indexes
+CREATE INDEX idx_open_orders_customer_id ON current_open_orders(customer_id);
+```
+
+> **Refresh Logic**: Refreshed periodically (e.g., every 10 minutes) based on `orders.order_status` (assuming a new column `order_status` exists or inferred via business logic).
+
+---
+
+## 4. Materialized View Alternative (if supported by engine)
+
+For engines that support materialized views (e.g., PostgreSQL, Snowflake), consider:
+
+```sql
+CREATE MATERIALIZED VIEW mv_order_summary AS
+SELECT
+    o.order_id,
+    c.customer_id,
+    c.customer_name,
+    c.customer_email,
+    o.order_date,
+    SUM(od.quantity) AS total_items,
+    SUM(od.quantity * p.price) AS total_value
+FROM orders o
+JOIN customers c ON o.customer_id = c.customer_id
+JOIN order_details od ON o.order_id = od.order_id
+JOIN products p ON od.product_id = p.product_id
+GROUP BY o.order_id, c.customer_id, c.customer_name, c.customer_email, o.order_date;
+```
+
+> **Note**: Requires periodic refresh or incremental maintenance logic depending on engine capabilities.
+
+---
+
+# Physical Design Details
+
+### Partitioning Strategy
+
+- **`order_summary`**: Not partitioned unless volume exceeds 10M rows/year.
+- **`daily_sales_summary`**: Not partitioned due to low cardinality.
+- **`current_open_orders`**: Not partitioned; refreshed entirely during each run.
+
+### Clustering / Ordering
+
+- If engine supports:
+  - Cluster `order_summary` by `(customer_id, order_date)` for efficient customer-based queries.
+  - Cluster `daily_sales_summary` by `order_date`.
+
+### Storage Parameters
+
+- Use compression where supported (`ROW COMPRESSION`, `COLUMNAR COMPRESSION`) for large tables.
+- Store denormalized tables in fast-access storage tier if available.
+
+---
+
+# Consistency Architecture
+
+### Data Lineage
+
+| Denormalized Column        | Source Tables                  | Refresh Mechanism              |
+|---------------------------|--------------------------------|--------------------------------|
+| `order_summary.total_items` | `order_details.quantity`       | Batch/CDC → Aggregate → Write |
+| `order_summary.total_value` | `order_details.quantity`, `products.price` | Same as above |
+| `daily_sales_summary.total_revenue` | `order_details`, `products` | Daily batch job or incremental |
+| `current_open_orders.*`     | `orders`, `customers`, `order_details` | Periodic snapshot query |
+
+### Staleness Windows
+
+- `order_summary`: Up to 15 minutes (depending on refresh frequency).
+- `daily_sales_summary`: Up to 1 day.
+- `current_open_orders`: Up to 10 minutes.
+
+> **Correctness Assumption**: Business users accept bounded staleness for improved performance.
+
+---
+
+# Risk Analysis
+
+## Write Amplification
+
+- Each insert/update/delete in normalized tables may trigger multiple writes in denormalized tables.
+- Mitigation: Use batch processing or change data capture (CDC) pipelines to batch updates.
+
+## Lock Contention
+
+- High write frequency on denormalized tables could cause lock waits.
+- Mitigation: Use append-only or partition-swapping strategies where possible.
+
+## Failure Modes
+
+- Incomplete refreshes can lead to stale data.
+- Mitigation: Implement reconciliation checks and alerting on lag/freshness.
+
+## Backfill Runtime
+
+- Full backfills of `order_summary` or `daily_sales_summary` may take hours for large datasets.
+- Mitigation: Parallelize backfills using partitioning or chunked processing.
+
+## Storage Growth
+
+- Denormalization increases storage footprint (typically 2x–5x).
+- Mitigation: Monitor growth and archive old data if needed.
+
+---
+
+# Monitoring & Alerting
+
+| Metric                        | Alert Threshold                        | Tooling Integration         |
+|------------------------------|----------------------------------------|-----------------------------|
+| Denormalized lag              | >15 minutes                            | Prometheus / Grafana        |
+| Reconciliation mismatch       | Any difference >0                      | Custom reconciliation job   |
+| Query latency regression      | +20% increase in p95 latency            | APM (e.g., New Relic)       |
+| Refresh job failure           | Job fails or exceeds runtime SLA       | Cron monitoring / Airflow   |
+
+---
+
+# Implementation Plan (High-Level)
+
+1. **Phase 1**: Design & Deploy Schema
+   - Create new tables/views.
+   - Set up indexes and storage settings.
+
+2. **Phase 2**: Build Refresh Pipelines
+   - Implement ETL jobs or CDC consumers.
+   - Schedule incremental refreshes.
+
+3. **Phase 3**: Validate Correctness
+   - Run sample reconciliations between normalized and denormalized data.
+   - Validate with stakeholders on correctness/staleness trade-off.
+
+4. **Phase 4**: Rollout to Consumers
+   - Update dashboards/reports to use denormalized tables.
+   - Monitor query performance improvements.
+
+5. **Phase 5**: Ongoing Maintenance
+   - Tune refresh intervals based on usage.
+   - Monitor for drift and alert on inconsistency.
+
+---
+
+# Assumptions
+
+- No triggers allowed (per hard requirement).
+- Limited batch windows acceptable (e.g., nightly ETL acceptable).
+- CDC is available or can be implemented via log-based replication.
+- Data staleness of up to 15 minutes is acceptable.
+- Operational complexity is manageable with existing ETL tools (e.g., Airflow, DBT, Kafka Connect).
+
+---
+
+Let me know if you'd like implementation templates for the ETL pipelines or CDC-based refresh logic.

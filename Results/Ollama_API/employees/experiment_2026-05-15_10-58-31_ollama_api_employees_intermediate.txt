@@ -1,0 +1,347 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_10-58-31
+Model: ollama_api
+Prompt: intermediate
+Schema: employees
+==================================================
+
+# Denormalized Physical Schema for Read Performance Optimization
+
+## 1. Workload-Driven Analysis
+
+### High-Cost Operations in Read Workloads:
+- **Employee Department History**: Requires joining `employee`, `department_employee`, and `department` tables to get full history.
+- **Current Employee Details**: Multiple joins required to get current department, title, and salary for active employees.
+- **Manager Hierarchy Queries**: Joining `department_manager`, `employee`, and `department` to find reporting structure.
+- **Salary Analysis**: Getting salary history requires joining `employee` and `salary` tables.
+- **Title History**: Requires joining `employee` and `title` tables for employment history.
+
+### Denormalization Candidates:
+1. Pre-join employee with current department information
+2. Pre-compute current salary, title, and department into a single view
+3. Create aggregated salary statistics by department
+4. Build a wide "employee snapshot" table for common queries
+
+## 2. Denormalization Design
+
+### Proposed Denormalizations:
+1. **Employee Current Snapshot Table**: Wide table containing current employee info, department, title, and salary
+2. **Department Salary Summary Table**: Pre-aggregated salary data by department
+3. **Employee History View**: Simplified access to historical employee data
+4. **Manager-Employee Hierarchy View**: Simplified access to organizational structure
+5. **Covering Indexes**: Optimized indexes for common query patterns
+
+## 3. New Physical Schema
+
+```sql
+BEGIN;
+
+-- Create schema for read-optimized tables
+CREATE SCHEMA IF NOT EXISTS employees_read;
+
+-- 1. Employee Current Snapshot Table (Denormalized wide table for current employee data)
+CREATE TABLE employees_read.employee_current (
+    employee_id BIGINT PRIMARY KEY,
+    birth_date DATE NOT NULL,
+    first_name VARCHAR(14) NOT NULL,
+    last_name VARCHAR(16) NOT NULL,
+    gender employees.employee_gender NOT NULL,
+    hire_date DATE NOT NULL,
+    current_department_id CHAR(4),
+    current_department_name VARCHAR(40),
+    current_title VARCHAR(50),
+    current_salary BIGINT,
+    is_manager BOOLEAN DEFAULT FALSE,
+    manager_id BIGINT,
+    manager_name VARCHAR(30)  -- First and last name of manager
+);
+
+-- 2. Department Salary Summary (Precomputed aggregates)
+CREATE TABLE employees_read.department_salary_summary (
+    department_id CHAR(4) PRIMARY KEY,
+    department_name VARCHAR(40) NOT NULL,
+    employee_count INTEGER NOT NULL,
+    avg_salary BIGINT NOT NULL,
+    min_salary BIGINT NOT NULL,
+    max_salary BIGINT NOT NULL,
+    total_salary_cost BIGINT NOT NULL,
+    last_updated TIMESTAMP DEFAULT NOW()
+);
+
+-- 3. Employee History Table (Denormalized historical data)
+CREATE TABLE employees_read.employee_history (
+    employee_id BIGINT,
+    first_name VARCHAR(14) NOT NULL,
+    last_name VARCHAR(16) NOT NULL,
+    department_id CHAR(4),
+    department_name VARCHAR(40),
+    title VARCHAR(50),
+    salary_amount BIGINT,
+    from_date DATE NOT NULL,
+    to_date DATE NOT NULL,
+    record_type VARCHAR(20) NOT NULL, -- 'department', 'salary', 'title'
+    PRIMARY KEY (employee_id, from_date, record_type)
+);
+
+-- 4. Manager Hierarchy View (Simplified organizational structure)
+CREATE TABLE employees_read.manager_hierarchy (
+    employee_id BIGINT,
+    employee_name VARCHAR(50),
+    department_id CHAR(4),
+    department_name VARCHAR(40),
+    manager_id BIGINT,
+    manager_name VARCHAR(50),
+    hierarchy_level INTEGER,
+    PRIMARY KEY (employee_id, department_id)
+);
+
+-- Indexes for employee_current table
+CREATE INDEX idx_employee_current_dept ON employees_read.employee_current(current_department_id);
+CREATE INDEX idx_employee_current_salary ON employees_read.employee_current(current_salary);
+CREATE INDEX idx_employee_current_manager ON employees_read.employee_current(manager_id);
+CREATE INDEX idx_employee_current_name ON employees_read.employee_current(last_name, first_name);
+
+-- Indexes for employee_history table
+CREATE INDEX idx_employee_history_emp_id ON employees_read.employee_history(employee_id);
+CREATE INDEX idx_employee_history_dept ON employees_read.employee_history(department_id);
+CREATE INDEX idx_employee_history_date_range ON employees_read.employee_history(from_date, to_date);
+CREATE INDEX idx_employee_history_type ON employees_read.employee_history(record_type);
+
+-- Indexes for manager_hierarchy table
+CREATE INDEX idx_manager_hierarchy_manager ON employees_read.manager_hierarchy(manager_id);
+CREATE INDEX idx_manager_hierarchy_dept ON employees_read.manager_hierarchy(department_id);
+CREATE INDEX idx_manager_hierarchy_level ON employees_read.manager_hierarchy(hierarchy_level);
+
+-- Covering indexes for common query patterns
+CREATE INDEX idx_employee_current_covering 
+ON employees_read.employee_current(current_department_id, current_salary, last_name, first_name)
+INCLUDE (employee_id, hire_date);
+
+-- Materialized views for complex queries
+
+-- MV1: Current employees with department details (avoids joins)
+CREATE MATERIALIZED VIEW employees_read.mv_current_employees AS
+SELECT 
+    e.id as employee_id,
+    e.first_name,
+    e.last_name,
+    e.gender,
+    e.hire_date,
+    d.id as department_id,
+    d.dept_name as department_name,
+    t.title as current_title,
+    s.amount as current_salary
+FROM employees.employee e
+JOIN employees.department_employee de ON e.id = de.employee_id
+JOIN employees.department d ON de.department_id = d.id
+LEFT JOIN employees.title t ON e.id = t.employee_id AND t.to_date IS NULL
+LEFT JOIN employees.salary s ON e.id = s.employee_id AND s.to_date IS NULL
+WHERE de.to_date = '9999-01-01'; -- Current department assignment
+
+CREATE INDEX idx_mv_current_employees_dept ON employees_read.mv_current_employees(department_id);
+CREATE INDEX idx_mv_current_employees_name ON employees_read.mv_current_employees(last_name, first_name);
+
+-- MV2: Employee count and salary stats by department
+CREATE MATERIALIZED VIEW employees_read.mv_department_stats AS
+SELECT 
+    d.id as department_id,
+    d.dept_name as department_name,
+    COUNT(e.id) as employee_count,
+    AVG(s.amount) as avg_salary,
+    MIN(s.amount) as min_salary,
+    MAX(s.amount) as max_salary
+FROM employees.department d
+JOIN employees.department_employee de ON d.id = de.department_id
+JOIN employees.employee e ON de.employee_id = e.id
+JOIN employees.salary s ON e.id = s.employee_id
+WHERE de.to_date = '9999-01-01' AND s.to_date = '9999-01-01'
+GROUP BY d.id, d.dept_name;
+
+CREATE INDEX idx_mv_department_stats_dept ON employees_read.mv_department_stats(department_id);
+
+-- Partitioned table for large historical data (if needed for very large datasets)
+-- This would be used for extensive historical analysis
+CREATE TABLE employees_read.employee_compensation_history (
+    employee_id BIGINT NOT NULL,
+    department_id CHAR(4),
+    salary_amount BIGINT,
+    title VARCHAR(50),
+    effective_date DATE NOT NULL,
+    end_date DATE,
+    event_type VARCHAR(20) -- 'hire', 'salary_change', 'promotion', 'department_change', 'termination'
+) PARTITION BY RANGE (effective_date);
+
+-- Create partitions for different years
+CREATE TABLE employees_read.employee_compensation_history_2020 PARTITION OF 
+employees_read.employee_compensation_history FOR VALUES FROM ('2020-01-01') TO ('2021-01-01');
+
+CREATE TABLE employees_read.employee_compensation_history_2021 PARTITION OF 
+employees_read.employee_compensation_history FOR VALUES FROM ('2021-01-01') TO ('2022-01-01');
+
+CREATE TABLE employees_read.employee_compensation_history_2022 PARTITION OF 
+employees_read.employee_compensation_history FOR VALUES FROM ('2022-01-01') TO ('2023-01-01');
+
+CREATE TABLE employees_read.employee_compensation_history_2023 PARTITION OF 
+employees_read.employee_compensation_history FOR VALUES FROM ('2023-01-01') TO ('2024-01-01');
+
+CREATE TABLE employees_read.employee_compensation_history_2024 PARTITION OF 
+employees_read.employee_compensation_history FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
+
+-- Indexes on partitioned table
+CREATE INDEX idx_employee_comp_hist_emp ON employees_read.employee_compensation_history(employee_id);
+CREATE INDEX idx_employee_comp_hist_dept ON employees_read.employee_compensation_history(department_id);
+CREATE INDEX idx_employee_comp_hist_date ON employees_read.employee_compensation_history(effective_date);
+
+-- Views for simplified access patterns
+
+-- View for getting all current employees in a department
+CREATE VIEW employees_read.v_current_dept_employees AS
+SELECT 
+    employee_id,
+    first_name,
+    last_name,
+    current_title,
+    current_salary,
+    hire_date
+FROM employees_read.employee_current
+WHERE current_department_id IS NOT NULL;
+
+-- View for getting salary statistics by department
+CREATE VIEW employees_read.v_department_salary_stats AS
+SELECT 
+    department_id,
+    department_name,
+    employee_count,
+    avg_salary,
+    min_salary,
+    max_salary
+FROM employees_read.department_salary_summary;
+
+-- View for organizational hierarchy
+CREATE VIEW employees_read.v_org_structure AS
+SELECT 
+    m.employee_id,
+    m.employee_name,
+    m.department_id,
+    m.department_name,
+    m.manager_id,
+    m.manager_name,
+    m.hierarchy_level
+FROM employees_read.manager_hierarchy m;
+
+-- Refresh functions for materialized views (to be scheduled)
+CREATE OR REPLACE FUNCTION employees_read.refresh_materialized_views()
+RETURNS VOID AS $$
+BEGIN
+    REFRESH MATERIALIZED VIEW employees_read.mv_current_employees;
+    REFRESH MATERIALIZED VIEW employees_read.mv_department_stats;
+    REFRESH MATERIALIZED VIEW employees_read.department_salary_summary;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to populate employee_current table
+CREATE OR REPLACE FUNCTION employees_read.populate_employee_current()
+RETURNS VOID AS $$
+BEGIN
+    -- Clear existing data
+    TRUNCATE employees_read.employee_current;
+    
+    -- Insert current employee data
+    INSERT INTO employees_read.employee_current (
+        employee_id, birth_date, first_name, last_name, gender, hire_date,
+        current_department_id, current_department_name, current_title, 
+        current_salary, is_manager, manager_id, manager_name
+    )
+    SELECT 
+        e.id,
+        e.birth_date,
+        e.first_name,
+        e.last_name,
+        e.gender,
+        e.hire_date,
+        d.id as current_department_id,
+        d.dept_name as current_department_name,
+        t.title as current_title,
+        s.amount as current_salary,
+        CASE WHEN dm.employee_id IS NOT NULL THEN TRUE ELSE FALSE END as is_manager,
+        dm.manager_emp_id as manager_id,
+        CONCAT(me.first_name, ' ', me.last_name) as manager_name
+    FROM employees.employee e
+    LEFT JOIN (
+        SELECT employee_id, department_id
+        FROM employees.department_employee 
+        WHERE to_date = '9999-01-01'
+    ) de ON e.id = de.employee_id
+    LEFT JOIN employees.department d ON de.department_id = d.id
+    LEFT JOIN (
+        SELECT employee_id, title
+        FROM employees.title 
+        WHERE to_date IS NULL
+    ) t ON e.id = t.employee_id
+    LEFT JOIN (
+        SELECT employee_id, amount
+        FROM employees.salary 
+        WHERE to_date = '9999-01-01'
+    ) s ON e.id = s.employee_id
+    LEFT JOIN (
+        SELECT dm1.employee_id, dm1.employee_id as manager_emp_id
+        FROM employees.department_manager dm1
+        WHERE dm1.to_date = '9999-01-01'
+    ) dm ON e.id = dm.employee_id
+    LEFT JOIN employees.employee me ON dm.employee_id = me.id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to populate department_salary_summary table
+CREATE OR REPLACE FUNCTION employees_read.populate_department_salary_summary()
+RETURNS VOID AS $$
+BEGIN
+    -- Clear existing data
+    TRUNCATE employees_read.department_salary_summary;
+    
+    -- Insert aggregated department salary data
+    INSERT INTO employees_read.department_salary_summary (
+        department_id, department_name, employee_count, avg_salary, 
+        min_salary, max_salary, total_salary_cost
+    )
+    SELECT 
+        d.id,
+        d.dept_name,
+        COUNT(e.id) as employee_count,
+        AVG(s.amount) as avg_salary,
+        MIN(s.amount) as min_salary,
+        MAX(s.amount) as max_salary,
+        SUM(s.amount) as total_salary_cost
+    FROM employees.department d
+    JOIN employees.department_employee de ON d.id = de.department_id
+    JOIN employees.employee e ON de.employee_id = e.id
+    JOIN employees.salary s ON e.id = s.employee_id
+    WHERE de.to_date = '9999-01-01' AND s.to_date = '9999-01-01'
+    GROUP BY d.id, d.dept_name;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMIT;
+```
+
+## Summary of Optimizations
+
+### Key Denormalization Strategies Implemented:
+
+1. **Wide Snapshot Table** (`employee_current`): Eliminates up to 5 joins for getting current employee information
+2. **Precomputed Aggregates** (`department_salary_summary`): Removes need to calculate salary statistics on-the-fly
+3. **History Table** (`employee_history`): Simplifies temporal queries without complex date logic
+4. **Hierarchy Table** (`manager_hierarchy`): Precomputes organizational structure
+5. **Materialized Views**: For complex analytical queries that don't need real-time data
+6. **Covering Indexes**: Optimized for common filter and sort patterns
+7. **Partitioning**: For large historical datasets
+
+### Performance Benefits:
+- **Employee Details Query**: Now single table lookup instead of 4-5 joins
+- **Department Salary Analysis**: Instant results from precomputed aggregates
+- **Manager Reports**: Simplified with precomputed hierarchy
+- **Historical Analysis**: Faster with denormalized history table
+- **Covering Indexes**: Eliminate table lookups for many queries
+
+### Data Freshness:
+Materialized views and summary tables should be refreshed on a schedule (e.g., nightly) based on business requirements for data freshness vs. performance trade-offs.

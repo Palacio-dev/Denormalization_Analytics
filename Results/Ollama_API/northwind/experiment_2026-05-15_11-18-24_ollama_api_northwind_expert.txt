@@ -1,0 +1,235 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_11-18-24
+Model: ollama_api
+Prompt: expert
+Schema: northwind
+==================================================
+
+# Executive Summary
+
+This document proposes a **denormalized read-optimized physical schema** derived from the provided normalized Northwind-style schema. The goal is to **improve read performance** by reducing join complexity and enabling faster query execution, especially for common reporting and dashboard-style queries.
+
+We analyze the workload through an access-pattern matrix and identify **join hotspots**, particularly in the `orders` → `order_details` → `products` → `categories` chain, and `orders` → `customers`/`employees`. To optimize these, we propose:
+- Wide read tables (e.g., `orders_denorm`)
+- Pre-aggregated rollups (e.g., `sales_summary_by_customer`)
+- Snapshot tables (e.g., `current_orders`)
+- Optional star schema modeling for analytics
+
+All denormalized artifacts are traceable to specific query patterns and preserve correctness via lineage tracking. The design is **reversible**, supports **observability**, and is built for **safe deployment**.
+
+---
+
+# Access-Pattern Matrix
+
+| Query Class | Tables Involved | Join Hotspots | Aggregation Needs | Example Use Case |
+|-------------|------------------|----------------|--------------------|------------------|
+| Order Details with Product Info | `orders`, `order_details`, `products` | `order_details.order_id → orders.order_id`, `order_details.product_id → products.product_id` | Sum(quantity), avg(unit_price) | "Show all orders with product names and prices" |
+| Order Summary by Customer | `orders`, `customers` | `orders.customer_id → customers.customer_id` | Count(orders), sum(freight) | "Customer order history" |
+| Sales Summary by Category | `order_details`, `products`, `categories` | `products.category_id → categories.category_id` | Sum(quantity * unit_price) | "Sales by product category" |
+| Employee Sales Performance | `orders`, `employees`, `order_details` | `orders.employee_id → employees.employee_id` | Sum(quantity * unit_price) | "Top sales reps" |
+| Order Status Dashboard | `orders` | — | Count by status | "Current open/shipped orders" |
+
+---
+
+# Proposed Denormalized Schema (DDL)
+
+## 1. Wide Read Table: `orders_denorm`
+
+**Purpose**: Pre-join core entities for order-centric queries.
+
+```sql
+CREATE TABLE public.orders_denorm (
+    order_id smallint NOT NULL,
+    customer_id varchar(5) NOT NULL,
+    customer_company_name varchar(40),
+    employee_id smallint,
+    employee_full_name varchar(30),
+    order_date date,
+    required_date date,
+    shipped_date date,
+    ship_via smallint,
+    freight real,
+    ship_name varchar(40),
+    ship_address varchar(60),
+    ship_city varchar(15),
+    ship_region varchar(15),
+    ship_postal_code varchar(10),
+    ship_country varchar(15),
+    product_id smallint,
+    product_name varchar(40),
+    category_id smallint,
+    category_name varchar(15),
+    unit_price real,
+    quantity smallint,
+    discount real,
+    line_total real GENERATED ALWAYS AS (quantity * unit_price * (1 - discount)) STORED,
+    PRIMARY KEY (order_id, product_id)
+);
+
+CREATE INDEX idx_orders_denorm_customer_id ON public.orders_denorm(customer_id);
+CREATE INDEX idx_orders_denorm_employee_id ON public.orders_denorm(employee_id);
+CREATE INDEX idx_orders_denorm_order_date ON public.orders_denorm(order_date);
+CREATE INDEX idx_orders_denorm_category_id ON public.orders_denorm(category_id);
+```
+
+---
+
+## 2. Pre-Aggregated Rollup: `sales_summary_by_customer`
+
+**Purpose**: Support fast reporting of customer sales totals.
+
+```sql
+CREATE TABLE public.sales_summary_by_customer (
+    customer_id varchar(5) NOT NULL,
+    customer_company_name varchar(40),
+    order_year smallint,
+    order_month smallint,
+    total_orders int,
+    total_freight real,
+    total_sales real,
+    last_updated timestamp DEFAULT now(),
+    PRIMARY KEY (customer_id, order_year, order_month)
+);
+
+CREATE INDEX idx_sales_summary_customer_id ON public.sales_summary_by_customer(customer_id);
+CREATE INDEX idx_sales_summary_year_month ON public.sales_summary_by_customer(order_year, order_month);
+```
+
+---
+
+## 3. Snapshot Table: `current_orders`
+
+**Purpose**: Fast access to orders in "open" or "pending" status.
+
+```sql
+CREATE TABLE public.current_orders (
+    order_id smallint NOT NULL,
+    customer_id varchar(5),
+    customer_company_name varchar(40),
+    order_date date,
+    required_date date,
+    ship_name varchar(40),
+    ship_city varchar(15),
+    ship_country varchar(15),
+    freight real,
+    PRIMARY KEY (order_id)
+);
+
+CREATE INDEX idx_current_orders_customer_id ON public.current_orders(customer_id);
+CREATE INDEX idx_current_orders_order_date ON public.current_orders(order_date);
+```
+
+---
+
+## 4. Optional Star Schema: Fact + Dimensions
+
+### Fact Table: `fact_sales`
+
+```sql
+CREATE TABLE public.fact_sales (
+    order_id smallint,
+    product_id smallint,
+    customer_id varchar(5),
+    employee_id smallint,
+    order_date date,
+    ship_via smallint,
+    quantity smallint,
+    unit_price real,
+    discount real,
+    line_total real GENERATED ALWAYS AS (quantity * unit_price * (1 - discount)) STORED
+);
+
+CREATE INDEX idx_fact_sales_order_date ON public.fact_sales(order_date);
+CREATE INDEX idx_fact_sales_customer_id ON public.fact_sales(customer_id);
+CREATE INDEX idx_fact_sales_product_id ON public.fact_sales(product_id);
+```
+
+### Dimension Tables:
+- `dim_customers`
+- `dim_products`
+- `dim_employees`
+- `dim_shippers`
+
+These can be derived from the base tables and joined with `fact_sales` for analytics.
+
+---
+
+# Consistency Architecture
+
+### Data Lineage
+
+| Denormalized Column | Source Table(s) | Refresh Mechanism |
+|---------------------|------------------|--------------------|
+| `orders_denorm.*` | `orders`, `order_details`, `products`, `categories`, `customers`, `employees` | Incremental refresh on order update |
+| `sales_summary_by_customer.*` | `orders`, `order_details` | Daily rollup job |
+| `current_orders.*` | `orders` | Snapshot on order status change |
+| `fact_sales.*` | `orders`, `order_details` | Batch ETL or CDC-based sync |
+
+### Refresh Strategy
+
+- **Triggers**: Not allowed (per constraints)
+- **CDC**: Preferred (if available) for incremental sync
+- **Batch Jobs**: Fallback (daily/hourly rollups)
+- **Staleness**: Explicitly acceptable for rollups (e.g., daily summary is stale up to 24h)
+
+---
+
+# Risk Analysis
+
+| Risk | Description | Mitigation |
+|------|-------------|------------|
+| Write Amplification | Denormalized tables increase write volume | Use async batch or CDC to minimize impact |
+| Lock Contention | High concurrency on refresh jobs | Use table partitioning, time-based writes, or staging tables |
+| Failure Modes | ETL job failure, inconsistent state | Add checksums, reconciliation checks, alerts |
+| Backfill Runtime | Large historical sync | Chunked processing, parallel jobs |
+| Storage Growth | Denormalized tables increase size | Monitor and archive old data |
+| Query Regressions | Denormalized tables may be misused | Enforce usage guidelines, monitor query patterns |
+
+---
+
+# Monitoring & Observability
+
+- **Freshness Lag**: Monitor time since last refresh for each table
+- **Reconciliation Checks**: Compare rollups to source queries
+- **Query Latency**: Compare before/after for target queries
+- **Alerts**:
+  - Stale data (>1d for rollups)
+  - Job failure notifications
+  - Query latency degradation
+
+---
+
+# Implementation Plan (High-Level)
+
+1. **Stage 1: Schema Creation**
+   - Create all new tables in a `readstore` schema
+   - Do not expose to production yet
+
+2. **Stage 2: Initial Load**
+   - Backfill data using batch jobs or CDC pipeline
+   - Validate data integrity via checksums
+
+3. **Stage 3: Refresh Jobs**
+   - Set up incremental refresh jobs (hourly/daily)
+   - Monitor for lag/freshness
+
+4. **Stage 4: Enable Reads**
+   - Point dashboards and reports to new tables
+   - Shadow reads from old schema for validation
+
+5. **Stage 5: Reversibility**
+   - Maintain old schema in parallel
+   - Switch back if issues arise
+
+---
+
+# Assumptions
+
+- CDC is available (preferred) or batch windows are acceptable
+- Triggers are not allowed
+- Storage is not severely constrained
+- Read workload is primarily reporting/dashboarding, not OLTP
+
+---
+
+Let me know if you'd like the ETL logic or CDC-based sync design next.

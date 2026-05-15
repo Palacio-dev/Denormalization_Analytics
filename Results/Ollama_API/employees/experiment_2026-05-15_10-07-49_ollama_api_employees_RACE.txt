@@ -1,0 +1,203 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_10-07-49
+Model: ollama_api
+Prompt: RACE
+Schema: employees
+==================================================
+
+# Denormalized Physical Schema Design for Employee Database
+
+## Step 1: Schema Analysis
+
+The provided schema represents an employee management system with the following key entities:
+- **employees.employee**: Core employee information (id, name, birth_date, gender, hire_date)
+- **employees.department**: Department information (id, dept_name)
+- **employees.department_employee**: Employee-department relationships with date ranges
+- **employees.department_manager**: Manager-department relationships with date ranges
+- **employees.salary**: Salary history with date ranges
+- **employees.title**: Job title history with date ranges
+
+Key characteristics:
+- Heavy use of composite primary keys for temporal data (effective dating)
+- Multiple temporal tables requiring JOINs for current information
+- Many-to-many relationships between employees and departments
+
+## Step 2: Frequent Query Analysis
+
+Based on typical HR/employee analytics workloads, the most common queries likely include:
+
+1. **Current employee information with department and salary**
+   ```sql
+   SELECT e.first_name, e.last_name, d.dept_name, s.amount
+   FROM employees e
+   JOIN department_employee de ON e.id = de.employee_id
+   JOIN department d ON de.department_id = d.id
+   JOIN salary s ON e.id = s.employee_id
+   WHERE de.to_date = '9999-01-01' AND s.to_date = '9999-01-01'
+   ```
+
+2. **Employee history tracking**
+   ```sql
+   SELECT e.first_name, e.last_name, t.title, d.dept_name, s.amount
+   FROM employees e
+   JOIN title t ON e.id = t.employee_id
+   JOIN department_employee de ON e.id = de.employee_id
+   JOIN department d ON de.department_id = d.id
+   JOIN salary s ON e.id = s.employee_id
+   WHERE t.to_date > '2020-01-01' AND de.to_date > '2020-01-01'
+   ```
+
+3. **Managerial hierarchy queries**
+   ```sql
+   SELECT e.first_name, e.last_name, d.dept_name
+   FROM employees e
+   JOIN department_manager dm ON e.id = dm.employee_id
+   JOIN department d ON dm.department_id = d.id
+   WHERE dm.to_date = '9999-01-01'
+   ```
+
+These queries require multiple JOINs and date filtering, creating performance bottlenecks.
+
+## Step 3: Applicable Denormalization Techniques
+
+For this schema, the most applicable techniques are:
+
+1. **Adding Redundant Attributes**: Merging current employee information with department and salary data
+2. **Adding Derived Attributes**: Pre-calculating aggregates like average salary by department
+3. **Collapsing Relations**: Combining employee information with their current roles and compensation
+
+## Step 4: Proposed Denormalized Schemas
+
+### Option A: Employee Current Snapshot Table
+Create a materialized view of current employee information:
+```sql
+CREATE TABLE employees_current (
+    employee_id BIGINT PRIMARY KEY,
+    first_name VARCHAR(14),
+    last_name VARCHAR(16),
+    birth_date DATE,
+    gender employee_gender,
+    hire_date DATE,
+    current_department_id CHAR(4),
+    current_department_name VARCHAR(40),
+    current_title VARCHAR(50),
+    current_salary BIGINT,
+    is_manager BOOLEAN,
+    manager_department_id CHAR(4),
+    manager_department_name VARCHAR(40)
+);
+```
+
+### Option B: Comprehensive Employee History Table
+Collapse all temporal relationships into a single table:
+```sql
+CREATE TABLE employee_history (
+    employee_id BIGINT,
+    first_name VARCHAR(14),
+    last_name VARCHAR(16),
+    birth_date DATE,
+    gender employee_gender,
+    hire_date DATE,
+    department_id CHAR(4),
+    department_name VARCHAR(40),
+    title VARCHAR(50),
+    salary_amount BIGINT,
+    from_date DATE,
+    to_date DATE,
+    is_current BOOLEAN,
+    is_manager BOOLEAN
+);
+```
+
+### Option C: Department-Centric Denormalized Table
+Optimize for department-based analytics:
+```sql
+CREATE TABLE department_employees (
+    department_id CHAR(4),
+    department_name VARCHAR(40),
+    employee_id BIGINT,
+    first_name VARCHAR(14),
+    last_name VARCHAR(16),
+    current_title VARCHAR(50),
+    current_salary BIGINT,
+    hire_date DATE,
+    is_manager BOOLEAN,
+    salary_stats JSONB  -- Precomputed aggregates
+);
+```
+
+## Step 5: Evaluation of Options
+
+| Option | Query Performance | Storage Efficiency | Maintenance Complexity | Flexibility |
+|--------|------------------|-------------------|----------------------|-------------|
+| A: Current Snapshot | Excellent for current data queries | Good | Moderate | Limited to current data |
+| B: Comprehensive History | Good for all queries | Poor (data duplication) | High | Excellent |
+| C: Department-Centric | Excellent for department analytics | Good | Moderate | Department-focused |
+
+## Step 6: Recommended Denormalized Schema
+
+Based on the read-heavy analytical workload context, I recommend **Option A** with some enhancements:
+
+```sql
+-- Denormalized table for current employee information
+CREATE TABLE IF NOT EXISTS employees.employee_current (
+    employee_id BIGINT PRIMARY KEY,
+    first_name VARCHAR(14) NOT NULL,
+    last_name VARCHAR(16) NOT NULL,
+    birth_date DATE NOT NULL,
+    gender employees.employee_gender NOT NULL,
+    hire_date DATE NOT NULL,
+    current_department_id CHAR(4),
+    current_department_name VARCHAR(40),
+    current_title VARCHAR(50),
+    current_salary BIGINT,
+    salary_from_date DATE,
+    salary_to_date DATE,
+    title_from_date DATE,
+    title_to_date DATE,
+    dept_from_date DATE,
+    dept_to_date DATE,
+    is_manager BOOLEAN DEFAULT FALSE,
+    manager_department_id CHAR(4),
+    manager_department_name VARCHAR(40)
+);
+
+-- Denormalized table for department analytics
+CREATE TABLE IF NOT EXISTS employees.department_stats (
+    department_id CHAR(4) PRIMARY KEY,
+    department_name VARCHAR(40),
+    employee_count INTEGER,
+    avg_salary BIGINT,
+    min_salary BIGINT,
+    max_salary BIGINT,
+    manager_name VARCHAR(30),  -- first_name + last_name
+    manager_employee_id BIGINT
+);
+
+-- Materialized view for salary analytics by title
+CREATE TABLE IF NOT EXISTS employees.title_salary_stats (
+    title VARCHAR(50),
+    employee_count INTEGER,
+    avg_salary BIGINT,
+    min_salary BIGINT,
+    max_salary BIGINT,
+    salary_std_dev NUMERIC
+);
+```
+
+### Benefits of This Approach:
+
+1. **Performance**: Eliminates JOINs for common queries about current employee information
+2. **Analytics Ready**: Precomputed aggregates support analytical queries without complex calculations
+3. **Temporal Awareness**: Maintains date range information for historical context
+4. **Manager Identification**: Direct boolean flag for identifying managers
+5. **Department Analytics**: Dedicated table for department-level metrics
+
+### Implementation Strategy:
+
+1. Create these tables as materialized views that refresh periodically
+2. Set up triggers or scheduled jobs to update these tables when base tables change
+3. Use these denormalized tables for reporting and analytical queries
+4. Keep the normalized schema for transactional operations to maintain data integrity
+
+This approach balances performance optimization with data integrity while providing flexibility for various analytical use cases.

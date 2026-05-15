@@ -1,0 +1,262 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_11-05-40
+Model: ollama_api
+Prompt: intermediate
+Schema: ex04
+==================================================
+
+# Denormalized Schema for Read Performance Optimization
+
+## 1. Workload-Driven Analysis
+
+### High-Cost Operations in Read Workloads:
+
+1. **Multi-table joins for country indicators**: Queries often need to join country, region, demography, economy, education, employment, health, and life_expectancy tables to get comprehensive country-level indicators.
+
+2. **Survey data with decile information**: Accessing survey results along with decile breakdowns requires joining survey and decile tables.
+
+3. **Repeated lookups of country metadata**: Every query involving country data needs to join country and region tables to get country names and region information.
+
+4. **Time-series analysis across domains**: Analyzing trends over time requires joining multiple fact tables (demography, economy, education, etc.) with their respective time dimensions.
+
+### Denormalization Candidates:
+
+1. **Country indicators consolidation**: All country-related metrics should be in a single table to avoid multiple joins.
+
+2. **Survey data with deciles**: Survey results should include decile values directly to eliminate joins.
+
+3. **Pre-aggregated population data**: Age/gender population breakdowns should be directly in the country indicators table.
+
+4. **Life expectancy by gender**: Should be directly accessible without joining life_expectancy table.
+
+## 2. Denormalization Design
+
+### Proposed Denormalizations:
+
+1. **Wide country indicators table**: Combines country metadata with all related metrics to eliminate joins.
+
+2. **Survey results with deciles**: Creates a comprehensive survey table with decile values as columns.
+
+3. **Covering indexes**: For common query patterns like filtering by country, year, or region.
+
+4. **Partitioning**: Survey data partitioned by year for better query performance on time-series analysis.
+
+## 3. New Physical Schema
+
+```sql
+BEGIN;
+
+-- Main denormalized table for country indicators
+CREATE TABLE IF NOT EXISTS public.country_indicators (
+    country_code VARCHAR(10) NOT NULL,
+    country_name VARCHAR(255),
+    region_code VARCHAR(10),
+    region_name VARCHAR(255),
+    year INTEGER NOT NULL,
+    
+    -- Demography metrics
+    pop_density DOUBLE PRECISION,
+    net_migration DOUBLE PRECISION,
+    birth_rate DOUBLE PRECISION,
+    death_rate DOUBLE PRECISION,
+    rural_pop DOUBLE PRECISION,
+    urban_pop DOUBLE PRECISION,
+    
+    -- Economy metrics
+    tax_revenue DOUBLE PRECISION,
+    inflation DOUBLE PRECISION,
+    gdp DOUBLE PRECISION,
+    
+    -- Education metrics
+    preprim_enrol DOUBLE PRECISION,
+    prim_enrol DOUBLE PRECISION,
+    child_out_of_school DOUBLE PRECISION,
+    sec_enrol DOUBLE PRECISION,
+    progression_to_sec DOUBLE PRECISION,
+    terti_enrol DOUBLE PRECISION,
+    expenditure_edu DOUBLE PRECISION,
+    
+    -- Employment metrics
+    employers DOUBLE PRECISION,
+    vulnerable_emp DOUBLE PRECISION,
+    child_emp DOUBLE PRECISION,
+    part_time DOUBLE PRECISION,
+    labor_force_fem DOUBLE PRECISION,
+    labor_force_total DOUBLE PRECISION,
+    unemp DOUBLE PRECISION,
+    
+    -- Health metrics
+    hospital_beds DOUBLE PRECISION,
+    physicians DOUBLE PRECISION,
+    expenditure_health DOUBLE PRECISION,
+    
+    -- Life expectancy by gender
+    life_expectancy_female DOUBLE PRECISION,
+    life_expectancy_male DOUBLE PRECISION,
+    
+    -- Population breakdowns by age/gender
+    pop_0_14_female DOUBLE PRECISION,
+    pop_0_14_male DOUBLE PRECISION,
+    pop_15_64_female DOUBLE PRECISION,
+    pop_15_64_male DOUBLE PRECISION,
+    pop_65_plus_female DOUBLE PRECISION,
+    pop_65_plus_male DOUBLE PRECISION,
+    
+    PRIMARY KEY (country_code, year)
+);
+
+-- Indexes for country_indicators table
+CREATE INDEX idx_country_indicators_region_year ON public.country_indicators(region_code, year);
+CREATE INDEX idx_country_indicators_year ON public.country_indicators(year);
+CREATE INDEX idx_country_indicators_gdp ON public.country_indicators(gdp DESC) WHERE gdp IS NOT NULL;
+CREATE INDEX idx_country_indicators_population ON public.country_indicators(country_code, year, pop_density, urban_pop, rural_pop);
+
+-- Comprehensive survey table with deciles
+CREATE TABLE IF NOT EXISTS public.poverty_surveys (
+    id_survey SERIAL NOT NULL,
+    country_code VARCHAR(10) NOT NULL,
+    country_name VARCHAR(255),
+    region_code VARCHAR(10),
+    region_name VARCHAR(255),
+    survey_year INTEGER NOT NULL,
+    welfare_type VARCHAR(100),
+    survey_acronym VARCHAR(50),
+    survey_comparability INTEGER,
+    comparable_spell VARCHAR(100),
+    poverty_line DOUBLE PRECISION,
+    headcount DOUBLE PRECISION,
+    poverty_gap DOUBLE PRECISION,
+    poverty_severity DOUBLE PRECISION,
+    gini DOUBLE PRECISION,
+    reporting_pop INTEGER,
+    distribution_type VARCHAR(100),
+    reporting_pce DOUBLE PRECISION,
+    spl DOUBLE PRECISION,
+    survey_coverage VARCHAR(100),
+    reporting_level VARCHAR(100),
+    
+    -- Decile values as columns
+    decile1 DOUBLE PRECISION,
+    decile2 DOUBLE PRECISION,
+    decile3 DOUBLE PRECISION,
+    decile4 DOUBLE PRECISION,
+    decile5 DOUBLE PRECISION,
+    decile6 DOUBLE PRECISION,
+    decile7 DOUBLE PRECISION,
+    decile8 DOUBLE PRECISION,
+    decile9 DOUBLE PRECISION,
+    decile10 DOUBLE PRECISION,
+    
+    PRIMARY KEY (id_survey)
+);
+
+-- Partitioning by year for better performance on time-based queries
+-- Note: Actual partitioning implementation depends on PostgreSQL version
+-- This is the declarative partitioning syntax for PostgreSQL 10+
+-- CREATE TABLE poverty_surveys PARTITION BY RANGE (survey_year);
+
+-- Indexes for poverty_surveys table
+CREATE INDEX idx_poverty_surveys_country_year ON public.poverty_surveys(country_code, survey_year);
+CREATE INDEX idx_poverty_surveys_region ON public.poverty_surveys(region_code);
+CREATE INDEX idx_poverty_surveys_gini ON public.poverty_surveys(gini DESC) WHERE gini IS NOT NULL;
+CREATE INDEX idx_poverty_surveys_headcount ON public.poverty_surveys(headcount DESC) WHERE headcount IS NOT NULL;
+CREATE INDEX idx_poverty_surveys_coverage ON public.poverty_surveys(survey_coverage, survey_year);
+
+-- Materialized view for regional summary statistics
+CREATE MATERIALIZED VIEW IF NOT EXISTS public.regional_summary AS
+SELECT 
+    region_code,
+    region_name,
+    COUNT(DISTINCT country_code) as country_count,
+    AVG(gdp) as avg_gdp,
+    AVG(inflation) as avg_inflation,
+    AVG(poverty_line) as avg_poverty_line,
+    AVG(headcount) as avg_headcount,
+    AVG(gini) as avg_gini
+FROM public.country_indicators ci
+LEFT JOIN public.poverty_surveys ps ON ci.country_code = ps.country_code
+WHERE ci.gdp IS NOT NULL 
+   OR ci.inflation IS NOT NULL 
+   OR ps.poverty_line IS NOT NULL 
+   OR ps.headcount IS NOT NULL 
+   OR ps.gini IS NOT NULL
+GROUP BY region_code, region_name;
+
+-- Index for the materialized view
+CREATE INDEX idx_regional_summary_region ON public.regional_summary(region_code);
+
+-- Covering index for common analytical queries
+CREATE INDEX idx_country_indicators_covering ON public.country_indicators(country_code, year, region_code, gdp, inflation, urban_pop, rural_pop)
+WHERE gdp IS NOT NULL OR inflation IS NOT NULL;
+
+-- Index for time-series analysis
+CREATE INDEX idx_country_indicators_time_series ON public.country_indicators(year, country_code)
+WHERE year IS NOT NULL;
+
+-- View for current year data (assuming current year is 2023)
+CREATE VIEW IF NOT EXISTS public.current_indicators AS
+SELECT *
+FROM public.country_indicators
+WHERE year = 2023;
+
+-- View for poverty analysis combining both tables
+CREATE VIEW IF NOT EXISTS public.poverty_analysis AS
+SELECT 
+    ps.country_code,
+    ps.country_name,
+    ps.region_name,
+    ps.survey_year,
+    ps.welfare_type,
+    ps.poverty_line,
+    ps.headcount,
+    ps.poverty_gap,
+    ps.poverty_severity,
+    ps.gini,
+    ps.decile1,
+    ps.decile2,
+    ps.decile3,
+    ps.decile4,
+    ps.decile5,
+    ps.decile6,
+    ps.decile7,
+    ps.decile8,
+    ps.decile9,
+    ps.decile10,
+    ci.gdp,
+    ci.inflation,
+    ci.urban_pop,
+    ci.rural_pop
+FROM public.poverty_surveys ps
+JOIN public.country_indicators ci 
+    ON ps.country_code = ci.country_code 
+    AND ps.survey_year = ci.year;
+
+COMMIT;
+```
+
+## Index Strategy Summary:
+
+1. **Composite indexes** aligned with common query patterns:
+   - `(region_code, year)` for regional analysis by year
+   - `(country_code, year)` for country time-series analysis
+   - `(year, country_code)` for time-first analytical queries
+
+2. **Covering indexes** for frequently accessed metric combinations:
+   - GDP, inflation, and population metrics for economic analysis
+   - All decile values for poverty distribution analysis
+
+3. **Specialized indexes** for sorting and filtering:
+   - Descending indexes on Gini coefficient and headcount for ranking queries
+   - Conditional indexes for non-null values to optimize space
+
+## Partitioning Strategy:
+
+The `poverty_surveys` table is designed with partitioning in mind by including `survey_year` as a key field. In PostgreSQL 10+, this would be implemented as:
+
+```sql
+-- Example partitioning implementation (commented out in main schema)
+-- CREATE TABLE poverty_surveys_2020 PARTITION OF poverty_surveys
+-- FOR VALUES FROM (2020) TO (2021);
+```
+
+This approach significantly reduces query latency by eliminating multiple joins and providing all necessary data in fewer table accesses while preserving data correctness through careful design.

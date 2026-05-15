@@ -1,0 +1,188 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_09-56-33
+Model: ollama_api
+Prompt: RACE
+Schema: TPC_H
+==================================================
+
+# Denormalized Schema Design for TPC-H Benchmark Database
+
+## 1. Schema Analysis
+
+The provided schema represents the TPC-H benchmark database with 8 tables. Key relationships include:
+- ORDERS → CUSTOMER → NATION → REGION (hierarchical dimension tables)
+- ORDERS → LINEITEM (fact table relationship)
+- LINEITEM → PART, SUPPLIER, PARTSUPP (dimension relationships)
+- SUPPLIER → NATION (supplier location)
+
+## 2. Frequent Query Analysis
+
+Based on typical analytical workloads for TPC-H, common query patterns include:
+- Order analysis by date, status, priority
+- Customer segmentation and market analysis
+- Supplier performance and availability analysis
+- Part performance and pricing analysis
+- Revenue calculations across multiple dimensions
+- Complex joins between ORDERS, LINEITEM, CUSTOMER, SUPPLIER, PART
+
+Key JOIN bottlenecks:
+- ORDERS ↔ CUSTOMER ↔ NATION ↔ REGION (multiple levels of dimension hierarchy)
+- LINEITEM ↔ ORDERS (large fact table to header)
+- LINEITEM ↔ PART/SUPPLIER (product and supplier information)
+- LINEITEM ↔ PARTSUPP (availability and cost information)
+
+## 3. Applicable Denormalization Techniques
+
+For this schema, the most effective techniques are:
+1. **Adding Redundant Attributes**: Materializing frequently joined dimension attributes in fact tables
+2. **Collapsing Relations**: Merging hierarchical dimension tables into fewer consolidated tables
+3. **Adding Derived Attributes**: Pre-calculating common aggregations like total revenue, quantities
+
+Vertical partitioning is less applicable as most tables don't have clearly separable column groups.
+
+## 4. Potential Denormalized Schema Designs
+
+### Option A: Denormalize LINEITEM with Dimension Attributes
+Add customer, supplier, part, and nation details directly to LINEITEM.
+
+### Option B: Create Consolidated Dimension Tables
+Collapse NATION/REGION into SUPPLIER/CUSTOMER tables.
+
+### Option C: Create Star Schema with Fact Table
+Build a comprehensive fact table with all dimensions embedded.
+
+## 5. Evaluation and Selection
+
+Option C provides the best balance of performance and maintainability. It eliminates almost all JOINs for typical analytical queries while keeping the schema comprehensible.
+
+## 6. Final Denormalized Schema Design
+
+```sql
+-- Denormalized fact table containing all necessary information for analytical queries
+CREATE TABLE LINEITEM_ANALYTICAL (
+    -- LINEITEM original attributes
+    L_ORDERKEY    INTEGER NOT NULL,
+    L_PARTKEY     INTEGER NOT NULL,
+    L_SUPPKEY     INTEGER NOT NULL,
+    L_LINENUMBER  INTEGER NOT NULL,
+    L_QUANTITY    DECIMAL(15,2) NOT NULL,
+    L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,
+    L_DISCOUNT    DECIMAL(15,2) NOT NULL,
+    L_TAX         DECIMAL(15,2) NOT NULL,
+    L_RETURNFLAG  CHAR(1) NOT NULL,
+    L_LINESTATUS  CHAR(1) NOT NULL,
+    L_SHIPDATE    DATE NOT NULL,
+    L_COMMITDATE  DATE NOT NULL,
+    L_RECEIPTDATE DATE NOT NULL,
+    L_SHIPINSTRUCT CHAR(25) NOT NULL,
+    L_SHIPMODE     CHAR(10) NOT NULL,
+    L_COMMENT      VARCHAR(44) NOT NULL,
+    
+    -- Derived attributes for common calculations
+    L_DISCOUNTED_PRICE DECIMAL(15,2) GENERATED ALWAYS AS (L_EXTENDEDPRICE * (1 - L_DISCOUNT)) STORED,
+    L_FINAL_PRICE      DECIMAL(15,2) GENERATED ALWAYS AS (L_EXTENDEDPRICE * (1 - L_DISCOUNT) * (1 + L_TAX)) STORED,
+    L_SHIP_DAYS        INTEGER GENERATED ALWAYS AS (EXTRACT(DAY FROM (L_RECEIPTDATE - L_COMMITDATE))) STORED,
+    
+    -- PART attributes (redundant)
+    P_NAME        VARCHAR(55) NOT NULL,
+    P_MFGR        CHAR(25) NOT NULL,
+    P_BRAND       CHAR(10) NOT NULL,
+    P_TYPE        VARCHAR(25) NOT NULL,
+    P_SIZE        INTEGER NOT NULL,
+    P_CONTAINER   CHAR(10) NOT NULL,
+    P_RETAILPRICE DECIMAL(15,2) NOT NULL,
+    P_COMMENT     VARCHAR(23) NOT NULL,
+    
+    -- SUPPLIER attributes (redundant)
+    S_NAME        CHAR(25) NOT NULL,
+    S_ADDRESS     VARCHAR(40) NOT NULL,
+    S_PHONE       CHAR(15) NOT NULL,
+    S_ACCTBAL     DECIMAL(15,2) NOT NULL,
+    S_COMMENT     VARCHAR(101) NOT NULL,
+    
+    -- SUPPLIER NATION attributes (redundant)
+    S_NATION_NAME CHAR(25) NOT NULL,
+    S_REGION_NAME CHAR(25) NOT NULL,
+    S_NATION_COMMENT VARCHAR(152),
+    S_REGION_COMMENT VARCHAR(152),
+    
+    -- CUSTOMER attributes (redundant)
+    C_NAME        VARCHAR(25) NOT NULL,
+    C_ADDRESS     VARCHAR(40) NOT NULL,
+    C_PHONE       CHAR(15) NOT NULL,
+    C_ACCTBAL     DECIMAL(15,2) NOT NULL,
+    C_MKTSEGMENT  CHAR(10) NOT NULL,
+    C_COMMENT     VARCHAR(117) NOT NULL,
+    
+    -- CUSTOMER NATION attributes (redundant)
+    C_NATION_NAME CHAR(25) NOT NULL,
+    C_REGION_NAME CHAR(25) NOT NULL,
+    C_NATION_COMMENT VARCHAR(152),
+    C_REGION_COMMENT VARCHAR(152),
+    
+    -- ORDERS attributes (redundant)
+    O_ORDERSTATUS    CHAR(1) NOT NULL,
+    O_TOTALPRICE     DECIMAL(15,2) NOT NULL,
+    O_ORDERDATE      DATE NOT NULL,
+    O_ORDERPRIORITY  CHAR(15) NOT NULL,  
+    O_CLERK          CHAR(15) NOT NULL, 
+    O_SHIPPRIORITY   INTEGER NOT NULL,
+    O_COMMENT        VARCHAR(79) NOT NULL
+);
+
+-- Simplified dimension tables for reference data that changes infrequently
+CREATE TABLE PART_DIM (
+    P_PARTKEY     INTEGER NOT NULL PRIMARY KEY,
+    P_NAME        VARCHAR(55) NOT NULL,
+    P_MFGR        CHAR(25) NOT NULL,
+    P_BRAND       CHAR(10) NOT NULL,
+    P_TYPE        VARCHAR(25) NOT NULL,
+    P_SIZE        INTEGER NOT NULL,
+    P_CONTAINER   CHAR(10) NOT NULL,
+    P_RETAILPRICE DECIMAL(15,2) NOT NULL,
+    P_COMMENT     VARCHAR(23) NOT NULL
+);
+
+CREATE TABLE SUPPLIER_DIM (
+    S_SUPPKEY     INTEGER NOT NULL PRIMARY KEY,
+    S_NAME        CHAR(25) NOT NULL,
+    S_ADDRESS     VARCHAR(40) NOT NULL,
+    S_PHONE       CHAR(15) NOT NULL,
+    S_ACCTBAL     DECIMAL(15,2) NOT NULL,
+    S_COMMENT     VARCHAR(101) NOT NULL,
+    S_NATION_NAME CHAR(25) NOT NULL,
+    S_REGION_NAME CHAR(25) NOT NULL
+);
+
+CREATE TABLE CUSTOMER_DIM (
+    C_CUSTKEY     INTEGER NOT NULL PRIMARY KEY,
+    C_NAME        VARCHAR(25) NOT NULL,
+    C_ADDRESS     VARCHAR(40) NOT NULL,
+    C_PHONE       CHAR(15) NOT NULL,
+    C_ACCTBAL     DECIMAL(15,2) NOT NULL,
+    C_MKTSEGMENT  CHAR(10) NOT NULL,
+    C_COMMENT     VARCHAR(117) NOT NULL,
+    C_NATION_NAME CHAR(25) NOT NULL,
+    C_REGION_NAME CHAR(25) NOT NULL
+);
+
+CREATE TABLE DATE_DIM (
+    D_DATE        DATE NOT NULL PRIMARY KEY,
+    D_YEAR        INTEGER NOT NULL,
+    D_QUARTER     INTEGER NOT NULL,
+    D_MONTH       INTEGER NOT NULL,
+    D_DAY         INTEGER NOT NULL,
+    D_DAY_OF_WEEK INTEGER NOT NULL,
+    D_IS_WEEKEND  BOOLEAN NOT NULL
+);
+```
+
+## Key Benefits of This Design
+
+1. **Eliminates Complex Joins**: All analytical queries can be executed against a single table
+2. **Improves Query Performance**: No JOIN overhead for the most common analytical patterns
+3. **Pre-calculates Common Metrics**: Derived attributes reduce computation during querying
+4. **Maintains Reference Data**: Dimension tables allow for consistency checks and updates
+5. **Supports Time-based Analysis**: Dedicated date dimension enables efficient temporal queries
+
+This denormalized schema dramatically improves read performance for analytical workloads while maintaining data integrity through careful design of derived attributes and retention of reference dimensions.

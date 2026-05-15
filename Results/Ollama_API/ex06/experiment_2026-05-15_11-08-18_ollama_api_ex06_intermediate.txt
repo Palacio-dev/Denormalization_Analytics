@@ -1,0 +1,223 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_11-08-18
+Model: ollama_api
+Prompt: intermediate
+Schema: ex06
+==================================================
+
+As a senior database performance engineer, I'll analyze your workload-driven denormalization and provide an optimized physical schema. Let me first identify the issues with your current denormalized approach and then provide a better solution.
+
+## Workload-Driven Analysis
+
+### High-Cost Operations in Read Workloads:
+1. **Geographic aggregations** - Frequent queries by state (UF) requiring joins from ESCOLA/MUNICIPIO to UF
+2. **Educational performance analysis** - Queries needing IDEB, SAEB, ENADE scores with school/institution details
+3. **Time-series analysis** - Annual performance tracking across multiple entities
+4. **Institution/school comparisons** - Cross-referencing performance metrics with geographic and administrative data
+
+### Issues with Current Denormalized Model:
+- Missing proper indexing strategy
+- No partitioning for time-series data
+- Incomplete denormalization (missing IES data)
+- No aggregate tables for common analytical queries
+- Foreign key constraints may impact performance
+
+## Optimized Denormalization Design
+
+Here's my improved physical schema:
+
+```sql
+-- Wide fact tables for analytical queries
+CREATE TABLE dim_uf (
+    uf_id INT PRIMARY KEY,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    qtd_habitantes INT CHECK(qtd_habitantes >= 0),
+    INDEX idx_sigla (sigla_uf)
+);
+
+CREATE TABLE dim_municipio (
+    municipio_id INT PRIMARY KEY,
+    uf_id INT NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    qtd_ies INT DEFAULT 0,
+    qtd_escolas INT DEFAULT 0,
+    INDEX idx_uf_municipio (sigla_uf, nome_municipio),
+    INDEX idx_uf_id (uf_id)
+);
+
+-- Main fact table for school performance
+CREATE TABLE fact_escola_performance (
+    escola_id INT NOT NULL,
+    cod_escola INT NOT NULL,
+    ano INT NOT NULL,
+    nome_escola VARCHAR(100) NOT NULL,
+    rede_escola VARCHAR(100) NOT NULL,
+    municipio_id INT NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    
+    -- IDEB metrics
+    rend_1 REAL,
+    rend_2 REAL,
+    rend_3 REAL,
+    rend_4 REAL,
+    ind_rend REAL,
+    nota_ideb REAL,
+    
+    -- SAEB metrics
+    nota_mat REAL,
+    nota_port REAL,
+    nota_padrao REAL,
+    
+    -- Aggregated metrics
+    total_participantes INT DEFAULT 0,
+    
+    PRIMARY KEY (cod_escola, ano),
+    INDEX idx_ano (ano),
+    INDEX idx_uf_ano (sigla_uf, ano),
+    INDEX idx_municipio_ano (municipio_id, ano),
+    INDEX idx_rede_ano (rede_escola, ano),
+    INDEX idx_performance_ideb (nota_ideb),
+    INDEX idx_performance_saeb (nota_padrao)
+) PARTITION BY RANGE (ano) (
+    PARTITION p2010 VALUES LESS THAN (2011),
+    PARTITION p2015 VALUES LESS THAN (2016),
+    PARTITION p2020 VALUES LESS THAN (2021),
+    PARTITION p2025 VALUES LESS THAN (2026),
+    PARTITION p_future VALUES LESS THAN MAXVALUE
+);
+
+-- Main fact table for higher education performance
+CREATE TABLE fact_curso_performance (
+    curso_id INT NOT NULL,
+    ies_id INT NOT NULL,
+    ano INT NOT NULL,
+    nome_curso VARCHAR(100) NOT NULL,
+    nome_ies VARCHAR(100) NOT NULL,
+    sigla_ies VARCHAR(20),
+    codigo_ies INT NOT NULL,
+    rede_ies VARCHAR(100) NOT NULL,
+    municipio_id INT NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    
+    -- ENADE metrics
+    total_inscritos INT DEFAULT 0,
+    total_concluintes INT DEFAULT 0,
+    nota_bruta_ce REAL,
+    nota_padronizada_ce REAL,
+    nota_bruta_fg REAL,
+    nota_padronizada_fg REAL,
+    nota_enade_continua REAL,
+    nota_enade_faixa REAL,
+    
+    PRIMARY KEY (codigo_ies, nome_curso, ano),
+    INDEX idx_ano (ano),
+    INDEX idx_uf_ano (sigla_uf, ano),
+    INDEX idx_municipio_ano (municipio_id, ano),
+    INDEX idx_rede_ano (rede_ies, ano),
+    INDEX idx_enade_continua (nota_enade_continua),
+    INDEX idx_enade_faixa (nota_enade_faixa)
+) PARTITION BY RANGE (ano) (
+    PARTITION p2010 VALUES LESS THAN (2011),
+    PARTITION p2015 VALUES LESS THAN (2016),
+    PARTITION p2020 VALUES LESS THAN (2021),
+    PARTITION p2025 VALUES LESS THAN (2026),
+    PARTITION p_future VALUES LESS THAN MAXVALUE
+);
+
+-- Aggregate summary tables for analytical queries
+CREATE TABLE agg_uf_performance (
+    sigla_uf VARCHAR(2) NOT NULL,
+    ano INT NOT NULL,
+    total_escolas INT DEFAULT 0,
+    avg_ideb REAL,
+    avg_saeb REAL,
+    avg_enade REAL,
+    total_participantes INT DEFAULT 0,
+    total_ies INT DEFAULT 0,
+    PRIMARY KEY (sigla_uf, ano),
+    INDEX idx_ano (ano)
+);
+
+CREATE TABLE agg_municipio_performance (
+    municipio_id INT NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    ano INT NOT NULL,
+    total_escolas INT DEFAULT 0,
+    avg_ideb REAL,
+    avg_saeb REAL,
+    total_participantes INT DEFAULT 0,
+    total_ies INT DEFAULT 0,
+    PRIMARY KEY (municipio_id, ano),
+    INDEX idx_uf_ano (sigla_uf, ano)
+);
+
+-- Materialized views for common analytical queries
+CREATE TABLE mv_escola_ranking_uf (
+    sigla_uf VARCHAR(2) NOT NULL,
+    ano INT NOT NULL,
+    cod_escola INT NOT NULL,
+    nome_escola VARCHAR(100) NOT NULL,
+    nota_ideb REAL,
+    nota_padrao REAL,
+    ranking_ideb INT,
+    ranking_saeb INT,
+    PRIMARY KEY (sigla_uf, ano, cod_escola),
+    INDEX idx_ranking_ideb (sigla_uf, ano, ranking_ideb),
+    INDEX idx_ranking_saeb (sigla_uf, ano, ranking_saeb)
+);
+
+CREATE TABLE mv_curso_ranking_uf (
+    sigla_uf VARCHAR(2) NOT NULL,
+    ano INT NOT NULL,
+    codigo_ies INT NOT NULL,
+    nome_ies VARCHAR(100) NOT NULL,
+    nome_curso VARCHAR(100) NOT NULL,
+    nota_enade_continua REAL,
+    ranking_enade INT,
+    PRIMARY KEY (sigla_uf, ano, codigo_ies, nome_curso),
+    INDEX idx_ranking_enade (sigla_uf, ano, ranking_enade)
+);
+
+-- Covering indexes for common query patterns
+CREATE INDEX idx_fact_escola_covering ON fact_escola_performance 
+(sigla_uf, ano, nota_ideb, nota_padrao, nome_escola, cod_escola) 
+INCLUDE (rede_escola, total_participantes);
+
+CREATE INDEX idx_fact_curso_covering ON fact_curso_performance 
+(sigla_uf, ano, nota_enade_continua, nome_ies, codigo_ies) 
+INCLUDE (rede_ies, total_inscritos, total_concluintes);
+```
+
+## Key Optimizations Implemented:
+
+### 1. **Wide Fact Tables**
+- `fact_escola_performance`: Pre-joined school data with IDEB/SAEB metrics
+- `fact_curso_performance`: Pre-joined higher education data with ENADE metrics
+
+### 2. **Aggregate Tables**
+- `agg_uf_performance`: State-level summaries for quick reporting
+- `agg_municipio_performance`: Municipality-level summaries
+
+### 3. **Materialized Views**
+- `mv_escola_ranking_uf`: Pre-computed rankings by state
+- `mv_curso_ranking_uf`: Pre-computed higher education rankings
+
+### 4. **Indexing Strategy**
+- **Composite indexes** aligned with common query filters (UF, ano, performance metrics)
+- **Covering indexes** for frequently accessed columns
+- **Partitioning** by year for time-series queries
+
+### 5. **Dimension Tables**
+- `dim_uf` and `dim_municipio` for geographic lookups
+- Maintained for referential integrity while avoiding joins in fact tables
+
+### 6. **Partitioning**
+- Year-based partitioning on fact tables for efficient time-series queries
+- Automatic partition management for new years
+
+This design eliminates the need for complex joins in read-heavy workloads while maintaining data correctness through careful denormalization. The schema supports common analytical queries with minimal I/O operations.

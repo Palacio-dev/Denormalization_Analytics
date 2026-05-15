@@ -1,0 +1,114 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_11-08-50
+Model: ollama_api
+Prompt: expert
+Schema: ex07
+==================================================
+
+# Denormalized Read-Optimized Physical Schema Design
+
+## Executive Summary
+
+This document presents a comprehensive denormalization strategy to optimize read performance for the given normalized schema while preserving business correctness. The approach focuses on collapsing join-heavy queries into wide read tables that pre-join frequently accessed dimension data. The design maintains data freshness through batch refresh cycles during limited maintenance windows, with explicit handling of operational constraints including no trigger support. All denormalized artifacts are tied directly to specific query patterns identified from the workload analysis.
+
+## Access-Pattern Matrix
+
+| Query Type | Tables Accessed | Columns Used | Frequency |
+|------------|-----------------|--------------|-----------|
+| Usina Details with Location | Usina, Localizacoes, Municipios, Estados | nome, potkw, atualizacao, iniciop, potfis, lat, long, estagio, municipio, uf | High |
+| Usina with Ownership Info | Usina, Proprietarios | nome, proprietario, potkw, atualizacao | Medium |
+| Usina with River Info | Usina, Rios | nome, rio, potkw, atualizacao | Medium |
+| Full Usina Report | All tables | All columns | Low |
+
+## Proposed Denormalized Schema (DDL)
+
+```sql
+-- Main denormalized read table optimized for common query patterns
+CREATE TABLE IF NOT EXISTS public."UsinaReadOptimized" (
+    -- Primary key from source table
+    id INTEGER PRIMARY KEY,
+    
+    -- Core usina attributes
+    nome VARCHAR NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    iniciop DATE,
+    atualizacao DATE,
+    lat DOUBLE PRECISION,
+    long DOUBLE PRECISION,
+    estagio VARCHAR,
+    
+    -- Denormalized dimension data
+    proprietario VARCHAR,  -- From Proprietarios table
+    rio VARCHAR NOT NULL,  -- From Rios table
+    
+    -- Location hierarchy flattened
+    id_municipio1 INTEGER NOT NULL,  -- Reference to Municipios
+    munic1 VARCHAR NOT NULL,          -- Municipio name
+    uf1 CHAR(2) NOT NULL,            -- Estado code
+    
+    id_municipio2 INTEGER,           -- Optional second municipio
+    munic2 VARCHAR,                  -- Second municipio name
+    uf2 CHAR(2),                     -- Second estado code
+    
+    -- Metadata for consistency tracking
+    _last_refreshed TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    _source_hash TEXT  -- For detecting changes in source data
+);
+
+-- Indexes optimized for common query patterns
+CREATE INDEX idx_usina_read_potkw ON public."UsinaReadOptimized" (potkw DESC);
+CREATE INDEX idx_usina_read_atualizacao ON public."UsinaReadOptimized" (atualizacao DESC);
+CREATE INDEX idx_usina_read_uf1 ON public."UsinaReadOptimized" (uf1);
+CREATE INDEX idx_usina_read_rio ON public."UsinaReadOptimized" (rio);
+CREATE INDEX idx_usina_read_proprietario ON public."UsinaReadOptimized" (proprietario) WHERE proprietario IS NOT NULL;
+
+-- Optional: Partition by estado for large datasets
+-- CREATE TABLE public."UsinaReadOptimized" PARTITION BY LIST (uf1);
+```
+
+## Implementation Plan
+
+### Phase 1: Preparation (Safe and Observable)
+1. Create new denormalized table structure
+2. Implement ETL process using scheduled batch jobs
+3. Set up monitoring for data freshness and reconciliation
+4. Validate data accuracy with sample comparisons
+
+### Phase 2: Deployment (Reversible)
+1. Deploy ETL process in shadow mode
+2. Run parallel reads against both schemas
+3. Monitor performance improvements
+4. Switch application queries to use new schema
+
+### Phase 3: Operations
+1. Establish regular refresh schedule (e.g., nightly)
+2. Set up alerts for data lag > SLA threshold
+3. Implement reconciliation checks between source and denormalized data
+
+## Consistency Architecture
+
+**Data Lineage:**
+- Source of truth: Normalized tables (`Usina`, `Proprietarios`, `Rios`, `Localizacoes`, `Municipios`, `Estados`)
+- Denormalized target: `UsinaReadOptimized`
+- Refresh mechanism: Batch ETL process comparing `_last_refreshed` timestamps
+- Staleness window: Defined as time between ETL runs (e.g., up to 24 hours)
+
+## Risk Analysis
+
+**Write Amplification:** Minimal - only affects ETL process, not transactional writes
+
+**Lock Contention:** None - separate read-optimized table doesn't impact OLTP operations
+
+**Failure Modes:**
+- ETL failure: Alerts on missed schedules
+- Data divergence: Reconciliation checks detect inconsistencies
+- Storage growth: Monitored and capacity planned
+
+**Monitoring/Alerts:**
+- Data freshness lag > defined SLA (e.g., 24 hours)
+- Query performance regression detection
+- Row count and hash-based reconciliation diffs
+- Storage growth tracking
+
+This approach provides significant read performance improvements while maintaining operational simplicity and data correctness within acceptable staleness windows.

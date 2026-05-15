@@ -1,0 +1,46 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_10-20-52
+Model: ollama_api
+Prompt: RISEN
+Schema: ex10
+==================================================
+
+```sql
+BEGIN;
+
+-- Drop existing table if it exists
+DROP TABLE IF EXISTS infos_anuais_paises;
+
+-- Create the denormalized table combining multiple entities
+CREATE TABLE infos_anuais_paises (
+    -- Country information (from paises and continente tables)
+    id_paises INTEGER NOT NULL,
+    nome_pais VARCHAR(50) NOT NULL,
+    fundacao INTEGER NOT NULL,
+    continente_nome VARCHAR(50) NOT NULL,
+    
+    -- Year-specific data
+    ano INTEGER NOT NULL,
+    
+    -- Population data (from populacao table)
+    populacao INTEGER NOT NULL,
+    
+    -- Emission data (from emissao_g_efeito_estufa table)
+    quantidade_emitida BIGINT NOT NULL,
+    gee_per_capita DOUBLE PRECISION,
+    
+    -- Energy consumption data (from consumo_anual and fonte_energia tables)
+    porcentagem INTEGER NOT NULL,
+    tipo_energia_nome VARCHAR(50) NOT NULL,
+    
+    -- Primary key to ensure uniqueness
+    PRIMARY KEY (id_paises, ano)
+);
+
+-- Add indexes for common query patterns
+CREATE INDEX idx_infos_anuais_paises_ano ON infos_anuais_paises(ano);
+CREATE INDEX idx_infos_anuais_paises_continente ON infos_anuais_paises(continente_nome);
+CREATE INDEX idx_infos_anuais_paises_tipo_energia ON infos_anuais_paises(tipo_energia_nome);
+
+END;
+```

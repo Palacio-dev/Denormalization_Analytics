@@ -1,0 +1,241 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_09-46-48
+Model: ollama_api
+Prompt: expert
+Schema: HFC
+==================================================
+
+# Executive Summary
+
+This design proposes a denormalized read-optimized schema for your botanical specimen database system. The approach focuses on creating wide read tables that pre-join frequently accessed dimensions with core tombos (specimen) data, significantly reducing query complexity and join overhead. We identify key access patterns around specimen details, location hierarchies, taxonomic classifications, and historical changes.
+
+The denormalized schema preserves business correctness through explicit data lineage and implements a controlled staleness window of 15 minutes via incremental refresh processes. Operational complexity is managed through clearly defined refresh procedures with built-in monitoring and rollback capabilities. The solution provides measurable read performance improvements by eliminating multi-table joins and aggregations at query time, particularly benefiting specimen detail views and reporting queries.
+
+## Access-Pattern Matrix
+
+| Query Type | Tables Accessed | Columns Touched | Frequency |
+|------------|-----------------|------------------|-----------|
+| Specimen Detail View | tombos, especies, generos, familias, autores, locais_coleta, cidades, estados, paises, coletores, tipos | hcf, nome_cientifico, data_coleta, latitude, longitude, especie_nome, genero_nome, familia_nome, autor_nome, local_descricao, cidade_nome, estado_nome, pais_nome, coletor_nome, tipo_nome | High |
+| Taxonomic Classification Report | especies, generos, familias, autores | nome, autor_nome, familia_nome, genero_nome | Medium |
+| Geographic Distribution Analysis | tombos, locais_coleta, cidades, estados, paises | hcf, latitude, longitude, local_descricao, cidade_nome, estado_nome, pais_nome | Medium |
+| Specimen History Tracking | tombos, alteracoes, usuarios | hcf, status, observacao, usuario_nome, created_at | Low-Medium |
+| Collection Statistics | tombos, tipos, herbarios | hcf, tipo_nome, entidade_nome | Medium |
+| Location-based Search | tombos, locais_coleta, cidades, estados, paises | hcf, latitude, longitude, local_descricao, cidade_nome, estado_nome, pais_nome | High |
+
+## Join Hotspots
+1. `tombos` → `especies` → `generos` → `familias` → `autores`
+2. `tombos` → `locais_coleta` → `cidades` → `estados` → `paises`
+3. `tombos` → `herbarios` → `enderecos`
+4. `tombos` → multiple taxonomy tables (`especies`, `generos`, `familias`, etc.)
+
+## Aggregation Hotspots
+1. Count of specimens by taxonomic classification
+2. Count of specimens by geographic region
+3. Count of specimens by collection type
+4. Historical changes tracking
+
+## Proposed Denormalized Schema (DDL)
+
+```sql
+-- Denormalized wide table for specimen details with pre-joined dimensions
+CREATE TABLE IF NOT EXISTS public.tombos_denormalized (
+    -- Core tombos fields
+    hcf BIGSERIAL NOT NULL,
+    data_tombo TIMESTAMP WITH TIME ZONE,
+    data_coleta_dia BIGINT,
+    data_coleta_mes BIGINT,
+    data_coleta_ano BIGINT,
+    observacao TEXT,
+    nomes_populares TEXT,
+    numero_coleta BIGINT,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    altitude DOUBLE PRECISION,
+    variedade_id BIGINT,
+    tipo_id BIGINT,
+    data_identificacao_dia SMALLINT,
+    data_identificacao_mes SMALLINT,
+    data_identificacao_ano INTEGER,
+    situacao tombos_situacao DEFAULT 'REGULAR'::tombos_situacao,
+    nome_cientifico TEXT,
+    colecao_anexa_id BIGINT,
+    solo_id BIGINT,
+    relevo_id BIGINT,
+    vegetacao_id BIGINT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ativo BOOLEAN DEFAULT true,
+    taxon CHARACTER VARYING(45),
+    rascunho BOOLEAN DEFAULT false,
+    coletor_id BIGINT,
+    descricao TEXT,
+    unicata BOOLEAN,
+    cidade_id BIGINT,
+    fase_sucessional_id BIGINT,
+    
+    -- Pre-joined taxonomic information
+    especie_id BIGINT,
+    especie_nome CHARACTER VARYING(200),
+    especie_autor_nome CHARACTER VARYING(200),
+    genero_id BIGINT,
+    genero_nome CHARACTER VARYING(200),
+    familia_id BIGINT,
+    familia_nome CHARACTER VARYING(200),
+    sub_familia_id BIGINT,
+    sub_familia_nome CHARACTER VARYING(300),
+    sub_especie_id BIGINT,
+    sub_especie_nome CHARACTER VARYING(255),
+    variedade_nome CHARACTER VARYING(200),
+    
+    -- Pre-joined location information
+    local_coleta_id BIGINT,
+    local_coleta_descricao TEXT,
+    local_cidade_id BIGINT,
+    local_cidade_nome CHARACTER VARYING(200),
+    local_estado_id BIGINT,
+    local_estado_nome CHARACTER VARYING(255),
+    local_estado_sigla CHARACTER(4),
+    local_pais_id INTEGER,
+    local_pais_nome CHARACTER VARYING(255),
+    local_pais_sigla CHARACTER(4),
+    local_fase_sucessional_numero BIGINT,
+    local_fase_sucessional_nome CHARACTER VARYING(200),
+    
+    -- Pre-joined collector information
+    coletor_nome CHARACTER VARYING(255),
+    coletor_complementares CHARACTER VARYING(1000),
+    
+    -- Pre-joined type information
+    tipo_nome CHARACTER VARYING(250),
+    
+    -- Pre-joined collection entity information
+    entidade_id BIGINT,
+    entidade_nome CHARACTER VARYING(200),
+    entidade_sigla CHARACTER VARYING(80),
+    entidade_email CHARACTER VARYING(200),
+    
+    -- Pre-joined environmental information
+    solo_nome CHARACTER VARYING(300),
+    relevo_nome CHARACTER VARYING(300),
+    vegetacao_nome CHARACTER VARYING(300),
+    
+    -- Metadata for consistency tracking
+    last_refreshed TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    
+    CONSTRAINT tombos_denormalized_pkey PRIMARY KEY (hcf)
+);
+
+-- Indexes for common query patterns
+CREATE INDEX IF NOT EXISTS idx_tombos_denorm_taxonomic ON public.tombos_denormalized(familia_nome, genero_nome, especie_nome);
+CREATE INDEX IF NOT EXISTS idx_tombos_denorm_geographic ON public.tombos_denormalized(local_pais_nome, local_estado_nome, local_cidade_nome);
+CREATE INDEX IF NOT EXISTS idx_tombos_denorm_location ON public.tombos_denormalized(local_coleta_id);
+CREATE INDEX IF NOT EXISTS idx_tombos_denorm_coletor ON public.tombos_denormalized(coletor_nome);
+CREATE INDEX IF NOT EXISTS idx_tombos_denorm_tipo ON public.tombos_denormalized(tipo_nome);
+CREATE INDEX IF NOT EXISTS idx_tombos_denorm_data_coleta ON public.tombos_denormalized(data_coleta_ano, data_coleta_mes, data_coleta_dia);
+CREATE INDEX IF NOT EXISTS idx_tombos_denorm_ativo ON public.tombos_denormalized(ativo);
+
+-- Materialized view for taxonomic summary statistics
+CREATE MATERIALIZED VIEW IF NOT EXISTS public.taxonomic_summary AS
+SELECT 
+    familia_nome,
+    genero_nome,
+    especie_nome,
+    COUNT(*) as specimen_count,
+    MIN(data_coleta_ano) as earliest_collection_year,
+    MAX(data_coleta_ano) as latest_collection_year
+FROM public.tombos_denormalized
+WHERE ativo = true
+GROUP BY familia_nome, genero_nome, especie_nome;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_taxonomic_summary_pk ON public.taxonomic_summary(familia_nome, genero_nome, especie_nome);
+
+-- Materialized view for geographic summary statistics
+CREATE MATERIALIZED VIEW IF NOT EXISTS public.geographic_summary AS
+SELECT 
+    local_pais_nome,
+    local_estado_nome,
+    local_cidade_nome,
+    COUNT(*) as specimen_count,
+    COUNT(DISTINCT familia_nome) as family_count,
+    COUNT(DISTINCT genero_nome) as genus_count
+FROM public.tombos_denormalized
+WHERE ativo = true
+GROUP BY local_pais_nome, local_estado_nome, local_cidade_nome;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_geographic_summary_pk ON public.geographic_summary(local_pais_nome, local_estado_nome, local_cidade_nome);
+
+-- Snapshot table for current specimen status
+CREATE TABLE IF NOT EXISTS public.tombos_status_snapshot (
+    hcf BIGINT NOT NULL,
+    situacao tombos_situacao,
+    ativo BOOLEAN,
+    last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT tombos_status_snapshot_pkey PRIMARY KEY (hcf)
+);
+
+-- Index for quick status lookups
+CREATE INDEX IF NOT EXISTS idx_tombos_status_ativo ON public.tombos_status_snapshot(ativo);
+```
+
+## Implementation Plan
+
+### Phase 1: Preparation
+1. Create the new denormalized tables and materialized views in a separate schema
+2. Set up monitoring for refresh processes
+3. Establish baseline performance metrics
+
+### Phase 2: Initial Population
+1. Perform initial backfill of denormalized tables using batch processes during low-usage periods
+2. Validate data integrity through reconciliation queries
+3. Update application code to use new tables for read operations
+
+### Phase 3: Ongoing Maintenance
+1. Implement incremental refresh processes:
+   - Run every 15 minutes to maintain data freshness
+   - Use CDC or timestamp-based detection for changes
+2. Schedule full refresh weekly during maintenance windows
+3. Monitor and alert on:
+   - Refresh lag exceeding 30 minutes
+   - Data reconciliation discrepancies
+   - Query performance degradation
+
+### Phase 4: Rollback Procedures
+1. Maintain parallel access to normalized schema during transition
+2. Implement feature flags to switch between schemas
+3. Document rollback procedures for each component
+
+## Consistency Architecture
+
+### Data Lineage
+- Source tables: `tombos`, `especies`, `generos`, `familias`, `autores`, `locais_coleta`, `cidades`, `estados`, `paises`, `coletores`, `tipos`, `herbarios`, `solos`, `relevos`, `vegetacoes`
+- Denormalized target: `tombos_denormalized`
+- Refresh mechanism: Incremental updates based on `updated_at` timestamps
+- Staleness window: 15 minutes maximum
+
+### Risk Analysis
+
+#### Write Amplification
+- Creation of denormalized records requires updates to multiple source tables
+- Mitigation: Use batch processing during low-usage periods
+
+#### Lock Contention
+- Refresh processes may lock rows during updates
+- Mitigation: Use row-level locking and smaller batch sizes
+
+#### Failure Modes
+- Incomplete refreshes could lead to stale data
+- Mitigation: Implement validation checks and alerting
+
+#### Backfill Runtime
+- Initial population may take several hours depending on data volume
+- Mitigation: Perform during scheduled maintenance windows
+
+#### Storage Growth
+- Denormalized tables will increase storage requirements by approximately 2-3x
+- Mitigation: Monitor storage usage and implement archiving policies if needed
+
+#### Monitoring & Alerts
+- Lag: Alert when refresh intervals exceed 30 minutes
+- Freshness: Monitor time difference between source and denormalized data
+- Reconciliation: Daily comparison of counts between normalized and denormalized views
+- Query Performance: Track response times for key queries before and after migration

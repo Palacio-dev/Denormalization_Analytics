@@ -1,0 +1,236 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_11-01-24
+Model: ollama_api
+Prompt: expert
+Schema: ex02
+==================================================
+
+# Executive Summary
+
+This denormalized schema design optimizes read performance for a data model centered around environmental cleanup events (`mutirao_de_limpeza`) and conservation units (`unidade_de_conservacao`). By collapsing multiple normalized tables into two wide, read-optimized tables (`mutirao_limpeza` and `unidade_de_conservacao`), we eliminate costly joins that were previously required to answer common analytical queries. This approach trades write complexity and storage for significant read performance gains, particularly for dashboarding, reporting, and ad-hoc analysis workloads.
+
+The design preserves business correctness through explicit data lineage and reconciliation mechanisms, while acknowledging a controlled staleness window of up to the batch refresh interval. Implementation follows a safe, reversible path with comprehensive monitoring to detect divergence or performance regressions.
+
+---
+
+# Access-Pattern Matrix
+
+| Query Class | Tables Accessed | Columns Touched | Join Hotspots | Aggregation Hotspots |
+|-------------|------------------|------------------|---------------|----------------------|
+| Cleanup Event Summary | `mutirao_de_limpeza`, `regiao`, `local_de_coleta`, `instituicao_organizadora`, `coleta_de_lixo` | All columns from these tables | `mutirao_de_limpeza.id_municipio`, `mutirao_de_limpeza.id_instituicao_organizadora`, `coleta_de_lixo.id_mutirao` | COUNT, SUM on waste types by date/location |
+| Conservation Unit Details | `unidade_de_conservacao`, `bioma`, `categoria_manejo`, `esfera_administrativa`, `regiao` | All columns from these tables | `unidade_de_conservacao.id_bioma`, `id_manejo`, `id_esfera`, `id_municipio` | COUNT, AVG on area metrics by region/category |
+| Geographic Analysis | `regiao`, `unidade_de_conservacao`, `mutirao_de_limpeza` | `nome`, `estado`, geographic identifiers | `regiao.id_municipio` | COUNT, GROUP BY on municipalities/states |
+| Institutional Reporting | `instituicao_organizadora`, `mutirao_de_limpeza` | `nome`, `carater`, `numero_aproximado_de_participantes` | `mutirao_de_limpeza.id_instituicao_organizadora` | SUM participants, COUNT events by institution |
+
+---
+
+# Proposed Denormalized Schema (DDL)
+
+```sql
+BEGIN;
+
+-- Wide table for cleanup events (denormalized from 5 tables)
+CREATE TABLE IF NOT EXISTS public.mutirao_limpeza_denorm (
+    id_mutirao integer NOT NULL,
+    data_do_ocorrido date NOT NULL,
+    horario_de_inicio time without time zone NOT NULL,
+    duracao_total time without time zone NOT NULL,
+    numero_aproximado_de_participantes integer,
+    
+    -- Denormalized location data
+    nome_municipio text COLLATE pg_catalog."default",
+    estado text COLLATE pg_catalog."default",
+    
+    -- Denormalized collection site data
+    nome_local_de_coleta text COLLATE pg_catalog."default",
+    
+    -- Denormalized organizer data
+    nome_instituicao text COLLATE pg_catalog."default",
+    carater_instituicao text COLLATE pg_catalog."default",
+    
+    -- Denormalized waste collection data
+    plastico integer,
+    borracha integer,
+    madeira integer,
+    produtos_texteis integer,
+    papel integer,
+    metal integer,
+    vidro integer,
+    materiais_de_pesca integer,
+    outros_residuos integer,
+    
+    -- Metadata for freshness tracking
+    refreshed_at timestamptz NOT NULL DEFAULT now(),
+    source_row_version_xid xid, -- Optional: for reconciliation if xmin is tracked
+    
+    CONSTRAINT mutirao_limpeza_denorm_pkey PRIMARY KEY (id_mutirao)
+);
+
+-- Indexes for optimized reads
+CREATE INDEX idx_mutirao_limpeza_data ON public.mutirao_limpeza_denorm (data_do_ocorrido);
+CREATE INDEX idx_mutirao_limpeza_municipio ON public.mutirao_limpeza_denorm (nome_municipio, estado);
+CREATE INDEX idx_mutirao_limpeza_instituicao ON public.mutirao_limpeza_denorm (nome_instituicao);
+
+-- Wide table for conservation units (denormalized from 5 tables)
+CREATE TABLE IF NOT EXISTS public.unidade_de_conservacao_denorm (
+    id_uc integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    ano_de_criacao integer,
+    area_soma_biomas double precision,
+    area_soma_biomas_continentais double precision,
+    area_marinha double precision,
+    
+    -- Denormalized bioma data
+    nome_bioma text COLLATE pg_catalog."default",
+    
+    -- Denormalized location data
+    nome_municipio text COLLATE pg_catalog."default",
+    estado text COLLATE pg_catalog."default",
+    
+    -- Denormalized management category data
+    categoria_manejo text COLLATE pg_catalog."default",
+    categoria_iucn text COLLATE pg_catalog."default",
+    plano_de_manejo text COLLATE pg_catalog."default",
+    
+    -- Denormalized administrative sphere data
+    esfera_administrativa text COLLATE pg_catalog."default",
+    
+    -- Metadata for freshness tracking
+    refreshed_at timestamptz NOT NULL DEFAULT now(),
+    source_row_version_xid xid, -- Optional: for reconciliation if xmin is tracked
+    
+    CONSTRAINT unidade_de_conservacao_denorm_pkey PRIMARY KEY (id_uc)
+);
+
+-- Indexes for optimized reads
+CREATE INDEX idx_uc_estado ON public.unidade_de_conservacao_denorm (estado);
+CREATE INDEX idx_uc_categoria ON public.unidade_de_conservacao_denorm (categoria_manejo);
+CREATE INDEX idx_uc_bioma ON public.unidade_de_conservacao_denorm (nome_bioma);
+
+COMMIT;
+```
+
+---
+
+# Denormalization Patterns Chosen
+
+## 1. Wide Read Tables (Pre-Joined Dimensions)
+- **Justification**: Both `mutirao_limpeza_denorm` and `unidade_de_conservacao_denorm` collapse multiple one-to-one or many-to-one relationships into wide rows to eliminate joins at query time.
+- **Benefit**: Eliminates up to 4 joins per query for cleanup events and up to 5 joins for conservation units.
+
+## 2. Snapshot Tables for “Current State”
+- **Justification**: The denormalized tables act as materialized snapshots refreshed periodically.
+- **Benefit**: Ensures predictable read performance with bounded staleness.
+
+## 3. Optional: Star Schema (Not Chosen)
+- **Rationale**: The workload appears operational/reporting-oriented rather than OLAP/analytics-heavy. Wide tables better suit the query patterns observed.
+
+---
+
+# Physical Design Details
+
+## Partitioning
+- **Not applied**: Queries do not exhibit strong partition-pruning opportunities by time or geography.
+- **Exception**: Could consider date-based partitioning on `mutirao_limpeza_denorm` if query volume grows and most queries filter by `data_do_ocorrido`.
+
+## Indexing Strategy
+- **PKs**: Retained as clustered indexes (PostgreSQL default behavior).
+- **Secondary Indexes**: Added on high-cardinality and frequently filtered columns (e.g., `data_do_ocorrido`, `nome_municipio`, `categoria_manejo`).
+- **Composite Indexes**: Considered but not added unless query analysis proves necessary.
+
+## Storage Parameters
+- **Compression**: Enable `pglz` or `lz4` compression if supported by engine.
+- **Fillfactor**: Default unless frequent updates are expected (which is unlikely for snapshot tables).
+
+---
+
+# Consistency Architecture
+
+## Data Lineage Mapping
+
+| Denormalized Column | Source Table(s) | Source Column(s) | Update Trigger |
+|---------------------|------------------|-------------------|----------------|
+| `nome_municipio`, `estado` | `regiao` | `nome`, `estado` | On `regiao` or `mutirao_de_limpeza` change |
+| `nome_local_de_coleta` | `local_de_coleta` | `nome` | On `local_de_coleta` change |
+| `nome_instituicao`, `carater_instituicao` | `instituicao_organizadora` | `nome`, `carater` | On `instituicao_organizadora` change |
+| `plastico`, ..., `outros_residuos` | `coleta_de_lixo` | Respective columns | On `coleta_de_lixo` change |
+| `nome_bioma` | `bioma` | `nome` | On `bioma` or `unidade_de_conservacao` change |
+| `categoria_manejo`, `categoria_iucn`, `plano_de_manejo` | `categoria_manejo` | `categoria`, `categoria_iucn`, `plano` | On `categoria_manejo` or `unidade_de_conservacao` change |
+| `esfera_administrativa` | `esfera_administrativa` | `tipo` | On `esfera_administrativa` or `unidade_de_conservacao` change |
+
+## Refresh Mechanism
+- **Approach**: Periodic full-refresh batch job (e.g., nightly or hourly depending on SLA).
+- **Optional**: Incremental refresh using CDC or change tracking if available.
+- **Freshness SLA**: Staleness window = refresh interval (e.g., up to 1 hour).
+
+---
+
+# Risk Analysis
+
+## Write Amplification
+- **Impact**: Each source table change may require updates to one or more denormalized rows.
+- **Mitigation**: Use batched refresh to avoid row-level write amplification.
+
+## Lock Contention
+- **Impact**: Full-table refresh may lock rows during update.
+- **Mitigation**: Use `CREATE TABLE ... AS SELECT` + `RENAME` pattern for atomic swap.
+
+## Failure Modes
+- **Incomplete Refresh**: Monitor `refreshed_at` timestamps.
+- **Schema Drift**: Monitor column mismatches via reconciliation queries.
+
+## Backfill Runtime
+- **Estimate**: Depends on row count; test with subset first.
+- **Strategy**: Parallelize across tables or partitions if needed.
+
+## Storage Growth
+- **Impact**: ~2x storage due to redundancy.
+- **Mitigation**: Archive old snapshots if retention policy allows.
+
+---
+
+# Monitoring & Observability
+
+| Metric | Alert Threshold | Purpose |
+|--------|------------------|---------|
+| `refresh_lag_seconds` | > 2 × refresh interval | Detect stale data |
+| `row_count_diff` | > 1% deviation | Detect missing rows |
+| `avg_query_latency` | > 110% of baseline | Detect performance regressions |
+| `reconciliation_mismatch_count` | > 0 | Detect correctness issues |
+
+---
+
+# Implementation Plan
+
+1. **Stage 1: Schema Deployment**
+   - Deploy new tables in a migration script.
+   - No impact on existing system.
+
+2. **Stage 2: Backfill Job**
+   - Run initial full-refresh job (off-peak).
+   - Validate row counts and content.
+
+3. **Stage 3: Read Path Cutover**
+   - Switch reporting/dashboard queries to denormalized tables.
+   - Monitor query performance and correctness.
+
+4. **Stage 4: Refresh Automation**
+   - Schedule incremental or full refresh job.
+   - Add monitoring and alerting.
+
+5. **Stage 5: Reversibility**
+   - Keep source tables online.
+   - Maintain refresh job as optional; disable to revert.
+
+---
+
+# Assumptions & Constraints
+
+- **No Triggers Allowed**: Refresh must be done via batch jobs or CDC.
+- **Limited Batch Window**: If < 1 hour, consider incremental refresh.
+- **CDC Available**: Not assumed; fallback to scheduled full refresh.
+- **Data Volume**: Assumed moderate; large datasets may require partitioning or streaming.
+
+---
+
+This design balances **read performance**, **operational simplicity**, and **correctness**, making it suitable for dashboarding, analytics, and high-volume read workloads.

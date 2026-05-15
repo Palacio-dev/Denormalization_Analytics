@@ -1,0 +1,135 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_10-06-17
+Model: ollama_api
+Prompt: RACE
+Schema: chinook
+==================================================
+
+<ROLE>
+As a Senior Data Engineer with 15 years of experience in relational and non-relational databases, SQL, and analytical database performance, I will guide you through the process of denormalizing a relational database schema to optimize it for read-heavy analytical workloads.
+</ROLE>
+
+<ACTION>
+Based on the provided schema and common denormalization techniques, here is my analysis and proposed solution:
+
+1. **Schema Analysis:**
+The provided schema represents a music store database with the following key relationships:
+- Artists -> Albums -> Tracks -> InvoiceLines -> Invoices -> Customers
+- Tracks also connect to Genres and MediaTypes
+- Customers connect to Employees (SupportRep)
+- Playlists connect to Tracks
+
+2. **Frequent Query Analysis:**
+For analytical workloads, the most common queries likely involve:
+- Sales analysis (total revenue, track popularity, customer spending)
+- Artist/Album performance metrics
+- Genre popularity and trends
+- Customer demographics and purchasing behavior
+- Playlist popularity
+
+These queries often require joining multiple tables (InvoiceLine -> Track -> Album -> Artist, or Invoice -> Customer -> Employee).
+
+3. **Denormalization Techniques Selection:**
+Based on the schema and query patterns, the most beneficial techniques are:
+- Adding Redundant Attributes (to avoid joins in analytical queries)
+- Adding Derived Attributes (for precomputed aggregations)
+- Collapsing Relations (for frequently joined entity hierarchies)
+
+4. **Proposed Denormalized Schema:**
+I'll design a star-schema-like structure optimized for analytical queries:
+
+```sql
+-- Fact table for sales transactions
+CREATE TABLE sales_facts (
+    sale_id SERIAL PRIMARY KEY,
+    invoice_date TIMESTAMP NOT NULL,
+    customer_id INTEGER,
+    customer_first_name VARCHAR(40),
+    customer_last_name VARCHAR(20),
+    customer_city VARCHAR(40),
+    customer_state VARCHAR(40),
+    customer_country VARCHAR(40),
+    customer_postal_code VARCHAR(10),
+    employee_id INTEGER,
+    employee_first_name VARCHAR(20),
+    employee_last_name VARCHAR(20),
+    employee_title VARCHAR(30),
+    
+    track_id INTEGER,
+    track_name VARCHAR(200),
+    album_id INTEGER,
+    album_title VARCHAR(160),
+    artist_id INTEGER,
+    artist_name VARCHAR(120),
+    genre_id INTEGER,
+    genre_name VARCHAR(120),
+    media_type_id INTEGER,
+    media_type_name VARCHAR(120),
+    
+    unit_price NUMERIC(10,2),
+    quantity INTEGER,
+    line_total NUMERIC(10,2), -- Derived: unit_price * quantity
+    invoice_total NUMERIC(10,2)
+);
+
+-- Aggregated table for album performance metrics
+CREATE TABLE album_performance (
+    album_id INTEGER PRIMARY KEY,
+    album_title VARCHAR(160),
+    artist_id INTEGER,
+    artist_name VARCHAR(120),
+    genre_id INTEGER,
+    genre_name VARCHAR(120),
+    total_sales_quantity INTEGER, -- Derived
+    total_sales_revenue NUMERIC(12,2), -- Derived
+    total_tracks INTEGER, -- Derived
+    first_sale_date TIMESTAMP, -- Derived
+    last_sale_date TIMESTAMP -- Derived
+);
+
+-- Aggregated table for customer behavior
+CREATE TABLE customer_behavior (
+    customer_id INTEGER PRIMARY KEY,
+    customer_first_name VARCHAR(40),
+    customer_last_name VARCHAR(20),
+    customer_city VARCHAR(40),
+    customer_state VARCHAR(40),
+    customer_country VARCHAR(40),
+    first_purchase_date TIMESTAMP,
+    last_purchase_date TIMESTAMP,
+    total_purchases INTEGER, -- Derived
+    total_spent NUMERIC(12,2), -- Derived
+    favorite_genre_id INTEGER,
+    favorite_genre_name VARCHAR(120),
+    favorite_artist_id INTEGER,
+    favorite_artist_name VARCHAR(120)
+);
+
+-- Aggregated table for track popularity
+CREATE TABLE track_popularity (
+    track_id INTEGER PRIMARY KEY,
+    track_name VARCHAR(200),
+    album_id INTEGER,
+    album_title VARCHAR(160),
+    artist_id INTEGER,
+    artist_name VARCHAR(120),
+    genre_id INTEGER,
+    genre_name VARCHAR(120),
+    play_count INTEGER, -- Derived from playlist associations
+    sales_count INTEGER, -- Derived from invoice lines
+    total_revenue NUMERIC(12,2) -- Derived
+);
+```
+
+5. **Justification:**
+- The `sales_facts` table eliminates the need for multiple joins in typical sales analysis queries by including all relevant dimensional data
+- The aggregated tables (`album_performance`, `customer_behavior`, `track_popularity`) precompute common metrics to dramatically speed up analytical queries
+- This approach reduces query complexity from joining 6-7 tables to querying a single table
+- The schema supports common analytical queries like:
+  - "Top selling artists by country"
+  - "Customer lifetime value analysis"
+  - "Genre popularity trends over time"
+  - "Best performing albums"
+
+This denormalized schema trades storage space for query performance, which is appropriate for analytical workloads where read performance is prioritized over storage efficiency.
+</ACTION>

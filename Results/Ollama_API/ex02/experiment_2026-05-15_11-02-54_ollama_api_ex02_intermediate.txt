@@ -1,0 +1,209 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_11-02-54
+Model: ollama_api
+Prompt: intermediate
+Schema: ex02
+==================================================
+
+# Denormalized Schema for Read-Optimized Performance
+
+Based on the provided normalized schema and the existing denormalized model, I'll provide a comprehensive workload-driven analysis and a fully optimized physical schema.
+
+## 1. Workload-Driven Analysis
+
+### High-Cost Operations in Read Workloads:
+1. **Join-heavy queries** for cleanup events - Currently requires joining 5 tables (mutirao_de_limpeza, regiao, local_de_coleta, instituicao_organizadora, coleta_de_lixo)
+2. **Join-heavy queries** for conservation units - Currently requires joining 5 tables (unidade_de_conservacao with bioma, categoria_manejo, esfera_administrativa, regiao)
+3. **Frequent filtering** by date ranges, municipality names, institution types, and conservation categories
+4. **Aggregate queries** on collected waste materials by region, time period, or institution
+
+### Denormalization Candidates:
+1. **mutirao_de_limpeza** with related entities (regiao, local_de_coleta, instituicao_organizadora, coleta_de_lixo) - High read frequency, multiple joins
+2. **unidade_de_conservacao** with related entities (bioma, categoria_manejo, esfera_administrativa, regiao) - Complex joins, frequent lookups
+3. **Precomputed aggregates** for waste collection statistics by time periods and regions
+
+## 2. Denormalization Design
+
+### Proposed Denormalizations:
+1. **Wide "mutirao_limpeza" table** - Pre-joined with all related information
+2. **Wide "unidade_de_conservacao_detalhada" table** - Pre-joined with all related information
+3. **Summary table "resumo_coletas"** - Precomputed aggregates by month/region
+4. **Covering indexes** aligned to common query patterns
+5. **Partitioning** on date for the main events table
+
+## 3. New Physical Schema
+
+```sql
+BEGIN;
+
+-- Main denormalized table for cleanup events with all related information
+CREATE TABLE IF NOT EXISTS public.mutirao_limpeza (
+    id_mutirao integer NOT NULL,
+    data_do_ocorrido date NOT NULL,
+    horario_de_inicio time without time zone NOT NULL,
+    numero_aproximado_de_participantes integer,
+    duracao_total time without time zone NOT NULL,
+    nome_municipio text COLLATE pg_catalog."default",
+    estado text COLLATE pg_catalog."default",
+    nome_local_de_coleta text COLLATE pg_catalog."default",
+    nome_instituicao text COLLATE pg_catalog."default",
+    carater_instituicao text COLLATE pg_catalog."default",
+    plastico integer,
+    borracha integer,
+    madeira integer,
+    produtos_texteis integer,
+    papel integer,
+    metal integer,
+    vidro integer,
+    materiais_de_pesca integer,
+    outros_residuos integer,
+    total_residuos integer GENERATED ALWAYS AS (
+        COALESCE(plastico, 0) + 
+        COALESCE(borracha, 0) + 
+        COALESCE(madeira, 0) + 
+        COALESCE(produtos_texteis, 0) + 
+        COALESCE(papel, 0) + 
+        COALESCE(metal, 0) + 
+        COALESCE(vidro, 0) + 
+        COALESCE(materiais_de_pesca, 0) + 
+        COALESCE(outros_residuos, 0)
+    ) STORED,
+    CONSTRAINT mutirao_limpeza_pkey PRIMARY KEY (id_mutirao, data_do_ocorrido)
+) PARTITION BY RANGE (data_do_ocorrido);
+
+-- Create monthly partitions for better query performance
+CREATE TABLE mutirao_limpeza_2023_01 PARTITION OF mutirao_limpeza
+FOR VALUES FROM ('2023-01-01') TO ('2023-02-01');
+
+CREATE TABLE mutirao_limpeza_2023_02 PARTITION OF mutirao_limpeza
+FOR VALUES FROM ('2023-02-01') TO ('2023-03-01');
+
+CREATE TABLE mutirao_limpeza_2023_03 PARTITION OF mutirao_limpeza
+FOR VALUES FROM ('2023-03-01') TO ('2023-04-01');
+
+-- Add more partitions as needed
+
+-- Denormalized table for conservation units with all related information
+CREATE TABLE IF NOT EXISTS public.unidade_de_conservacao_detalhada (
+    id_uc integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    ano_de_criacao integer,
+    area_soma_biomas double precision,
+    area_soma_biomas_continentais double precision,
+    area_marinha double precision,
+    nome_bioma text COLLATE pg_catalog."default",
+    nome_municipio text COLLATE pg_catalog."default",
+    estado text COLLATE pg_catalog."default",
+    categoria_manejo text COLLATE pg_catalog."default",
+    categoria_iucn text COLLATE pg_catalog."default",
+    plano_de_manejo text COLLATE pg_catalog."default",
+    esfera_administrativa text COLLATE pg_catalog."default",
+    total_area double precision GENERATED ALWAYS AS (
+        COALESCE(area_soma_biomas, 0) + 
+        COALESCE(area_marinha, 0)
+    ) STORED,
+    CONSTRAINT unidade_de_conservacao_detalhada_pkey PRIMARY KEY (id_uc)
+);
+
+-- Summary table for aggregated waste collection statistics
+CREATE TABLE IF NOT EXISTS public.resumo_coletas (
+    periodo date NOT NULL, -- First day of month
+    nome_municipio text COLLATE pg_catalog."default",
+    estado text COLLATE pg_catalog."default",
+    total_eventos integer,
+    total_participantes integer,
+    total_plastico integer,
+    total_borracha integer,
+    total_madeira integer,
+    total_produtos_texteis integer,
+    total_papel integer,
+    total_metal integer,
+    total_vidro integer,
+    total_materiais_de_pesca integer,
+    total_outros_residuos integer,
+    total_residuos integer,
+    media_participantes_por_evento numeric(10,2),
+    CONSTRAINT resumo_coletas_pkey PRIMARY KEY (periodo, nome_municipio, estado)
+);
+
+-- Indexes for mutirao_limpeza table
+CREATE INDEX idx_mutirao_data ON public.mutirao_limpeza (data_do_ocorrido);
+CREATE INDEX idx_mutirao_municipio ON public.mutirao_limpeza (nome_municipio, estado);
+CREATE INDEX idx_mutirao_instituicao ON public.mutirao_limpeza (nome_instituicao);
+CREATE INDEX idx_mutirao_carater_instituicao ON public.mutirao_limpeza (carater_instituicao);
+CREATE INDEX idx_mutirao_total_residuos ON public.mutirao_limpeza (total_residuos);
+CREATE INDEX idx_mutirao_composto_data_municipio ON public.mutirao_limpeza (data_do_ocorrido, nome_municipio, estado) 
+INCLUDE (plastico, papel, metal, vidro, total_residuos);
+
+-- Indexes for unidade_de_conservacao_detalhada table
+CREATE INDEX idx_uc_municipio ON public.unidade_de_conservacao_detalhada (nome_municipio, estado);
+CREATE INDEX idx_uc_bioma ON public.unidade_de_conservacao_detalhada (nome_bioma);
+CREATE INDEX idx_uc_categoria_manejo ON public.unidade_de_conservacao_detalhada (categoria_manejo);
+CREATE INDEX idx_uc_esfera ON public.unidade_de_conservacao_detalhada (esfera_administrativa);
+CREATE INDEX idx_uc_area_total ON public.unidade_de_conservacao_detalhada (total_area DESC);
+CREATE INDEX idx_uc_composto_municipio_categoria ON public.unidade_de_conservacao_detalhada (nome_municipio, categoria_manejo) 
+INCLUDE (nome, area_soma_biomas, area_marinha);
+
+-- Indexes for resumo_coletas table
+CREATE INDEX idx_resumo_periodo ON public.resumo_coletas (periodo);
+CREATE INDEX idx_resumo_municipio ON public.resumo_coletas (nome_municipio, estado);
+CREATE INDEX idx_resumo_total_residuos ON public.resumo_coletas (total_residuos DESC);
+CREATE INDEX idx_resumo_composto_periodo_municipio ON public.resumo_coletas (periodo, nome_municipio, estado) 
+INCLUDE (total_eventos, total_participantes, total_residuos);
+
+-- Materialized view for top municipalities by waste collection
+CREATE MATERIALIZED VIEW IF NOT EXISTS public.top_municipios_coleta AS
+SELECT 
+    nome_municipio,
+    estado,
+    COUNT(*) as total_eventos,
+    SUM(total_residuos) as total_residuos_coletados,
+    AVG(numero_aproximado_de_participantes) as media_participantes
+FROM public.mutirao_limpeza
+WHERE data_do_ocorrido >= CURRENT_DATE - INTERVAL '1 year'
+GROUP BY nome_municipio, estado
+ORDER BY total_residuos_coletados DESC
+LIMIT 100;
+
+CREATE INDEX idx_top_municipios_coleta ON public.top_municipios_coleta (total_residuos_coletados DESC);
+
+-- Materialized view for conservation unit statistics
+CREATE MATERIALIZED VIEW IF NOT EXISTS public.estatisticas_unidades_conservacao AS
+SELECT 
+    esfera_administrativa,
+    categoria_manejo,
+    COUNT(*) as total_unidades,
+    AVG(area_soma_biomas) as media_area_terrestre,
+    AVG(area_marinha) as media_area_marinha,
+    COUNT(DISTINCT nome_municipio) as municipios_representados
+FROM public.unidade_de_conservacao_detalhada
+GROUP BY esfera_administrativa, categoria_manejo;
+
+CREATE INDEX idx_estatisticas_uc_esfera ON public.estatisticas_unidades_conservacao (esfera_administrativa);
+
+-- View for current year cleanup events (for frequently accessed recent data)
+CREATE VIEW IF NOT EXISTS public.mutirao_atual AS
+SELECT *
+FROM public.mutirao_limpeza
+WHERE data_do_ocorrido >= DATE_TRUNC('year', CURRENT_DATE);
+
+-- View for high participation events
+CREATE VIEW IF NOT EXISTS public.mutirao_alto_participacao AS
+SELECT *
+FROM public.mutirao_limpeza
+WHERE numero_aproximado_de_participantes >= 50;
+
+COMMIT;
+```
+
+## Key Optimizations Implemented:
+
+1. **Partitioning**: The main `mutirao_limpeza` table is partitioned by date to improve query performance on time-based queries
+2. **Computed Columns**: Added `total_residuos` and `total_area` computed columns to avoid runtime calculations
+3. **Covering Indexes**: Created indexes that include frequently accessed columns to avoid table lookups
+4. **Materialized Views**: Precomputed complex aggregations for frequently accessed statistics
+5. **Strategic Denormalization**: Combined all related entities into wide tables to eliminate joins
+6. **Summary Tables**: Created `resumo_coletas` for aggregated reporting queries
+7. **Specialized Views**: Created views for common access patterns (current year, high participation events)
+
+This schema design optimizes for read-heavy workloads by eliminating joins, precomputing aggregates, and providing multiple access paths through strategic indexing.

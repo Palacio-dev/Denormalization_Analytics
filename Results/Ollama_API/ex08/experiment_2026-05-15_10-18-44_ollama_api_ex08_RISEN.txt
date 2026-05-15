@@ -1,0 +1,106 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_10-18-44
+Model: ollama_api
+Prompt: RISEN
+Schema: ex08
+==================================================
+
+```sql
+BEGIN;
+
+-- Denormalized table for student trajectory and employment facts
+CREATE TABLE IF NOT EXISTS fato_aluno_trajetoria (
+    -- Aluno IFB attributes
+    id_aluno INTEGER,
+    data_nascimento DATE,
+    idade INTEGER,
+    sexo VARCHAR(1),
+    nacionalidade VARCHAR(50),
+    raca VARCHAR(50),
+    portador_deficiencia BOOLEAN,
+    
+    -- Matricula IFB attributes
+    ano_entrada_ifb INTEGER,
+    co_ciclo_matricula VARCHAR(50),
+    periodo VARCHAR(30),
+    situacao_matricula VARCHAR(50),
+    tipo_cota VARCHAR(50),
+    atestado_baixarenda VARCHAR(20),
+    unidade_ensino VARCHAR(100),
+    co_escola_educacenso VARCHAR(20),
+    
+    -- Curso IFB attributes
+    co_curso VARCHAR(50),
+    no_curso VARCHAR(200),
+    co_tipo_curso VARCHAR(10),
+    tipo_curso VARCHAR(100),
+    co_tipo_nivel VARCHAR(10),
+    ds_tipo_nivel VARCHAR(100),
+    ds_eixo_tecnologico VARCHAR(200),
+    modalidade_ensino VARCHAR(100),
+    carga_horaria INTEGER,
+    
+    -- Vinculo Empregaticio attributes
+    ano_rais INTEGER,
+    razao_social VARCHAR(200),
+    tipo_vinculo_empregaticio VARCHAR(200),
+    data_admissao_declarada DATE,
+    tempo_emprego INTEGER,
+    motivo_desligamento VARCHAR(200),
+    mes_desligamento VARCHAR(20),
+    indicador_vinculo_ativo BOOLEAN,
+    
+    -- Remuneracao attributes
+    vl_remun_media_nom NUMERIC(10, 2),
+    vl_remun_media_sm NUMERIC(10, 2),
+    vl_remun_dezembro_nom NUMERIC(10, 2),
+    vl_remun_dezembro_sm NUMERIC(10, 2),
+    qtd_hora_contr INTEGER,
+    vl_ultima_remuneracao_ano NUMERIC(10, 2),
+    vl_salario_contratual NUMERIC(10, 2),
+    
+    -- Localizacao attributes (from vinculo_empregaticio -> localizacao)
+    uf_vinculo VARCHAR(2),
+    municipio_vinculo VARCHAR(100)
+);
+
+-- Denormalized table for school indicators and performance metrics
+CREATE TABLE IF NOT EXISTS dim_escola_indicadores_anuais (
+    -- Escola attributes
+    co_escola_educacenso VARCHAR(50),
+    no_escola_educacenso VARCHAR(200),
+    tp_dependencia_adm_escola SMALLINT,
+    tp_localizacao_escola SMALLINT,
+    inse VARCHAR(10),
+    
+    -- Localizacao attributes (from escola -> localizacao)
+    uf_escola VARCHAR(2),
+    municipio_escola VARCHAR(100),
+    
+    -- Indicadores Escolares attributes
+    nu_ano INTEGER,
+    nu_taxa_permanencia NUMERIC(6, 2),
+    nu_taxa_aprovacao NUMERIC(5, 2),
+    nu_taxa_reprovacao NUMERIC(5, 2),
+    nu_taxa_abandono NUMERIC(5, 2),
+    porte_escola VARCHAR(50),
+    pc_formacao_docente NUMERIC(5, 2),
+    
+    -- Participacao ENEM attributes
+    nu_matriculas INTEGER,
+    nu_participantes_nec_esp INTEGER,
+    nu_participantes INTEGER,
+    nu_taxa_participacao NUMERIC(5, 2),
+    
+    -- Desempenho ENEM attributes
+    nu_media_cn NUMERIC(6, 2),
+    nu_media_ch NUMERIC(6, 2),
+    nu_media_lp NUMERIC(6, 2),
+    nu_media_mt NUMERIC(6, 2),
+    nu_media_red NUMERIC(6, 2),
+    
+    PRIMARY KEY (co_escola_educacenso, nu_ano)
+);
+
+END;
+```

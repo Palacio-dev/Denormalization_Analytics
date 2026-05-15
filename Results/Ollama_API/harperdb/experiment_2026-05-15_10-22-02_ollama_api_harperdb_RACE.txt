@@ -1,0 +1,57 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_10-22-02
+Model: ollama_api
+Prompt: RACE
+Schema: harperdb
+==================================================
+
+<denormalized_schema>
+CREATE TABLE user_entitlements_denormalized (
+    user_id INT,
+    entitlement_id INT,
+    activeDate DATE,
+    inactiveDate DATE,
+    useLimit INT,
+    useCount INT,
+    featureType VARCHAR(4),
+    packageType VARCHAR(4),
+    activeFlag INT,
+    PRIMARY KEY (user_id, entitlement_id)
+);
+</denormalized_schema>
+
+### Analysis and Design Process:
+
+**Step 1: Schema Analysis**
+The provided schema consists of three tables:
+- `entitlements`: Contains entitlement details
+- `users`: Simple user table with only ID
+- `user_entitlements`: Junction table linking users to entitlements
+
+This is a classic many-to-many relationship between users and entitlements.
+
+**Step 2: Workload Context Analysis**
+For read-heavy analytical workloads, common queries likely include:
+- List all entitlements for a specific user
+- Find users with specific entitlement types
+- Count active/inactive entitlements
+- Analyze usage patterns across entitlement types
+
+The main JOIN bottleneck is between `user_entitlements` and `entitlements` tables when retrieving entitlement details for users.
+
+**Step 3: Denormalization Techniques Evaluation**
+Based on the schema and workload:
+- **Adding Redundant Attributes** (Technique 1) is most suitable since we frequently need entitlement details with user information
+- **Collapsing Relations** (Technique 3) is also applicable as we can merge the junction table with entitlement details
+- Derived attributes and vertical partitioning are less relevant for this use case
+
+**Step 4: Possible Denormalized Schemas**
+1. Flatten user-entitlement relationship into single table (chosen approach)
+2. Pre-aggregated summary tables for analytical queries
+3. Separate active/inactive entitlement tables
+
+**Step 5: Evaluation and Selection**
+The chosen schema eliminates JOINs entirely while maintaining all necessary information for analytical queries. It preserves the composite primary key structure for efficient lookups.
+
+**Step 6: Final Denormalized Schema**
+The resulting schema combines `user_entitlements` and `entitlements` tables, removing the need for JOINs when querying user entitlement details. This significantly improves read performance for analytical workloads while maintaining data integrity through the composite primary key.

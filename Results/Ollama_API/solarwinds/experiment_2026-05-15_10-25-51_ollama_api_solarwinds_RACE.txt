@@ -1,0 +1,138 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_10-25-51
+Model: ollama_api
+Prompt: RACE
+Schema: solarwinds
+==================================================
+
+<STEP0>
+The provided normalized schema consists of four tables: customers, orders, products, and order_details. These tables are related through foreign key constraints to represent a typical e-commerce transactional model. The customers table holds customer information, orders tracks customer orders with dates, products contains product details including prices, and order_details links orders to products with quantities. This is a standard star schema-like structure commonly found in OLTP systems.
+</STEP0>
+
+<STEP1>
+Analyzing the schema reveals a classic e-commerce data model with a clear parent-child-grandchild relationship: customers → orders → order_details ← products. The primary keys are serial/auto-incrementing integers, and foreign key relationships enforce referential integrity. The schema follows third normal form (3NF) principles, eliminating redundancy but requiring multiple joins for comprehensive queries. All tables use appropriate data types with VARCHAR for text fields, SERIAL for auto-incrementing keys, DATE for temporal data, DECIMAL for monetary values, and INT for quantities and references.
+</STEP1>
+
+<STEP2>
+For analytical workloads, the most frequent queries would likely involve:
+1. Order analysis by customer (JOIN orders with customers)
+2. Order analysis by product (JOIN orders with order_details and products)
+3. Revenue calculations (JOIN all tables to calculate total order values)
+4. Customer purchase history analysis
+5. Product performance analysis by time periods
+These queries require multiple JOIN operations which can become performance bottlenecks as data volume grows. The current normalized structure would require at least 3-4 table joins for comprehensive analytical queries, creating significant overhead in read-heavy scenarios.
+</STEP2>
+
+<STEP3>
+Evaluating the denormalization techniques for this schema:
+1. Adding Redundant Attributes: Highly applicable - customer and product information is frequently needed with order data
+2. Adding Derived Attributes: Very applicable - pre-calculating order totals, customer lifetime value, product sales counts would benefit analytical queries
+3. Collapsing Relations: Most applicable - merging the star schema into fewer tables would eliminate JOIN overhead
+4. Vertical Partitioning: Less applicable - the tables are already relatively narrow with relevant attributes
+Based on the analytical workload context, techniques 1, 2, and 3 would provide the most performance benefits.
+</STEP3>
+
+<STEP4>
+Designing multiple denormalized schema options:
+
+Option 1 - Heavy Redundancy:
+CREATE TABLE denormalized_orders (
+  order_id SERIAL PRIMARY KEY,
+  order_date DATE,
+  customer_id INT,
+  customer_name VARCHAR(100),
+  customer_email VARCHAR(100),
+  customer_address TEXT,
+  product_id INT,
+  product_name VARCHAR(100),
+  unit_price DECIMAL(10,2),
+  quantity INT,
+  line_total DECIMAL(10,2)  -- Derived attribute
+);
+
+Option 2 - Customer-Centric:
+CREATE TABLE customer_order_summary (
+  customer_id INT,
+  customer_name VARCHAR(100),
+  customer_email VARCHAR(100),
+  order_id SERIAL,
+  order_date DATE,
+  order_total DECIMAL(12,2),  -- Derived attribute
+  product_summary TEXT  -- Aggregated product info
+);
+
+Option 3 - Product-Centric:
+CREATE TABLE product_sales_analysis (
+  product_id INT,
+  product_name VARCHAR(100),
+  price DECIMAL(10,2),
+  order_id INT,
+  order_date DATE,
+  customer_id INT,
+  quantity INT,
+  line_total DECIMAL(10,2),
+  customer_name VARCHAR(100)  -- Redundant attribute
+);
+
+Option 4 - Comprehensive Single Table:
+CREATE TABLE sales_analytics (
+  order_id INT,
+  order_date DATE,
+  customer_id INT,
+  customer_name VARCHAR(100),
+  customer_email VARCHAR(100),
+  customer_address TEXT,
+  product_id INT,
+  product_name VARCHAR(100),
+  unit_price DECIMAL(10,2),
+  quantity INT,
+  line_total DECIMAL(10,2),
+  order_total DECIMAL(12,2)  -- Derived attribute at order level
+);
+</STEP4>
+
+<STEP5>
+Evaluating each option:
+Option 1 provides good granularity but may create data redundancy issues
+Option 2 focuses on customer analytics but loses product detail
+Option 3 emphasizes product analysis but may not capture full customer context
+Option 4 offers comprehensive analytical capabilities with all necessary data in one table
+For read-heavy analytical workloads, Option 4 is most consistent as it eliminates all JOIN operations while preserving all analytical dimensions. It incorporates redundant attributes (customer and product info) and derived attributes (line totals) to optimize query performance.
+</STEP5>
+
+<STEP6>
+```sql
+-- Denormalized schema for analytical workloads
+CREATE TABLE sales_analytics (
+  sales_record_id SERIAL PRIMARY KEY,
+  order_id INT NOT NULL,
+  order_date DATE NOT NULL,
+  customer_id INT NOT NULL,
+  customer_name VARCHAR(100) NOT NULL,
+  customer_email VARCHAR(100),
+  customer_address TEXT,
+  product_id INT NOT NULL,
+  product_name VARCHAR(100) NOT NULL,
+  unit_price DECIMAL(10,2) NOT NULL,
+  quantity INT NOT NULL,
+  line_total DECIMAL(12,2) NOT NULL,  -- Derived: unit_price * quantity
+  order_total DECIMAL(14,2),  -- Derived: sum of line_totals for the order
+  order_item_sequence INT,  -- To maintain order detail sequence
+  data_refresh_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for analytical query performance
+CREATE INDEX idx_sales_analytics_order_date ON sales_analytics(order_date);
+CREATE INDEX idx_sales_analytics_customer_id ON sales_analytics(customer_id);
+CREATE INDEX idx_sales_analytics_product_id ON sales_analytics(product_id);
+CREATE INDEX idx_sales_analytics_order_id ON sales_analytics(order_id);
+CREATE INDEX idx_sales_analytics_customer_name ON sales_analytics(customer_name);
+```
+
+This denormalized schema incorporates:
+1. Redundant Attributes: Customer and product information stored with each order line
+2. Derived Attributes: Line totals and order totals pre-calculated
+3. Collapsing Relations: All four original tables consolidated into one
+4. Analytical Optimization: Strategic indexes for common query patterns
+The design eliminates JOIN operations entirely, dramatically improving read performance for analytical queries while maintaining data integrity through careful column selection.
+</STEP6>

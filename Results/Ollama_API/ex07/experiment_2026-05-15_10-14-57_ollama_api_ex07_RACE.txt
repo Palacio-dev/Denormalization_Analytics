@@ -1,0 +1,135 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_10-14-57
+Model: ollama_api
+Prompt: RACE
+Schema: ex07
+==================================================
+
+# Denormalization Analysis and Design for Hydroelectric Power Plant Database
+
+## 1. Schema Analysis
+
+The normalized model represents a database for hydroelectric power plants with the following key relationships:
+- **Usina** (Power Plant) is the main entity
+- **Proprietarios** (Owners) - one-to-many relationship
+- **Rios** (Rivers) - one-to-many relationship  
+- **Localizacoes** (Locations) - one-to-many relationship with complex municipality connections
+- **Municipios** (Municipalities) - connected to states
+- **Estados** (States) - simple reference table
+
+## 2. Frequent Queries / Workload Context
+
+Based on the schema and typical analytical workloads for power plant databases, the most frequent queries likely include:
+
+1. **Power plant details with owner information**: 
+   - List plants with their owners
+   - Filter plants by owner
+
+2. **Geographic analysis queries**:
+   - Plants by state/region
+   - Plants by municipality
+   - Plants near specific rivers
+
+3. **Capacity and status reporting**:
+   - Total capacity by owner/region
+   - Plants by operational stage
+   - Capacity trends over time
+
+4. **Location-based analytics**:
+   - Plants within geographic boundaries
+   - River basin analysis
+
+These queries would require multiple JOINs in the normalized model, creating performance bottlenecks.
+
+## 3. Applicable Denormalization Techniques
+
+For this model, the most suitable techniques are:
+
+1. **Adding Redundant Attributes** - Most applicable as it addresses the JOIN bottleneck issue
+2. **Collapsing Relations** - Relevant for simplifying the complex location relationships
+3. **Vertical Partitioning** - Could be useful if we separate operational from static data
+
+Adding Derived Attributes is less critical here since we don't see aggregation-heavy queries in the typical workload.
+
+## 4. Multiple Denormalized Schema Designs
+
+### Design Option A: Comprehensive Single Table (Similar to provided example)
+Collapse all relationships into one wide table with all relevant attributes.
+
+### Design Option B: Two-Tier Approach
+1. Core Usina table with essential plant info + redundant attributes
+2. Separate Geographic dimension table
+
+### Design Option C: Vertical Partitioning
+1. Operational data table (frequently changing attributes)
+2. Static reference data table (rarely changing attributes)
+
+## 5. Evaluation and Selection
+
+**Design Option A** is most suitable because:
+- Eliminates all JOIN operations for read queries
+- Supports all common analytical queries directly
+- Simplifies query complexity significantly
+- Optimizes for read-heavy analytical workloads
+- Matches the pattern shown in the examples
+
+The provided denormalized model already follows this approach but can be improved.
+
+## 6. Final Denormalized Schema Design
+
+```sql
+CREATE TABLE IF NOT EXISTS public."UsinaDenormalized" (
+    -- Core plant identifiers and names
+    id INTEGER PRIMARY KEY,
+    nome VARCHAR NOT NULL,
+    
+    -- Owner information (redundant from Proprietarios)
+    proprietario VARCHAR,
+    
+    -- Geographic information (redundant from multiple tables)
+    rio VARCHAR NOT NULL,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    municipio1 VARCHAR NOT NULL,
+    uf1 CHAR(2) NOT NULL,
+    municipio2 VARCHAR,  -- Nullable as in original
+    uf2 CHAR(2),        -- Nullable as in original
+    
+    -- Plant specifications and metrics
+    potkw FLOAT,        -- Power in kW
+    potfis FLOAT,       -- Physical power
+    estagio VARCHAR,    -- Operational stage
+    
+    -- Temporal information
+    iniciop DATE,       -- Initial operation date
+    atualizacao DATE,   -- Last update
+    
+    -- Derived/computed fields for analytical performance
+    capacidade_utilizacao_pct FLOAT  -- Computed field: (potkw/potfis)*100 if potfis > 0
+);
+```
+
+### Key Improvements Over the Provided Example:
+
+1. **Better naming consistency** with the original schema
+2. **Added missing `potfis` field** that was in the original but missing from example
+3. **Proper data types** matching the source schema
+4. **Added computed field** for analytical queries (`capacidade_utilizacao_pct`)
+5. **Clearer geographic fields** with explicit naming (`municipio1`, `uf1`, etc.)
+
+### Benefits of This Design:
+
+1. **Eliminates JOINs**: All information available in single table scan
+2. **Optimized for analytics**: Common filters (owner, region, river) are direct column access
+3. **Reduced I/O**: No need to access multiple tables for comprehensive reports
+4. **Simplified querying**: Business users can write simpler SQL queries
+5. **Better performance**: Ideal for OLAP workloads with large result sets
+
+### Implementation Considerations:
+
+1. **ETL Process**: Need to populate this table from the normalized source through JOINs
+2. **Data Freshness**: Schedule regular updates to keep denormalized table synchronized
+3. **Storage Overhead**: Acceptable trade-off for performance gains in analytical context
+4. **Maintenance**: Updates to source tables require corresponding updates to denormalized table
+
+This design effectively transforms a highly normalized relational model into an optimized star-schema-like structure suitable for read-heavy analytical workloads while maintaining data integrity and significantly improving query performance.

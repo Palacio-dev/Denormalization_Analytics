@@ -1,0 +1,157 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_11-17-25
+Model: ollama_api
+Prompt: intermediate
+Schema: harperdb
+==================================================
+
+# Database Denormalization for Read Performance Optimization
+
+## 1. Workload-Driven Analysis
+
+### High-Cost Operations & Join Paths:
+- **Primary bottleneck**: Every read query requires joining `users` → `user_entitlements` → `entitlements` (3-table join)
+- **Frequent filters** on `activeFlag`, `featureType`, `packageType`, and date ranges (`activeDate` to `inactiveDate`)
+- **Aggregate queries** likely need to count entitlement usage, requiring scans across multiple tables
+- **User-centric queries** dominate (e.g., "what entitlements does user X have?")
+
+### Denormalization Candidates:
+1. **user_entitlements + entitlements** - Eliminate the most frequent join path
+2. **Precomputed aggregates** for entitlement usage summaries
+3. **Date dimension integration** for faster temporal filtering
+
+## 2. Denormalization Design
+
+### Key Optimizations:
+1. **Wide "User Entitlement Summary" table** - Pre-joins user and entitlement data
+2. **Covering indexes** for common query patterns
+3. **Redundant attributes** for filtering without joins
+4. **Precomputed usage summary** table for aggregate queries
+
+## 3. New Physical Schema
+
+```sql
+-- Denormalized wide table combining users, entitlements, and join table
+CREATE TABLE user_entitlement_details (
+    user_id INT NOT NULL,
+    entitlement_id INT NOT NULL,
+    activeDate DATE NOT NULL,
+    inactiveDate DATE,
+    useLimit INT,
+    useCount INT,
+    featureType VARCHAR(4) NOT NULL,
+    packageType VARCHAR(4) NOT NULL,
+    activeFlag INT NOT NULL,
+    -- Denormalized user info (if needed for filtering)
+    user_status VARCHAR(20) DEFAULT 'active',
+    -- Metadata for maintenance
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    PRIMARY KEY (user_id, entitlement_id),
+    INDEX idx_user_active_features (user_id, activeFlag, featureType),
+    INDEX idx_user_active_package (user_id, activeFlag, packageType),
+    INDEX idx_feature_package_active (featureType, packageType, activeFlag, activeDate, inactiveDate),
+    INDEX idx_date_range_active (activeDate, inactiveDate, activeFlag),
+    INDEX idx_usage_limit_check (user_id, useCount, useLimit, activeFlag) -- For usage validation queries
+) ENGINE=InnoDB;
+
+-- Precomputed summary table for aggregate queries
+CREATE TABLE entitlement_usage_summary (
+    featureType VARCHAR(4) NOT NULL,
+    packageType VARCHAR(4) NOT NULL,
+    active_date DATE NOT NULL, -- For time-series aggregation
+    total_active_users INT NOT NULL DEFAULT 0,
+    total_usage_count BIGINT NOT NULL DEFAULT 0,
+    avg_use_count DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    max_use_limit INT NOT NULL DEFAULT 0,
+    summary_granularity ENUM('daily', 'weekly', 'monthly') NOT NULL,
+    
+    PRIMARY KEY (featureType, packageType, active_date, summary_granularity),
+    INDEX idx_feature_usage (featureType, total_active_users DESC),
+    INDEX idx_package_usage (packageType, total_usage_count DESC)
+) ENGINE=InnoDB;
+
+-- Covering index table for fast user entitlement lookups
+CREATE TABLE user_active_entitlements (
+    user_id INT NOT NULL,
+    entitlement_id INT NOT NULL,
+    featureType VARCHAR(4) NOT NULL,
+    packageType VARCHAR(4) NOT NULL,
+    useCount INT NOT NULL,
+    useLimit INT NOT NULL,
+    expires_soon_flag TINYINT(1) NOT NULL DEFAULT 0, -- Precomputed: within 30 days of inactiveDate
+    
+    PRIMARY KEY (user_id, entitlement_id),
+    INDEX idx_user_features_covering (user_id, featureType, packageType, useCount, useLimit),
+    INDEX idx_expiring_soon (expires_soon_flag, user_id),
+    INDEX idx_feature_usage_high (featureType, useCount DESC)
+) ENGINE=InnoDB;
+
+-- Materialized view equivalent for current active entitlements
+CREATE TABLE current_active_entitlements (
+    user_id INT NOT NULL,
+    entitlement_id INT NOT NULL,
+    featureType VARCHAR(4) NOT NULL,
+    packageType VARCHAR(4) NOT NULL,
+    active_days_remaining INT GENERATED ALWAYS AS (
+        DATEDIFF(inactiveDate, CURDATE())
+    ) STORED,
+    use_percentage DECIMAL(5,2) GENERATED ALWAYS AS (
+        CASE WHEN useLimit > 0 THEN (useCount * 100.0 / useLimit) ELSE 0 END
+    ) STORED,
+    
+    activeDate DATE NOT NULL,
+    inactiveDate DATE NOT NULL,
+    useLimit INT NOT NULL,
+    useCount INT NOT NULL,
+    
+    PRIMARY KEY (user_id, entitlement_id),
+    INDEX idx_active_expiring_soon (active_days_remaining ASC),
+    INDEX idx_heavy_users (use_percentage DESC),
+    INDEX idx_feature_active (featureType, user_id),
+    INDEX idx_package_active (packageType, user_id)
+) ENGINE=InnoDB
+PARTITION BY RANGE (YEAR(activeDate)) (
+    PARTITION p2023 VALUES LESS THAN (2024),
+    PARTITION p2024 VALUES LESS THAN (2025),
+    PARTITION p2025 VALUES LESS THAN (2026),
+    PARTITION p_future VALUES LESS THAN MAXVALUE
+);
+
+-- Optimized lookup table for feature/package combinations
+CREATE TABLE feature_package_catalog (
+    featureType VARCHAR(4) NOT NULL,
+    packageType VARCHAR(4) NOT NULL,
+    description VARCHAR(255),
+    is_premium TINYINT(1) DEFAULT 0,
+    default_use_limit INT DEFAULT 0,
+    
+    PRIMARY KEY (featureType, packageType),
+    INDEX idx_premium_features (is_premium, featureType)
+) ENGINE=InnoDB;
+
+-- Indexes for the original tables (if still needed for writes)
+-- These should be reviewed for removal in read-optimized environment
+CREATE INDEX idx_entitlements_active ON entitlements(activeFlag, activeDate, inactiveDate);
+CREATE INDEX idx_user_entitlements_user ON user_entitlements(user_id);
+CREATE INDEX idx_user_entitlements_ent ON user_entitlements(entitlement_id);
+```
+
+## Query Pattern Optimizations
+
+### Before vs After Examples:
+
+**Query 1**: "Get all active entitlements for user 123"
+- **Before**: 3-table join
+- **After**: `SELECT * FROM user_entitlement_details WHERE user_id = 123 AND activeFlag = 1`
+
+**Query 2**: "Count active users by feature type"
+- **Before**: Complex aggregation across multiple tables
+- **After**: `SELECT featureType, COUNT(*) FROM user_active_entitlements GROUP BY featureType`
+
+**Query 3**: "Find users with expiring entitlements"
+- **Before**: Date calculations in query
+- **After**: `SELECT user_id FROM current_active_entitlements WHERE active_days_remaining < 30`
+
+This schema reduces query complexity from 3-table joins to single table lookups while maintaining data correctness through careful denormalization design.

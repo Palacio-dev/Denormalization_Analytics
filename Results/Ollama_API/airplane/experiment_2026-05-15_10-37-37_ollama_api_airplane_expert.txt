@@ -1,0 +1,281 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_10-37-37
+Model: ollama_api
+Prompt: expert
+Schema: airplane
+==================================================
+
+# Executive Summary
+
+This document outlines a denormalized, read-optimized physical schema derived from the normalized schema provided for the `bookings` database. The goal is to significantly improve read performance by reducing query complexity through pre-joined tables and materialized rollups, while preserving data correctness and ensuring operational safety.
+
+We identify key access patterns such as frequent joins between flights, airports, aircrafts, tickets, and boarding passes, which are hotspots for performance degradation in normalized designs. To address this, we propose:
+- Wide read tables that pre-join dimensions like flights with airports and aircrafts.
+- Pre-aggregated rollups for booking summaries by time buckets.
+- Snapshot tables for current flight statuses.
+- Materialized views or equivalent engine features where appropriate.
+
+All denormalized artifacts are tied directly to specific query patterns or analytical workloads. Operational constraints are respected, including avoiding triggers and managing refresh windows. The implementation plan includes safe rollout steps, observability hooks, and rollback strategies.
+
+---
+
+# Access-Pattern Matrix
+
+| Query Type / Use Case | Tables Involved | Columns Accessed | Join Hotspots | Aggregation Hotspots |
+|-----------------------|------------------|-------------------|----------------|------------------------|
+| Flight details with origin/destination airport info | flights, airports_data | flight_no, scheduled_departure, departure_airport, arrival_airport, airport_name, city | flights ↔ airports_data | None |
+| Aircraft model and range used in flight | flights, aircrafts_data | flight_no, aircraft_code, model, range | flights ↔ aircrafts_data | None |
+| Passenger itinerary (ticket + flight + boarding pass) | tickets, ticket_flights, boarding_passes, flights | passenger_name, ticket_no, flight_id, boarding_no, seat_no | ticket_flights ↔ boarding_passes, flights ↔ ticket_flights | None |
+| Booking summary by date | bookings, tickets, ticket_flights | book_date, total_amount, amount | bookings ↔ tickets ↔ ticket_flights | SUM(amount), COUNT(tickets) |
+| Current flight status overview | flights | flight_id, status, actual_departure, actual_arrival | N/A | COUNT(status) |
+| Seat availability per flight | seats, ticket_flights | aircraft_code, seat_no, fare_conditions | seats ↔ ticket_flights | COUNT(seats), COUNT(booked) |
+| Revenue per day | bookings, tickets, ticket_flights | book_date, amount | bookings ↔ tickets ↔ ticket_flights | SUM(amount) |
+
+---
+
+# Proposed Denormalized Schema (DDL)
+
+### 1. Wide Read Table: `flight_details`
+
+**Purpose**: Pre-joined view of flights with departure/arrival airports and aircraft info for fast lookups.
+
+```sql
+CREATE TABLE IF NOT EXISTS bookings.flight_details (
+    flight_id integer NOT NULL PRIMARY KEY,
+    flight_no character(6) NOT NULL,
+    scheduled_departure timestamptz NOT NULL,
+    scheduled_arrival timestamptz NOT NULL,
+    actual_departure timestamptz,
+    actual_arrival timestamptz,
+    status varchar(20) NOT NULL,
+
+    departure_airport_code char(3) NOT NULL,
+    departure_airport_name jsonb NOT NULL,
+    departure_city jsonb NOT NULL,
+
+    arrival_airport_code char(3) NOT NULL,
+    arrival_airport_name jsonb NOT NULL,
+    arrival_city jsonb NOT NULL,
+
+    aircraft_code char(3) NOT NULL,
+    aircraft_model jsonb NOT NULL,
+    aircraft_range integer NOT NULL,
+
+    INDEX idx_flight_details_scheduled_departure (scheduled_departure),
+    INDEX idx_flight_details_departure_airport (departure_airport_code),
+    INDEX idx_flight_details_arrival_airport (arrival_airport_code),
+    INDEX idx_flight_details_status (status)
+);
+```
+
+**Justification**: This table avoids multiple joins on `flights`, `airports_data`, and `aircrafts_data`. It's optimized for queries about flight schedules and related metadata.
+
+---
+
+### 2. Pre-Aggregated Rollup: `daily_booking_summary`
+
+**Purpose**: Daily aggregation of booking revenue and ticket counts to speed up reporting dashboards.
+
+```sql
+CREATE TABLE IF NOT EXISTS bookings.daily_booking_summary (
+    summary_date date NOT NULL PRIMARY KEY,
+    total_revenue numeric(12,2) NOT NULL DEFAULT 0,
+    total_tickets integer NOT NULL DEFAULT 0,
+    updated_at timestamptz NOT NULL DEFAULT NOW()
+);
+
+-- Indexing strategy
+CREATE INDEX idx_daily_booking_summary_date ON bookings.daily_booking_summary(summary_date);
+```
+
+**Justification**: Supports high-frequency analytical queries needing daily booking metrics without scanning millions of rows in `bookings`, `tickets`, and `ticket_flights`.
+
+---
+
+### 3. Snapshot Table: `current_flight_statuses`
+
+**Purpose**: Stores only the latest known status of each flight for quick lookup.
+
+```sql
+CREATE TABLE IF NOT EXISTS bookings.current_flight_statuses (
+    flight_id integer NOT NULL PRIMARY KEY,
+    flight_no character(6) NOT NULL,
+    status varchar(20) NOT NULL,
+    last_updated timestamptz NOT NULL DEFAULT NOW(),
+    INDEX idx_current_flight_status_status (status)
+);
+```
+
+**Justification**: Enables fast retrieval of current flight states without scanning the entire history in `flights`.
+
+---
+
+### 4. Wide Read Table: `passenger_itineraries`
+
+**Purpose**: Denormalized itinerary view combining ticket, flight, and boarding pass information.
+
+```sql
+CREATE TABLE IF NOT EXISTS bookings.passenger_itineraries (
+    ticket_no char(13) NOT NULL,
+    flight_id integer NOT NULL,
+    passenger_name text NOT NULL,
+    flight_no char(6) NOT NULL,
+    scheduled_departure timestamptz NOT NULL,
+    scheduled_arrival timestamptz NOT NULL,
+    departure_airport char(3) NOT NULL,
+    arrival_airport char(3) NOT NULL,
+    boarding_no integer,
+    seat_no varchar(4),
+    fare_conditions varchar(10),
+    amount numeric(10,2),
+
+    PRIMARY KEY (ticket_no, flight_id),
+    INDEX idx_passenger_itineraries_flight_id (flight_id),
+    INDEX idx_passenger_itineraries_passenger_name (passenger_name),
+    INDEX idx_passenger_itineraries_departure_date (scheduled_departure)
+);
+```
+
+**Justification**: Eliminates costly joins between `tickets`, `ticket_flights`, `boarding_passes`, and `flights` for passenger itinerary lookups.
+
+---
+
+### 5. Materialized View (Optional Engine Equivalent): `seat_availability_per_flight`
+
+**Purpose**: Real-time or near real-time view of seat availability per flight.
+
+> Note: If using PostgreSQL, consider using a **materialized view** with periodic refresh. Alternatively, implement as a regular table refreshed via batch job.
+
+```sql
+-- For PostgreSQL materialized view:
+CREATE MATERIALIZED VIEW bookings.seat_availability_per_flight AS
+SELECT
+    tf.flight_id,
+    COUNT(s.seat_no) AS total_seats,
+    COUNT(tf.ticket_no) AS booked_seats,
+    (COUNT(s.seat_no) - COUNT(tf.ticket_no)) AS available_seats
+FROM bookings.seats s
+LEFT JOIN bookings.ticket_flights tf ON s.aircraft_code = (
+    SELECT aircraft_code FROM bookings.flights f WHERE f.flight_id = tf.flight_id LIMIT 1
+)
+GROUP BY tf.flight_id;
+
+CREATE UNIQUE INDEX idx_seat_availability_flight_id ON bookings.seat_availability_per_flight(flight_id);
+```
+
+**Justification**: Reduces complexity of computing seat availability at query time by caching it periodically.
+
+---
+
+# Physical Design Details
+
+## Primary Keys & Indexes
+
+| Table | PK Strategy | Key Indexes |
+|-------|-------------|-------------|
+| `flight_details` | flight_id | idx_flight_details_scheduled_departure, idx_flight_details_departure_airport |
+| `daily_booking_summary` | summary_date | idx_daily_booking_summary_date |
+| `current_flight_statuses` | flight_id | idx_current_flight_status_status |
+| `passenger_itineraries` | ticket_no, flight_id | idx_passenger_itineraries_flight_id, idx_passenger_itineraries_passenger_name |
+
+## Partitioning
+
+None applied initially due to moderate dataset size and limited partition pruning benefit. Can be revisited if data volume exceeds ~100M rows per year.
+
+## Storage Parameters
+
+Use compression if supported by engine (e.g., `pg_prewarm`, `TOAST` settings in PostgreSQL).
+
+---
+
+# Consistency Architecture
+
+## Data Lineage
+
+| Denormalized Table | Source Tables | Lineage |
+|--------------------|---------------|---------|
+| `flight_details` | flights, airports_data, aircrafts_data | flight_id → [departure_airport_code → airport_name/city], [arrival_airport_code → airport_name/city], [aircraft_code → model/range] |
+| `daily_booking_summary` | bookings, tickets, ticket_flights | book_date → SUM(ticket_flights.amount) |
+| `current_flight_statuses` | flights | flight_id → latest status |
+| `passenger_itineraries` | tickets, ticket_flights, boarding_passes, flights | ticket_no + flight_id → passenger_name, flight_no, boarding_no, seat_no |
+| `seat_availability_per_flight` | seats, ticket_flights, flights | aircraft_code → total_seats, flight_id → booked_seats |
+
+---
+
+# Risk Analysis
+
+## Write Amplification
+
+- Denormalized tables increase write operations during ETL/batch updates.
+- Mitigation: Batch refreshes outside peak hours.
+
+## Lock Contention
+
+- Refresh jobs may lock tables during updates.
+- Mitigation: Use staging tables + atomic swap (`RENAME`) or logical replication slots.
+
+## Failure Modes
+
+- Inconsistent state if refresh fails mid-process.
+- Mitigation: Transactional refreshes, idempotent jobs, alerting on staleness.
+
+## Backfill Runtime
+
+- Initial backfill may take hours depending on data volume.
+- Mitigation: Parallelize across partitions or use CDC tools.
+
+## Storage Growth
+
+- Denormalization increases storage footprint (~2x–5x).
+- Mitigation: Monitor growth, archive old snapshots.
+
+## Monitoring & Alerting
+
+| Metric | Alert Threshold | Tool |
+|--------|------------------|------|
+| Lag in refresh | >1 hour | Prometheus / Grafana |
+| Freshness of summary tables | >2 hours stale | Datadog |
+| Query latency regression | +50% vs baseline | APM (e.g., New Relic) |
+| Reconciliation diff | >0.1% mismatch | Custom reconciliation scripts |
+
+---
+
+# Implementation Plan
+
+### Phase 1: Setup Infrastructure
+
+- Create new schema objects.
+- Set up ETL pipelines or scheduled jobs for refreshing data.
+- Add monitoring for freshness and consistency.
+
+### Phase 2: Deploy Staging
+
+- Load initial data into staging tables.
+- Validate data quality and accuracy.
+- Test queries against new schema.
+
+### Phase 3: Go Live
+
+- Atomically replace or switch over to new schema.
+- Monitor for performance regressions.
+- Enable alerting.
+
+### Phase 4: Rollback Strategy
+
+- Maintain access to original normalized schema.
+- Revert to original queries and disable denormalized tables.
+- Preserve ETL jobs for potential re-deployment.
+
+---
+
+# Assumptions
+
+- No triggers allowed (as per hard requirement).
+- Batch windows available nightly (at least 2–4 hours).
+- CDC is not available; fallback to batch ETL.
+- Data volumes moderate (< 100 GB total).
+- Engine supports JSONB and materialized views (PostgreSQL assumed).
+
+--- 
+
+Let me know if you'd like the ETL logic or query rewrite examples based on these tables.

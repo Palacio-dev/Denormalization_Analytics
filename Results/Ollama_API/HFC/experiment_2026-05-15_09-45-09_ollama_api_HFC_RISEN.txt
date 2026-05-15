@@ -1,0 +1,115 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_09-45-09
+Model: ollama_api
+Prompt: RISEN
+Schema: HFC
+==================================================
+
+BEGIN;
+
+-- Denormalized schema for tombos (specimens) analytical queries
+CREATE TABLE IF NOT EXISTS tombos_analitico (
+    -- Core tombos fields
+    hcf BIGSERIAL NOT NULL,
+    data_tombo TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    data_coleta_dia BIGINT,
+    data_coleta_mes BIGINT,
+    data_coleta_ano BIGINT,
+    observacao TEXT,
+    nomes_populares TEXT,
+    numero_coleta BIGINT,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    altitude DOUBLE PRECISION,
+    descricao TEXT,
+    situacao tombos_situacao DEFAULT 'REGULAR'::tombos_situacao,
+    ativo BOOLEAN DEFAULT true,
+    taxon CHARACTER VARYING(45) DEFAULT NULL::CHARACTER VARYING,
+    rascunho BOOLEAN DEFAULT false,
+    unicata BOOLEAN,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    -- Taxonomic hierarchy denormalized
+    especie_id BIGINT,
+    especie_nome CHARACTER VARYING(200),
+    genero_id BIGINT,
+    genero_nome CHARACTER VARYING(200),
+    familia_id BIGINT,
+    familia_nome CHARACTER VARYING(200),
+    sub_familia_id BIGINT,
+    sub_familia_nome CHARACTER VARYING(300),
+    sub_especie_id BIGINT,
+    sub_especie_nome CHARACTER VARYING(255),
+    variedade_id BIGINT,
+    variedade_nome CHARACTER VARYING(200),
+    nome_cientifico TEXT,
+
+    -- Taxonomic authors denormalized
+    especie_autor_nome CHARACTER VARYING(200),
+    sub_especie_autor_nome CHARACTER VARYING(200),
+    variedade_autor_nome CHARACTER VARYING(200),
+    sub_familia_autor_nome CHARACTER VARYING(200),
+
+    -- Collector information denormalized
+    coletor_id BIGINT,
+    coletor_nome CHARACTER VARYING(255),
+    coletor_complementar CHARACTER VARYING(1000),
+
+    -- Location information denormalized
+    local_coleta_id BIGINT,
+    local_coleta_descricao TEXT,
+    cidade_id BIGINT,
+    cidade_nome CHARACTER VARYING(255),
+    estado_id BIGINT,
+    estado_nome CHARACTER VARYING(255),
+    estado_sigla CHARACTER(4),
+    pais_id INTEGER,
+    pais_nome CHARACTER VARYING(255),
+    pais_sigla CHARACTER(4),
+    fase_sucessional_id BIGINT,
+    fase_sucessional_nome CHARACTER VARYING(200),
+    solo_id BIGINT,
+    solo_nome CHARACTER VARYING(300),
+    relevo_id BIGINT,
+    relevo_nome CHARACTER VARYING(300),
+    vegetacao_id BIGINT,
+    vegetacao_nome CHARACTER VARYING(300),
+
+    -- Type and collection information denormalized
+    tipo_id BIGINT,
+    tipo_nome CHARACTER VARYING(250),
+    colecao_anexa_id BIGINT,
+    colecao_anexa_tipo colecoes_anexas_tipo,
+
+    -- Identification information denormalized
+    data_identificacao_dia SMALLINT,
+    data_identificacao_mes SMALLINT,
+    data_identificacao_ano INTEGER,
+    identificadores_nomes TEXT, -- Comma-separated list of identifiers
+
+    -- Entity/Herbarium information denormalized
+    entidade_id BIGINT,
+    entidade_nome CHARACTER VARYING(200),
+    entidade_sigla CHARACTER VARYING(80),
+
+    -- Photo information denormalized
+    fotos_count BIGINT DEFAULT 0,
+    fotos_em_vivo_count BIGINT DEFAULT 0,
+
+    -- Alterations and history denormalized
+    alteracoes_count BIGINT DEFAULT 0,
+    ultima_alteracao_data TIMESTAMP WITH TIME ZONE,
+    ultima_alteracao_usuario_nome CHARACTER VARYING(200),
+
+    CONSTRAINT tombos_analitico_pkey PRIMARY KEY (hcf)
+);
+
+-- Indexes for common analytical queries
+CREATE INDEX IF NOT EXISTS idx_tombos_analitico_taxonomia ON tombos_analitico(familia_nome, genero_nome, especie_nome);
+CREATE INDEX IF NOT EXISTS idx_tombos_analitico_localizacao ON tombos_analitico(pais_nome, estado_nome, cidade_nome);
+CREATE INDEX IF NOT EXISTS idx_tombos_analitico_coletor ON tombos_analitico(coletor_nome);
+CREATE INDEX IF NOT EXISTS idx_tombos_analitico_data_coleta ON tombos_analitico(data_coleta_ano, data_coleta_mes, data_coleta_dia);
+CREATE INDEX IF NOT EXISTS idx_tombos_analitico_ativo ON tombos_analitico(ativo);
+
+END;

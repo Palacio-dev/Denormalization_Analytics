@@ -1,0 +1,119 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_09-51-04
+Model: ollama_api
+Prompt: RISEN
+Schema: TPC_DS
+==================================================
+
+```sql
+-- Denormalized schema for improved read performance
+-- Combines order and lineitem information into single tables per order type
+-- Adds derived attributes for common aggregations
+-- Preserves all necessary information while reducing join complexity
+
+CREATE TABLE d_store_sales (
+    -- Purchase header information
+    purchase_id INTEGER NOT NULL,
+    store_id CHAR(16),
+    customer_id CHAR(16),
+    purchase_date CHAR(10),
+    purchase_time INTEGER,
+    register_id INTEGER,
+    clerk_id INTEGER,
+    purchase_comment CHAR(100),
+    
+    -- Line item information (repeating for each item in purchase)
+    line_number INTEGER NOT NULL,
+    item_id CHAR(16),
+    promotion_id CHAR(16),
+    quantity INTEGER,
+    sale_price NUMERIC(7,2),
+    coupon_amt NUMERIC(7,2),
+    line_comment VARCHAR(100),
+    
+    -- Derived attributes for returns
+    return_date CHAR(10),
+    return_time CHAR(10),
+    return_qty INTEGER,
+    return_amt NUMERIC(7,2),
+    return_tax NUMERIC(7,2),
+    return_fee NUMERIC(7,2),
+    return_ship_cost NUMERIC(7,2),
+    refunded_cash NUMERIC(7,2),
+    reversed_charge NUMERIC(7,2),
+    store_credit NUMERIC(7,2),
+    reason_id CHAR(16)
+);
+
+CREATE TABLE d_catalog_sales (
+    -- Order header information
+    order_id INTEGER NOT NULL,
+    bill_customer_id CHAR(16),
+    ship_customer_id CHAR(16),
+    order_date CHAR(10),
+    order_time INTEGER,
+    ship_mode_id CHAR(16),
+    call_center_id CHAR(16),
+    order_comments VARCHAR(100),
+    
+    -- Line item information
+    line_number INTEGER NOT NULL,
+    item_id CHAR(16),
+    promotion_id CHAR(16),
+    quantity INTEGER,
+    sales_price NUMERIC(7,2),
+    coupon_amt NUMERIC(7,2),
+    warehouse_id CHAR(16),
+    ship_date CHAR(10),
+    catalog_number INTEGER,
+    catalog_page_number INTEGER,
+    ship_cost NUMERIC(7,2),
+    
+    -- Derived attributes for returns
+    return_date CHAR(10),
+    return_time CHAR(10),
+    return_qty INTEGER,
+    return_amt NUMERIC(7,2),
+    return_tax NUMERIC(7,2),
+    return_fee NUMERIC(7,2),
+    return_ship_cost NUMERIC(7,2),
+    refunded_cash NUMERIC(7,2),
+    reversed_charge NUMERIC(7,2),
+    merchant_credit NUMERIC(7,2),
+    reason_id CHAR(16),
+    shipmode_id CHAR(16),
+    catalog_page_id CHAR(16),
+    return_warehouse_id CHAR(16)
+);
+
+CREATE TABLE d_web_sales (
+    -- Order header information
+    order_id INTEGER NOT NULL,
+    bill_customer_id CHAR(16),
+    ship_customer_id CHAR(16),
+    order_date CHAR(10),
+    order_time INTEGER,
+    ship_mode_id CHAR(16),
+    web_site_id CHAR(16),
+    order_comments CHAR(100),
+    
+    -- Line item information
+    line_number INTEGER NOT NULL,
+    item_id CHAR(16),
+    promotion_id CHAR(16),
+    quantity INTEGER,
+    sales_price NUMERIC(7,2),
+    coupon_amt NUMERIC(7,2),
+    warehouse_id CHAR(16),
+    ship_date CHAR(10),
+    ship_cost NUMERIC(7,2),
+    web_page_id CHAR(16)
+);
+
+CREATE TABLE d_inventory (
+    warehouse_id CHAR(16) NOT NULL,
+    item_id CHAR(16) NOT NULL,
+    date CHAR(10) NOT NULL,
+    qty_on_hand INTEGER
+);
+```

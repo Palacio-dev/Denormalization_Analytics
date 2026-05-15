@@ -1,0 +1,178 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_10-11-42
+Model: ollama_api
+Prompt: RACE
+Schema: ex04
+==================================================
+
+<ROLE>
+You are a Senior Data Engineer with 15 years of experience, specialized in relational and non-relational databases, SQL, and analytical database performance.
+</ROLE>
+
+<ACTION>
+Based on the analysis of the normalized model and the workload context, here is my approach to denormalization:
+
+**Step 1: Analysis of the Normalized Model**
+The schema contains 11 tables with multiple one-to-many relationships. Key relationships include:
+- Country → Region (via region_code)
+- Country → Survey (via country_code)
+- Country → Demography, Employment, Education, Economy, Health (via country_code)
+- Demography → Population, Life_Expectancy (via id_demography)
+- Survey → Decile (via id_survey)
+
+**Step 2: Frequent Queries / Workload Context Analysis**
+For analytical workloads, common query patterns likely include:
+- Country-level indicators across multiple years
+- Poverty and welfare analysis by region/country
+- Cross-domain analysis (economy + health + education)
+- Time-series analysis for countries/regions
+- JOIN bottlenecks: Country-Region-Survey-Decile chain, and Country-Demography-Population-Life_Expectancy chain
+
+**Step 3: Evaluation of Denormalization Techniques**
+All four techniques are applicable:
+1. Adding Redundant Attributes: For frequently joined lookup values (region_name, country_name)
+2. Adding Derived Attributes: For pre-computed aggregations (avg_gdp, total_population, etc.)
+3. Collapsing Relations: Merging related tables to reduce joins
+4. Vertical Partitioning: Separating frequently accessed attributes
+
+**Step 4: Design of Multiple Denormalized Schemas**
+
+**Schema Option A: Single Wide Table**
+Consolidate everything into one table with all attributes. Pros: No joins. Cons: Very wide, sparse data.
+
+**Schema Option B: Two Main Tables (Current Approach)**
+- country_indicators: Country-level consolidated data
+- poverty_surveys: Survey-specific data with deciles
+Pros: Balanced approach, separates static from dynamic data. Cons: Some redundancy.
+
+**Schema Option C: Three Domain Tables**
+- country_master: Country + Region info
+- country_indicators: Time-series indicators (year-based)
+- survey_analytics: Poverty surveys with deciles
+Pros: Better organization, less redundancy. Cons: Requires some joins.
+
+**Step 5: Evaluation and Selection**
+Option B is most consistent with the workload. It reduces JOIN complexity significantly while maintaining data organization. The separation makes sense logically (static country info vs. survey data).
+
+**Step 6: Final Denormalized Schema Design**
+
+```sql
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS public.country_profile (
+    country_code VARCHAR(10) NOT NULL,
+    country_name VARCHAR(255),
+    region_code VARCHAR(10),
+    region_name VARCHAR(255),
+    PRIMARY KEY (country_code)
+);
+
+CREATE TABLE IF NOT EXISTS public.country_indicators (
+    country_code VARCHAR(10) NOT NULL,
+    year INTEGER NOT NULL,
+    
+    -- Demographics
+    pop_density DOUBLE PRECISION,
+    net_migration DOUBLE PRECISION,
+    birth_rate DOUBLE PRECISION,
+    death_rate DOUBLE PRECISION,
+    rural_pop DOUBLE PRECISION,
+    urban_pop DOUBLE PRECISION,
+    
+    -- Economy
+    gdp DOUBLE PRECISION,
+    inflation DOUBLE PRECISION,
+    tax_revenue DOUBLE PRECISION,
+    
+    -- Education
+    preprim_enrol DOUBLE PRECISION,
+    prim_enrol DOUBLE PRECISION,
+    child_out_of_school DOUBLE PRECISION,
+    sec_enrol DOUBLE PRECISION,
+    progression_to_sec DOUBLE PRECISION,
+    terti_enrol DOUBLE PRECISION,
+    expenditure_edu DOUBLE PRECISION,
+    
+    -- Employment
+    employers DOUBLE PRECISION,
+    vulnerable_emp DOUBLE PRECISION,
+    child_emp DOUBLE PRECISION,
+    part_time DOUBLE PRECISION,
+    labor_force_fem DOUBLE PRECISION,
+    labor_force_total DOUBLE PRECISION,
+    unemp DOUBLE PRECISION,
+    
+    -- Health
+    hospital_beds DOUBLE PRECISION,
+    physicians DOUBLE PRECISION,
+    expenditure_health DOUBLE PRECISION,
+    
+    -- Derived Population Metrics (Collapsed from population table)
+    pop_0_14_female DOUBLE PRECISION,
+    pop_0_14_male DOUBLE PRECISION,
+    pop_15_64_female DOUBLE PRECISION,
+    pop_15_64_male DOUBLE PRECISION,
+    pop_65_plus_female DOUBLE PRECISION,
+    pop_65_plus_male DOUBLE PRECISION,
+    
+    -- Life Expectancy
+    life_expectancy_female DOUBLE PRECISION,
+    life_expectancy_male DOUBLE PRECISION,
+    
+    PRIMARY KEY (country_code, year)
+);
+
+CREATE TABLE IF NOT EXISTS public.poverty_surveys (
+    id_survey INTEGER NOT NULL,
+    country_code VARCHAR(10) NOT NULL,
+    survey_year INTEGER NOT NULL,
+    country_name VARCHAR(255),
+    region_code VARCHAR(10),
+    region_name VARCHAR(255),
+    welfare_type VARCHAR(100),
+    survey_acronym VARCHAR(50),
+    survey_comparability INTEGER,
+    comparable_spell VARCHAR(100),
+    poverty_line DOUBLE PRECISION,
+    headcount DOUBLE PRECISION,
+    poverty_gap DOUBLE PRECISION,
+    poverty_severity DOUBLE PRECISION,
+    gini DOUBLE PRECISION,
+    reporting_pop INTEGER,
+    distribution_type VARCHAR(100),
+    reporting_pce DOUBLE PRECISION,
+    spl DOUBLE PRECISION,
+    survey_coverage VARCHAR(100),
+    reporting_level VARCHAR(100),
+    
+    -- Deciles (Collapsed from decile table)
+    decile1 DOUBLE PRECISION,
+    decile2 DOUBLE PRECISION,
+    decile3 DOUBLE PRECISION,
+    decile4 DOUBLE PRECISION,
+    decile5 DOUBLE PRECISION,
+    decile6 DOUBLE PRECISION,
+    decile7 DOUBLE PRECISION,
+    decile8 DOUBLE PRECISION,
+    decile9 DOUBLE PRECISION,
+    decile10 DOUBLE PRECISION,
+    
+    PRIMARY KEY (id_survey)
+);
+
+-- Indexes for performance
+CREATE INDEX idx_country_indicators_country_year ON public.country_indicators(country_code, year);
+CREATE INDEX idx_poverty_surveys_country_year ON public.poverty_surveys(country_code, survey_year);
+CREATE INDEX idx_poverty_surveys_region ON public.poverty_surveys(region_code);
+
+END;
+```
+
+**Techniques Applied:**
+1. **Adding Redundant Attributes**: region_name, country_name in poverty_surveys
+2. **Adding Derived Attributes**: Pre-calculated population segments
+3. **Collapsing Relations**: Merged decile data into poverty_surveys, population data into country_indicators
+4. **Vertical Partitioning**: Separated static country info from time-series data
+
+This design reduces query complexity from 7-8 table joins to at most 2 table accesses, significantly improving analytical query performance.
+</ACTION>

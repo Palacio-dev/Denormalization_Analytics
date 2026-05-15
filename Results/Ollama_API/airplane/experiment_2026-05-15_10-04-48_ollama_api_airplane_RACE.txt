@@ -1,0 +1,204 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_10-04-48
+Model: ollama_api
+Prompt: RACE
+Schema: airplane
+==================================================
+
+# Denormalized Physical Schema for Booking System
+
+## 1. Schema Analysis
+
+The provided schema represents a booking system with the following key tables:
+- **bookings**: Main booking information
+- **tickets**: Individual tickets linked to bookings
+- **ticket_flights**: Flight segments for tickets
+- **flights**: Flight details with aircraft and airport references
+- **boarding_passes**: Boarding pass information
+- **aircrafts_data**: Aircraft specifications
+- **airports_data**: Airport information
+- **seats**: Seat configuration per aircraft
+
+The schema has multiple levels of relationships:
+- Bookings → Tickets → Ticket_Flights → Flights → Aircrafts/Airports
+- Ticket_Flights → Boarding_Passes
+
+## 2. Frequent Query Analysis
+
+Based on the schema, likely heavy read queries include:
+1. **Booking details with passenger information**: JOIN bookings → tickets
+2. **Flight details with aircraft and airport information**: JOIN flights → aircrafts_data, airports_data
+3. **Ticket information with flight details**: JOIN tickets → ticket_flights → flights
+4. **Boarding pass information**: JOIN boarding_passes → ticket_flights
+5. **Revenue analysis by route/aircraft/date**: Aggregations on flights, ticket_flights
+6. **Seat occupancy reports**: JOIN seats, ticket_flights, flights
+
+## 3. Applicable Denormalization Techniques
+
+For this schema, the most beneficial techniques are:
+- **Adding Redundant Attributes**: To avoid expensive JOINs between frequently accessed tables
+- **Adding Derived Attributes**: For pre-calculated aggregations like revenue, occupancy rates
+- **Collapsing Relations**: To combine related entities that are frequently accessed together
+
+## 4. Proposed Denormalized Schemas
+
+### Option 1: Flight-Centric Denormalization
+Merge flights with aircraft and airport information to create a comprehensive flight view.
+
+### Option 2: Ticket Journey Denormalization
+Create a complete ticket-to-flight journey record with all relevant information.
+
+### Option 3: Booking-to-Boarding Denormalization
+End-to-end denormalization from booking through boarding.
+
+## 5. Evaluation and Selection
+
+The most consistent approach is **Option 2: Ticket Journey Denormalization** because:
+- It covers the complete analytical journey from booking to boarding
+- Eliminates multiple JOIN operations in common queries
+- Preserves transactional integrity while optimizing for read-heavy workloads
+- Supports both operational and analytical queries effectively
+
+## 6. Final Denormalized Schema
+
+```sql
+-- Denormalized schema for read-heavy analytical workloads
+BEGIN;
+
+-- Main denormalized table containing complete journey information
+CREATE TABLE bookings.ticket_journey_analytics (
+    -- Booking information
+    book_ref character(6) NOT NULL,
+    book_date timestamp with time zone NOT NULL,
+    total_amount numeric(10, 2) NOT NULL,
+    
+    -- Ticket information
+    ticket_no character(13) NOT NULL,
+    passenger_id character varying(20) NOT NULL,
+    passenger_name text NOT NULL,
+    contact_data jsonb,
+    
+    -- Flight segment information
+    flight_id integer NOT NULL,
+    flight_no character(6) NOT NULL,
+    scheduled_departure timestamp with time zone NOT NULL,
+    scheduled_arrival timestamp with time zone NOT NULL,
+    actual_departure timestamp with time zone,
+    actual_arrival timestamp with time zone,
+    status character varying(20) NOT NULL,
+    
+    -- Departure airport information (redundant)
+    departure_airport_code character(3) NOT NULL,
+    departure_airport_name jsonb NOT NULL,
+    departure_city jsonb NOT NULL,
+    departure_timezone text NOT NULL,
+    
+    -- Arrival airport information (redundant)
+    arrival_airport_code character(3) NOT NULL,
+    arrival_airport_name jsonb NOT NULL,
+    arrival_city jsonb NOT NULL,
+    arrival_timezone text NOT NULL,
+    
+    -- Aircraft information (redundant)
+    aircraft_code character(3) NOT NULL,
+    aircraft_model jsonb NOT NULL,
+    aircraft_range integer NOT NULL,
+    
+    -- Ticket flight information
+    fare_conditions character varying(10) NOT NULL,
+    amount numeric(10, 2) NOT NULL,
+    
+    -- Boarding pass information
+    boarding_no integer,
+    seat_no character varying(4),
+    
+    -- Derived analytics attributes
+    flight_duration interval GENERATED ALWAYS AS (
+        CASE 
+            WHEN actual_arrival IS NOT NULL AND actual_departure IS NOT NULL 
+            THEN actual_arrival - actual_departure
+            ELSE scheduled_arrival - scheduled_departure
+        END
+    ) STORED,
+    
+    is_delayed boolean GENERATED ALWAYS AS (
+        CASE 
+            WHEN actual_departure IS NOT NULL AND actual_departure > scheduled_departure 
+            THEN true 
+            ELSE false 
+        END
+    ) STORED,
+    
+    -- Composite primary key
+    PRIMARY KEY (ticket_no, flight_id)
+);
+
+-- Indexes for optimized analytical queries
+CREATE INDEX idx_tja_book_date ON bookings.ticket_journey_analytics (book_date);
+CREATE INDEX idx_tja_flight_date ON bookings.ticket_journey_analytics (scheduled_departure);
+CREATE INDEX idx_tja_departure_airport ON bookings.ticket_journey_analytics (departure_airport_code);
+CREATE INDEX idx_tja_arrival_airport ON bookings.ticket_journey_analytics (arrival_airport_code);
+CREATE INDEX idx_tja_aircraft ON bookings.ticket_journey_analytics (aircraft_code);
+CREATE INDEX idx_tja_passenger ON bookings.ticket_journey_analytics (passenger_id);
+CREATE INDEX idx_tja_status ON bookings.ticket_journey_analytics (status);
+
+-- Summary table for pre-aggregated analytics
+CREATE TABLE bookings.flight_analytics_summary (
+    flight_id integer PRIMARY KEY,
+    flight_no character(6) NOT NULL,
+    departure_airport_code character(3) NOT NULL,
+    arrival_airport_code character(3) NOT NULL,
+    aircraft_code character(3) NOT NULL,
+    scheduled_departure_date date NOT NULL,
+    total_revenue numeric(12, 2) DEFAULT 0,
+    total_passengers integer DEFAULT 0,
+    occupancy_rate numeric(5, 2) DEFAULT 0,
+    avg_ticket_price numeric(10, 2) DEFAULT 0,
+    on_time_performance numeric(5, 2) DEFAULT 0,
+    last_updated timestamp with time zone DEFAULT now()
+);
+
+-- Indexes for summary table
+CREATE INDEX idx_fas_departure_date ON bookings.flight_analytics_summary (scheduled_departure_date);
+CREATE INDEX idx_fas_route ON bookings.flight_analytics_summary (departure_airport_code, arrival_airport_code);
+CREATE INDEX idx_fas_aircraft ON bookings.flight_analytics_summary (aircraft_code);
+
+-- Materialized view for monthly booking trends
+CREATE MATERIALIZED VIEW bookings.monthly_booking_trends AS
+SELECT 
+    date_trunc('month', book_date) as booking_month,
+    departure_airport_code,
+    arrival_airport_code,
+    count(*) as total_bookings,
+    sum(total_amount) as total_revenue,
+    avg(total_amount) as avg_booking_value
+FROM bookings.ticket_journey_analytics
+GROUP BY date_trunc('month', book_date), departure_airport_code, arrival_airport_code;
+
+CREATE INDEX idx_mbt_month ON bookings.monthly_booking_trends (booking_month);
+
+COMMENT ON TABLE bookings.ticket_journey_analytics IS 'Denormalized table for analytical queries containing complete booking-to-boarding journey information';
+COMMENT ON TABLE bookings.flight_analytics_summary IS 'Pre-aggregated flight performance metrics for quick analytical access';
+COMMENT ON MATERIALIZED VIEW bookings.monthly_booking_trends IS 'Monthly booking trends by route for business intelligence';
+
+END;
+```
+
+## Benefits of This Denormalized Schema
+
+1. **Eliminates Complex JOINs**: All relevant information is in a single table for most analytical queries
+2. **Improved Query Performance**: Significantly faster response times for common reporting queries
+3. **Pre-calculated Metrics**: Derived attributes reduce computation during query execution
+4. **Flexible Indexing**: Multiple indexes support various analytical access patterns
+5. **Summary Tables**: Pre-aggregated data for high-level reporting
+6. **Materialized Views**: For complex aggregations that don't need real-time updates
+
+## Implementation Considerations
+
+1. **ETL Process**: Need to populate this denormalized table from the normalized source
+2. **Data Synchronization**: Mechanisms to keep denormalized data consistent with source
+3. **Storage Overhead**: Increased storage requirements due to redundancy
+4. **Update Complexity**: More complex update operations when source data changes
+5. **Partitioning Strategy**: Consider partitioning by date for large datasets
+
+This denormalized schema provides optimal performance for read-heavy analytical workloads while maintaining data integrity and supporting complex business intelligence queries.

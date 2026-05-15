@@ -1,0 +1,293 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_10-39-40
+Model: ollama_api
+Prompt: intermediate
+Schema: airplane
+==================================================
+
+# Denormalized Schema for Read-Optimized Workloads
+
+## 1. Workload-Driven Analysis
+
+### Common Query Patterns:
+1. **Flight details with airport information** - Requires joining flights with airports twice
+2. **Booking details with passenger information** - Requires joining bookings, tickets, and ticket_flights
+3. **Boarding pass information with seat details** - Requires joining boarding_passes with seats
+4. **Aircraft utilization reports** - Requires joining flights with aircrafts_data
+5. **Revenue reports by route** - Requires aggregating ticket_flights with flight information
+
+### High-Cost Operations:
+- Multiple joins to get complete flight information (flights → airports_data x2)
+- Joining bookings → tickets → ticket_flights for booking details
+- Joining boarding_passes → seats for seat information
+- Complex aggregations for reporting queries
+
+### Denormalization Candidates:
+1. Pre-joined "wide" tables for flights with airport details
+2. Booking summary table with passenger and flight information
+3. Flight-seat mapping table for boarding pass lookups
+4. Revenue summary tables for reporting
+
+## 2. Denormalization Design
+
+### Proposed Denormalizations:
+1. **Flight details view** - Pre-joined flights with departure/arrival airport information
+2. **Booking summary table** - Contains booking, ticket, and flight information in one table
+3. **Boarding pass details view** - Pre-joined boarding_passes with seat information
+4. **Flight revenue summary table** - Aggregated revenue by flight for reporting
+5. **Passenger booking history table** - Aggregated booking history per passenger
+
+## 3. New Physical Schema
+
+```sql
+BEGIN;
+
+-- Denormalized flight details table
+CREATE TABLE IF NOT EXISTS bookings.flights_denorm (
+    flight_id integer NOT NULL,
+    flight_no character(6) NOT NULL,
+    scheduled_departure timestamptz NOT NULL,
+    scheduled_arrival timestamptz NOT NULL,
+    departure_airport_code character(3) NOT NULL,
+    departure_airport_name jsonb NOT NULL,
+    departure_city jsonb NOT NULL,
+    arrival_airport_code character(3) NOT NULL,
+    arrival_airport_name jsonb NOT NULL,
+    arrival_city jsonb NOT NULL,
+    status varchar(20) NOT NULL,
+    aircraft_code character(3) NOT NULL,
+    aircraft_model jsonb NOT NULL,
+    actual_departure timestamptz,
+    actual_arrival timestamptz,
+    duration interval GENERATED ALWAYS AS (scheduled_arrival - scheduled_departure) STORED,
+    CONSTRAINT flights_denorm_pkey PRIMARY KEY (flight_id)
+);
+
+-- Indexes for flight details queries
+CREATE INDEX idx_flights_denorm_departure_time ON bookings.flights_denorm (scheduled_departure);
+CREATE INDEX idx_flights_denorm_arrival_time ON bookings.flights_denorm (scheduled_arrival);
+CREATE INDEX idx_flights_denorm_departure_airport ON bookings.flights_denorm (departure_airport_code);
+CREATE INDEX idx_flights_denorm_arrival_airport ON bookings.flights_denorm (arrival_airport_code);
+CREATE INDEX idx_flights_denorm_status ON bookings.flights_denorm (status);
+CREATE INDEX idx_flights_denorm_aircraft ON bookings.flights_denorm (aircraft_code);
+CREATE INDEX idx_flights_denorm_city_pair ON bookings.flights_denorm (departure_city, arrival_city);
+
+-- Denormalized booking summary table
+CREATE TABLE IF NOT EXISTS bookings.booking_summaries (
+    book_ref character(6) NOT NULL,
+    book_date timestamptz NOT NULL,
+    total_amount numeric(10,2) NOT NULL,
+    ticket_count integer NOT NULL DEFAULT 0,
+    passenger_id varchar(20) NOT NULL,
+    passenger_name text NOT NULL,
+    contact_data jsonb,
+    first_flight_date timestamptz,
+    last_flight_date timestamptz,
+    total_distance integer,
+    CONSTRAINT booking_summaries_pkey PRIMARY KEY (book_ref)
+);
+
+-- Indexes for booking summary queries
+CREATE INDEX idx_booking_summaries_book_date ON bookings.booking_summaries (book_date);
+CREATE INDEX idx_booking_summaries_passenger ON bookings.booking_summaries (passenger_id);
+CREATE INDEX idx_booking_summaries_amount ON bookings.booking_summaries (total_amount DESC);
+CREATE INDEX idx_booking_summaries_flight_dates ON bookings.booking_summaries (first_flight_date, last_flight_date);
+
+-- Denormalized ticket-flight information table
+CREATE TABLE IF NOT EXISTS bookings.ticket_flight_details (
+    ticket_no character(13) NOT NULL,
+    flight_id integer NOT NULL,
+    book_ref character(6) NOT NULL,
+    passenger_id varchar(20) NOT NULL,
+    passenger_name text NOT NULL,
+    flight_no character(6) NOT NULL,
+    scheduled_departure timestamptz NOT NULL,
+    scheduled_arrival timestamptz NOT NULL,
+    departure_airport_code character(3) NOT NULL,
+    departure_city jsonb NOT NULL,
+    arrival_airport_code character(3) NOT NULL,
+    arrival_city jsonb NOT NULL,
+    fare_conditions varchar(10) NOT NULL,
+    amount numeric(10,2) NOT NULL,
+    status varchar(20) NOT NULL,
+    CONSTRAINT ticket_flight_details_pkey PRIMARY KEY (ticket_no, flight_id)
+);
+
+-- Indexes for ticket-flight queries
+CREATE INDEX idx_ticket_flight_book_ref ON bookings.ticket_flight_details (book_ref);
+CREATE INDEX idx_ticket_flight_passenger ON bookings.ticket_flight_details (passenger_id);
+CREATE INDEX idx_ticket_flight_flight_no ON bookings.ticket_flight_details (flight_no);
+CREATE INDEX idx_ticket_flight_departure ON bookings.ticket_flight_details (scheduled_departure);
+CREATE INDEX idx_ticket_flight_departure_airport ON bookings.ticket_flight_details (departure_airport_code);
+CREATE INDEX idx_ticket_flight_arrival_airport ON bookings.ticket_flight_details (arrival_airport_code);
+CREATE INDEX idx_ticket_flight_status ON bookings.ticket_flight_details (status);
+
+-- Denormalized boarding pass details table
+CREATE TABLE IF NOT EXISTS bookings.boarding_pass_details (
+    ticket_no character(13) NOT NULL,
+    flight_id integer NOT NULL,
+    boarding_no integer NOT NULL,
+    seat_no varchar(4) NOT NULL,
+    fare_conditions varchar(10) NOT NULL,
+    aircraft_code character(3) NOT NULL,
+    CONSTRAINT boarding_pass_details_pkey PRIMARY KEY (ticket_no, flight_id),
+    CONSTRAINT boarding_pass_details_boarding_no_key UNIQUE (flight_id, boarding_no),
+    CONSTRAINT boarding_pass_details_seat_no_key UNIQUE (flight_id, seat_no)
+);
+
+-- Indexes for boarding pass queries
+CREATE INDEX idx_boarding_pass_flight ON bookings.boarding_pass_details (flight_id);
+CREATE INDEX idx_boarding_pass_seat ON bookings.boarding_pass_details (seat_no);
+CREATE INDEX idx_boarding_pass_aircraft ON bookings.boarding_pass_details (aircraft_code);
+
+-- Flight revenue summary table
+CREATE TABLE IF NOT EXISTS bookings.flight_revenue_summary (
+    flight_id integer NOT NULL,
+    flight_no character(6) NOT NULL,
+    scheduled_departure timestamptz NOT NULL,
+    departure_airport_code character(3) NOT NULL,
+    arrival_airport_code character(3) NOT NULL,
+    aircraft_code character(3) NOT NULL,
+    total_revenue numeric(12,2) NOT NULL DEFAULT 0,
+    ticket_count integer NOT NULL DEFAULT 0,
+    occupancy_rate numeric(5,2) NOT NULL DEFAULT 0,
+    last_updated timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT flight_revenue_summary_pkey PRIMARY KEY (flight_id)
+);
+
+-- Indexes for revenue summary queries
+CREATE INDEX idx_flight_revenue_flight_no ON bookings.flight_revenue_summary (flight_no);
+CREATE INDEX idx_flight_revenue_departure_date ON bookings.flight_revenue_summary (scheduled_departure);
+CREATE INDEX idx_flight_revenue_departure_airport ON bookings.flight_revenue_summary (departure_airport_code);
+CREATE INDEX idx_flight_revenue_arrival_airport ON bookings.flight_revenue_summary (arrival_airport_code);
+CREATE INDEX idx_flight_revenue_revenue ON bookings.flight_revenue_summary (total_revenue DESC);
+CREATE INDEX idx_flight_revenue_occupancy ON bookings.flight_revenue_summary (occupancy_rate DESC);
+
+-- Passenger booking history table
+CREATE TABLE IF NOT EXISTS bookings.passenger_booking_history (
+    passenger_id varchar(20) NOT NULL,
+    passenger_name text NOT NULL,
+    total_bookings integer NOT NULL DEFAULT 0,
+    total_spent numeric(12,2) NOT NULL DEFAULT 0,
+    first_booking_date timestamptz,
+    last_booking_date timestamptz,
+    favorite_departure_city jsonb,
+    favorite_arrival_city jsonb,
+    last_flight_date timestamptz,
+    CONSTRAINT passenger_booking_history_pkey PRIMARY KEY (passenger_id)
+);
+
+-- Indexes for passenger history queries
+CREATE INDEX idx_passenger_history_spent ON bookings.passenger_booking_history (total_spent DESC);
+CREATE INDEX idx_passenger_history_bookings ON bookings.passenger_booking_history (total_bookings DESC);
+CREATE INDEX idx_passenger_history_last_flight ON bookings.passenger_booking_history (last_flight_date);
+
+-- Materialized view for airport route popularity
+CREATE MATERIALIZED VIEW IF NOT EXISTS bookings.route_popularity AS
+SELECT 
+    departure_airport_code,
+    arrival_airport_code,
+    departure_city,
+    arrival_city,
+    count(*) as flight_count,
+    sum(ticket_count) as total_passengers,
+    avg(total_revenue) as avg_revenue
+FROM bookings.flight_revenue_summary frs
+JOIN bookings.flights_denorm fd ON frs.flight_id = fd.flight_id
+GROUP BY departure_airport_code, arrival_airport_code, departure_city, arrival_city
+ORDER BY flight_count DESC;
+
+-- Indexes for route popularity queries
+CREATE INDEX idx_route_popularity_departure ON bookings.route_popularity (departure_airport_code);
+CREATE INDEX idx_route_popularity_arrival ON bookings.route_popularity (arrival_airport_code);
+CREATE INDEX idx_route_popularity_count ON bookings.route_popularity (flight_count DESC);
+
+-- Partitioned table for historical booking data (for very large datasets)
+CREATE TABLE IF NOT EXISTS bookings.booking_history (
+    book_ref character(6) NOT NULL,
+    book_date date NOT NULL,
+    total_amount numeric(10,2) NOT NULL,
+    passenger_id varchar(20) NOT NULL,
+    flight_count integer NOT NULL DEFAULT 1,
+    PRIMARY KEY (book_date, book_ref)
+) PARTITION BY RANGE (book_date);
+
+-- Indexes for booking history queries
+CREATE INDEX idx_booking_history_date ON bookings.booking_history (book_date);
+CREATE INDEX idx_booking_history_passenger ON bookings.booking_history (passenger_id);
+
+-- Create monthly partitions for booking history
+CREATE TABLE IF NOT EXISTS bookings.booking_history_2023_q1 PARTITION OF bookings.booking_history
+FOR VALUES FROM ('2023-01-01') TO ('2023-04-01');
+
+CREATE TABLE IF NOT EXISTS bookings.booking_history_2023_q2 PARTITION OF bookings.booking_history
+FOR VALUES FROM ('2023-04-01') TO ('2023-07-01');
+
+CREATE TABLE IF NOT EXISTS bookings.booking_history_2023_q3 PARTITION OF bookings.booking_history
+FOR VALUES FROM ('2023-07-01') TO ('2023-10-01');
+
+CREATE TABLE IF NOT EXISTS bookings.booking_history_2023_q4 PARTITION OF bookings.booking_history
+FOR VALUES FROM ('2023-10-01') TO ('2024-01-01');
+
+-- Covering indexes for common query patterns
+CREATE INDEX idx_flights_denorm_covering ON bookings.flights_denorm (departure_airport_code, scheduled_departure) 
+INCLUDE (flight_no, arrival_airport_code, status);
+
+CREATE INDEX idx_ticket_flight_covering ON bookings.ticket_flight_details (passenger_id, scheduled_departure) 
+INCLUDE (flight_no, departure_airport_code, arrival_airport_code);
+
+CREATE INDEX idx_boarding_pass_covering ON bookings.boarding_pass_details (flight_id) 
+INCLUDE (seat_no, boarding_no);
+
+-- Refresh function for materialized view
+CREATE OR REPLACE FUNCTION bookings.refresh_route_popularity()
+RETURNS void AS $$
+BEGIN
+    REFRESH MATERIALIZED VIEW CONCURRENTLY bookings.route_popularity;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to update flight revenue summary
+CREATE OR REPLACE FUNCTION bookings.update_flight_revenue(flight_id_param integer)
+RETURNS void AS $$
+BEGIN
+    INSERT INTO bookings.flight_revenue_summary (
+        flight_id, flight_no, scheduled_departure, 
+        departure_airport_code, arrival_airport_code, 
+        aircraft_code, total_revenue, ticket_count
+    )
+    SELECT 
+        f.flight_id,
+        f.flight_no,
+        f.scheduled_departure,
+        f.departure_airport,
+        f.arrival_airport,
+        f.aircraft_code,
+        COALESCE(SUM(tf.amount), 0) as total_revenue,
+        COUNT(tf.ticket_no) as ticket_count
+    FROM bookings.flights f
+    LEFT JOIN bookings.ticket_flights tf ON f.flight_id = tf.flight_id
+    WHERE f.flight_id = flight_id_param
+    GROUP BY f.flight_id, f.flight_no, f.scheduled_departure, 
+             f.departure_airport, f.arrival_airport, f.aircraft_code
+    ON CONFLICT (flight_id) 
+    DO UPDATE SET 
+        total_revenue = EXCLUDED.total_revenue,
+        ticket_count = EXCLUDED.ticket_count,
+        last_updated = now();
+END;
+$$ LANGUAGE plpgsql;
+
+END;
+```
+
+## Summary of Denormalization Benefits
+
+1. **Reduced Joins**: Most common queries now require 0-1 table accesses instead of 3-5
+2. **Improved Read Performance**: Pre-computed joins and aggregates eliminate runtime calculations
+3. **Better Indexing Strategy**: Composite indexes aligned with query patterns
+4. **Partitioning**: Historical data partitioned for faster access patterns
+5. **Covering Indexes**: Frequently accessed columns included in indexes to avoid table lookups
+6. **Materialized Views**: Complex aggregations pre-computed for reporting queries
+
+This schema design prioritizes read performance while maintaining data correctness through careful denormalization choices and appropriate indexing strategies.

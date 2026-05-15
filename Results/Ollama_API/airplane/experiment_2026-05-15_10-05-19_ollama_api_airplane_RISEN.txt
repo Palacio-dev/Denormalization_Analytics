@@ -1,0 +1,72 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_10-05-19
+Model: ollama_api
+Prompt: RISEN
+Schema: airplane
+==================================================
+
+BEGIN;
+
+-- Denormalized schema for analytical queries
+-- Combines flights, airports, aircrafts, tickets, and bookings information
+
+CREATE TABLE IF NOT EXISTS bookings.flight_details_denorm
+(
+    -- Flight information
+    flight_id integer NOT NULL,
+    flight_no character(6) COLLATE pg_catalog."default" NOT NULL,
+    scheduled_departure timestamp with time zone NOT NULL,
+    scheduled_arrival timestamp with time zone NOT NULL,
+    actual_departure timestamp with time zone,
+    actual_arrival timestamp with time zone,
+    status character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Departure airport information
+    departure_airport_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    departure_airport_name jsonb NOT NULL,
+    departure_city jsonb NOT NULL,
+    departure_coordinates point NOT NULL,
+    departure_timezone text COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Arrival airport information
+    arrival_airport_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    arrival_airport_name jsonb NOT NULL,
+    arrival_city jsonb NOT NULL,
+    arrival_coordinates point NOT NULL,
+    arrival_timezone text COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Aircraft information
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    aircraft_model jsonb NOT NULL,
+    aircraft_range integer NOT NULL,
+    
+    -- Ticket and booking information
+    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL,
+    book_ref character(6) COLLATE pg_catalog."default" NOT NULL,
+    book_date timestamp with time zone NOT NULL,
+    passenger_id character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    passenger_name text COLLATE pg_catalog."default" NOT NULL,
+    contact_data jsonb,
+    
+    -- Fare and seat information
+    fare_conditions character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    amount numeric(10, 2) NOT NULL,
+    seat_no character varying(4) COLLATE pg_catalog."default",
+    boarding_no integer,
+    
+    -- Booking total
+    total_amount numeric(10, 2) NOT NULL,
+    
+    CONSTRAINT flight_details_denorm_pkey PRIMARY KEY (flight_id, ticket_no)
+);
+
+-- Indexes for common analytical queries
+CREATE INDEX idx_flight_details_departure ON bookings.flight_details_denorm (scheduled_departure);
+CREATE INDEX idx_flight_details_arrival ON bookings.flight_details_denorm (scheduled_arrival);
+CREATE INDEX idx_flight_details_airport_pair ON bookings.flight_details_denorm (departure_airport_code, arrival_airport_code);
+CREATE INDEX idx_flight_details_aircraft ON bookings.flight_details_denorm (aircraft_code);
+CREATE INDEX idx_flight_details_passenger ON bookings.flight_details_denorm (passenger_id);
+CREATE INDEX idx_flight_details_book_date ON bookings.flight_details_denorm (book_date);
+CREATE INDEX idx_flight_details_status ON bookings.flight_details_denorm (status);
+
+END;

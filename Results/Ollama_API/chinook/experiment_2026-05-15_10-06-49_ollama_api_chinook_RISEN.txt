@@ -1,0 +1,93 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-15_10-06-49
+Model: ollama_api
+Prompt: RISEN
+Schema: chinook
+==================================================
+
+BEGIN;
+
+-- Denormalized schema for improved read performance
+-- Combines key entities into fewer tables based on query patterns
+
+-- Denormalized Albums with Artist information
+CREATE TABLE IF NOT EXISTS public."AlbumDenormalized"
+(
+    "AlbumId" integer NOT NULL,
+    "Title" character varying(160) COLLATE pg_catalog."default" NOT NULL,
+    "ArtistId" integer NOT NULL,
+    "ArtistName" character varying(120) COLLATE pg_catalog."default",
+    CONSTRAINT "PK_AlbumDenormalized" PRIMARY KEY ("AlbumId")
+);
+
+-- Denormalized Tracks with related metadata
+CREATE TABLE IF NOT EXISTS public."TrackDenormalized"
+(
+    "TrackId" integer NOT NULL,
+    "Name" character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    "AlbumId" integer,
+    "AlbumTitle" character varying(160) COLLATE pg_catalog."default",
+    "MediaTypeId" integer NOT NULL,
+    "MediaTypeName" character varying(120) COLLATE pg_catalog."default",
+    "GenreId" integer,
+    "GenreName" character varying(120) COLLATE pg_catalog."default",
+    "Composer" character varying(220) COLLATE pg_catalog."default",
+    "Milliseconds" integer NOT NULL,
+    "Bytes" integer,
+    "UnitPrice" numeric(10, 2) NOT NULL,
+    CONSTRAINT "PK_TrackDenormalized" PRIMARY KEY ("TrackId")
+);
+
+-- Denormalized Invoices with Customer information
+CREATE TABLE IF NOT EXISTS public."InvoiceDenormalized"
+(
+    "InvoiceId" integer NOT NULL,
+    "CustomerId" integer NOT NULL,
+    "CustomerFirstName" character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    "CustomerLastName" character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    "CustomerEmail" character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    "CustomerCountry" character varying(40) COLLATE pg_catalog."default",
+    "InvoiceDate" timestamp without time zone NOT NULL,
+    "BillingAddress" character varying(70) COLLATE pg_catalog."default",
+    "BillingCity" character varying(40) COLLATE pg_catalog."default",
+    "BillingState" character varying(40) COLLATE pg_catalog."default",
+    "BillingCountry" character varying(40) COLLATE pg_catalog."default",
+    "BillingPostalCode" character varying(10) COLLATE pg_catalog."default",
+    "Total" numeric(10, 2) NOT NULL,
+    CONSTRAINT "PK_InvoiceDenormalized" PRIMARY KEY ("InvoiceId")
+);
+
+-- Denormalized Invoice Lines with Track and Album information
+CREATE TABLE IF NOT EXISTS public."InvoiceLineDenormalized"
+(
+    "InvoiceLineId" integer NOT NULL,
+    "InvoiceId" integer NOT NULL,
+    "TrackId" integer NOT NULL,
+    "TrackName" character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    "AlbumId" integer,
+    "AlbumTitle" character varying(160) COLLATE pg_catalog."default",
+    "ArtistName" character varying(120) COLLATE pg_catalog."default",
+    "UnitPrice" numeric(10, 2) NOT NULL,
+    "Quantity" integer NOT NULL,
+    "LineTotal" numeric(10, 2) NOT NULL, -- Derived attribute: UnitPrice * Quantity
+    CONSTRAINT "PK_InvoiceLineDenormalized" PRIMARY KEY ("InvoiceLineId")
+);
+
+-- Denormalized Playlist Tracks with full track information
+CREATE TABLE IF NOT EXISTS public."PlaylistTrackDenormalized"
+(
+    "PlaylistId" integer NOT NULL,
+    "PlaylistName" character varying(120) COLLATE pg_catalog."default",
+    "TrackId" integer NOT NULL,
+    "TrackName" character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    "AlbumId" integer,
+    "AlbumTitle" character varying(160) COLLATE pg_catalog."default",
+    "ArtistName" character varying(120) COLLATE pg_catalog."default",
+    "GenreName" character varying(120) COLLATE pg_catalog."default",
+    "Composer" character varying(220) COLLATE pg_catalog."default",
+    "Milliseconds" integer NOT NULL,
+    "UnitPrice" numeric(10, 2) NOT NULL,
+    CONSTRAINT "PK_PlaylistTrackDenormalized" PRIMARY KEY ("PlaylistId", "TrackId")
+);
+
+END;
