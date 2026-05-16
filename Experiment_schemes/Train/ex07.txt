@@ -1,112 +1,75 @@
-<NORMALIZED MODEL>
-    BEGIN;
+CREATE TABLE IF NOT EXISTS public."Usina" (
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    iniciop DATE,
+    atualizacao DATE,
+    lat DOUBLE PRECISION ,
+    long DOUBLE PRECISION ,
+    estagio VARCHAR,
+    id_proprietario INTEGER NULL,
+    id_rio INTEGER NOT NULL,
+    id_localizacao INTEGER NOT NULL
+);
 
-            CREATE SCHEMA IF NOT EXISTS public AUTHORIZATION ava_um_usr;
-            SET search_path TO public, public;
+CREATE TABLE IF NOT EXISTS public."Proprietarios" (
+    proprietario VARCHAR,
+    id_proprietario INTEGER PRIMARY KEY NOT NULL
+);
 
-            DROP TABLE IF EXISTS public."Usina" CASCADE;
-            DROP TABLE IF EXISTS public."Rios" CASCADE;
-            DROP TABLE IF EXISTS public."Proprietarios" CASCADE;
-            DROP TABLE IF EXISTS public."Municipios" CASCADE;
-            DROP TABLE IF EXISTS public."Estados" CASCADE;
-            DROP TABLE IF EXISTS public."Localizacoes" CASCADE;
+CREATE TABLE IF NOT EXISTS public."Municipios" (
+    municipio VARCHAR NOT NULL,
+    uf CHAR(2) NOT NULL,
+    id_municipio SERIAL PRIMARY KEY
+);
 
-            CREATE TABLE IF NOT EXISTS public."Usina" (
-                id SERIAL PRIMARY KEY,
-                nome VARCHAR NOT NULL,
-                potkw FLOAT,
-                potfis FLOAT,
-                iniciop DATE,
-                atualizacao DATE,
-                lat DOUBLE PRECISION ,
-                long DOUBLE PRECISION ,
-                estagio VARCHAR,
-                id_proprietario INTEGER NULL,
-                id_rio INTEGER NOT NULL,
-                id_localizacao INTEGER NOT NULL
-            );
+CREATE TABLE IF NOT EXISTS public."Estados" (
+    uf CHAR(2) PRIMARY KEY
+);
 
-            CREATE TABLE IF NOT EXISTS public."Proprietarios" (
-                proprietario VARCHAR,
-                id_proprietario INTEGER PRIMARY KEY NOT NULL
-            );
+CREATE TABLE IF NOT EXISTS public."Rios" (
+    rio VARCHAR NOT NULL,
+    id_rio INTEGER PRIMARY KEY
+);
 
-            CREATE TABLE IF NOT EXISTS public."Municipios" (
-                municipio VARCHAR NOT NULL,
-                uf CHAR(2) NOT NULL,
-                id_municipio SERIAL PRIMARY KEY
-            );
+CREATE TABLE IF NOT EXISTS public."Localizacoes" (
+    id_localização INTEGER PRIMARY KEY,
+    longitude DOUBLE PRECISION,
+    id_municipio1 INTEGER NOT NULL,
+    id_municipio2 INTEGER,
+    latitude DOUBLE PRECISION
+);
 
-            CREATE TABLE IF NOT EXISTS public."Estados" (
-                uf CHAR(2) PRIMARY KEY
-            );
+ALTER TABLE IF EXISTS public."Usina"
+ADD CONSTRAINT FK_Usina_Proprietario
+FOREIGN KEY (id_proprietario)
+REFERENCES public."Proprietarios"(id_proprietario);
 
-            CREATE TABLE IF NOT EXISTS public."Rios" (
-                rio VARCHAR NOT NULL,
-                id_rio INTEGER PRIMARY KEY
-            );
+ALTER TABLE IF EXISTS public."Usina"
+ADD CONSTRAINT FK_Usina_Rio
+FOREIGN KEY (id_rio)
+REFERENCES public."Rios"(id_rio);
 
-            CREATE TABLE IF NOT EXISTS public."Localizacoes" (
-                id_localização INTEGER PRIMARY KEY,
-                longitude DOUBLE PRECISION,
-                id_municipio1 INTEGER NOT NULL,
-                id_municipio2 INTEGER,
-                latitude DOUBLE PRECISION
-            );
+ALTER TABLE IF EXISTS public."Usina"
+ADD CONSTRAINT FK_Usina_Localizacao
+FOREIGN KEY (id_localizacao)
+REFERENCES public."Localizacoes"(id_localização);
 
-            ALTER TABLE IF EXISTS public."Usina"
-            ADD CONSTRAINT FK_Usina_Proprietario
-            FOREIGN KEY (id_proprietario)
-            REFERENCES public."Proprietarios"(id_proprietario);
+ALTER TABLE IF EXISTS public."Municipios" ADD CONSTRAINT FK_Municipios_1
+    FOREIGN KEY (uf)
+    REFERENCES public."Estados"(uf);
 
-            ALTER TABLE IF EXISTS public."Usina"
-            ADD CONSTRAINT FK_Usina_Rio
-            FOREIGN KEY (id_rio)
-            REFERENCES public."Rios"(id_rio);
+ALTER TABLE IF EXISTS public."Localizacoes"
+DROP CONSTRAINT IF EXISTS FK_Localizacoes_2;
 
-            ALTER TABLE IF EXISTS public."Usina"
-            ADD CONSTRAINT FK_Usina_Localizacao
-            FOREIGN KEY (id_localizacao)
-            REFERENCES public."Localizacoes"(id_localização);
+ALTER TABLE IF EXISTS public."Localizacoes"
+ADD CONSTRAINT FK_Localizacoes_Mun1
+    FOREIGN KEY (id_municipio1)
+    REFERENCES public."Municipios"(id_municipio);
 
-            ALTER TABLE IF EXISTS public."Municipios" ADD CONSTRAINT FK_Municipios_1
-                FOREIGN KEY (uf)
-                REFERENCES public."Estados"(uf);
-            
-            ALTER TABLE IF EXISTS public."Localizacoes"
-            DROP CONSTRAINT IF EXISTS FK_Localizacoes_2;
-
-            ALTER TABLE IF EXISTS public."Localizacoes"
-            ADD CONSTRAINT FK_Localizacoes_Mun1
-                FOREIGN KEY (id_municipio1)
-                REFERENCES public."Municipios"(id_municipio);
-
-            ALTER TABLE IF EXISTS public."Localizacoes"
-            ADD CONSTRAINT FK_Localizacoes_Mun2
-                FOREIGN KEY (id_municipio2)
-                REFERENCES public."Municipios"(id_municipio);
-            COMMIT;
-</NORMALIZED MODEL>
-
-<DENORMALIZED MODEL>
-    CREATE TABLE IF NOT EXISTS Usina (
-        id INTEGER PRIMARY KEY,
-        nome VARCHAR NOT NULL,
-        proprietario VARCHAR,
-        munic1 VARCHAR NOT NULL,
-        uf1 VARCHAR NOT NULL,
-        munic2 VARCHAR,
-        uf2 VARCHAR,
-        rio VARCHAR NOT NULL,
-        potkw FLOAT,
-        atualizacao DATE,
-        iniciop DATE,
-        potfisc FLOAT,
-        lat DOUBLE PRECISION,
-        long DOUBLE PRECISION,
-        estagio VARCHAR
-    );
-</DENORMALIZED MODEL>
-
-In this transformation , we see the ONE BIG TABLE approach, where the relationships are collapsed and all the attributes
-are added in the same table, this, we dont need to JOIN multiple tables to get some specific information anymore.
+ALTER TABLE IF EXISTS public."Localizacoes"
+ADD CONSTRAINT FK_Localizacoes_Mun2
+    FOREIGN KEY (id_municipio2)
+    REFERENCES public."Municipios"(id_municipio);
+COMMIT;

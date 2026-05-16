@@ -1,314 +1,210 @@
-<NORMALIZED MODEL>
-    BEGIN;
+CREATE TABLE IF NOT EXISTS public.aluno_ifb
+(
+    id_aluno serial NOT NULL,
+    data_nascimento date,
+    idade integer,
+    sexo character(1) COLLATE pg_catalog."default",
+    nacionalidade character varying(50) COLLATE pg_catalog."default",
+    raca character varying(50) COLLATE pg_catalog."default",
+    portador_deficiencia boolean,
+    CONSTRAINT aluno_ifb_pkey PRIMARY KEY (id_aluno)
+);
 
-    CREATE TABLE IF NOT EXISTS public.aluno_ifb
-    (
-        id_aluno serial NOT NULL,
-        data_nascimento date,
-        idade integer,
-        sexo character(1) COLLATE pg_catalog."default",
-        nacionalidade character varying(50) COLLATE pg_catalog."default",
-        raca character varying(50) COLLATE pg_catalog."default",
-        portador_deficiencia boolean,
-        CONSTRAINT aluno_ifb_pkey PRIMARY KEY (id_aluno)
-    );
+CREATE TABLE IF NOT EXISTS public.curso_ifb
+(
+    co_curso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    no_curso character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    co_tipo_curso character varying(10) COLLATE pg_catalog."default",
+    tipo_curso character varying(100) COLLATE pg_catalog."default",
+    co_tipo_nivel character varying(10) COLLATE pg_catalog."default",
+    ds_tipo_nivel character varying(100) COLLATE pg_catalog."default",
+    ds_eixo_tecnologico character varying(200) COLLATE pg_catalog."default",
+    modalidade_ensino character varying(100) COLLATE pg_catalog."default",
+    carga_horaria integer,
+    CONSTRAINT curso_ifb_pkey PRIMARY KEY (co_curso)
+);
 
-    CREATE TABLE IF NOT EXISTS public.curso_ifb
-    (
-        co_curso character varying(50) COLLATE pg_catalog."default" NOT NULL,
-        no_curso character varying(200) COLLATE pg_catalog."default" NOT NULL,
-        co_tipo_curso character varying(10) COLLATE pg_catalog."default",
-        tipo_curso character varying(100) COLLATE pg_catalog."default",
-        co_tipo_nivel character varying(10) COLLATE pg_catalog."default",
-        ds_tipo_nivel character varying(100) COLLATE pg_catalog."default",
-        ds_eixo_tecnologico character varying(200) COLLATE pg_catalog."default",
-        modalidade_ensino character varying(100) COLLATE pg_catalog."default",
-        carga_horaria integer,
-        CONSTRAINT curso_ifb_pkey PRIMARY KEY (co_curso)
-    );
+CREATE TABLE IF NOT EXISTS public.desempenho_enem
+(
+    id_desempenho serial NOT NULL,
+    nu_ano integer NOT NULL,
+    nu_media_cn numeric(6, 2),
+    nu_media_ch numeric(6, 2),
+    nu_media_lp numeric(6, 2),
+    nu_media_mt numeric(6, 2),
+    nu_media_red numeric(6, 2),
+    co_escola_educacenso character varying(20) COLLATE pg_catalog."default",
+    CONSTRAINT desempenho_enem_pkey PRIMARY KEY (id_desempenho)
+);
 
-    CREATE TABLE IF NOT EXISTS public.desempenho_enem
-    (
-        id_desempenho serial NOT NULL,
-        nu_ano integer NOT NULL,
-        nu_media_cn numeric(6, 2),
-        nu_media_ch numeric(6, 2),
-        nu_media_lp numeric(6, 2),
-        nu_media_mt numeric(6, 2),
-        nu_media_red numeric(6, 2),
-        co_escola_educacenso character varying(20) COLLATE pg_catalog."default",
-        CONSTRAINT desempenho_enem_pkey PRIMARY KEY (id_desempenho)
-    );
+CREATE TABLE IF NOT EXISTS public.escola
+(
+    co_escola_educacenso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    no_escola_educacenso character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    tp_dependencia_adm_escola smallint,
+    tp_localizacao_escola smallint,
+    inse character varying(10) COLLATE pg_catalog."default",
+    id_loc integer,
+    CONSTRAINT escola_pkey PRIMARY KEY (co_escola_educacenso)
+);
 
-    CREATE TABLE IF NOT EXISTS public.escola
-    (
-        co_escola_educacenso character varying(50) COLLATE pg_catalog."default" NOT NULL,
-        no_escola_educacenso character varying(200) COLLATE pg_catalog."default" NOT NULL,
-        tp_dependencia_adm_escola smallint,
-        tp_localizacao_escola smallint,
-        inse character varying(10) COLLATE pg_catalog."default",
-        id_loc integer,
-        CONSTRAINT escola_pkey PRIMARY KEY (co_escola_educacenso)
-    );
+CREATE TABLE IF NOT EXISTS public.indicadores_escolares
+(
+    id_indicadores serial NOT NULL,
+    nu_ano integer NOT NULL,
+    nu_taxa_permanencia numeric(6, 2),
+    nu_taxa_aprovacao numeric(5, 2),
+    nu_taxa_reprovacao numeric(5, 2),
+    nu_taxa_abandono numeric(5, 2),
+    co_escola_educacenso character varying(20) COLLATE pg_catalog."default",
+    porte_escola character varying(50) COLLATE pg_catalog."default",
+    pc_formacao_docente numeric(5, 2),
+    CONSTRAINT indicadores_escolares_pkey PRIMARY KEY (id_indicadores)
+);
 
-    CREATE TABLE IF NOT EXISTS public.indicadores_escolares
-    (
-        id_indicadores serial NOT NULL,
-        nu_ano integer NOT NULL,
-        nu_taxa_permanencia numeric(6, 2),
-        nu_taxa_aprovacao numeric(5, 2),
-        nu_taxa_reprovacao numeric(5, 2),
-        nu_taxa_abandono numeric(5, 2),
-        co_escola_educacenso character varying(20) COLLATE pg_catalog."default",
-        porte_escola character varying(50) COLLATE pg_catalog."default",
-        pc_formacao_docente numeric(5, 2),
-        CONSTRAINT indicadores_escolares_pkey PRIMARY KEY (id_indicadores)
-    );
+CREATE TABLE IF NOT EXISTS public.localizacao
+(
+    id_loc serial NOT NULL,
+    uf character varying(2) COLLATE pg_catalog."default" NOT NULL,
+    municipio character varying(100) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT localizacao_pkey PRIMARY KEY (id_loc)
+);
 
-    CREATE TABLE IF NOT EXISTS public.localizacao
-    (
-        id_loc serial NOT NULL,
-        uf character varying(2) COLLATE pg_catalog."default" NOT NULL,
-        municipio character varying(100) COLLATE pg_catalog."default" NOT NULL,
-        CONSTRAINT localizacao_pkey PRIMARY KEY (id_loc)
-    );
+CREATE TABLE IF NOT EXISTS public.matricula_ifb
+(
+    id_matricula serial NOT NULL,
+    co_ciclo_matricula character varying(50) COLLATE pg_catalog."default",
+    periodo character varying(30) COLLATE pg_catalog."default",
+    situacao_matricula character varying(50) COLLATE pg_catalog."default",
+    tipo_cota character varying(50) COLLATE pg_catalog."default",
+    atestado_baixarenda character varying(20) COLLATE pg_catalog."default",
+    ano character varying(20) COLLATE pg_catalog."default",
+    id_aluno integer,
+    co_curso character varying(50) COLLATE pg_catalog."default",
+    unidade_ensino character varying(100) COLLATE pg_catalog."default",
+    co_escola_educacenso character varying(20) COLLATE pg_catalog."default",
+    CONSTRAINT matricula_ifb_pkey PRIMARY KEY (id_matricula)
+);
 
-    CREATE TABLE IF NOT EXISTS public.matricula_ifb
-    (
-        id_matricula serial NOT NULL,
-        co_ciclo_matricula character varying(50) COLLATE pg_catalog."default",
-        periodo character varying(30) COLLATE pg_catalog."default",
-        situacao_matricula character varying(50) COLLATE pg_catalog."default",
-        tipo_cota character varying(50) COLLATE pg_catalog."default",
-        atestado_baixarenda character varying(20) COLLATE pg_catalog."default",
-        ano character varying(20) COLLATE pg_catalog."default",
-        id_aluno integer,
-        co_curso character varying(50) COLLATE pg_catalog."default",
-        unidade_ensino character varying(100) COLLATE pg_catalog."default",
-        co_escola_educacenso character varying(20) COLLATE pg_catalog."default",
-        CONSTRAINT matricula_ifb_pkey PRIMARY KEY (id_matricula)
-    );
+CREATE TABLE IF NOT EXISTS public.participacao_enem
+(
+    id_participacao serial NOT NULL,
+    nu_ano integer NOT NULL,
+    nu_matriculas integer,
+    nu_participantes_nec_esp integer,
+    nu_participantes integer,
+    nu_taxa_participacao numeric(5, 2),
+    co_escola_educacenso character varying(20) COLLATE pg_catalog."default",
+    CONSTRAINT participacao_enem_pkey PRIMARY KEY (id_participacao)
+);
 
-    CREATE TABLE IF NOT EXISTS public.participacao_enem
-    (
-        id_participacao serial NOT NULL,
-        nu_ano integer NOT NULL,
-        nu_matriculas integer,
-        nu_participantes_nec_esp integer,
-        nu_participantes integer,
-        nu_taxa_participacao numeric(5, 2),
-        co_escola_educacenso character varying(20) COLLATE pg_catalog."default",
-        CONSTRAINT participacao_enem_pkey PRIMARY KEY (id_participacao)
-    );
+CREATE TABLE IF NOT EXISTS public.remuneracao
+(
+    id_remuneracao serial NOT NULL,
+    vl_remun_media_nom numeric(10, 2),
+    vl_remun_media_sm numeric(10, 2),
+    vl_remun_dezembro_nom numeric(10, 2),
+    vl_remun_dezembro_sm numeric(10, 2),
+    qtd_hora_contr integer,
+    vl_ultima_remuneracao_ano numeric(10, 2),
+    vl_salario_contratual numeric(10, 2),
+    CONSTRAINT remuneracao_pkey PRIMARY KEY (id_remuneracao)
+);
 
-    CREATE TABLE IF NOT EXISTS public.remuneracao
-    (
-        id_remuneracao serial NOT NULL,
-        vl_remun_media_nom numeric(10, 2),
-        vl_remun_media_sm numeric(10, 2),
-        vl_remun_dezembro_nom numeric(10, 2),
-        vl_remun_dezembro_sm numeric(10, 2),
-        qtd_hora_contr integer,
-        vl_ultima_remuneracao_ano numeric(10, 2),
-        vl_salario_contratual numeric(10, 2),
-        CONSTRAINT remuneracao_pkey PRIMARY KEY (id_remuneracao)
-    );
+CREATE TABLE IF NOT EXISTS public.vinculo_empregaticio
+(
+    id_vinculo serial NOT NULL,
+    ano_rais integer,
+    razao_social character varying(200) COLLATE pg_catalog."default",
+    tipo_vinculo_empregaticio character varying(200) COLLATE pg_catalog."default",
+    data_admissao_declarada date,
+    tempo_emprego integer,
+    motivo_desligamento character varying(200) COLLATE pg_catalog."default",
+    mes_desligamento character varying(20) COLLATE pg_catalog."default",
+    indicador_vinculo_ativo boolean,
+    id_aluno integer,
+    id_remuneracao integer,
+    id_loc integer,
+    CONSTRAINT vinculo_empregaticio_pkey PRIMARY KEY (id_vinculo)
+);
 
-    CREATE TABLE IF NOT EXISTS public.vinculo_empregaticio
-    (
-        id_vinculo serial NOT NULL,
-        ano_rais integer,
-        razao_social character varying(200) COLLATE pg_catalog."default",
-        tipo_vinculo_empregaticio character varying(200) COLLATE pg_catalog."default",
-        data_admissao_declarada date,
-        tempo_emprego integer,
-        motivo_desligamento character varying(200) COLLATE pg_catalog."default",
-        mes_desligamento character varying(20) COLLATE pg_catalog."default",
-        indicador_vinculo_ativo boolean,
-        id_aluno integer,
-        id_remuneracao integer,
-        id_loc integer,
-        CONSTRAINT vinculo_empregaticio_pkey PRIMARY KEY (id_vinculo)
-    );
-
-    ALTER TABLE IF EXISTS public.desempenho_enem
-        ADD CONSTRAINT desempenho_enem_co_escola_educacenso_fkey FOREIGN KEY (co_escola_educacenso)
-        REFERENCES public.escola (co_escola_educacenso) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION;
-    CREATE INDEX IF NOT EXISTS idx_desempenho_escola
-        ON public.desempenho_enem(co_escola_educacenso);
+ALTER TABLE IF EXISTS public.desempenho_enem
+    ADD CONSTRAINT desempenho_enem_co_escola_educacenso_fkey FOREIGN KEY (co_escola_educacenso)
+    REFERENCES public.escola (co_escola_educacenso) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+CREATE INDEX IF NOT EXISTS idx_desempenho_escola
+    ON public.desempenho_enem(co_escola_educacenso);
 
 
-    ALTER TABLE IF EXISTS public.escola
-        ADD CONSTRAINT escola_id_loc_fkey FOREIGN KEY (id_loc)
-        REFERENCES public.localizacao (id_loc) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION;
-    CREATE INDEX IF NOT EXISTS idx_escola_localizacao
-        ON public.escola(id_loc);
+ALTER TABLE IF EXISTS public.escola
+    ADD CONSTRAINT escola_id_loc_fkey FOREIGN KEY (id_loc)
+    REFERENCES public.localizacao (id_loc) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+CREATE INDEX IF NOT EXISTS idx_escola_localizacao
+    ON public.escola(id_loc);
 
 
-    ALTER TABLE IF EXISTS public.indicadores_escolares
-        ADD CONSTRAINT indicadores_escolares_co_escola_educacenso_fkey FOREIGN KEY (co_escola_educacenso)
-        REFERENCES public.escola (co_escola_educacenso) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION;
+ALTER TABLE IF EXISTS public.indicadores_escolares
+    ADD CONSTRAINT indicadores_escolares_co_escola_educacenso_fkey FOREIGN KEY (co_escola_educacenso)
+    REFERENCES public.escola (co_escola_educacenso) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
 
 
-    ALTER TABLE IF EXISTS public.matricula_ifb
-        ADD CONSTRAINT matricula_ifb_co_curso_fkey FOREIGN KEY (co_curso)
-        REFERENCES public.curso_ifb (co_curso) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION;
-    CREATE INDEX IF NOT EXISTS idx_matricula_curso
-        ON public.matricula_ifb(co_curso);
+ALTER TABLE IF EXISTS public.matricula_ifb
+    ADD CONSTRAINT matricula_ifb_co_curso_fkey FOREIGN KEY (co_curso)
+    REFERENCES public.curso_ifb (co_curso) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+CREATE INDEX IF NOT EXISTS idx_matricula_curso
+    ON public.matricula_ifb(co_curso);
 
 
-    ALTER TABLE IF EXISTS public.matricula_ifb
-        ADD CONSTRAINT matricula_ifb_escola_fk FOREIGN KEY (co_escola_educacenso)
-        REFERENCES public.escola (co_escola_educacenso) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION;
+ALTER TABLE IF EXISTS public.matricula_ifb
+    ADD CONSTRAINT matricula_ifb_escola_fk FOREIGN KEY (co_escola_educacenso)
+    REFERENCES public.escola (co_escola_educacenso) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
 
 
-    ALTER TABLE IF EXISTS public.matricula_ifb
-        ADD CONSTRAINT matricula_ifb_id_aluno_fkey FOREIGN KEY (id_aluno)
-        REFERENCES public.aluno_ifb (id_aluno) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION;
-    CREATE INDEX IF NOT EXISTS idx_matricula_aluno
-        ON public.matricula_ifb(id_aluno);
+ALTER TABLE IF EXISTS public.matricula_ifb
+    ADD CONSTRAINT matricula_ifb_id_aluno_fkey FOREIGN KEY (id_aluno)
+    REFERENCES public.aluno_ifb (id_aluno) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+CREATE INDEX IF NOT EXISTS idx_matricula_aluno
+    ON public.matricula_ifb(id_aluno);
 
 
-    ALTER TABLE IF EXISTS public.participacao_enem
-        ADD CONSTRAINT participacao_enem_co_escola_educacenso_fkey FOREIGN KEY (co_escola_educacenso)
-        REFERENCES public.escola (co_escola_educacenso) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION;
-    CREATE INDEX IF NOT EXISTS idx_participacao_escola
-        ON public.participacao_enem(co_escola_educacenso);
+ALTER TABLE IF EXISTS public.participacao_enem
+    ADD CONSTRAINT participacao_enem_co_escola_educacenso_fkey FOREIGN KEY (co_escola_educacenso)
+    REFERENCES public.escola (co_escola_educacenso) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+CREATE INDEX IF NOT EXISTS idx_participacao_escola
+    ON public.participacao_enem(co_escola_educacenso);
 
 
-    ALTER TABLE IF EXISTS public.vinculo_empregaticio
-        ADD CONSTRAINT vinculo_empregaticio_id_aluno_fkey FOREIGN KEY (id_aluno)
-        REFERENCES public.aluno_ifb (id_aluno) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION;
-    CREATE INDEX IF NOT EXISTS idx_vinculo_aluno
-        ON public.vinculo_empregaticio(id_aluno);
+ALTER TABLE IF EXISTS public.vinculo_empregaticio
+    ADD CONSTRAINT vinculo_empregaticio_id_aluno_fkey FOREIGN KEY (id_aluno)
+    REFERENCES public.aluno_ifb (id_aluno) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+CREATE INDEX IF NOT EXISTS idx_vinculo_aluno
+    ON public.vinculo_empregaticio(id_aluno);
 
 
-    ALTER TABLE IF EXISTS public.vinculo_empregaticio
-        ADD CONSTRAINT vinculo_empregaticio_id_remuneracao_fkey FOREIGN KEY (id_remuneracao)
-        REFERENCES public.remuneracao (id_remuneracao) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION;
+ALTER TABLE IF EXISTS public.vinculo_empregaticio
+    ADD CONSTRAINT vinculo_empregaticio_id_remuneracao_fkey FOREIGN KEY (id_remuneracao)
+    REFERENCES public.remuneracao (id_remuneracao) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
 
 
-    ALTER TABLE IF EXISTS public.vinculo_empregaticio
-        ADD CONSTRAINT vinculo_localizacao_fk FOREIGN KEY (id_loc)
-        REFERENCES public.localizacao (id_loc) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION;
-
-    END;
-</NORMALIZED MODEL>
-
-<DENORMALIZED MODEL>
-    CREATE TABLE IF NOT EXISTS fato_aluno_trajetoria (
-        id_aluno INTEGER,
-        data_nascimento DATE,
-        idade INTEGER,
-        sexo VARCHAR,
-        nacionalidade VARCHAR,
-        raca VARCHAR,
-        portador_deficiencia BOOLEAN,
-        ano_entrada_ifb INTEGER,
-        co_ciclo_matricula VARCHAR,
-        periodo VARCHAR,
-        situacao_matricula VARCHAR,
-        tipo_cota VARCHAR,
-        atestado_baixarenda VARCHAR,
-        unidade_ensino VARCHAR,
-        co_curso VARCHAR,
-        no_curso VARCHAR,
-        co_tipo_curso VARCHAR,
-        tipo_curso VARCHAR,
-        co_tipo_nivel VARCHAR,
-        ds_tipo_nivel VARCHAR,
-        ds_eixo_tecnologico VARCHAR,
-        modalidade_ensino VARCHAR,
-        carga_horaria INTEGER,
-        co_escola_educacenso VARCHAR,
-        ano_rais INTEGER,
-        razao_social VARCHAR,
-        tipo_vinculo_empregaticio VARCHAR,
-        data_admissao_declarada DATE,
-        tempo_emprego DOUBLE,
-        motivo_desligamento VARCHAR,
-        mes_desligamento VARCHAR,
-        indicador_vinculo_ativo BOOLEAN,
-        vl_remun_media_nom DOUBLE,
-        vl_remun_media_sm DOUBLE,
-        vl_remun_dezembro_nom DOUBLE,
-        vl_remun_dezembro_sm DOUBLE,
-        qtd_hora_contr INTEGER,
-        vl_ultima_remuneracao_ano DOUBLE,
-        vl_salario_contratual DOUBLE,
-        uf_vinculo VARCHAR,
-        municipio_vinculo VARCHAR
-    );
-    CREATE TABLE IF NOT EXISTS dim_escola_indicadores_anuais (
-        co_escola_educacenso VARCHAR,
-        nu_ano INTEGER,
-        no_escola_educacenso VARCHAR,
-        tp_dependencia_adm_escola SMALLINT,
-        tp_localizacao_escola SMALLINT,
-        inse_escola DOUBLE,
-
-        uf_escola VARCHAR,
-        municipio_escola VARCHAR,
-
-        nu_taxa_permanencia DOUBLE,
-        nu_taxa_aprovacao DOUBLE,
-        nu_taxa_reprovacao DOUBLE,
-        nu_taxa_abandono DOUBLE,
-        pc_formacao_docente DOUBLE,
-        porte_escola VARCHAR,
-
-        nu_matriculas_enem INTEGER,
-        nu_participantes_nec_esp_enem INTEGER,
-        nu_participantes_enem INTEGER,
-        nu_taxa_participacao_enem DOUBLE,
-        nu_media_cn_enem DOUBLE,
-        nu_media_ch_enem DOUBLE,
-        nu_media_lp_enem DOUBLE,
-        nu_media_mt_enem DOUBLE,
-        nu_media_red_enem DOUBLE,
-        PRIMARY KEY (co_escola_educacenso, nu_ano)
-    );
-</DENORMALIZED MODEL>
-
-
-1. Creating a dim_escola_indicadores_anuais table
-
-Techniques Used: 3 - Collapsing Relations and 1 - Adding Redundant Attributes.
-
-The attibutes from the following table were united in a single table: escola,desempenho_enem, localizacao, indicadores_escolares,
-participacao_enem.This way, the one-to-may relationships are collapsed, and redundant attributes
-that would just get searched from a JOIN query are now on the same big table.
-
-2. Creating a fato_aluno_trajetoria table
-
-Techniques Used: 3 - Collapsing Relations and 1 - Adding Redundant Attributes.
-
-The attibutes from the following table were united in a single table: curso_ifb, matricula_ifb, aluno_ifb, vinculo_empregaticio
-and remuneracao.This way, the one-to-may relationships are collapsed, and redundant attributes
-that would just get searched from a JOIN query are now on the same big table.
-
-
-It is important to notice that the tables are connected with the "unidade_ensino" attribute and the "no_escola_educacenso"
-attibute, which is a relationship one-to-one , basically, one student has studied in one "unidade_ensino" which is the
-same name as "no_escola_educacenso". This way,it is possible to get all the information previously possible on the
-normalized model.
+ALTER TABLE IF EXISTS public.vinculo_empregaticio
+    ADD CONSTRAINT vinculo_localizacao_fk FOREIGN KEY (id_loc)
+    REFERENCES public.localizacao (id_loc) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;

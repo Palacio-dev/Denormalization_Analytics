@@ -1,319 +1,212 @@
-<NORMALIZED MODEL>
-    BEGIN;
+CREATE TABLE IF NOT EXISTS public.country
+(
+    country_code character varying NOT NULL,
+    country_name character varying,
+    region_code character varying NOT NULL,
+    PRIMARY KEY (country_code)
+);
 
-    CREATE TABLE IF NOT EXISTS public.country
-    (
-        country_code character varying NOT NULL,
-        country_name character varying,
-        region_code character varying NOT NULL,
-        PRIMARY KEY (country_code)
-    );
+CREATE TABLE IF NOT EXISTS public.survey
+(
+    id_survey serial NOT NULL,
+    country_code character varying NOT NULL,
+    welfare_type character varying,
+    survey_acronym character varying,
+    survey_comparability integer,
+    comparable_spell character varying,
+    poverty_line double precision,
+    headcount double precision,
+    poverty_gap double precision,
+    poverty_severity double precision,
+    gini double precision,
+    reporting_pop integer,
+    reporting_pce double precision,
+    distribution_type character varying,
+    spl double precision,
+    survey_year integer,
+    survey_coverage character varying,
+    reporting_level character varying,
+    PRIMARY KEY (id_survey)
+);
 
-    CREATE TABLE IF NOT EXISTS public.survey
-    (
-        id_survey serial NOT NULL,
-        country_code character varying NOT NULL,
-        welfare_type character varying,
-        survey_acronym character varying,
-        survey_comparability integer,
-        comparable_spell character varying,
-        poverty_line double precision,
-        headcount double precision,
-        poverty_gap double precision,
-        poverty_severity double precision,
-        gini double precision,
-        reporting_pop integer,
-        reporting_pce double precision,
-        distribution_type character varying,
-        spl double precision,
-        survey_year integer,
-        survey_coverage character varying,
-        reporting_level character varying,
-        PRIMARY KEY (id_survey)
-    );
+CREATE TABLE IF NOT EXISTS public.region
+(
+    region_code character varying NOT NULL,
+    region_name character varying NOT NULL,
+    PRIMARY KEY (region_code)
+);
 
-    CREATE TABLE IF NOT EXISTS public.region
-    (
-        region_code character varying NOT NULL,
-        region_name character varying NOT NULL,
-        PRIMARY KEY (region_code)
-    );
+CREATE TABLE IF NOT EXISTS public.decile
+(
+    id_decile serial NOT NULL,
+    value double precision,
+    name character varying,
+    id_survey integer NOT NULL,
+    PRIMARY KEY (id_decile)
+);
 
-    CREATE TABLE IF NOT EXISTS public.decile
-    (
-        id_decile serial NOT NULL,
-        value double precision,
-        name character varying,
-        id_survey integer NOT NULL,
-        PRIMARY KEY (id_decile)
-    );
+CREATE TABLE IF NOT EXISTS public.demography
+(
+    id_demography serial NOT NULL,
+    year integer,
+    country_code character varying NOT NULL,
+    pop_density double precision,
+    urban_pop double precision,
+    rural_pop double precision,
+    net_migration double precision,
+    death_rate double precision,
+    birth_rate double precision,
+    PRIMARY KEY (id_demography)
+);
 
-    CREATE TABLE IF NOT EXISTS public.demography
-    (
-        id_demography serial NOT NULL,
-        year integer,
-        country_code character varying NOT NULL,
-        pop_density double precision,
-        urban_pop double precision,
-        rural_pop double precision,
-        net_migration double precision,
-        death_rate double precision,
-        birth_rate double precision,
-        PRIMARY KEY (id_demography)
-    );
+CREATE TABLE IF NOT EXISTS public.employment
+(
+    id_employment serial NOT NULL,
+    year integer,
+    country_code character varying NOT NULL,
+    child_emp double precision,
+    unemp double precision,
+    vulnerable_emp double precision,
+    part_time double precision,
+    employers double precision,
+    labor_force_total double precision,
+    labor_force_fem double precision,
+    PRIMARY KEY (id_employment)
+);
 
-    CREATE TABLE IF NOT EXISTS public.employment
-    (
-        id_employment serial NOT NULL,
-        year integer,
-        country_code character varying NOT NULL,
-        child_emp double precision,
-        unemp double precision,
-        vulnerable_emp double precision,
-        part_time double precision,
-        employers double precision,
-        labor_force_total double precision,
-        labor_force_fem double precision,
-        PRIMARY KEY (id_employment)
-    );
+CREATE TABLE IF NOT EXISTS public.education
+(
+    id_education serial NOT NULL,
+    year integer,
+    country_code character varying NOT NULL,
+    child_out_of_school double precision,
+    progression_to_sec double precision,
+    expenditure double precision,
+    preprim_enroll double precision,
+    prim_enrol double precision,
+    sec_enrol double precision,
+    terti_enrol double precision,
+    PRIMARY KEY (id_education)
+);
 
-    CREATE TABLE IF NOT EXISTS public.education
-    (
-        id_education serial NOT NULL,
-        year integer,
-        country_code character varying NOT NULL,
-        child_out_of_school double precision,
-        progression_to_sec double precision,
-        expenditure double precision,
-        preprim_enroll double precision,
-        prim_enrol double precision,
-        sec_enrol double precision,
-        terti_enrol double precision,
-        PRIMARY KEY (id_education)
-    );
+CREATE TABLE IF NOT EXISTS public.economy
+(
+    id_economy serial NOT NULL,
+    year integer,
+    country_code character varying NOT NULL,
+    gdp double precision,
+    inflation double precision,
+    tax_revenue double precision,
+    PRIMARY KEY (id_economy)
+);
 
-    CREATE TABLE IF NOT EXISTS public.economy
-    (
-        id_economy serial NOT NULL,
-        year integer,
-        country_code character varying NOT NULL,
-        gdp double precision,
-        inflation double precision,
-        tax_revenue double precision,
-        PRIMARY KEY (id_economy)
-    );
+CREATE TABLE IF NOT EXISTS public.population
+(
+    id_population serial NOT NULL,
+    id_demography integer NOT NULL,
+    pop_ages character varying,
+    gender character varying,
+    "number" double precision,
+    PRIMARY KEY (id_population)
+);
 
-    CREATE TABLE IF NOT EXISTS public.population
-    (
-        id_population serial NOT NULL,
-        id_demography integer NOT NULL,
-        pop_ages character varying,
-        gender character varying,
-        "number" double precision,
-        PRIMARY KEY (id_population)
-    );
+CREATE TABLE IF NOT EXISTS public.life_expectancy
+(
+    id_life_expectancy serial NOT NULL,
+    id_demography integer NOT NULL,
+    gender character varying,
+    value double precision,
+    PRIMARY KEY (id_life_expectancy)
+);
 
-    CREATE TABLE IF NOT EXISTS public.life_expectancy
-    (
-        id_life_expectancy serial NOT NULL,
-        id_demography integer NOT NULL,
-        gender character varying,
-        value double precision,
-        PRIMARY KEY (id_life_expectancy)
-    );
+CREATE TABLE IF NOT EXISTS public.health
+(
+    id_health serial NOT NULL,
+    country_code character varying NOT NULL,
+    year integer,
+    hospital_beds double precision,
+    physicians double precision,
+    expenditure double precision,
+    PRIMARY KEY (id_health)
+);
 
-    CREATE TABLE IF NOT EXISTS public.health
-    (
-        id_health serial NOT NULL,
-        country_code character varying NOT NULL,
-        year integer,
-        hospital_beds double precision,
-        physicians double precision,
-        expenditure double precision,
-        PRIMARY KEY (id_health)
-    );
-
-    ALTER TABLE IF EXISTS public.country
-        ADD FOREIGN KEY (region_code)
-        REFERENCES public.region (region_code) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION
-        NOT VALID;
+ALTER TABLE IF EXISTS public.country
+    ADD FOREIGN KEY (region_code)
+    REFERENCES public.region (region_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
 
 
-    ALTER TABLE IF EXISTS public.survey
-        ADD FOREIGN KEY (country_code)
-        REFERENCES public.country (country_code) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION
-        NOT VALID;
+ALTER TABLE IF EXISTS public.survey
+    ADD FOREIGN KEY (country_code)
+    REFERENCES public.country (country_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
 
 
-    ALTER TABLE IF EXISTS public.decile
-        ADD FOREIGN KEY (id_survey)
-        REFERENCES public.survey (id_survey) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION
-        NOT VALID;
+ALTER TABLE IF EXISTS public.decile
+    ADD FOREIGN KEY (id_survey)
+    REFERENCES public.survey (id_survey) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
 
 
-    ALTER TABLE IF EXISTS public.demography
-        ADD FOREIGN KEY (country_code)
-        REFERENCES public.country (country_code) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION
-        NOT VALID;
+ALTER TABLE IF EXISTS public.demography
+    ADD FOREIGN KEY (country_code)
+    REFERENCES public.country (country_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
 
 
-    ALTER TABLE IF EXISTS public.employment
-        ADD FOREIGN KEY (country_code)
-        REFERENCES public.country (country_code) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION
-        NOT VALID;
+ALTER TABLE IF EXISTS public.employment
+    ADD FOREIGN KEY (country_code)
+    REFERENCES public.country (country_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
 
 
-    ALTER TABLE IF EXISTS public.education
-        ADD FOREIGN KEY (country_code)
-        REFERENCES public.country (country_code) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION
-        NOT VALID;
+ALTER TABLE IF EXISTS public.education
+    ADD FOREIGN KEY (country_code)
+    REFERENCES public.country (country_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
 
 
-    ALTER TABLE IF EXISTS public.economy
-        ADD FOREIGN KEY (country_code)
-        REFERENCES public.country (country_code) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION
-        NOT VALID;
+ALTER TABLE IF EXISTS public.economy
+    ADD FOREIGN KEY (country_code)
+    REFERENCES public.country (country_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
 
 
-    ALTER TABLE IF EXISTS public.population
-        ADD FOREIGN KEY (id_demography)
-        REFERENCES public.demography (id_demography) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION
-        NOT VALID;
+ALTER TABLE IF EXISTS public.population
+    ADD FOREIGN KEY (id_demography)
+    REFERENCES public.demography (id_demography) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
 
 
-    ALTER TABLE IF EXISTS public.life_expectancy
-        ADD FOREIGN KEY (id_demography)
-        REFERENCES public.demography (id_demography) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION
-        NOT VALID;
+ALTER TABLE IF EXISTS public.life_expectancy
+    ADD FOREIGN KEY (id_demography)
+    REFERENCES public.demography (id_demography) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
 
 
-    ALTER TABLE IF EXISTS public.health
-        ADD FOREIGN KEY (country_code)
-        REFERENCES public.country (country_code) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION
-        NOT VALID;
+ALTER TABLE IF EXISTS public.health
+    ADD FOREIGN KEY (country_code)
+    REFERENCES public.country (country_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
 
-    END;
-</NORMALIZED MODEL>
-
-<DENORMALIZED MODEL>
-    BEGIN;
-
-    CREATE TABLE IF NOT EXISTS public.country_indicators (
-        country_code VARCHAR(10) NOT NULL,
-        country_name VARCHAR(255),
-        region_code VARCHAR(10),
-        region_name VARCHAR(255),
-        
-        pop_density DOUBLE PRECISION,
-        net_migration DOUBLE PRECISION,
-        birth_rate DOUBLE PRECISION,
-        death_rate DOUBLE PRECISION,
-        rural_pop DOUBLE PRECISION,
-        urban_pop DOUBLE PRECISION,
-        
-        tax_revenue DOUBLE PRECISION,
-        inflation DOUBLE PRECISION,
-        gdp DOUBLE PRECISION,
-        
-        preprim_enrol DOUBLE PRECISION,
-        prim_enrol DOUBLE PRECISION,
-        child_out_of_school DOUBLE PRECISION,
-        sec_enrol DOUBLE PRECISION,
-        progression_to_sec DOUBLE PRECISION,
-        terti_enrol DOUBLE PRECISION,
-        expenditure_edu DOUBLE PRECISION, -- Renomeado para evitar conflito com saúde
-        
-        employers DOUBLE PRECISION,
-        vulnerable_emp DOUBLE PRECISION,
-        child_emp DOUBLE PRECISION,
-        part_time DOUBLE PRECISION,
-        labor_force_fem DOUBLE PRECISION,
-        labor_force_total DOUBLE PRECISION,
-        unemp DOUBLE PRECISION,
-        
-        hospital_beds DOUBLE PRECISION,
-        physicians DOUBLE PRECISION,
-        expenditure_health DOUBLE PRECISION,
-        
-        life_expectancy_female DOUBLE PRECISION,
-        life_expectancy_male DOUBLE PRECISION,
-        
-        pop_0_14_female DOUBLE PRECISION,
-        pop_0_14_male DOUBLE PRECISION,
-        pop_15_64_female DOUBLE PRECISION,
-        pop_15_64_male DOUBLE PRECISION,
-        pop_65_plus_female DOUBLE PRECISION,
-        pop_65_plus_male DOUBLE PRECISION,
-    );
-
-    CREATE TABLE IF NOT EXISTS public.poverty_surveys (
-        country_code VARCHAR(10) NOT NULL,
-        survey_year INTEGER NOT NULL,
-        country_name VARCHAR(255),
-        region_code VARCHAR(10),
-        region_name VARCHAR(255),
-        welfare_type VARCHAR(100),
-        survey_acronym VARCHAR(50),
-        survey_comparability INTEGER,
-        comparable_spell VARCHAR(100),
-        poverty_line DOUBLE PRECISION,
-        headcount DOUBLE PRECISION,
-        poverty_gap DOUBLE PRECISION,
-        poverty_severity DOUBLE PRECISION,
-        gini DOUBLE PRECISION,
-        reporting_pop INTEGER,
-        distribution_type VARCHAR(100),
-        reporting_pce DOUBLE PRECISION,
-        spl DOUBLE PRECISION,
-        survey_coverage VARCHAR(100),
-        reporting_level VARCHAR(100),
-        
-        decile1 DOUBLE PRECISION,
-        decile2 DOUBLE PRECISION,
-        decile3 DOUBLE PRECISION,
-        decile4 DOUBLE PRECISION,
-        decile5 DOUBLE PRECISION,
-        decile6 DOUBLE PRECISION,
-        decile7 DOUBLE PRECISION,
-        decile8 DOUBLE PRECISION,
-        decile9 DOUBLE PRECISION,
-        decile10 DOUBLE PRECISION,
-    );
-</DENORMALIZED MODEL>
-
-
-1. Creating a country_indicators table
-
-Techniques Used: 3 - Collapsing Relations and 1 - Adding Redundant Attributes.
-
-The attibutes from the following table were united in a single table: region, country, demography, economy, education,
-employment, health, life_expectancy and population .This way, the one-to-may relationships are collapsed, and redundant
-attributes that would just get queried from a JOIN query are now on the same big table.
-
-2. Creating a poverty_surveys table
-
-Techniques Used: 3 - Collapsing Relations and 1 - Adding Redundant Attributes.
-
-The survey table turned into a one big table, but it has attibutes that connects to the country_indicators table, like 
-country_code, country_name , region_code and region_name. This way, it is still possible to get all the information 
-previously possible with the normalized model.
+END;
