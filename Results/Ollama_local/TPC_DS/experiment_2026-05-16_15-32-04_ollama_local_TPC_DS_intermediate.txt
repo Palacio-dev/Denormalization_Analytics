@@ -1,0 +1,221 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-16_15-32-04
+Model: ollama_local
+Prompt: intermediate
+Schema: TPC_DS
+==================================================
+
+Here is the **Denormalized Wide Schema** and the **Optimized DDL**. This design merges the Header and LineItem tables into single "Wide Fact Tables" to eliminate joins, while assuming dimension keys (Store, Item, Date) are available to be joined or denormalized further.
+
+### **Optimization Strategy**
+1.  **Wide Tables:** Merged `Header` + `LineItem` into single tables (e.g., `s_purchase_wide`).
+2.  **Dimension Keys:** Added `store_sk`, `item_sk`, `date_sk` to avoid joins.
+3.  **Partitioning:** `s_inventory` is partitioned by `invn_date`.
+4.  **Indexing:** Composite indexes on `(store_sk, date_sk)` and `(item_sk, date_sk)` for fast filtering.
+
+---
+
+### **1. Wide Fact Tables (Merged Header + LineItem)**
+
+```sql
+-- =============================================
+-- Table: s_purchase_wide
+-- Description: Merged Purchase Header + LineItem + Dimension Keys
+-- Optimization: Eliminates joins between Header and LineItem.
+-- =============================================
+CREATE TABLE s_purchase_wide (
+    crec_order_id        INT NOT NULL,
+    crec_line_number     INT NOT NULL,
+    crec_item_id         INT NOT NULL,
+    crec_customer_id     INT NOT NULL,
+    crec_order_date      DATE NOT NULL,
+    crec_order_status    VARCHAR(50) NOT NULL,
+    crec_total_amount    DECIMAL(12, 2) NOT NULL,
+    crec_quantity        INT NOT NULL,
+    crec_unit_price      DECIMAL(10, 2) NOT NULL,
+    crec_discount        DECIMAL(10, 2) NOT NULL,
+    crec_tax             DECIMAL(10, 2) NOT NULL,
+    crec_shipping_cost   DECIMAL(10, 2) NOT NULL,
+    crec_payment_method  VARCHAR(50) NOT NULL,
+    crec_ship_address    VARCHAR(255) NOT NULL,
+    crec_ship_city       VARCHAR(100) NOT NULL,
+    crec_ship_state      VARCHAR(100) NOT NULL,
+    crec_ship_zip        VARCHAR(20) NOT NULL,
+    crec_ship_country    VARCHAR(100) NOT NULL,
+    crec_ship_date       DATE NOT NULL,
+    crec_order_date_sk   INT NOT NULL, -- Dimension Key
+    crec_store_sk        INT NOT NULL, -- Dimension Key
+    crec_item_sk         INT NOT NULL, -- Dimension Key
+    crec_customer_sk     INT NOT NULL, -- Dimension Key
+    
+    PRIMARY KEY (crec_order_id, crec_line_number),
+    INDEX idx_store_date (crec_store_sk, crec_order_date_sk),
+    INDEX idx_item_date (crec_item_sk, crec_order_date_sk)
+) ENGINE=InnoDB 
+PARTITION BY RANGE (crec_order_date_sk) (
+    PARTITION p1 VALUES LESS THAN (20230101),
+    PARTITION p2 VALUES LESS THAN (20240101),
+    PARTITION p3 VALUES LESS THAN (20250101),
+    PARTITION p4 VALUES LESS THAN (20260101)
+);
+
+-- =============================================
+-- Table: s_catalog_wide
+-- Description: Merged Catalog Order + LineItem + Dimension Keys
+-- =============================================
+CREATE TABLE s_catalog_wide (
+    crec_order_id        INT NOT NULL,
+    crec_line_number     INT NOT NULL,
+    crec_item_id         INT NOT NULL,
+    crec_customer_id     INT NOT NULL,
+    crec_order_date      DATE NOT NULL,
+    crec_order_status    VARCHAR(50) NOT NULL,
+    crec_total_amount    DECIMAL(12, 2) NOT NULL,
+    crec_quantity        INT NOT NULL,
+    crec_unit_price      DECIMAL(10, 2) NOT NULL,
+    crec_discount        DECIMAL(10, 2) NOT NULL,
+    crec_tax             DECIMAL(10, 2) NOT NULL,
+    crec_shipping_cost   DECIMAL(10, 2) NOT NULL,
+    crec_payment_method  VARCHAR(50) NOT NULL,
+    crec_ship_address    VARCHAR(255) NOT NULL,
+    crec_ship_city       VARCHAR(100) NOT NULL,
+    crec_ship_state      VARCHAR(100) NOT NULL,
+    crec_ship_zip        VARCHAR(20) NOT NULL,
+    crec_ship_country    VARCHAR(100) NOT NULL,
+    crec_ship_date       DATE NOT NULL,
+    crec_order_date_sk   INT NOT NULL,
+    crec_store_sk        INT NOT NULL,
+    crec_item_sk         INT NOT NULL,
+    crec_customer_sk     INT NOT NULL,
+    
+    PRIMARY KEY (crec_order_id, crec_line_number),
+    INDEX idx_store_date (crec_store_sk, crec_order_date_sk),
+    INDEX idx_item_date (crec_item_sk, crec_order_date_sk)
+) ENGINE=InnoDB 
+PARTITION BY RANGE (crec_order_date_sk) (
+    PARTITION p1 VALUES LESS THAN (20230101),
+    PARTITION p2 VALUES LESS THAN (20240101),
+    PARTITION p3 VALUES LESS THAN (20250101),
+    PARTITION p4 VALUES LESS THAN (20260101)
+);
+
+-- =============================================
+-- Table: s_web_wide
+-- Description: Merged Web Order + LineItem + Dimension Keys
+-- =============================================
+CREATE TABLE s_web_wide (
+    crec_order_id        INT NOT NULL,
+    crec_line_number     INT NOT NULL,
+    crec_item_id         INT NOT NULL,
+    crec_customer_id     INT NOT NULL,
+    crec_order_date      DATE NOT NULL,
+    crec_order_status    VARCHAR(50) NOT NULL,
+    crec_total_amount    DECIMAL(12, 2) NOT NULL,
+    crec_quantity        INT NOT NULL,
+    crec_unit_price      DECIMAL(10, 2) NOT NULL,
+    crec_discount        DECIMAL(10, 2) NOT NULL,
+    crec_tax             DECIMAL(10, 2) NOT NULL,
+    crec_shipping_cost   DECIMAL(10, 2) NOT NULL,
+    crec_payment_method  VARCHAR(50) NOT NULL,
+    crec_ship_address    VARCHAR(255) NOT NULL,
+    crec_ship_city       VARCHAR(100) NOT NULL,
+    crec_ship_state      VARCHAR(100) NOT NULL,
+    crec_ship_zip        VARCHAR(20) NOT NULL,
+    crec_ship_country    VARCHAR(100) NOT NULL,
+    crec_ship_date       DATE NOT NULL,
+    crec_order_date_sk   INT NOT NULL,
+    crec_store_sk        INT NOT NULL,
+    crec_item_sk         INT NOT NULL,
+    crec_customer_sk     INT NOT NULL,
+    
+    PRIMARY KEY (crec_order_id, crec_line_number),
+    INDEX idx_store_date (crec_store_sk, crec_order_date_sk),
+    INDEX idx_item_date (crec_item_sk, crec_order_date_sk)
+) ENGINE=InnoDB 
+PARTITION BY RANGE (crec_order_date_sk) (
+    PARTITION p1 VALUES LESS THAN (20230101),
+    PARTITION p2 VALUES LESS THAN (20240101),
+    PARTITION p3 VALUES LESS THAN (20250101),
+    PARTITION p4 VALUES LESS THAN (20260101)
+);
+
+-- =============================================
+-- Table: s_store_returns_wide
+-- Description: Merged Store Returns + LineItem + Dimension Keys
+-- =============================================
+CREATE TABLE s_store_returns_wide (
+    crec_order_id        INT NOT NULL,
+    crec_line_number     INT NOT NULL,
+    crec_item_id         INT NOT NULL,
+    crec_customer_id     INT NOT NULL,
+    crec_return_date     DATE NOT NULL,
+    crec_return_status   VARCHAR(50) NOT NULL,
+    crec_total_amount    DECIMAL(12, 2) NOT NULL,
+    crec_quantity        INT NOT NULL,
+    crec_unit_price      DECIMAL(10, 2) NOT NULL,
+    crec_discount        DECIMAL(10, 2) NOT NULL,
+    crec_tax             DECIMAL(10, 2) NOT NULL,
+    crec_store_id        INT NOT NULL,
+    crec_store_date_sk   INT NOT NULL,
+    crec_store_sk        INT NOT NULL,
+    crec_item_sk         INT NOT NULL,
+    crec_customer_sk     INT NOT NULL,
+    
+    PRIMARY KEY (crec_order_id, crec_line_number),
+    INDEX idx_store_date (crec_store_sk, crec_return_date_sk),
+    INDEX idx_item_date (crec_item_sk, crec_return_date_sk)
+) ENGINE=InnoDB 
+PARTITION BY RANGE (crec_return_date_sk) (
+    PARTITION p1 VALUES LESS THAN (20230101),
+    PARTITION p2 VALUES LESS THAN (20240101),
+    PARTITION p3 VALUES LESS THAN (20250101),
+    PARTITION p4 VALUES LESS THAN (20260101)
+);
+
+-- =============================================
+-- Table: s_catalog_returns_wide
+-- Description: Merged Catalog Returns + LineItem + Dimension Keys
+-- =============================================
+CREATE TABLE s_catalog_returns_wide (
+    crec_order_id        INT NOT NULL,
+    crec_line_number     INT NOT NULL,
+    crec_item_id         INT NOT NULL,
+    crec_customer_id     INT NOT NULL,
+    crec_return_date     DATE NOT NULL,
+    crec_return_status   VARCHAR(50) NOT NULL,
+    crec_total_amount    DECIMAL(12, 2) NOT NULL,
+    crec_quantity        INT NOT NULL,
+    crec_unit_price      DECIMAL(10, 2) NOT NULL,
+    crec_discount        DECIMAL(10, 2) NOT NULL,
+    crec_tax             DECIMAL(10, 2) NOT NULL,
+    crec_store_id        INT NOT NULL,
+    crec_store_date_sk   INT NOT NULL,
+    crec_store_sk        INT NOT NULL,
+    crec_item_sk         INT NOT NULL,
+    crec_customer_sk     INT NOT NULL,
+    
+    PRIMARY KEY (crec_order_id, crec_line_number),
+    INDEX idx_store_date (crec_store_sk, crec_return_date_sk),
+    INDEX idx_item_date (crec_item_sk, crec_return_date_sk)
+) ENGINE=InnoDB 
+PARTITION BY RANGE (crec_return_date_sk) (
+    PARTITION p1 VALUES LESS THAN (20230101),
+    PARTITION p2 VALUES LESS THAN (20240101),
+    PARTITION p3 VALUES LESS THAN (20250101),
+    PARTITION p4 VALUES LESS THAN (20260101)
+);
+```
+
+---
+
+### **2. Optimized Inventory Table (Partitioned)**
+
+```sql
+-- =============================================
+-- Table: s_inventory
+-- Description: Partitioned by Date for fast range queries.
+-- Optimization: No joins required.
+-- =============================================
+CREATE TABLE s_inventory (
+    invn_warehouse_id    INT NOT NULL,
+    invn_item_id         INT NOT

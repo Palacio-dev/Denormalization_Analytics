@@ -1,0 +1,186 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-16_16-08-27
+Model: ollama_local
+Prompt: intermediate
+Schema: TPC_H
+==================================================
+
+## 1. Workload-Driven Analysis
+
+Based on the provided schema (standard TPC-H structure), this is a classic **OLTP/OLAP hybrid** design optimized for writes but inefficient for reads.
+
+**Identified Bottlenecks:**
+1.  **The "Join Hell" Problem:** Queries requiring Part/Supplier details must join `LINEITEM` $\rightarrow$ `PART` $\rightarrow$ `SUPPLIER` $\rightarrow$ `NATION` $\rightarrow$ `REGION`.
+2.  **Data Locality:** `NATION` and `REGION` are tiny tables. Joining them adds overhead for every query.
+3.  **Filtering Overhead:** Filtering by `OrderStatus` or `ShipDate` requires scanning the full `LINEITEM` table, then joining to `ORDERS` to filter.
+4.  **Aggregation Latency:** Reporting on "Total Spend per Customer" requires a complex join chain and aggregation every time.
+
+**Goal:** Create a **Read-Optimized Schema** (Materialized/Denormalized) that eliminates these joins at the cost of storage and consistency (handled via ETL/Triggers).
+
+---
+
+## 2. Denormalization Strategy
+
+We will adopt a **"Wide Table"** strategy for the read layer.
+*   **Dimensions:** Merge `REGION` into `NATION`. Merge `NATION` into `CUSTOMER` and `SUPPLIER`.
+*   **Facts:** Merge `PART` and `SUPPLIER` details into `LINEITEM`.
+*   **Aggregates:** Pre-calculate daily/monthly sales summaries.
+*   **Partitions:** Partition large tables by `ShipDate` (or `OrderDate`) to enable efficient pruning.
+
+---
+
+## 3. New Physical Schema (DDL)
+
+This DDL assumes a PostgreSQL/MySQL compatible syntax.
+*   **Note:** `FACT_` tables are designed to be **Read-Only** or updated asynchronously (via ETL/Triggers).
+*   **Note:** `DIM_` tables are the "Wide" versions containing all necessary context.
+
+### A. Denormalized Dimensions (Wide Tables)
+
+```sql
+-- 1. DIM_NATION_REGION (Merged NATION + REGION)
+-- Purpose: Eliminates N + R joins. Stores RegionName directly.
+CREATE TABLE DIM_NATION_REGION (
+    NATION_KEY        INT PRIMARY KEY,
+    NATION_NAME       VARCHAR(25) NOT NULL,
+    REGION_NAME       VARCHAR(25) NOT NULL, -- Merged from REGION table
+    NATION_REGION_KEY BIGINT GENERATED ALWAYS AS (NATION_KEY * 1000 + HASH(REGION_NAME)) STORED, -- Optional composite key
+    UPDATED_AT        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 2. DIM_CUSTOMER_WIDE (Merged CUSTOMER + NATION + REGION)
+-- Purpose: Eliminates C + N + R joins.
+CREATE TABLE DIM_CUSTOMER_WIDE (
+    CUSTOMER_KEY      INT PRIMARY KEY,
+    C_NAME            VARCHAR(25) NOT NULL,
+    C_ADDRESS         VARCHAR(48) NOT NULL,
+    C_PHONE           VARCHAR(24) NOT NULL,
+    C_ACCTBAL         DECIMAL(12, 2) NOT NULL,
+    C_MKTSEGMENT      VARCHAR(10) NOT NULL,
+    NATION_KEY        INT NOT NULL, -- Foreign Key to DIM_NATION_REGION
+    NATION_NAME       VARCHAR(25) NOT NULL, -- Denormalized
+    REGION_NAME       VARCHAR(25) NOT NULL, -- Denormalized
+    CONSTRAINT FK_CUST_NATION FOREIGN KEY (NATION_KEY) REFERENCES DIM_NATION_REGION(NATION_KEY)
+);
+
+-- 3. DIM_SUPPLIER_WIDE (Merged SUPPLIER + NATION + REGION)
+-- Purpose: Eliminates S + N + R joins.
+CREATE TABLE DIM_SUPPLIER_WIDE (
+    SUPPLIER_KEY      INT PRIMARY KEY,
+    S_NAME            VARCHAR(25) NOT NULL,
+    S_ADDRESS         VARCHAR(48) NOT NULL,
+    S_PHONE           VARCHAR(24) NOT NULL,
+    S_ACCTBAL         DECIMAL(12, 2) NOT NULL,
+    S_COMMENT         VARCHAR(100) NOT NULL,
+    NATION_KEY        INT NOT NULL,
+    NATION_NAME       VARCHAR(25) NOT NULL, -- Denormalized
+    REGION_NAME       VARCHAR(25) NOT NULL, -- Denormalized
+    CONSTRAINT FK_SUP_NATION FOREIGN KEY (NATION_KEY) REFERENCES DIM_NATION_REGION(NATION_KEY)
+);
+
+-- 4. DIM_PART_WIDE (Merged PART details)
+-- Purpose: Consolidates Part attributes.
+CREATE TABLE DIM_PART_WIDE (
+    PART_KEY          INT PRIMARY KEY,
+    P_NAME            VARCHAR(55) NOT NULL,
+    P_MFGR            VARCHAR(25) NOT NULL,
+    P_BRAND           VARCHAR(10) NOT NULL,
+    P_TYPE            VARCHAR(25) NOT NULL,
+    P_SIZE            VARCHAR(10) NOT NULL,
+    P_CONTAINER       VARCHAR(10) NOT NULL,
+    P_RETAILPRICE     DECIMAL(15, 2) NOT NULL,
+    P_COMMENT         VARCHAR(23) NOT NULL
+);
+```
+
+### B. Denormalized Facts (Read-Optimized)
+
+```sql
+-- 5. FACT_LINEITEM_WIDE (The Heavy Lifter)
+-- Purpose: Merges LINEITEM + PART + SUPPLIER + NATION details.
+-- Allows querying "ShipDate, PartName, SupplierName, NationName" without joins.
+CREATE TABLE FACT_LINEITEM_WIDE (
+    LINEITEM_KEY      BIGINT PRIMARY KEY, -- Composite key or surrogate
+    L_ORDERKEY        INT NOT NULL,
+    L_PARTKEY         INT NOT NULL,
+    L_SUPPKEY         INT NOT NULL,
+    L_QUANTITY        INT NOT NULL,
+    L_EXTENDEDPRICE   DECIMAL(15, 2) NOT NULL,
+    L_DISCOUNT        DECIMAL(15, 4) NOT NULL,
+    L_TAX             DECIMAL(15, 4) NOT NULL,
+    L_RETURNFLAG      CHAR(1) NOT NULL,
+    L_LINESTATUS      CHAR(1) NOT NULL,
+    L_SHIPDATE        DATE NOT NULL,
+    L_COMMITDATE      DATE NOT NULL,
+    L_RECEIPTDATE     DATE NOT NULL,
+    L_SHIPINSTRUCT    VARCHAR(25) NOT NULL,
+    L_SHIPMODE        VARCHAR(10) NOT NULL,
+    L_COMMENT         VARCHAR(44) NOT NULL,
+    
+    -- Denormalized Attributes (Eliminates Joins)
+    P_NAME             VARCHAR(55), -- From DIM_PART_WIDE
+    P_MFGR             VARCHAR(25), -- From DIM_PART_WIDE
+    P_BRAND            VARCHAR(10), -- From DIM_PART_WIDE
+    S_NAME             VARCHAR(25), -- From DIM_SUPPLIER_WIDE
+    S_ADDRESS          VARCHAR(48), -- From DIM_SUPPLIER_WIDE
+    S_PHONE            VARCHAR(24), -- From DIM_SUPPLIER_WIDE
+    S_ACCTBAL          DECIMAL(12, 2), -- From DIM_SUPPLIER_WIDE
+    S_COMMENT          VARCHAR(100), -- From DIM_SUPPLIER_WIDE
+    NATION_NAME        VARCHAR(25), -- From DIM_NATION_REGION
+    REGION_NAME        VARCHAR(25), -- From DIM_NATION_REGION
+    
+    -- Aggregates (Pre-calculated)
+    L_TOTAL_REVENUE    DECIMAL(15, 2) GENERATED ALWAYS AS (L_EXTENDEDPRICE * (1 - L_DISCOUNT)) STORED,
+    
+    UPDATED_AT         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 6. FACT_ORDERS_SUMMARY (Aggregated Customer/Order Stats)
+-- Purpose: Pre-aggregates Orders + Customers.
+CREATE TABLE FACT_ORDERS_SUMMARY (
+    ORDER_KEY         INT PRIMARY KEY,
+    O_ORDERDATE       DATE NOT NULL,
+    O_ORDERPRIORITY   VARCHAR(15) NOT NULL,
+    O_CLERK           VARCHAR(15) NOT NULL,
+    O_SHIPPRIORITY    INT NOT NULL,
+    O_COMMENT         VARCHAR(79) NOT NULL,
+    
+    -- Denormalized Customer Stats
+    C_NAME             VARCHAR(25),
+    C_ACCTBAL          DECIMAL(12, 2),
+    C_MKTSEGMENT      VARCHAR(10),
+    NATION_NAME        VARCHAR(25),
+    REGION_NAME        VARCHAR(25),
+    
+    -- Aggregates
+    O_TOTAL_PRICE      DECIMAL(15, 2),
+    O_TOTAL_COUNT      INT, -- Number of line items
+    O_TOTAL_QUANTITY   INT,
+    O_TOTAL_REVENUE    DECIMAL(15, 2),
+    
+    UPDATED_AT         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 7. FACT_SALES_DAILY (Time-Series Aggregates)
+-- Purpose: Pre-aggregates daily sales by Nation/Region.
+CREATE TABLE FACT_SALES_DAILY (
+    DATE_KEY          DATE PRIMARY KEY,
+    NATION_KEY        INT NOT NULL,
+    REGION_NAME       VARCHAR(25) NOT NULL,
+    TOTAL_SALES       DECIMAL(15, 2) NOT NULL,
+    TOTAL_QUANTITY    INT NOT NULL,
+    TOTAL_DISCOUNT    DECIMAL(15, 4) NOT NULL,
+    TOTAL_REVENUE     DECIMAL(15, 2) NOT NULL,
+    UNIQUE_COUNT      INT NOT NULL,
+    UPDATED_AT        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### C. Indexing Strategy
+
+```sql
+-- 1. Index on ShipDate for Time-Travel Queries
+CREATE INDEX IDX_FACT_LINEITEM_WIDE_SHIPDATE ON FACT_LINEITEM_WIDE(L_SHIPDATE);
+CREATE INDEX IDX_FACT_LINEITEM_WIDE_NATION ON FACT_LINEITEM_WIDE(NATION_NAME);
+CREATE `INDEX_FACT_LINEITEM_WIDE_PART` ON FACT_LINEITEM wide table
+```

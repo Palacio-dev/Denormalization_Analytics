@@ -1,0 +1,219 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-16_15-56-53
+Model: ollama_local
+Prompt: expert
+Schema: TPC_H
+==================================================
+
+# Executive Summary
+
+This design introduces a **Read-Optimized Physical Schema** alongside your existing OLTP normalized schema. The primary objective is to eliminate join latency for analytical queries (BI, Reporting, Dashboards) by pre-joining dimensions (NATION, REGION, SUPPLIER, PART) into fact tables (ORDERS, LINEITEM). 
+
+**Key Trade-offs:**
+1.  **Correctness:** The normalized tables remain the **Single Source of Truth (SSOT)**. The denormalized tables are read-replicas refreshed via batch/CDC.
+2.  **Complexity:** Introduces an ETL pipeline. Complexity is contained to the refresh layer, not the transactional layer.
+3.  **Staleness:** Denormalized data is refreshed within a **15-minute window** (assuming CDC) or **4-hour window** (assuming batch). Business logic must account for this lag if querying the denormalized layer.
+4.  **Reversibility:** The denormalized tables are separate physical objects. Dropping them restores the baseline performance state without data loss in the normalized tables.
+
+---
+
+# 1. Access-Pattern Matrix
+
+We identified three dominant query classes based on TPC-H and standard business reporting. The denormalization targets these specific join paths.
+
+| Query Class | Description | Normalized Join Path (Cost) | Denormalized Target | Target Schema Artifact |
+| :--- | :--- | :--- | :--- | :--- |
+| **Q1: Customer Revenue** | Sum revenue by Customer, filtered by Region/Nation. | `ORDERS` -> `CUSTOMER` -> `NATION` -> `REGION` | `ORDERS_WIDE` | `ORDERS_CUSTOMER_REGION_WIDE` |
+| **Q2: Supplier Performance** | Line item analysis by Supplier, Part, and Ship Mode. | `LINEITEM` -> `SUPPLIER` -> `PART` -> `ORDERS` -> `CUSTOMER` | `LINEITEM_WIDE` | `LINEITEM_PART_SUPPLIER_WIDE` |
+| **Q3: Inventory/Supply** | Available quantity by Supplier/Part/Region. | `PARTSUPP` -> `PART` -> `SUPPLIER` -> `NATION` | `PARTSUPP_WIDE` | `PARTSUPP_SUPPLIER_WIDE` |
+| **Q4: Order Status** | Order status distribution by Clerk/Region. | `ORDERS` -> `CUSTOMER` -> `NATION` | `ORDERS_WIDE` | `ORDERS_CUSTOMER_REGION_WIDE` |
+
+---
+
+# 2. Proposed Denormalized Schema (DDL)
+
+**Assumptions:**
+*   **Engine:** PostgreSQL (DDL syntax compatible).
+*   **Refresh Mechanism:** Batch/CDC based (No Triggers).
+*   **Storage:** Separate tables to avoid write contention on normalized tables.
+*   **Partitioning:** Enabled on time-based tables (`ORDERDATE`, `L_SHIPDATE`) to enable pruning.
+
+### 2.1 Wide Order Table (Customer + Region Context)
+**Target:** Q1, Q4 (Customer Revenue, Order Status).
+**Strategy:** Joins `ORDERS` + `CUSTOMER` + `NATION` + `REGION`.
+**Staleness:** Refreshed via CDC (15 min lag) or Batch (4 hr lag).
+
+```sql
+-- Artifact: ORDERS_CUSTOMER_REGION_WIDE
+-- Purpose: Eliminates 3-level joins for Customer Revenue queries.
+-- Staleness: ~15 minutes (CDC) or 4 hours (Batch).
+-- Reversibility: Dropping this table does not affect OLTP transactions.
+
+CREATE TABLE IF NOT EXISTS ORDERS_CUSTOMER_REGION_WIDE (
+    -- Primary Key: Composite of Order and Customer keys for uniqueness
+    O_ORDERKEY BIGINT NOT NULL,
+    O_CUSTKEY BIGINT NOT NULL,
+    O_TOTALPRICE DECIMAL(12,2) NOT NULL,
+    O_ORDERDATE DATE NOT NULL,
+    O_ORDERSTATUS VARCHAR(10) NOT NULL,
+    O_CLERK VARCHAR(15) NOT NULL,
+    O_SHIPMODE VARCHAR(10) NOT NULL,
+    
+    -- Denormalized Dimensions (Read-Only for this table)
+    C_NAME VARCHAR(25) NOT NULL,
+    C_ADDRESS VARCHAR(40) NOT NULL,
+    C_PHONE VARCHAR(15) NOT NULL,
+    C_ACCTBAL DECIMAL(12,2) NOT NULL,
+    C_MKTSEGMENT VARCHAR(10) NOT NULL,
+    
+    N_NAME VARCHAR(25) NOT NULL,
+    N_REGION VARCHAR(25) NOT NULL,
+    N_COMMENT VARCHAR(151) NOT NULL,
+    
+    R_NAME VARCHAR(25) NOT NULL,
+    R_COMMENT VARCHAR(151) NOT NULL,
+
+    -- Indexes for Query Filters
+    PRIMARY KEY (O_ORDERKEY, O_CUSTKEY),
+    INDEX (O_ORDERDATE) USING BTREE,
+    INDEX (N_REGION) USING BTREE,
+    INDEX (O_ORDERSTATUS) USING BTREE,
+    INDEX (C_MKTSEGMENT) USING BTREE
+) PARTITION BY RANGE (O_ORDERDATE); -- Allows pruning by date
+
+-- Index for common "Ship Mode" filtering
+CREATE INDEX IX_ORDERS_WIDE_SHIPMODE ON ORDERS_CUSTOMER_REGION_WIDE (O_SHIPMODE);
+```
+
+### 2.2 Wide LineItem Table (Supplier + Part Context)
+**Target:** Q2 (Supplier Performance, Inventory).
+**Strategy:** Joins `LINEITEM` + `ORDERS` + `CUSTOMER` + `NATION` + `REGION` + `PART` + `SUPPLIER`.
+
+```sql
+-- Artifact: LINEITEM_PART_SUPPLIER_WIDE
+-- Purpose: Eliminates 5-level joins for Supplier/Part analysis.
+-- Staleness: ~15 minutes (CDC) or 4 hours (Batch).
+-- Reversibility: Dropping this table does not affect OLTP transactions.
+
+CREATE TABLE IF NOT EXISTS LINEITEM_PART_SUPPLIER_WIDE (
+    -- Primary Key: Composite of Order, Line, and Part keys
+    L_ORDERKEY BIGINT NOT NULL,
+    L_LINENUMBER SMALLINT NOT NULL,
+    L_PARTKEY BIGINT NOT NULL,
+    L_SUPPKEY BIGINT NOT NULL,
+    L_QUANTITY DECIMAL(12,2) NOT NULL,
+    L_EXTENDEDPRICE DECIMAL(12,2) NOT NULL,
+    L_DISCOUNT DECIMAL(5,2) NOT NULL,
+    L_TAX DECIMAL(5,2) NOT NULL,
+    L_RETURNFLAG VARCHAR(1) NOT NULL,
+    L_LINestatus VARCHAR(1) NOT NULL,
+    L_SHIPDATE DATE NOT NULL,
+    L_COMMITDATE DATE NOT NULL,
+    L_RECEIPTDATE DATE NOT NULL,
+    L_SHIPINSTRUCT VARCHAR(25) NOT NULL,
+    L_SHIPMODE VARCHAR(10) NOT NULL,
+    L_COMMENT VARCHAR(44) NOT NULL,
+
+    -- Denormalized Dimensions
+    O_ORDERSTATUS VARCHAR(10) NOT NULL, -- From ORDERS
+    C_NAME VARCHAR(25) NOT NULL,        -- From CUSTOMER
+    C_ADDRESS VARCHAR(40) NOT NULL,
+    C_PHONE VARCHAR(15) NOT NULL,
+    C_ACCTBAL DECIMAL(12,2) NOT NULL,
+    C_MKTSEGMENT VARCHAR(10) NOT NULL,
+    
+    N_NAME VARCHAR(25) NOT NULL,
+    N_REGION VARCHAR(25) NOT NULL,
+    N_COMMENT VARCHAR(151) NOT NULL,
+    R_NAME VARCHAR(25) NOT NULL,
+    R_COMMENT VARCHAR(151) NOT NULL,
+    
+    P_NAME VARCHAR(55) NOT NULL,
+    P_MFGR VARCHAR(25) NOT NULL,
+    P_BRAND VARCHAR(10) NOT NULL,
+    P_TYPE VARCHAR(25) NOT NULL,
+    P_SIZE DECIMAL(2,0) NOT NULL,
+    P_CONTAINER VARCHAR(10) NOT NULL,
+    P_COMMENT VARCHAR(23) NOT NULL,
+    
+    S_NAME VARCHAR(25) NOT NULL,
+    S_ADDRESS VARCHAR(40) NOT NULL,
+    S_PHONE VARCHAR(15) NOT NULL,
+    S_ACCTBAL DECIMAL(12,2) NOT NULL,
+    S_MKTSEGMENT VARCHAR(10) NOT NULL,
+    S_COMMENT VARCHAR(101) NOT NULL,
+
+    -- Indexes for Query Filters
+    PRIMARY KEY (L_ORDERKEY, L_LINENUMBER, L_PARTKEY, L_SUPPKEY),
+    INDEX (L_SHIPDATE) USING BTREE,
+    INDEX (L_SHIPMODE) USING BTREE,
+    INDEX (S_MKTSEGMENT) USING BTREE,
+    INDEX (N_REGION) USING BTREE
+) PARTITION BY RANGE (L_SHIPDATE); -- Allows pruning by ship date
+```
+
+### 2.3 Wide PartSupply Table (Inventory Context)
+**Target:** Q3 (Inventory/Supply Analysis).
+**Strategy:** Joins `PARTSUPP` + `PART` + `SUPPLIER` + `NATION` + `REGION`.
+
+```sql
+-- Artifact: PARTSUPP_SUPPLIER_WIDE
+-- Purpose: Eliminates joins for Inventory/Supply analysis.
+-- Staleness: ~15 minutes (CDC) or 4 hours (Batch).
+
+CREATE TABLE IF NOT EXISTS PARTSUPP_SUPPLIER_WIDE (
+    PS_SUPPKEY BIGINT NOT NULL,
+    PS_PARTKEY BIGINT NOT NULL,
+    PS_AVAILQTY INTEGER NOT NULL,
+    PS_SUPPLYCOST DECIMAL(12,2) NOT NULL,
+    PS_COMMENT VARCHAR(199) NOT NULL,
+
+    -- Denormalized Dimensions
+    P_NAME VARCHAR(55) NOT NULL,
+    P_MFGR VARCHAR(25) NOT NULL,
+    P_BRAND VARCHAR(10) NOT NULL,
+    P_TYPE VARCHAR(25) NOT NULL,
+    P_SIZE DECIMAL(2,0) NOT NULL,
+    P_CONTAINER VARCHAR(10) NOT NULL,
+    P_COMMENT VARCHAR(23) NOT NULL,
+    
+    S_NAME VARCHAR(25) NOT NULL,
+    S_ADDRESS VARCHAR(40) NOT NULL,
+    S_PHONE VARCHAR(15) NOT NULL,
+    S_ACCTBAL DECIMAL(12,2) NOT NULL,
+    S_MKTSEGMENT VARCHAR(10) NOT NULL,
+    S_COMMENT VARCHAR(101) NOT NULL,
+    
+    N_NAME VARCHAR(25) NOT NULL,
+    N_REGION VARCHAR(25) NOT NULL,
+    N_COMMENT VARCHAR(151) NOT NULL,
+    R_NAME VARCHAR(25) NOT NULL,
+    R_COMMENT VARCHAR(151) NOT NULL,
+
+    PRIMARY KEY (PS_SUPPKEY, PS_PARTKEY),
+    INDEX (P_MFGR) USING BTREE,
+    INDEX (S_MKTSEGMENT) USING BTREE,
+    INDEX (N_REGION) USING BTREE
+) PARTITION BY RANGE (PS_AVAILQTY); -- Optional partitioning by quantity range
+```
+
+---
+
+# 3. Consistency Architecture
+
+Since we are creating **physical tables** (not materialized views), we must manage consistency explicitly.
+
+### 3.1 Refresh Strategy (ETL)
+We assume a **CDC (Change Data Capture)** or **Batch** pipeline exists.
+*   **Mechanism:** A background job (e.g., Airflow, Flink, or a custom Python script) extracts changes from the normalized tables.
+*   **Logic:**
+    1.  Extract `INSERT`/`UPDATE`/`DELETE` events from `ORDERS`, `CUSTOMER`, etc.
+    2.  Transform: Join the extracted rows with the latest dimension data.
+    3.  Load: `UPSERT` (MERGE) the data into the Wide Tables.
+*   **Lag:** The wide tables are **not** live. Queries must be aware of the **15-minute lag** (or 4-hour lag if batch).
+*   **Reconciliation:** A nightly job compares row counts and checksums of the normalized source vs. the denormalized target to detect data drift.
+
+### 3.2 Handling Updates
+*   **Source Update:** If `CUSTOMER` name changes in the normalized table, the denormalized table **does not update immediately**.
+*   **Impact:** The denormalized table reflects the customer name as of the last refresh.
+*   **Mitigation:** If a user queries the denormalized table and sees a "stale" name, the application layer should check the `LAST_REFRESH_TIMESTAMP` column (added to DDL) and alert if the data is older than the acceptable threshold.
