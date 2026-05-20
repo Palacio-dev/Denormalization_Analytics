@@ -1,0 +1,199 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_17-55-27
+Model: ollama_local
+Prompt: expert
+Schema: chinook
+==================================================
+
+# Executive Summary
+
+The current schema is a standard, normalized design typical of early SQL Server or legacy PostgreSQL migrations. It suffers from **read-path complexity**: queries requiring customer details, invoice totals, and artist information must perform multiple nested joins, leading to high CPU usage and latency on large datasets.
+
+The proposed solution introduces a **Denormalized "Sales & Catalog" Read-Optimized Schema**. Instead of relying on the transactional `Invoice` and `Track` tables for reporting, we introduce two new materialized tables: `InvoiceSummary` (pre-aggregated by time and customer) and `TrackMetadata` (pre-joined with Album/Artist/Genre). This approach eliminates the most common join patterns found in the top 20% of queries.
+
+**Trade-offs:**
+*   **Correctness:** The denormalized tables are **eventually consistent**. They will not reflect instantaneous changes to the source tables (e.g., an invoice updated at 10:00:01 AM will not appear in the summary until the next refresh cycle). A 5–15 minute staleness window is acceptable for analytical reports.
+*   **Complexity:** Requires a background job (or CDC listener) to maintain the denormalized tables.
+*   **Safety:** The source tables remain immutable regarding reads; the denormalized tables are append-only or overwrite-safe, minimizing lock contention during updates.
+
+---
+
+## 1. Model-to-Workload Mapping
+
+Based on typical SaaS/CRM workloads for this domain, the access pattern matrix identifies the following hotspots:
+
+| Query Class | Primary Filters | Join Requirements | Aggregations Needed | Latency Bottleneck |
+| :--- | :--- | :--- | :--- :--- |
+| **Sales Reporting** | `InvoiceDate` (Range), `CustomerId` | `Invoice` → `Customer` → `Employee` (Rep) | `SUM(Total)`, `COUNT(*)` | Joining `Invoice` + `Customer` + `Employee` |
+| **Catalog Discovery** | `GenreId`, `MediaType`, `ArtistName` | `Track` → `Album` → `Artist` → `Genre` | `COUNT`, `AVG(Bytes)` | Multi-table join chain (4+ tables) |
+| **Customer View** | `CustomerId`, `InvoiceDate` | `Customer` → `Invoice` → `InvoiceLine` | `SUM(Total)`, `AVG(Total)` | Joining `Customer` with line-item aggregates |
+
+**Identified Hotspots:**
+1.  **Join Hotspot:** `Invoice` (many-to-many via `InvoiceLine`) joining `Customer` and `Employee`.
+2.  **Aggregation Hotspot:** Summing `Total` per customer per month/day.
+3.  **Lookup Latency:** Resolving `TrackId` to human-readable `Artist/Album/Genre` names repeatedly.
+
+---
+
+## 2. Denormalization Patterns & Justification
+
+We will implement three specific patterns to address the bottlenecks:
+
+### A. Pre-Aggregated Rollup (`InvoiceSummary`)
+*   **Pattern:** Aggregate `Invoice` and `InvoiceLine` data into a fixed granularity (Daily/Monthly) per Customer.
+*   **Justification:** Eliminates the need to scan and aggregate `InvoiceLine` rows during reporting. Reduces row count from millions to thousands.
+*   **Staleness:** Requires a refresh window (e.g., hourly or daily).
+
+### B. Wide Read Dimension (`TrackMetadata`)
+*   **Pattern:** Create a denormalized table containing all joinable fields from `Track`, `Album`, `Artist`, `Genre`, and `MediaType`.
+*   **Justification:** Enables "SELECT * FROM TrackMetadata WHERE Genre = ..." without joining 4 tables.
+*   **Staleness:** Requires a full table rebuild or incremental update on schema changes.
+
+### C. Snapshot Table (`CustomerProfile`)
+*   **Pattern:** A table holding the latest known state of Customer + Support Rep details.
+*   **Justification:** Optimizes "Who is the support rep for customer X?" queries which currently require a join.
+
+---
+
+## 3. Physical Design Details (DDL)
+
+*Note: These tables are **read-only** in the transactional context. They are updated via a separate ETL process or Change Data Capture (CDC) pipeline. No triggers are used.*
+
+### 3.1. Pre-Aggregated Sales Summary
+**Goal:** Fast calculation of sales per customer per day.
+**Assumption:** Business day granularity is preferred over calendar day.
+
+```sql
+CREATE TABLE IF NOT EXISTS public."InvoiceSummary"
+(
+    "DateKey" date NOT NULL, -- Business Day Key
+    "CustomerId" integer NOT NULL,
+    "TotalRevenue" numeric(12, 2) NOT NULL,
+    "InvoiceCount" integer NOT NULL,
+    "AvgTicketSize" numeric(10, 2) NOT NULL,
+    CONSTRAINT "PK_InvoiceSummary" PRIMARY KEY ("DateKey", "CustomerId"),
+    -- Index for filtering by date range and customer
+    CONSTRAINT "IX_InvoiceSummary_DateCustomer" UNIQUE ("DateKey", "CustomerId")
+);
+
+-- Indexing Strategy:
+-- Clustered on (DateKey, CustomerId) for efficient range scans.
+-- Secondary index on (CustomerId) for "Customer Lifetime Value" queries.
+CREATE INDEX IF NOT EXISTS "IX_InvoiceSummary_Customer" 
+    ON public."InvoiceSummary" ("CustomerId");
+```
+
+### 3.2. Wide Read Catalog View
+**Goal:** Eliminate joins for catalog queries.
+**Assumption:** TrackId is the unique identifier; we store the joined attributes.
+
+```sql
+CREATE TABLE IF NOT EXISTS public."TrackMetadata"
+(
+    "TrackId" integer NOT NULL,
+    "Name" character varying(200) NOT NULL,
+    "AlbumTitle" character varying(160),
+    "ArtistName" character varying(120),
+    "GenreName" character varying(120),
+    "MediaTypeName" character varying(120),
+    "Composer" character varying(220),
+    "Milliseconds" integer,
+    "Bytes" integer,
+    "UnitPrice" numeric(10, 2),
+    CONSTRAINT "PK_TrackMetadata" PRIMARY KEY ("TrackId"),
+    -- Index on common filter columns
+    CONSTRAINT "IX_TrackMetadata_Genre" UNIQUE ("GenreName"),
+    CONSTRAINT "IX_TrackMetadata_Artist" UNIQUE ("ArtistName")
+);
+```
+
+### 3.3. Customer Support Snapshot
+**Goal:** Instant retrieval of support rep info.
+**Assumption:** SupportRepId changes are infrequent compared to invoice creation.
+
+```sql
+CREATE TABLE IF NOT EXISTS public."CustomerProfile"
+(
+    "CustomerId" integer NOT NULL,
+    "FirstName" character varying(40) NOT NULL,
+    "LastName" character varying(20) NOT NULL,
+    "Company" character varying(80),
+    "SupportRepId" integer,
+    "SupportRepLastName" character varying(20),
+    "SupportRepFirstName" character varying(20),
+    CONSTRAINT "PK_CustomerProfile" PRIMARY KEY ("CustomerId"),
+    CONSTRAINT "IX_CustomerProfile_Rep" UNIQUE ("SupportRepId")
+);
+```
+
+---
+
+## 4. Consistency Architecture & Data Lineage
+
+| Source of Truth (SoT) | Denormalized Artifact | Lineage Logic | Staleness Window |
+| :--- | :--- | :--- | :--- |
+| `Invoice` (Total, Date, CustId) | `InvoiceSummary` | `SUM(Total)` grouped by `(Date, CustId)` | **5–15 mins** (Batch refresh) |
+| `Track` + `Album` + `Artist` + `Genre` + `MediaType` | `TrackMetadata` | `SELECT ... FROM ... JOIN ...` (Full join) | **15–60 mins** (Full rebuild) |
+| `Customer` + `Employee` (SupportRep) | `CustomerProfile` | `SELECT ... FROM ... JOIN ...` | **1–5 mins** (CDC or Poll) |
+
+**Refresh Mechanism Recommendation:**
+Do not use `CREATE MATERIALIZED VIEW` if the database engine lacks robust refresh capabilities (e.g., older PostgreSQL versions or strict ACID requirements for the *reporting* tier). Instead, implement a **background job**:
+1.  **Trigger:** Run every 10 minutes.
+2.  **Action:** Truncate denormalized tables -> Insert fresh data from normalized tables.
+3.  **Fallback:** If the job fails, alert on "Data Lag".
+
+---
+
+## 5. Risk Analysis & Monitoring
+
+### Risks
+1.  **Write Amplification:** The denormalized tables are write-heavy during refresh.
+    *   *Mitigation:* Schedule refresh during off-peak hours (e.g., 02:00–04:00 UTC).
+2.  **Data Divergence:** If the normalized schema changes (e.g., adding a new column to `Track`), the denormalized tables must be updated manually or via script.
+    *   *Mitigation:* Add a `LastRefreshedAt` timestamp column to all denormalized tables.
+3.  **Storage Growth:** `TrackMetadata` stores repeated text.
+    *   *Mitigation:* Acceptable for read-optimized workloads. If storage becomes critical, consider partitioning `TrackMetadata` by `GenreName`.
+
+### Monitoring & Alerts
+Define the following metrics to track health:
+
+1.  **Freshness Lag:**
+    *   *Metric:* `MAX(InvoiceDate) - MAX(InvoiceSummary.DateKey)`
+    *   *Alert:* If lag > 10 minutes.
+2.  **Reconciliation Diff:**
+    *   *Metric:* `SUM(InvoiceSummary.TotalRevenue) != SUM(Invoice.Total)`
+    *   *Alert:* If absolute difference > $0.01 (floating point tolerance).
+3.  **Query Latency Regression:**
+    *   *Metric:* P99 latency on `SELECT * FROM TrackMetadata`
+    *   *Alert:* If latency increases by > 20% compared to baseline.
+
+### Operational Complexity
+*   **Maintenance:** One DBA/DevOps engineer must manage the refresh job.
+*   **Reversibility:** If the denormalized tables are deleted, the normalized schema remains intact. No data loss occurs.
+*   **Trigger Constraints:** **No triggers** are used. All updates are application-driven (ETL) to ensure atomicity of the refresh process.
+
+---
+
+## Implementation Plan (Safe & Observable)
+
+1.  **Phase 1: Validation (Day 1)**
+    *   Create `InvoiceSummary` and `TrackMetadata` empty.
+    *   Run a one-time `INSERT` to populate initial data.
+    *   Verify row counts match expected calculations.
+    *   *Check:* `SELECT COUNT(*) FROM InvoiceSummary` vs `SELECT COUNT(DISTINCT InvoiceId) FROM Invoice`.
+
+2.  **Phase 2: Job Creation (Day 2)**
+    *   Deploy the background refresh script (SQL stored procedure or Python script calling `pg_dump`/`psql`).
+    *   Configure cron/scheduler for 10-minute intervals.
+    *   Add `LastRefreshedAt` timestamp columns to the DDL.
+
+3.  **Phase 3: Query Migration (Day 3+)**
+    *   Update application code to query `TrackMetadata` instead of joining 4 tables.
+    *   Update reporting dashboards to use `InvoiceSummary`.
+    *   *Note:* Keep normalized queries available for audit trails.
+
+4.  **Phase 4: Monitoring (Day 5+)**
+    *   Enable the alerting rules defined in Section 5.
+    *   Review logs for any reconciliation failures.
+
+This design provides an immediate, measurable improvement in read performance for the identified query classes while maintaining a clear, auditable path to correctness.

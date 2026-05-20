@@ -1,0 +1,176 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-20_09-47-19
+Model: gemini
+Prompt: intermediate
+Schema: ex06
+==================================================
+
+As a Senior Database Performance Engineer, I have analyzed your physical schema. Your current model is highly normalized (approaching a snowflake schema). While excellent for OLTP (inserts/updates) and avoiding data anomalies, it is actively hostile to read-heavy analytical workloads. 
+
+Here is the step-by-step denormalization strategy to optimize your database for low-latency reads while preserving business correctness.
+
+---
+
+### 1. Workload-Driven Analysis
+
+In educational datasets (like INEP/MEC data in Brazil, which this clearly mirrors), read workloads are heavily analytical (OLAP). I have identified the following high-cost operations based on your schema:
+
+*   **High-Cost Join Path 1 (Geographical Aggregations):** To find the average ENADE or IDEB score for a specific State (`UF`), the database must execute a 5-to-6 table join: `UF` → `MUNICIPIO` → `IES` → `CURSO` → `ANO` → `ENADE/IDEB`. This causes massive CPU overhead and memory spilling on large datasets.
+*   **High-Cost Join Path 2 (Metric Lookups):** Your `ANO` table acts as a "factless fact table" that merely glues IDs together. To get the actual scores for a course in a given year, the engine must join `ANO` to `ENADE`, `SAEB`, and `IDEB`. This requires 4 random I/O lookups per row.
+*   **Update Contention (The `MUNICIPIO` table):** Your `MUNICIPIO` table contains hardcoded aggregates (`media_ideb`, `qtd_IES`). In a normalized system, keeping these updated requires complex triggers or batch jobs, leading to lock contention.
+
+### 2. Denormalization Design
+
+To achieve sub-second read latency, we will transition from a Snowflake schema to a **Star Schema with a Wide Fact Table and Materialized Views**.
+
+*   **Flattened Wide Fact Table (`fact_avaliacao`):** We will merge `ANO`, `ENADE`, `SAEB`, and `IDEB` into a single table. 
+    *   *Why:* This eliminates 3 joins instantly. Educational scores are generated once a year and rarely updated. A wide table is perfect for this immutable data.
+*   **Redundant "Degenerate" Dimensions:** We will inject `sigla_uf`, `id_municipio`, and `rede` directly into the fact table.
+    *   *Why:* 90% of analytical queries filter by State, City, or Public/Private network. By placing these in the fact table, we can aggregate metrics *without joining dimension tables at all*.
+*   **Pre-joined Dimensions (`dim_localidade` & `dim_curso_ies`):** We will combine `UF` + `MUNICIPIO` and `IES` + `CURSO`. 
+    *   *Why:* Users rarely query a Course without wanting to know its Institution, or a City without its State.
+*   **Materialized View for Aggregates:** We will remove the aggregate columns from the `MUNICIPIO` table and replace them with a Materialized View (`mv_resumo_municipio_ano`).
+    *   *Why:* This preserves data correctness (calculated directly from the source of truth) while providing instant O(1) read times for dashboards.
+*   **Partitioning:** The fact table will be partitioned by `ano` (Year).
+    *   *Why:* Queries almost always filter or group by year. Partition pruning will allow the database to skip scanning irrelevant years entirely.
+
+---
+
+### 3. New Physical Schema (DDL)
+
+*Note: Written for PostgreSQL, utilizing standard modern features.*
+
+```sql
+-- ============================================================================
+-- 1. DIMENSION TABLES (Pre-joined and flattened)
+-- ============================================================================
+
+DROP TABLE IF EXISTS dim_localidade CASCADE;
+CREATE TABLE dim_localidade (
+    id_municipio INT PRIMARY KEY,
+    nome_municipio VARCHAR(100) NOT NULL,
+    id_uf INT NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    qtd_habitantes_uf INT CHECK(qtd_habitantes_uf >= 0)
+);
+-- Index for filtering by state
+CREATE INDEX idx_dim_localidade_uf ON dim_localidade(sigla_uf);
+
+DROP TABLE IF EXISTS dim_curso_ies CASCADE;
+CREATE TABLE dim_curso_ies (
+    id_curso INT PRIMARY KEY,
+    nome_curso VARCHAR(100) NOT NULL,
+    id_ies INT NOT NULL,
+    nome_ies VARCHAR(100) NOT NULL,
+    sigla_ies VARCHAR(20),
+    codigo_ies INT NOT NULL,
+    rede VARCHAR(100) NOT NULL,
+    id_municipio INT NOT NULL REFERENCES dim_localidade(id_municipio)
+);
+-- Index for filtering by network (Public/Private) and geography
+CREATE INDEX idx_dim_curso_ies_rede ON dim_curso_ies(rede);
+CREATE INDEX idx_dim_curso_ies_mun ON dim_curso_ies(id_municipio);
+
+DROP TABLE IF EXISTS dim_escola CASCADE;
+CREATE TABLE dim_escola (
+    id_escola INT PRIMARY KEY,
+    nome_escola VARCHAR(100) NOT NULL,
+    cod_escola INTEGER UNIQUE NOT NULL,
+    rede VARCHAR(100) NOT NULL,
+    id_municipio INT NOT NULL REFERENCES dim_localidade(id_municipio)
+);
+
+-- ============================================================================
+-- 2. WIDE FACT TABLE (Partitioned by Year)
+-- ============================================================================
+
+DROP TABLE IF EXISTS fact_avaliacao CASCADE;
+CREATE TABLE fact_avaliacao (
+    id_avaliacao BIGINT GENERATED ALWAYS AS IDENTITY,
+    ano INT NOT NULL,
+    id_curso INT NOT NULL REFERENCES dim_curso_ies(id_curso),
+    
+    -- Degenerate Dimensions (Redundant data to eliminate joins on heavy reads)
+    id_municipio INT NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    rede VARCHAR(100) NOT NULL,
+
+    -- ENADE Metrics
+    enade_total_inscritos INT CHECK (enade_total_inscritos >= 0),
+    enade_total_concluintes INT CHECK (enade_total_concluintes >= 0),
+    enade_nota_bruta_ce REAL,
+    enade_nota_padronizada_ce REAL,
+    enade_nota_bruta_fg REAL,
+    enade_nota_padronizada_fg REAL,
+    enade_nota_continua REAL,
+    enade_nota_faixa REAL,
+
+    -- SAEB Metrics
+    saeb_nota_mat REAL,
+    saeb_nota_port REAL,
+    saeb_nota_padrao REAL,
+
+    -- IDEB Metrics
+    ideb_rend_1 REAL,
+    ideb_rend_2 REAL,
+    ideb_rend_3 REAL,
+    ideb_rend_4 REAL,
+    ideb_ind_rend REAL,
+    ideb_nota REAL,
+    
+    PRIMARY KEY (ano, id_avaliacao) -- Year must be in PK for partitioning
+) PARTITION BY RANGE (ano);
+
+-- Create partitions for current and upcoming years
+CREATE TABLE fact_avaliacao_2022 PARTITION OF fact_avaliacao FOR VALUES FROM (2022) TO (2023);
+CREATE TABLE fact_avaliacao_2023 PARTITION OF fact_avaliacao FOR VALUES FROM (2023) TO (2024);
+CREATE TABLE fact_avaliacao_2024 PARTITION OF fact_avaliacao FOR VALUES FROM (2024) TO (2025);
+
+-- ============================================================================
+-- 3. INDEXING STRATEGY FOR THE FACT TABLE
+-- ============================================================================
+
+-- Composite index to serve the most common geographical dashboard queries 
+-- (e.g., "Show me all scores for SP in 2023")
+CREATE INDEX idx_fact_geography ON fact_avaliacao (ano, sigla_uf, id_municipio);
+
+-- Composite index for Institutional/Network analysis
+-- (e.g., "Compare public vs private performance in 2023")
+CREATE INDEX idx_fact_rede ON fact_avaliacao (ano, rede);
+
+-- Index for specific course lookups
+CREATE INDEX idx_fact_curso ON fact_avaliacao (id_curso, ano);
+
+-- ============================================================================
+-- 4. MATERIALIZED VIEW (Replacing hardcoded aggregates in MUNICIPIO)
+-- ============================================================================
+-- This replaces the fragile, manually updated aggregate columns in your old 
+-- MUNICIPIO table. Refresh this concurrently after nightly ETL loads.
+
+DROP MATERIALIZED VIEW IF EXISTS mv_resumo_municipio_ano;
+CREATE MATERIALIZED VIEW mv_resumo_municipio_ano AS
+SELECT 
+    f.ano,
+    f.id_municipio,
+    f.sigla_uf,
+    COUNT(DISTINCT c.id_ies) AS qtd_IES,
+    COUNT(DISTINCT f.id_curso) AS qtd_cursos,
+    SUM(f.enade_total_inscritos) AS total_participantes,
+    AVG(f.ideb_nota) AS media_ideb,
+    AVG(f.saeb_nota_padrao) AS media_saeb,
+    AVG(f.enade_nota_continua) AS media_enade
+FROM fact_avaliacao f
+JOIN dim_curso_ies c ON f.id_curso = c.id_curso
+GROUP BY f.ano, f.id_municipio, f.sigla_uf;
+
+-- Unique index allows for CONCURRENTLY refreshing the materialized view 
+-- without locking reads for your users.
+CREATE UNIQUE INDEX idx_mv_resumo_mun_ano ON mv_resumo_municipio_ano(ano, id_municipio);
+CREATE INDEX idx_mv_resumo_uf ON mv_resumo_municipio_ano(ano, sigla_uf);
+```
+
+### Summary of Performance Gains:
+1. **Zero-Join Aggregations:** You can now calculate the average ENADE score for the state of São Paulo (`sigla_uf = 'SP'`) by querying `fact_avaliacao` directly. The old schema required 5 joins.
+2. **O(1) Dashboard Loads:** The city-level statistics are now pre-calculated in `mv_resumo_municipio_ano`. Dashboards querying city statistics will return in milliseconds.
+3. **I/O Reduction:** Because `fact_avaliacao` is partitioned by `ano`, a query for `ano = 2023` will completely ignore the disk files for 2022 and 2024.

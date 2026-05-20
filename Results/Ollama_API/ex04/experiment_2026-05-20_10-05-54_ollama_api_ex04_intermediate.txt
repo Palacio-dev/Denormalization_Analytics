@@ -1,0 +1,232 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-20_10-05-54
+Model: ollama_api
+Prompt: intermediate
+Schema: ex04
+==================================================
+
+To optimize **read performance** on your schema while preserving data integrity, we'll proceed through a structured approach:
+
+---
+
+## ✅ 1. WORKLOAD-DRIVEN ANALYSIS
+
+### 🔍 Query Patterns Assumed (Based on Schema & Common BI Use Cases)
+
+| Pattern | Description |
+|--------|-------------|
+| **Q1** | Get poverty indicators (headcount, poverty gap, etc.) with region info by country/year |
+| **Q2** | Analyze deciles per survey including survey metadata like welfare type and year |
+| **Q3** | Demographics + population breakdowns (gender, age group) filtered by country/year |
+| **Q4** | Employment stats joined with economy indicators for multi-dimensional analysis |
+| **Q5** | Education outcomes compared against health metrics across years/countries |
+
+These queries often involve multiple joins, especially from `survey` ➝ `country` ➝ `region`, or `demography` ➝ `population`.
+
+### 🧨 High-Cost Operations Identified:
+- Join between `survey.country_code → country.country_code → region.region_code`
+- Joins from parent-child tables: `demography.id_demography → population/life_expectancy`
+- Repeated lookups of static reference values (`region_name`, `country_name`)
+- Aggregations over large fact tables without summaries
+
+---
+
+## ✅ 2. DENORMALIZATION DESIGN
+
+We will apply these techniques:
+
+| Technique | Purpose | Applied To |
+|----------|---------|------------|
+| Redundant Attributes | Eliminate joins | Country/Region names into Survey |
+| Pre-Joined Wide Tables | Reduce runtime joins | Fact table consolidation |
+| Summary Tables | Speed up aggregate queries | Yearly averages per region |
+| Covering Indexes | Optimize filtering/sorting | Composite index support |
+| Partitioning | Improve scan speed | By year in large time-series tables |
+
+---
+
+## ✅ 3. NEW PHYSICAL SCHEMA WITH DDL
+
+Below is the fully denormalized schema optimized for reads.
+
+```sql
+-- Denormalized wide survey table with embedded region/country details
+CREATE TABLE IF NOT EXISTS public.survey_denorm (
+    id_survey serial NOT NULL PRIMARY KEY,
+    country_code varchar NOT NULL,
+    country_name varchar,
+    region_code varchar NOT NULL,
+    region_name varchar,
+    welfare_type varchar,
+    survey_acronym varchar,
+    survey_comparability int,
+    comparable_spell varchar,
+    poverty_line double precision,
+    headcount double precision,
+    poverty_gap double precision,
+    poverty_severity double precision,
+    gini double precision,
+    reporting_pop int,
+    reporting_pce double precision,
+    distribution_type varchar,
+    spl double precision,
+    survey_year int,
+    survey_coverage varchar,
+    reporting_level varchar
+);
+
+-- Denormalized demographic snapshot with embedded country name
+CREATE TABLE IF NOT EXISTS public.demography_denorm (
+    id_demography serial NOT NULL PRIMARY KEY,
+    year int,
+    country_code varchar NOT NULL,
+    country_name varchar,
+    pop_density double precision,
+    urban_pop double precision,
+    rural_pop double precision,
+    net_migration double precision,
+    death_rate double precision,
+    birth_rate double precision
+);
+
+-- Population breakdown merged with demography (pre-join)
+CREATE TABLE IF NOT EXISTS public.population_denorm (
+    id_population serial NOT NULL PRIMARY KEY,
+    id_demography int NOT NULL,
+    year int,
+    country_code varchar,
+    country_name varchar,
+    pop_ages varchar,
+    gender varchar,
+    number double precision
+);
+
+-- Life expectancy merged with demography
+CREATE TABLE IF NOT EXISTS public.life_expectancy_denorm (
+    id_life_expectancy serial NOT NULL PRIMARY KEY,
+    id_demography int NOT NULL,
+    year int,
+    country_code varchar,
+    country_name varchar,
+    gender varchar,
+    value double precision
+);
+
+-- Employment merged with economy indicators (fact consolidation)
+CREATE TABLE IF NOT EXISTS public.employment_economy_denorm (
+    id_employment serial NOT NULL PRIMARY KEY,
+    year int,
+    country_code varchar NOT NULL,
+    country_name varchar,
+    child_emp double precision,
+    unemp double precision,
+    vulnerable_emp double precision,
+    part_time double precision,
+    employers double precision,
+    labor_force_total double precision,
+    labor_force_fem double precision,
+    gdp double precision,
+    inflation double precision,
+    tax_revenue double precision
+);
+
+-- Education merged with health metrics
+CREATE TABLE IF NOT EXISTS public.education_health_denorm (
+    id_education serial NOT NULL PRIMARY KEY,
+    year int,
+    country_code varchar NOT NULL,
+    country_name varchar,
+    child_out_of_school double precision,
+    progression_to_sec double precision,
+    expenditure double precision,
+    preprim_enroll double precision,
+    prim_enrol double precision,
+    sec_enrol double precision,
+    terti_enrol double precision,
+    hospital_beds double precision,
+    physicians double precision,
+    health_expenditure double precision
+);
+
+-- Aggregate summary view by region and year (materialized view candidate)
+CREATE MATERIALIZED VIEW public.summary_by_region_year AS
+SELECT 
+    s.region_code,
+    s.region_name,
+    s.survey_year,
+    AVG(s.headcount) AS avg_headcount,
+    AVG(s.poverty_gap) AS avg_poverty_gap,
+    AVG(s.gini) AS avg_gini,
+    SUM(s.reporting_pop) AS total_reporting_pop
+FROM public.survey_denorm s
+GROUP BY s.region_code, s.region_name, s.survey_year;
+
+-- Materialized View Refresh Policy (Optional but recommended)
+-- REFRESH MATERIALIZED VIEW CONCURRENTLY public.summary_by_region_year;
+```
+
+---
+
+## 📈 INDEX STRATEGY (Optimized for Read Filters)
+
+### Survey Table
+```sql
+CREATE INDEX idx_survey_country_year ON public.survey_denorm(country_code, survey_year);
+CREATE INDEX idx_survey_welfare_type ON public.survey_denorm(welfare_type);
+CREATE INDEX idx_survey_region_year_covering 
+ON public.survey_denorm(region_code, survey_year)
+INCLUDE (headcount, poverty_gap, gini);
+```
+
+### Demography / Population
+```sql
+CREATE INDEX idx_demog_country_year ON public.demography_denorm(country_code, year);
+CREATE INDEX idx_pop_country_year_gender_age 
+ON public.population_denorm(country_code, year, gender, pop_ages);
+```
+
+### Employment-Economy
+```sql
+CREATE INDEX idx_employment_country_year ON public.employment_economy_denorm(country_code, year);
+CREATE INDEX idx_employment_unemp_gdp_covering 
+ON public.employment_economy_denorm(unemp, gdp)
+INCLUDE (labor_force_total, inflation);
+```
+
+### Education-Health
+```sql
+CREATE INDEX idx_eduhealth_country_year ON public.education_health_denorm(country_code, year);
+CREATE INDEX idx_eduhealth_expenditure_covering 
+ON public.education_health_denorm(expenditure DESC)
+INCLUDE (hospital_beds, physicians);
+```
+
+---
+
+## ⚙️ PARTITIONING RECOMMENDATIONS (If Engine Supports It)
+
+Apply partitioning to large tables based on `year` field:
+```sql
+-- Example for employment_economy_denorm
+ALTER TABLE public.employment_economy_denorm
+PARTITION BY RANGE (year);
+
+CREATE TABLE employment_economy_y2020 PARTITION OF employment_economy_denorm
+FOR VALUES FROM (2020) TO (2021);
+
+CREATE TABLE employment_economy_y2021 PARTITION OF employment_economy_denorm
+FOR VALUES FROM (2021) TO (2022);
+...
+```
+
+This helps prune irrelevant partitions during scans.
+
+---
+
+## 📋 FINAL NOTES ON CORRECTNESS
+
+All critical business fields such as `gini`, `headcount`, `poverty_line`, `reporting_pop` are preserved directly in the denormalized models. Foreign key constraints have been replaced with inline duplication where necessary, which trades referential consistency at write-time for much faster read performance—appropriate for OLAP-style analytics systems.
+
+You should consider using **materialized views** refreshed periodically (e.g., nightly) rather than real-time ETL updates if writes are infrequent.
+
+Let me know if you'd like this translated into Postgres, Snowflake, BigQuery, or another engine!

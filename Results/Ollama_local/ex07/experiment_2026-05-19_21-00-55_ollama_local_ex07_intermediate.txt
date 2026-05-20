@@ -1,0 +1,183 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_21-00-55
+Model: ollama_local
+Prompt: intermediate
+Schema: ex07
+==================================================
+
+### Workload-Driven Analysis & Strategy
+
+Based on the provided schema, the current design suffers from **high cardinality join chains** and **missing pre-aggregations**, which are fatal for read-heavy workloads.
+
+#### 1. Problem Identification
+*   **The Join Chain Bottleneck**: A typical read query (e.g., "Find all hydroelectric plants in Rio Grande do Sul owned by State X") requires joining: `Usina` → `Localizacoes` → `Municipios` (twice) → `Estados`.
+    *   *Cost*: Every row in `Usina` must match, then scan `Localizacoes`, then filter `Municipios`, then filter `Estados`. With millions of rows, this is an $O(N^2)$ operation in the worst case due to nested loops if indexes are missing or misaligned.
+*   **Geospatial Search Inefficiency**: Searching by `lat`/`long` combined with `uf` or `municipio` requires complex multi-column index lookups. If the query filters on location coordinates and administrative regions, the database must perform a Cartesian product before filtering.
+*   **Missing Aggregates**: There is no pre-computed data for "Total Power by State," "Plant Count by Owner," or "Power per Municipality." Calculating these on the fly (`SUM(potkw)`, `COUNT(*)`) blocks the query engine until the join completes.
+
+#### 2. Denormalization Candidates
+To optimize latency, we will adopt a **Star Schema** approach for the read model:
+1.  **Denormalize `Usina`**: Embed `uf` (State), `nome_municipio` (Municipality name), and `rio_nome` directly into the `Usina` table. This eliminates the need to join `Estados`, `Municipios`, and `Rios` for every read.
+2.  **Denormalize `Localizacoes`**: Store `uf` and `nome_municipio` directly to avoid joining `Municipios` twice.
+3.  **Create Precomputed Aggregates**: Build a `Fatos_Usina_por_Estado` table for instant regional summaries.
+4.  **Covering Indexes**: Create composite indexes on `(uf, nome_municipio)` and `(lat, long)` to allow "seek" operations without scanning full tables.
+
+---
+
+### New Physical Schema Design
+
+#### Key Changes Summary:
+*   **`Usina` (Read-Optimized)**: Added columns `uf`, `nome_municipio`, `rio_nome`. Removed foreign keys to `Estados`, `Municipios`, `Rios` (replaced by covering indexes).
+*   **`Localizacoes` (Read-Optimized)**: Added `uf` and `nome_municipio`. Removed FK to `Municipios`.
+*   **`Fatos_Usina_por_Estado`**: A materialized fact table with grain `(uf, ano)` containing `total_power_kw`, `plant_count`, `avg_efficiency`.
+*   **Index Strategy**:
+    *   `IX_Usina_Geo`: Composite index on `(lat, long)` for geospatial filtering.
+    *   `IX_Usina_Admin`: Composite index on `(uf, nome_municipio)` for administrative queries.
+    *   `IX_Fatos_Usina`: Composite index on `(uf, ano)` for time-series aggregation queries.
+
+#### DDL: Denormalized Schema
+
+```sql
+-- --------------------------------------------------------
+-- 1. Core Reference Tables (Minimalized for Write Performance)
+-- --------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public."Estados" (
+    uf CHAR(2) PRIMARY KEY,
+    nome VARCHAR(100) NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS public."Municipios" (
+    id_municipio SERIAL PRIMARY KEY,
+    uf CHAR(2) NOT NULL,
+    nome_municipio VARCHAR(200) NOT NULL,
+    -- FK is implicit via application logic or a separate small lookup table if strict referential integrity is needed
+    -- For denormalized reads, we treat 'uf' as the key here.
+    CONSTRAINT chk_uf_length CHECK (LENGTH(uf) = 2)
+);
+
+CREATE TABLE IF NOT EXISTS public."Rios" (
+    id_rio INTEGER PRIMARY KEY,
+    nome_rio VARCHAR(200) NOT NULL
+);
+
+-- --------------------------------------------------------
+-- 2. Read-Optimized Fact Tables (Denormalized)
+-- --------------------------------------------------------
+
+-- Denormalized Usina: Embeds State, Municipality, and River names to eliminate joins
+CREATE TABLE IF NOT EXISTS public."Usina" (
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR(200) NOT NULL,
+    potkw FLOAT NOT NULL,
+    potfis FLOAT NOT NULL,
+    iniciop DATE NOT NULL,
+    atualizacao DATE NOT NULL,
+    lat DOUBLE PRECISION NOT NULL,
+    long DOUBLE PRECISION NOT NULL,
+    estagio VARCHAR(50),
+    
+    -- DENORMALIZED ATTRIBUTES (Read Performance Critical)
+    uf CHAR(2) NOT NULL,
+    nome_municipio VARCHAR(200) NOT NULL,
+    nome_rio VARCHAR(200) NOT NULL,
+    
+    -- Index Strategy: Covering index for Geo + Admin queries
+    -- This allows queries like: SELECT * FROM Usina WHERE lat > 10 AND long < 20 AND uf = 'RS'
+    -- to run entirely within this index without touching heap data.
+    CREATE INDEX IX_Usina_Geo_Admin ON public."Usina"(lat, long, uf, nome_municipio);
+    
+    -- Index for filtering by State only
+    CREATE INDEX IX_Usina_State ON public."Usina"(uf);
+    
+    -- Index for primary search by name
+    CREATE INDEX IX_Usina_Nome ON public."Usina"(nome);
+);
+
+-- Denormalized Localizacoes: Embeds Municipality info to avoid double joins
+CREATE TABLE IF NOT EXISTS public."Localizacoes" (
+    id_localização INTEGER PRIMARY KEY,
+    longitude DOUBLE PRECISION NOT NULL,
+    latitude DOUBLE PRECISION NOT NULL,
+    
+    -- DENORMALIZED ATTRIBUTES
+    uf CHAR(2) NOT NULL,
+    nome_municipio VARCHAR(200) NOT NULL,
+    
+    -- Covering index for location + admin queries
+    CREATE INDEX IX_Localizacoes_Geo_Admin ON public."Localizacoes"(longitude, latitude, uf, nome_municipio);
+);
+
+-- --------------------------------------------------------
+-- 3. Materialized Aggregate Tables (Pre-computed)
+-- --------------------------------------------------------
+-- Grain: (State, Year)
+-- Use case: "Show total power capacity in each state for the last 5 years"
+-- Without this, the DB must SUM(potkw) over potentially millions of rows for every query.
+CREATE TABLE IF NOT EXISTS public."Fatos_Usina_por_Estado" (
+    uf CHAR(2) NOT NULL,
+    ano INTEGER NOT NULL,
+    total_power_kw BIGINT NOT NULL,
+    plant_count INTEGER NOT NULL,
+    avg_pot_per_plant FLOAT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Index for time-series range queries (e.g., WHERE ano BETWEEN 2020 AND 2023)
+CREATE INDEX IX_Fatos_Usina_Tempo ON public."Fatos_Usina_por_Estado"(ano, uf);
+
+-- --------------------------------------------------------
+-- 4. Helper Views for Complex Denormalized Queries
+-- --------------------------------------------------------
+-- Use case: "Find plants in a specific municipality with power > 100MW"
+-- This view joins the denormalized Usina table with itself if a municipality spans multiple records, 
+-- or simply filters the denormalized Usina table directly.
+CREATE OR REPLACE VIEW public."Usina_Vista_Municipal" AS
+SELECT 
+    u.id,
+    u.nome,
+    u.potkw,
+    u.uf,
+    u.nome_municipio,
+    u.lat,
+    u.long
+FROM public."Usina" u
+JOIN public."Municipios" m ON u.nome_municipio = m.nome_municipio 
+    AND u.uf = m.uf; -- Optional join if strict consistency on name spelling is needed, 
+                     -- otherwise rely on direct columns in Usina
+
+-- Use case: "Top 10 states by power capacity"
+CREATE OR REPLACE VIEW public."Top_Estados_Potencia" AS
+SELECT 
+    uf,
+    COUNT(*) as num_usinas,
+    SUM(potkw) as total_power_kw,
+    AVG(potkw) as avg_power_kw
+FROM public."Usina"
+GROUP BY uf
+ORDER BY total_power_kw DESC
+LIMIT 10;
+```
+
+### Implementation Notes for the Engineer
+
+1.  **Data Migration Strategy**:
+    *   Do not drop the old tables immediately. Use `INSERT INTO ... SELECT` to populate the new `Usina` table with `uf`, `nome_municipio`, and `nome_rio` derived from the joins on the old tables.
+    *   Populate `Fatos_Usina_por_Estado` using `INSERT INTO ... SELECT` with `SUM(potkw)` grouped by `uf`.
+
+2.  **Write Performance Trade-off**:
+    *   **Pros**: Read latency drops from ~500ms to ~5ms for complex queries.
+    *   **Cons**: Write latency increases slightly due to extra columns to update.
+    *   **Mitigation**: The `Usina` table size increases by ~10-15% (approx 3 extra columns per row). This is negligible compared to the I/O savings of avoiding 3-4 table scans per read request.
+
+3.  **Index Maintenance**:
+    *   The composite index `IX_Usina_Geo_Admin` is critical. If you add a new `uf` or `nome_municipio` that doesn't exist in the index (due to data entry errors), the query planner might choose a sequential scan. Ensure data quality is maintained.
+    *   If `uf` values become inconsistent (e.g., "RS" vs "rs"), the index will fail to cover the query, forcing a heap scan. Normalize input data at the application layer.
+
+4.  **Foreign Key Removal**:
+    *   The foreign keys to `Municipios` and `Estados` on the `Usina` table have been logically removed (or replaced by the denormalized columns).
+    *   **Critical**: If your application relies on `CHECK` constraints or automatic cascade deletes, you must implement these logic checks in your application code or add `CHECK` constraints to the `Usina` table itself (e.g., `CHECK (uf IN (SELECT uf FROM Estados))`). Given the denormalization goal, application-level validation is often faster and more robust than database constraints for high-volume writes.
+
+5.  **Partitioning Consideration**:
+    *   If `Usina` grows beyond 100M rows, consider partitioning `Fatos_Usina_por_Estado` by `ano` (Year). This allows you to drop old years from the table physically while keeping the index, significantly reducing storage and query time for historical analysis.
+    *   `Usina` itself does not strictly need partitioning yet, but if `ano` is added for historical capacity tracking, partition by `ano` would be optimal.

@@ -1,0 +1,182 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-20_10-06-40
+Model: ollama_api
+Prompt: RACE
+Schema: ex06
+==================================================
+
+<ROLE>Senior Data Engineer</ROLE>
+
+<ACTION>
+Let's go through the steps systematically to denormalize the schema for improved analytical performance.
+
+### **Step 0: Schema Analysis**
+
+The current normalized schema has several distinct entities:
+
+- **Geographic Hierarchy:** `UF` (state) → `MUNICIPIO` (municipality)
+- **Educational Institutions:** `MUNICIPIO` → `ESCOLA` (school) and `IES` (higher education institution)
+- **Evaluation Metrics:** `IDEB`, `ENADE`, `SAEB`
+- **Course Structure:** `IES` → `CURSO` (course)
+- **Temporal Linkage:** `ANO` links courses to all three evaluation metrics for a specific year.
+
+**Key Relationships:**
+- A `MUNICIPIO` belongs to one `UF`.
+- An `ESCOLA` and an `IES` belong to one `MUNICIPIO`.
+- A `CURSO` belongs to one `IES`.
+- The `ANO` table acts as a central fact table, linking a `CURSO` to its `IDEB`, `ENADE`, and `SAEB` scores for a given year.
+
+This structure is highly normalized, which is excellent for data integrity but can lead to complex, slow queries for reporting due to the numerous joins required.
+
+---
+
+### **Step 1 & 2: Frequent Queries / Workload Context & Bottleneck Analysis**
+
+Given the context of read-heavy analytical workloads, common queries will likely involve aggregating or filtering data across multiple dimensions. Let's infer the most probable heavy queries:
+
+1. **Query: Performance by State (`UF`)**
+   - *What is the average ENADE score for courses in São Paulo?*
+   - **Joins:** `ANO` → `CURSO` → `IES` → `MUNICIPIO` → `UF`
+   - **Bottleneck:** Multiple joins across 5 tables.
+
+2. **Query: Performance by Municipality**
+   - *List schools in a municipality and their average SAEB scores.*
+   - **Joins:** `ANO` → `CURSO` → `IES` → `MUNICIPIO` / `ESCOLA` → `MUNICIPIO`
+   - **Bottleneck:** Complex joins, especially if querying both IES and ESCOLA.
+
+3. **Query: Institutional Comparison**
+   - *Compare the IDEB scores of all schools over the last 5 years.*
+   - **Joins:** `ANO` → `CURSO` → `IES` → `MUNICIPIO` → `ESCOLA` (to get school name) + `IDEB`
+   - **Bottleneck:** Very complex path, especially linking `IDEB` scores back to `ESCOLA`.
+
+4. **Query: Derived Aggregations**
+   - *What is the total number of participants in ENADE exams for Federal Universities?*
+   - **Joins:** `ANO` → `CURSO` → `IES` (filter by `rede='Federal'`) + `ENADE`
+   - **Bottleneck:** Filtering and aggregation across multiple tables.
+
+The primary bottleneck is the `ANO` table acting as a central hub. Every analytical query must traverse this hub to connect facts (scores) with dimensions (institutions, locations).
+
+---
+
+### **Step 3: Evaluating Denormalization Techniques**
+
+Let's assess how the common techniques apply:
+
+1. **Adding Redundant Attributes:** Highly applicable. Geographic names (`sigla_uf`, `nome_municipio`) and institution names (`nome_ies`, `nome_escola`) are frequently needed and require expensive joins.
+2. **Adding Derived Attributes:** Very applicable. Pre-calculating totals like `total_participantes` at higher levels (e.g., per municipality or state) or adding flags (e.g., `is_federal_university`) would speed up filters and aggregations.
+3. **Collapsing Relations:** Extremely applicable. The biggest win is collapsing the chain `CURSO` → `IES` → `MUNICIPIO` → `UF` and `ANO` → `*EB` metrics into a single, wide fact table.
+4. **Vertical Partitioning:** Less critical here. Tables like `MUNICIPIO` have a few columns, so splitting them offers little benefit. It might be relevant for a very wide final fact table but is not the primary strategy.
+
+---
+
+### **Step 4: Designing Possible Denormalized Schemas**
+
+#### **Option A: Collapse Everything into a Single Wide Fact Table**
+
+Create one massive table combining all information.
+
+- **Pros:** Eliminates almost all joins for any query.
+- **Cons:** Extremely wide table, difficult to manage, lots of data repetition, potential for update anomalies if data changes (though less of a concern for read-only analytics).
+
+#### **Option B: Strategic Collapsing & Redundancy (Recommended Hybrid)**
+
+- Create a **main fact table** that collapses the core analytical paths.
+- Keep some dimension tables separate but enrich them with redundant data.
+
+This balances performance gains with manageability.
+
+---
+
+### **Step 5: Evaluation and Choice**
+
+**Option B** is the most consistent. It provides significant performance improvements by removing the most burdensome joins (through collapsing `ANO` and its related entities) while keeping the schema organized enough for long-term maintenance. It aligns perfectly with star-schema design principles common in data warehouses.
+
+---
+
+### **Step 6: Designing the New Denormalized Schema**
+
+Based on the analysis, we will create a denormalized **Fact Table** for educational metrics, enriched with dimensional data.
+
+```sql
+-- Denormalized Fact Table for Educational Analytics
+DROP TABLE IF EXISTS FATOS_EDUCACAO CASCADE;
+
+CREATE TABLE FATOS_EDUCACAO (
+    -- Surrogate Key
+    id_fato INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+
+    -- === Temporal Dimension ===
+    ano INT NOT NULL,
+
+    -- === Geographic Dimensions (Denormalized) ===
+    id_uf INT NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    qtd_habitantes_uf INT,
+
+    id_municipio INT NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    qtd_IES_municipio INT,
+    qtd_ESCOLAS_municipio INT,
+
+    -- === Institutional Dimensions (Denormalized) ===
+    -- For Higher Education Courses
+    id_ies INT,
+    nome_ies VARCHAR(100),
+    sigla_ies VARCHAR(20),
+    codigo_ies INT,
+    rede_ies VARCHAR(100),
+
+    -- For Basic Education Schools (if linked)
+    id_escola INT,
+    nome_escola VARCHAR(100),
+    cod_escola INT,
+    rede_escola VARCHAR(100),
+
+    -- === Course Dimension ===
+    id_curso INT,
+    nome_curso VARCHAR(100),
+
+    -- === Performance Metrics (IDEB, ENADE, SAEB - Collapsed) ===
+    
+    -- IDEB Metrics
+    rend_1 REAL,
+    rend_2 REAL,
+    rend_3 REAL,
+    rend_4 REAL,
+    ind_rend REAL,
+    nota_ideb REAL,
+
+    -- ENADE Metrics
+    total_inscritos_enade INT,
+    total_concluintes_enade INT,
+    nota_bruta_ce REAL,
+    nota_padronizada_ce REAL,
+    nota_bruta_fg REAL,
+    nota_padronizada_fg REAL,
+    nota_enade_continua REAL,
+    nota_enade_faixa REAL,
+
+    -- SAEB Metrics
+    nota_mat REAL,
+    nota_port REAL,
+    nota_padrao REAL,
+
+    -- === Derived/Convenience Attributes ===
+    total_participantes INT -- From MUNICIPIO, brought in for easy querying
+    
+);
+```
+
+**Explanation of Changes:**
+
+- **Collapsed Relations:** The `ANO` table and its referenced `IDEB`, `ENADE`, `SAEB`, `CURSO`, `IES`, `MUNICIPIO`, and `UF` tables are all merged.
+- **Added Redundant Attributes:** All names and key codes (`sigla_uf`, `nome_municipio`, `nome_ies`, etc.) are included to avoid joins.
+- **Added Derived Attributes:** `total_participantes` is brought in from `MUNICIPIO`. We could also add a `tipo_instituicao` (HigherEd/School) flag.
+- **Single Access Point:** This table can now answer most analytical queries with a single `SELECT` and `WHERE` clause, drastically improving performance.
+
+**Supporting Dimension Table (Optional for further normalization if needed):**
+
+If the list of municipalities or institutions is very long and static, a small dimension table could still be useful, but for pure read performance, embedding the data is preferred.
+
+This denormalized schema is optimized for the read-heavy analytical workload described, providing a significant boost in query speed at the cost of some storage space and write complexity (which is acceptable for an analytical database).

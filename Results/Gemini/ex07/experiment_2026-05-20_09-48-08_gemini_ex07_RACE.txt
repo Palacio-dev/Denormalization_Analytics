@@ -1,0 +1,96 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-20_09-48-08
+Model: gemini
+Prompt: RACE
+Schema: ex07
+==================================================
+
+Here is the execution of the requested task, following the steps outlined in your framework.
+
+### 1 - Deep Analysis of the Provided SQL Script
+The provided normalized schema represents a relational model for Power Plants (`Usina`). It is highly normalized (3NF or higher in some aspects), splitting the data across 6 distinct tables:
+*   **`Usina`**: The central fact table containing measures (`potkw`, `potfis`), dates, and foreign keys. Interestingly, it contains its own `lat`/`long` columns.
+*   **`Proprietarios` & `Rios`**: Simple lookup tables (dimensions) for owner names and river names.
+*   **`Localizacoes`**: An intermediate table linking a location to coordinates (`latitude`, `longitude`) and up to two municipalities (`id_municipio1`, `id_municipio2`). *Note: There is a redundancy here as `Usina` also has `lat`/`long`.*
+*   **`Municipios` & `Estados`**: A geographical hierarchy where municipalities belong to states (`uf`).
+
+### 2 - Frequent Queries / Workload Context
+In a read-heavy analytical workload for this domain, users (like Data Analysts or BI tools) will frequently run aggregations and groupings. 
+**Inferred Bottlenecks & Heavy Queries:**
+*   *Geographical Aggregations:* Calculating total power capacity (`SUM(potkw)`) by State (`uf`) or Municipality (`municipio`). In the current model, this requires joining `Usina` -> `Localizacoes` -> `Municipios` -> `Estados` (a 4-table join).
+*   *Cross-dimensional Analysis:* Filtering plants by operational stage (`estagio`) and grouping by Owner (`proprietario`) and River (`rio`). This requires joining `Usina` -> `Proprietarios` and `Usina` -> `Rios`.
+*   *Full Detail Extracts:* A simple flat report of all power plants with their respective names, owners, rivers, and states requires a massive 6-table JOIN, which will cause significant CPU and memory overhead on the database during heavy concurrent analytical reads.
+
+### 3 - Evaluation of Denormalization Techniques
+*   **Adding Redundant Attributes:** Highly applicable. We should bring the names of the owners, rivers, municipalities, and states directly into the main table.
+*   **Adding Derived Attributes:** Not strictly necessary based on the provided schema, though we could precalculate the "age" of the plant based on `iniciop`, but simple flattening is the priority.
+*   **Collapsing Relations:** **Most Applicable.** We can completely collapse the 6 tables into a single table. The 1:N relationships from dimensions to the fact table mean that flattening them will duplicate string values (like state names), but this is a standard and acceptable trade-off in OLAP databases to eliminate JOINs.
+*   **Vertical Partitioning:** Not applicable here. Even fully denormalized, the resulting table will have fewer than 20 columns, which is very narrow for analytical columnar databases.
+
+### 4 - Design Multiple Possible Schemas
+**Option A: Star Schema (Partial Denormalization)**
+*   *Fact Table:* `Fato_Usina` (id, potkw, potfis, iniciop, atualizacao, lat, long, estagio, id_proprietario, id_rio, id_localizacao)
+*   *Dimension Tables:* `Dim_Proprietario`, `Dim_Rio`, and a collapsed `Dim_Localizacao` (which merges `Localizacoes`, `Municipios`, and `Estados` into one table).
+*   *Pros:* Reduces some joins while maintaining integer keys for BI tools.
+*   *Cons:* Still requires joins for basic querying.
+
+**Option B: One Big Table / OBT (Full Denormalization)**
+*   *Table:* `Usina_Analitica`
+*   *Structure:* All descriptive attributes (owner name, river name, municipality names, state UF) are brought directly into the `Usina` table. We also consolidate the redundant `lat`/`long` columns.
+*   *Pros:* Zero JOINs required. Maximum read performance for aggregations and filtering. Perfect for modern analytical engines.
+*   *Cons:* Increased storage space due to repeated string values (negligible in modern columnar storage).
+
+### 5 - Evaluate and Choose the Best Schema
+**Selection: Option B (One Big Table)**
+Given the context of optimizing for "read-heavy analytical workloads" and aligning with the provided examples, the **One Big Table (OBT)** approach is the most consistent and performant choice. By collapsing all relations, we completely eliminate the complex 6-table join bottleneck. Analysts can query a single table to get all geographical, ownership, and technical metrics instantly.
+
+### 6 - Design the New Denormalized Schema
+
+Below is the DDL for the new denormalized physical schema. All relevant descriptive fields have been merged into a single table. I have also consolidated the coordinates (`lat`/`long`) into a single pair of columns to resolve the redundancy found in the normalized model.
+
+```sql
+BEGIN;
+
+-- Drop the normalized tables if they exist (optional, depending on if this is a migration)
+-- DROP TABLE IF EXISTS public."Usina" CASCADE;
+-- DROP TABLE IF EXISTS public."Localizacoes" CASCADE;
+-- DROP TABLE IF EXISTS public."Municipios" CASCADE;
+-- DROP TABLE IF EXISTS public."Estados" CASCADE;
+-- DROP TABLE IF EXISTS public."Rios" CASCADE;
+-- DROP TABLE IF EXISTS public."Proprietarios" CASCADE;
+
+-- Create the fully denormalized analytical table
+CREATE TABLE IF NOT EXISTS public."Usina_Analitica" (
+    id_usina INTEGER PRIMARY KEY,
+    nome_usina VARCHAR NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    iniciop DATE,
+    atualizacao DATE,
+    estagio VARCHAR,
+    
+    -- Consolidated Coordinates
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    
+    -- Collapsed from "Proprietarios"
+    nome_proprietario VARCHAR,
+    
+    -- Collapsed from "Rios"
+    nome_rio VARCHAR,
+    
+    -- Collapsed from "Localizacoes", "Municipios", and "Estados"
+    -- Handling the two possible municipalities from the original Localizacoes table
+    municipio_principal VARCHAR,
+    uf_principal CHAR(2),
+    municipio_secundario VARCHAR,
+    uf_secundario CHAR(2)
+);
+
+-- Optional: Create indexes on highly filtered/grouped analytical columns
+CREATE INDEX IF NOT EXISTS idx_usina_uf ON public."Usina_Analitica" (uf_principal);
+CREATE INDEX IF NOT EXISTS idx_usina_estagio ON public."Usina_Analitica" (estagio);
+CREATE INDEX IF NOT EXISTS idx_usina_proprietario ON public."Usina_Analitica" (nome_proprietario);
+
+COMMIT;
+```

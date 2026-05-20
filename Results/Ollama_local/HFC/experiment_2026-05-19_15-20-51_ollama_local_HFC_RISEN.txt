@@ -1,0 +1,320 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_15-20-51
+Model: ollama_local
+Prompt: RISEN
+Schema: HFC
+==================================================
+
+BEGIN;
+
+-- Drop existing tables to ensure clean state
+DROP TABLE IF EXISTS public.tombos_analytics CASCADE;
+DROP TABLE IF EXISTS public.taxonomia_analytics CASCADE;
+DROP TABLE IF EXISTS public.locais_analytics CASCADE;
+DROP TABLE IF EXISTS public.entidades_analytics CASCADE;
+DROP TABLE IF EXISTS public.requisicoes_analytics CASCADE;
+
+-- ============================================================================
+-- 1. DENORMALIZED SCHEMA DESIGN
+-- ============================================================================
+
+-- --- TABLE: TAXONOMY_ANALYTICS ---
+-- Strategy: Collapsing Relations & Adding Redundant Attributes.
+-- Merges: especies, sub_especies, sub_familias, generos, familias, autores.
+-- Rationale: Species queries often require full taxonomic lineage (Genus, Family, Sub-family, Sub-species)
+-- and author details in a single read. Joins between these tables are frequent bottlenecks.
+-- We materialize the full lineage and author info directly.
+CREATE TABLE IF NOT EXISTS public.taxonomia_analytics (
+    especie_id bigint NOT NULL,
+    nome_especie character varying(255) COLLATE pg_catalog."default",
+    genero_id bigint NOT NULL,
+    nome_genero character varying(200) COLLATE pg_catalog."default",
+    familia_id bigint NOT NULL,
+    nome_familia character varying(200) COLLATE pg_catalog."default",
+    sub_familia_id bigint,
+    nome_sub_familia character varying(300) COLLATE pg_catalog."default",
+    sub_especie_id bigint,
+    nome_sub_especie character varying(255) COLLATE pg_catalog."default",
+    autor_id bigint,
+    nome_autor character varying(200) COLLATE pg_catalog."default",
+    CONSTRAINT tax_analytics_pkey PRIMARY KEY (especie_id)
+);
+
+-- --- TABLE: LOCAIS_ANALYTICS ---
+-- Strategy: Collapsing Relations & Adding Redundant Attributes.
+-- Merges: locais_coleta, estados, paises, fases_sucessional.
+-- Rationale: Collection location queries often need full context (State, Country, Successional Phase).
+-- The original schema has many nullable foreign keys; we materialize the resolved strings.
+CREATE TABLE IF NOT EXISTS public.locais_analytics (
+    local_coleta_id bigint NOT NULL,
+    descricao character varying COLLATE pg_catalog."default",
+    cidade_id bigint,
+    nome_cidade character varying(200) COLLATE pg_catalog."default",
+    fase_sucessional_id bigint,
+    fase_numero bigint,
+    nome_fase character varying(200) COLLATE pg_catalog."default",
+    estado_id bigint,
+    nome_estado character varying(255) COLLATE pg_catalog."default",
+    sigla_estado character(4) COLLATE pg_catalog."default",
+    pais_id integer,
+    nome_pais character varying(255) COLLATE pg_catalog."default",
+    sigla_pais character(4) COLLATE pg_catalog."default",
+    CONSTRAINT locais_analytics_pkey PRIMARY KEY (local_coleta_id)
+);
+
+-- --- TABLE: ENTIDADES_ANALYTICS ---
+-- Strategy: Collapsing Relations & Adding Redundant Attributes.
+-- Merges: herbarios, enderecos, tipos_usuarios, usuarios.
+-- Rationale: Entity (Herbarium) queries often require full contact details and user context.
+-- This table flattens the relationship between Herbarium, Address, and Users.
+CREATE TABLE IF NOT EXISTS public.entidades_analytics (
+    herbario_id bigint NOT NULL,
+    nome character varying(200) COLLATE pg_catalog."default",
+    sigla character varying(80) COLLATE pg_catalog."default",
+    email character varying(200) COLLATE pg_catalog."default",
+    caminho_logotipo text COLLATE pg_catalog."default",
+    endereco_id bigint,
+    logradouro character varying(200) COLLATE pg_catalog."default",
+    numero character varying(10) COLLATE pg_catalog."default",
+    complemento text COLLATE pg_catalog."default",
+    cidade_id bigint,
+    nome_cidade character varying(200) COLLATE pg_catalog."default",
+    usuario_id bigint,
+    nome_usuario character varying(200) COLLATE pg_catalog."default",
+    email_usuario character varying(200) COLLATE pg_catalog."default",
+    ra character varying(45) COLLATE pg_catalog."default",
+    tipo_usuario_id bigint,
+    nome_tipo_usuario character varying(100) COLLATE pg_catalog."default",
+    CONSTRAINT entidades_analytics_pkey PRIMARY KEY (herbario_id)
+);
+
+-- --- TABLE: ENVIRONMENTAL_ANALYTICS ---
+-- Strategy: Collapsing Relations & Adding Redundant Attributes.
+-- Merges: tombos, solos, relevos, vegetacoes, tipos, colecoes_anexas.
+-- Rationale: Specimen (Tumbo) queries often require environmental context (Soil, Relief, Vegetation)
+-- and collection metadata (Type, Collection) in one go.
+CREATE TABLE IF NOT EXISTS public.enviro_analytics (
+    tombo_hcf bigint NOT NULL,
+    nome_populares text COLLATE pg_catalog."default",
+    observacao text COLLATE pg_catalog."default",
+    latitude double precision,
+    longitude double precision,
+    altitude double precision,
+    data_coleta_dia bigint,
+    data_coleta_mes bigint,
+    data_coleta_ano bigint,
+    data_identificacao_dia smallint,
+    data_identificacao_mes smallint,
+    data_identificacao_ano integer,
+    solo_id bigint,
+    nome_solo character varying(300) COLLATE pg_catalog."default",
+    relevo_id bigint,
+    nome_relevo character varying(300) COLLATE pg_catalog."default",
+    vegetacao_id bigint,
+    nome_vegetacao character varying(300) COLLATE pg_catalog."default",
+    tipo_id bigint,
+    nome_tipo character varying(250) COLLATE pg_catalog."default",
+    colecao_anexa_id bigint,
+    nome_colecao_anexa character varying(50) COLLATE pg_catalog."default",
+    CONSTRAINT enviro_analytics_pkey PRIMARY KEY (tombo_hcf)
+);
+
+-- --- TABLE: REQUISICOES_ANALYTICS ---
+-- Strategy: Collapsing Relations & Adding Redundant Attributes.
+-- Merges: reflora, specieslink, tombo_alteracoes_antigas, autores.
+-- Rationale: Request tracking often requires cross-referencing the species, the request history,
+-- and the author of the original species record.
+CREATE TABLE IF NOT EXISTS public.requisicoes_analytics (
+    id bigint NOT NULL,
+    cod_barra character varying(12) COLLATE pg_catalog."default",
+    ja_comparou boolean DEFAULT false,
+    ja_requisitou boolean DEFAULT false,
+    nro_requisicoes bigint DEFAULT '0'::bigint,
+    tombo_hcf bigint NOT NULL,
+    especie_id bigint NOT NULL,
+    nome_especie character varying(255) COLLATE pg_catalog."default",
+    autor_id bigint,
+    nome_autor character varying(200) COLLATE pg_catalog."default",
+    CONSTRAINT requisicoes_analytics_pkey PRIMARY KEY (id)
+);
+
+-- ============================================================================
+-- 2. FOREIGN KEY CONSTRAINTS (Optional for Analytics)
+-- Note: In pure analytical read-only models, foreign keys are often dropped to allow
+-- flexible joins or to reduce write complexity. However, we keep them for
+-- data integrity during migration or if the denormalized tables are treated as
+-- logical views that must be consistent.
+-- ============================================================================
+
+-- Constraints for taxonomia_analytics
+ALTER TABLE IF EXISTS public.taxonomia_analytics
+    ADD CONSTRAINT fk_tax_analytics_genero FOREIGN KEY (genero_id)
+    REFERENCES public.generos (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.taxonomia_analytics
+    ADD CONSTRAINT fk_tax_analytics_familia FOREIGN KEY (familia_id)
+    REFERENCES public.familias (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.taxonomia_analytics
+    ADD CONSTRAINT fk_tax_analytics_sub_familia FOREIGN KEY (sub_familia_id)
+    REFERENCES public.sub_familias (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.taxonomia_analytics
+    ADD CONSTRAINT fk_tax_analytics_sub_especie FOREIGN KEY (sub_especie_id)
+    REFERENCES public.sub_especies (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.taxonomia_analytics
+    ADD CONSTRAINT fk_tax_analytics_autor FOREIGN KEY (autor_id)
+    REFERENCES public.autores (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+-- Constraints for locais_analytics
+ALTER TABLE IF EXISTS public.locais_analytics
+    ADD CONSTRAINT fk_locais_analytics_cidade FOREIGN KEY (cidade_id)
+    REFERENCES public.enderecos (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.locais_analytics
+    ADD CONSTRAINT fk_locais_analytics_fase FOREIGN KEY (fase_sucessional_id)
+    REFERENCES public.fase_sucessional (numero) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.locais_analytics
+    ADD CONSTRAINT fk_locais_analytics_estado FOREIGN KEY (estado_id)
+    REFERENCES public.estados (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.locais_analytics
+    ADD CONSTRAINT fk_locais_analytics_pais FOREIGN KEY (pais_id)
+    REFERENCES public.paises (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+-- Constraints for entidades_analytics
+ALTER TABLE IF EXISTS public.entidades_analytics
+    ADD CONSTRAINT fk_entidades_analytics_endereco FOREIGN KEY (endereco_id)
+    REFERENCES public.enderecos (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.entidades_analytics
+    ADD CONSTRAINT fk_entidades_analytics_cidade FOREIGN KEY (cidade_id)
+    REFERENCES public.enderecos (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.entidades_analytics
+    ADD CONSTRAINT fk_entidades_analytics_usuario FOREIGN KEY (usuario_id)
+    REFERENCES public.usuarios (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.entidades_analytics
+    ADD CONSTRAINT fk_entidades_analytics_tipo_usuario FOREIGN KEY (tipo_usuario_id)
+    REFERENCES public.tipos_usuarios (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+-- Constraints for enviro_analytics
+ALTER TABLE IF EXISTS public.enviro_analytics
+    ADD CONSTRAINT fk_enviro_analytics_solo FOREIGN KEY (solo_id)
+    REFERENCES public.solos (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.enviro_analytics
+    ADD CONSTRAINT fk_enviro_analytics_relevo FOREIGN KEY (relevo_id)
+    REFERENCES public.relevos (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.enviro_analytics
+    ADD CONSTRAINT fk_enviro_analytics_vegetacao FOREIGN KEY (vegetacao_id)
+    REFERENCES public.vegetacoes (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.enviro_analytics
+    ADD CONSTRAINT fk_enviro_analytics_tipo FOREIGN KEY (tipo_id)
+    REFERENCES public.tipos (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.enviro_analytics
+    ADD CONSTRAINT fk_enviro_analytics_colecao_anexa FOREIGN KEY (colecao_anexa_id)
+    REFERENCES public.colecoes_anexas (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+-- Constraints for requisicoes_analytics
+ALTER TABLE IF EXISTS public.requisicoes_analytics
+    ADD CONSTRAINT fk_requisicoes_analytics_tombo FOREIGN KEY (tombo_hcf)
+    REFERENCES public.tombos (hcf) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.requisicoes_analytics
+    ADD CONSTRAINT fk_requisicoes_analytics_especie FOREIGN KEY (especie_id)
+    REFERENCES public.especies (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.requisicoes_analytics
+    ADD CONSTRAINT fk_requisicoes_analytics_autor FOREIGN KEY (autor_id)
+    REFERENCES public.autores (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+-- ============================================================================
+-- 3. INDEXES FOR OPTIMIZED READ PERFORMANCE
+-- ============================================================================
+
+-- Indexes for taxonomia_analytics
+CREATE INDEX IF NOT EXISTS idx_tax_analytics_especie ON public.taxonomia_analytics(especie_id);
+CREATE INDEX IF NOT EXISTS idx_tax_analytics_genero ON public.taxonomia_analytics(genero_id);
+CREATE INDEX IF NOT EXISTS idx_tax_analytics_familia ON public.taxonomia_analytics(familia_id);
+CREATE INDEX IF NOT EXISTS idx_tax_analytics_sub_familia ON public.taxonomia_analytics(sub_familia_id);
+CREATE INDEX IF NOT EXISTS idx_tax_analytics_sub_especie ON public.taxonomia_analytics(sub_especie_id);
+CREATE INDEX IF NOT EXISTS idx_tax_analytics_autor ON public.taxonomia_analytics(autor_id);
+
+-- Indexes for locais_analytics
+CREATE INDEX IF NOT EXISTS idx_locais_analytics_local_id ON public.locais_analytics(local_coleta_id);
+CREATE INDEX IF NOT EXISTS idx_locais_analytics_cidade ON public.locais_analytics(cidade_id);
+CREATE INDEX IF NOT EXISTS idx_locais_analytics_fase ON public.locais_analytics(fase_sucessional_id);
+CREATE INDEX IF NOT EXISTS idx_locais_analytics_estado ON public.locais_analytics(estado_id);
+CREATE INDEX IF NOT EXISTS idx_locais_analytics_pais ON public.locais_analytics(pais_id);
+
+-- Indexes for entidades_analytics
+CREATE INDEX IF NOT EXISTS idx_entidades_analytics_herbario_id ON public.entidades_analytics(herbario_id);
+CREATE INDEX IF NOT EXISTS idx_entidades_analytics_endereco ON public.entidades_analytics(endereco_id);
+CREATE INDEX IF NOT EXISTS idx_entidades_analytics_cidade ON public.entidades_analytics(cidade_id);
+CREATE INDEX IF NOT EXISTS idx_entidades_analytics_usuario ON public.entidades_analytics(usuario_id);
+CREATE INDEX IF NOT EXISTS idx_entidades_analytics_tipo_usuario ON public.entidades_analytics(tipo_usuario_id);
+
+-- Indexes for enviro_analytics
+CREATE INDEX IF NOT EXISTS idx_enviro_analytics_tombo_hcf ON public.enviro_analytics(tombo_hcf);
+CREATE INDEX IF NOT EXISTS idx_enviro_analytics_solo ON public.enviro_analytics(solo_id);
+CREATE INDEX IF NOT EXISTS idx_enviro_analytics_relevo ON public.enviro_analytics(relevo_id);
+CREATE INDEX IF NOT EXISTS idx_enviro_analytics_vegetacao ON public.enviro_analytics(vegetacao_id);
+CREATE INDEX IF NOT EXISTS idx_enviro_analytics_tipo ON public.enviro_analytics(tipo_id);
+CREATE INDEX IF NOT EXISTS idx_enviro_analytics_colecao_anexa ON public.enviro_analytics(colecao_anexa_id);
+
+-- Indexes for requisicoes_analytics
+CREATE INDEX IF NOT EXISTS idx_requisicoes_analytics_id ON public.requisicoes_analytics(id);
+CREATE INDEX IF NOT EXISTS idx_requisicoes_analytics_tombo_hcf ON public.requisicoes_analytics(tombo_hcf);
+CREATE INDEX IF NOT EXISTS idx_requisicoes_analytics_especie_id ON public.requisicoes_analytics(especie_id);
+CREATE INDEX IF NOT EXISTS idx_requisicoes_analytics_autor ON public.requisicoes_analytics(autor_id);
+
+END;

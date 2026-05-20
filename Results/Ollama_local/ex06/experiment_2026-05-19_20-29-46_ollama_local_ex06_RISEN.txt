@@ -1,0 +1,124 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_20-29-46
+Model: ollama_local
+Prompt: RISEN
+Schema: ex06
+==================================================
+
+BEGIN;
+
+-- Drop existing tables to ensure a clean state
+DROP TABLE IF EXISTS UF CASCADE;
+DROP TABLE IF EXISTS MUNICIPIO CASCADE;
+DROP TABLE IF EXISTS IDEB CASCADE;
+DROP TABLE IF EXISTS ENADE CASCADE;
+DROP TABLE IF EXISTS SAEB CASCADE;
+DROP TABLE IF EXISTS IES CASCADE;
+DROP TABLE IF EXISTS ESCOLA CASCADE;
+DROP TABLE IF EXISTS CURSO CASCADE;
+DROP TABLE IF EXISTS ANO CASCADE;
+
+-- 1. UF (State) - Kept as is, minimal structure
+CREATE TABLE UF (
+    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    sigla_uf VARCHAR(2) UNIQUE NOT NULL,
+    nome VARCHAR(100) NOT NULL,
+    qtd_habitantes INT CHECK(qtd_habitantes >= 0)
+);
+
+-- 2. MUNICIPIO (Municipality) - Kept as is, minimal structure
+CREATE TABLE MUNICIPIO (
+    id_municipio INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_uf INT NOT NULL REFERENCES UF (id) ON DELETE CASCADE,
+    nome_municipio VARCHAR(100) NOT NULL,
+    qtd_IES INT CHECK (qtd_IES >= 0),
+    qtd_ESCOLAS INT CHECK (qtd_ESCOLAS >= 0),
+    media_ideb REAL,
+    media_saeb REAL,
+    media_enade REAL,
+    total_participantes INT CHECK (total_participantes >= 0)
+);
+
+-- 3. DENORMALIZED: ESCOLA_DATA (School Data)
+-- Combines ESCOLA, IES, and ANO attributes.
+-- Strategy: Vertical Partitioning (splitting attributes by type) and Collapsing Relations.
+-- We create a single wide table for school-level data to avoid joins for queries like:
+-- "Select nota_ideb, nome_escola, sigla_ies, rede FROM schools WHERE ano = 2023"
+CREATE TABLE ESCOLA_DATA (
+    id_escola INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_municipio INT NOT NULL,
+    id_ies INT NOT NULL,
+    nome_escola VARCHAR(100) NOT NULL,
+    cod_escola INTEGER UNIQUE NOT NULL,
+    rede VARCHAR(100) NOT NULL,
+    nome_ies VARCHAR(100) NOT NULL,
+    sigla_ies VARCHAR(20),
+    codigo_ies INT UNIQUE NOT NULL,
+    ano INT NOT NULL,
+    -- Denormalized: IES attributes (previously in IES table)
+    -- Added to ESCOLA_DATA to eliminate JOINs between ESCOLA and IES
+    -- Note: Keeping a unique constraint on (cod_escola, sigla_ies) is not strictly enforced here as 
+    -- we are denormalizing for read performance, but we preserve the data integrity of the original schema.
+    -- However, to strictly follow "Each column name must appear EXACTLY ONCE", we list them here.
+    -- We do NOT add foreign keys to enforce referential integrity in the denormalized model (common practice),
+    -- but we keep the ID columns for potential re-normalization.
+);
+
+-- 4. DENORMALIZED: INDICADORES_AGRUPAMENTO (Indicators Aggregation)
+-- Combines ANO, IDEB, ENADE, SAEB, and MUNICIPIO attributes.
+-- Strategy: Collapsing Relations and Adding Derived Attributes.
+-- This table stores the aggregated metrics per school/year, pre-computing the join between
+-- school indicators and municipality indicators.
+CREATE TABLE INDICADORES_AGRUPAMENTO (
+    id_escola_ano INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_municipio INT NOT NULL,
+    id_uf INT NOT NULL,
+    id_ies INT NOT NULL,
+    -- Denormalized: ANO attributes
+    ano INT NOT NULL,
+    -- Denormalized: IDEB attributes (previously in IDEB table)
+    rend_1 REAL,
+    rend_2 REAL,
+    rend_3 REAL,
+    rend_4 REAL,
+    ind_rend REAL,
+    nota_ideb REAL,
+    -- Denormalized: ENADE attributes (previously in ENADE table)
+    total_inscritos INT CHECK (total_inscritos >= 0),
+    total_concluintes INT CHECK (total_concluintes >= 0),
+    nota_bruta_ce REAL,
+    nota_padronizada_ce REAL,
+    nota_bruta_fg REAL,
+    nota_padronizada_fg REAL,
+    nota_enade_continua REAL,
+    nota_enade_faixa REAL,
+    -- Denormalized: SAEB attributes (previously in SAEB table)
+    nota_mat REAL,
+    nota_port REAL,
+    nota_padrao REAL,
+    -- Denormalized: MUNICIPIO attributes (previously in MUNICIPIO table)
+    -- These are aggregated at the municipality level but stored here for context
+    media_ideb_muni REAL,
+    media_saeb_muni REAL,
+    media_enade_muni REAL,
+    total_participantes_muni INT CHECK (total_participantes_muni >= 0)
+);
+
+-- 5. DENORMALIZED: CURSO_ANO (Course Year Data)
+-- Combines CURSO and ANO attributes.
+-- Strategy: Collapsing Relations.
+-- This table represents the curriculum available per year, linking courses to the year and school context.
+CREATE TABLE CURSO_ANO (
+    id_curso_ano INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_curso INT NOT NULL,
+    id_ies INT NOT NULL,
+    id_escola INT NOT NULL,
+    -- Denormalized: ANO attributes
+    id_ano INT NOT NULL,
+    ano INT NOT NULL,
+    -- Denormalized: CURSO attributes
+    nome_curso VARCHAR(100) NOT NULL
+);
+
+-- End of transaction
+END;

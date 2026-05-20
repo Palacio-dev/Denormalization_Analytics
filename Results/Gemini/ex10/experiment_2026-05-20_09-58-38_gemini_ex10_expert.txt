@@ -1,0 +1,161 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-20_09-58-38
+Model: gemini
+Prompt: expert
+Schema: ex10
+==================================================
+
+### Executive Summary
+
+To optimize read performance for your analytical workload, I have designed a denormalized schema based on a **Wide-Table / Materialized View** pattern. The current normalized schema (snowflake design) forces the database to perform expensive multi-table joins and runtime aggregations across `paises`, `continente`, `populacao`, `emissao`, and `consumo` for almost every dashboard query. 
+
+Because operational constraints prohibit triggers and we assume a high-read/low-write analytical workload, the proposed architecture uses **PostgreSQL Materialized Views** with `CONCURRENTLY` refreshes. This guarantees zero read-downtime during data hydration, simplifies BI tool integration, and drastically reduces CPU/IO overhead by pre-joining dimensions and pre-calculating common metrics (like emissions per capita). 
+
+### 0. Explicit Assumptions & Operational Constraints
+*   **Workload:** Analytical/OLAP. Queries primarily aggregate data by Geography (Continent/Country) and Time (Year).
+*   **Data Volume:** While countries/years suggest low cardinality (~20,000 rows), I assume this schema scales to track granular sub-regions or handles massive read concurrency, justifying denormalization.
+*   **Constraints:** No triggers allowed. CDC (Change Data Capture) is not strictly required if we can tolerate a batch refresh window.
+*   **Staleness Window:** Intentional staleness of **1 to 24 hours** (depending on cron schedule). The read tables represent a "point-in-time" snapshot of the last refresh.
+
+---
+
+### 1. Model-to-Workload Mapping
+
+Since specific queries were not provided, I derived the most probable analytical access patterns based on the domain (Global ESG / Energy tracking).
+
+#### Access-Pattern Matrix
+| Inferred Query / Dashboard Panel | Tables Touched | Join Hotspots | Aggregation Hotspots |
+| :--- | :--- | :--- | :--- |
+| **Q1: Emissions vs. Population Trends** (Per capita emissions by country/year) | `paises`, `continente`, `populacao`, `emissao_g_efeito_estufa` | `id_paises`, `ano` across 4 tables | `ano`, `continente.nome` |
+| **Q2: Energy Mix Analysis** (% of energy type per country over time) | `paises`, `continente`, `consumo_anual`, `fonte_energia` | `id_paises`, `tipo_energia` | `ano`, `pais.nome` |
+| **Q3: Continent-Level Rollups** (Total emissions/population per continent) | `paises`, `continente`, `populacao`, `emissao_g_efeito_estufa` | `id_paises`, `continente` | `ano`, `continente.nome` |
+
+---
+
+### 2. Denormalization Patterns Chosen
+
+1.  **Unified Fact Wide-Table (Grain: Country + Year):** 
+    We will merge `populacao` and `emissao_g_efeito_estufa` into a single materialized view (`read_indicadores_anuais_mv`). Because a country might have population data but lack emission data for a specific year (or vice versa), we use a `FULL OUTER JOIN` on `(id_paises, ano)` to ensure business correctness and prevent data loss.
+2.  **Pre-joined Dimension Wide-Table (Grain: Country + Year + Energy Type):**
+    We will flatten `consumo_anual` with its dimensions into `read_matriz_energetica_mv`.
+3.  **Pre-calculated Metrics:**
+    Metrics like `emissoes_per_capita` are calculated at materialization time, saving CPU cycles on every read.
+4.  **No Partitioning:**
+    Unless your dataset includes daily metrics or millions of sub-regions, partitioning by `ano` will introduce overhead rather than performance gains. B-Tree indexes are sufficient.
+
+---
+
+### 3. Proposed Denormalized Schema (DDL)
+
+Execute these scripts in your PostgreSQL environment. 
+
+```sql
+-- ==============================================================================
+-- 1. UNIFIED INDICATORS WIDE TABLE (Emissions & Population)
+-- Grain: 1 row per Country per Year
+-- ==============================================================================
+CREATE MATERIALIZED VIEW public.read_indicadores_anuais_mv AS
+WITH fact_merged AS (
+    -- Full outer join ensures no dropped records if one table lags in data entry
+    SELECT 
+        COALESCE(p.id_paises, e.id_paises) AS id_paises,
+        COALESCE(p.ano, e.ano) AS ano,
+        p.quantidade_hab AS populacao,
+        e.quantidade_emitida AS emissoes_co2
+    FROM public.populacao p
+    FULL OUTER JOIN public.emissao_g_efeito_estufa e
+        ON p.id_paises = e.id_paises AND p.ano = e.ano
+)
+SELECT
+    fm.id_paises,
+    fm.ano,
+    pa.nome AS pais_nome,
+    c.nome AS continente_nome,
+    fm.populacao,
+    fm.emissoes_co2,
+    -- Pre-calculate heavy division operations for BI tools
+    CASE 
+        WHEN fm.populacao > 0 THEN (fm.emissoes_co2::numeric / fm.populacao) 
+        ELSE NULL 
+    END AS emissoes_per_capita
+FROM fact_merged fm
+JOIN public.paises pa ON fm.id_paises = pa.id_paises
+JOIN public.continente c ON pa.continente = c.id_continente;
+
+-- UNIQUE INDEX is strictly required for REFRESH MATERIALIZED VIEW CONCURRENTLY
+CREATE UNIQUE INDEX uidx_read_indicadores_anuais 
+    ON public.read_indicadores_anuais_mv (id_paises, ano);
+
+-- Index for Continent/Year aggregations (Q3)
+CREATE INDEX idx_read_indicadores_continente_ano 
+    ON public.read_indicadores_anuais_mv (continente_nome, ano);
+
+
+-- ==============================================================================
+-- 2. ENERGY MIX WIDE TABLE
+-- Grain: 1 row per Country per Year per Energy Type
+-- ==============================================================================
+CREATE MATERIALIZED VIEW public.read_matriz_energetica_mv AS
+SELECT
+    ca.id_consumo,
+    ca.id_paises,
+    ca.ano,
+    pa.nome AS pais_nome,
+    c.nome AS continente_nome,
+    ca.tipo_energia AS id_fonte_energia,
+    -- The original DDL defines nome as varchar[]. We cast to string for BI compatibility.
+    array_to_string(fe.nome, ', ') AS fonte_energia_nome,
+    ca.porcentagem
+FROM public.consumo_anual ca
+JOIN public.paises pa ON ca.id_paises = pa.id_paises
+JOIN public.continente c ON pa.continente = c.id_continente
+JOIN public.fonte_energia fe ON ca.tipo_energia = fe.id_fonte_energia;
+
+-- UNIQUE INDEX for concurrent refresh
+CREATE UNIQUE INDEX uidx_read_matriz_energetica 
+    ON public.read_matriz_energetica_mv (id_consumo);
+
+-- Index for Country/Year filtering (Q2)
+CREATE INDEX idx_read_matriz_pais_ano 
+    ON public.read_matriz_energetica_mv (pais_nome, ano);
+```
+
+---
+
+### 4. Consistency Architecture & Implementation Plan
+
+**Data Lineage:**
+*   `read_indicadores_anuais_mv` ← `populacao`, `emissao_g_efeito_estufa`, `paises`, `continente`
+*   `read_matriz_energetica_mv` ← `consumo_anual`, `fonte_energia`, `paises`, `continente`
+
+**Refresh Strategy:**
+Because triggers are disallowed, we will use a scheduled orchestration tool (e.g., pg_cron, Apache Airflow, or a simple cron + bash script) to refresh the views. 
+
+```sql
+-- The CONCURRENTLY keyword is critical. It allows read queries to continue 
+-- hitting the old data while the new data is calculated in the background.
+REFRESH MATERIALIZED VIEW CONCURRENTLY public.read_indicadores_anuais_mv;
+REFRESH MATERIALIZED VIEW CONCURRENTLY public.read_matriz_energetica_mv;
+```
+
+**Implementation Plan (Safe & Reversible):**
+1.  **Deploy DDL:** Create the MVs and Indexes. This does not touch the existing tables.
+2.  **Migrate Reads:** Update BI dashboards/APIs to point to `read_indicadores_anuais_mv` and `read_matriz_energetica_mv`.
+3.  **Schedule Refresh:** Implement the `REFRESH` job during off-peak hours (e.g., Nightly at 02:00 AM) or on a micro-batch schedule (e.g., every 15 minutes) depending on your write-frequency.
+4.  **Reversibility:** If the MVs fail, BI tools can be instantly pointed back to the normalized views/queries.
+
+---
+
+### 5. Risk Analysis & Observability
+
+| Risk Vector | Analysis & Mitigation |
+| :--- | :--- |
+| **Write Amplification** | **Low.** Writes to the normalized tables are unaffected. The only write penalty occurs during the batch refresh. Using `CONCURRENTLY` replaces the data via an internal diff, minimizing WAL (Write-Ahead Log) bloat compared to a full drop/recreate. |
+| **Staleness / Correctness** | **Intentional Window.** Data in the read tables will be stale up to the interval of your refresh schedule. *Mitigation:* Document this SLA with business stakeholders (e.g., "Dashboards reflect data as of midnight"). |
+| **Storage Growth** | **Moderate.** We are duplicating strings (continent names, country names). Given the domain (Countries/Years), this is likely a few Megabytes. If this scales to billions of rows, consider dictionary encoding or keeping strings normalized (though that defeats the wide-table read speed). |
+| **Lock Contention** | **Zero.** `REFRESH MATERIALIZED VIEW CONCURRENTLY` takes an `ExclusiveLock` only briefly at the end of the transaction to swap pointers. It does not block `SELECT` queries. |
+
+**Recommended Monitoring/Alerts:**
+1.  **Refresh Duration:** Alert if `REFRESH MATERIALIZED VIEW` takes longer than 5 minutes (indicates missing indexes on source tables or CPU starvation).
+2.  **Freshness Lag:** Monitor the `pg_stat_user_tables` to ensure `last_analyze` or `last_vacuum` on the MVs is updating, proving the cron job is firing.
+3.  **Reconciliation:** Run a weekly automated data-quality check: `SELECT SUM(quantidade_emitida) FROM emissao_g_efeito_estufa` vs `SELECT SUM(emissoes_co2) FROM read_indicadores_anuais_mv`. They must match exactly.

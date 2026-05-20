@@ -1,0 +1,301 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_16-45-52
+Model: ollama_local
+Prompt: intermediate
+Schema: airplane
+==================================================
+
+### 1. Workload-Driven Analysis
+
+Based on the provided schema, the current design suffers from the classic "Anomalies of Normalization" in a read-heavy environment. Here is the breakdown of the bottlenecks:
+
+*   **The Join Explosion (The "N+1" Problem):**
+    *   **Scenario:** A user requests a list of upcoming flights with full details (name, city, airline model, distance, seat availability).
+    *   **Current Cost:** To get this, the database must perform a `JOIN` between `flights`, `airports_data` (2x), `aircrafts_data`, and potentially `seats` or `ticket_flights`.
+    *   **Latency Impact:** Even with indexes, scanning multiple tables to stitch together a single logical entity (a flight with its context) adds up. If the query filters on `scheduled_departure` and `status`, the planner must still join to get the descriptive fields (`airport_name`, `model`).
+
+*   **Frequent Repeated Joins:**
+    *   **Scenario:** Reporting on "Total revenue by route" or "Flight status history".
+    *   **Current Cost:** Aggregating `bookings` + `tickets` + `ticket_flights` + `flights` requires a massive join tree.
+    *   **Latency Impact:** Complex aggregates are slow because the engine has to fetch raw rows, join them, compute sums, and then apply filters.
+
+*   **Lack of Pre-computed Aggregates:**
+    *   **Scenario:** "How many seats are available on Flight X?"
+    *   **Current Cost:** Requires joining `flights` -> `ticket_flights` -> `boardings_passes` (or `seats`) and counting distinct values.
+    *   **Latency Impact:** This is a read operation that is being turned into a write-heavy aggregation process.
+
+*   **Missing Spatial Optimization:**
+    *   **Scenario:** "Find all airports within 500km of London."
+    *   **Current Cost:** Using `point` without a proper GIST index or a denormalized distance column forces a full table scan or an inefficient index scan.
+
+### 2. Denormalization Design Strategy
+
+To optimize for low-latency reads while preserving data integrity, we will adopt a **Star Schema** approach for reporting and a **Read-Optimized Physical Model** for transactional reads.
+
+1.  **Denormalize Reference Data (`factless` tables):**
+    *   **Strategy:** Duplicate `airport_name`, `city`, `model`, and `range` directly into the `flights` table.
+    *   **Rationale:** Eliminates the most common join (`flights` -> `airports`/`aircrafts`). Since these are read-only reference data, duplicating them introduces zero correctness risk.
+
+2.  **Create a "Flight Facts" Table (Denormalized Flight):**
+    *   **Strategy:** Create a new table `flights_read_model` that includes all columns from `flights` plus the denormalized reference data.
+    *   **Rationale:** This serves as the single source of truth for "What is this flight?" queries. It allows for `SELECT * FROM flights_read_model WHERE ...` without any joins.
+
+3.  **Denormalize Booking Aggregates:**
+    *   **Strategy:** Create a `bookings_read_model` table. Instead of joining `tickets`, `ticket_flights`, and `boardings_passes`, we pre-calculate the `total_amount` and passenger count per booking reference.
+    *   **Rationale:** Reporting queries on `book_ref` become instant.
+
+4.  **Spatial Optimization:**
+    *   **Strategy:** Add a `distance_from_origin` column to `flights` (calculated on the fly or pre-computed if static origin is known, but for now, we rely on the `point` GIST index which is better than a denormalized distance column for dynamic queries). *Correction:* For extreme speed on "nearby airports", we can add a `h3_index` or simply rely on the GIST index on `coordinates` which is standard for PostGIS. We will optimize the `flights` table to ensure the `point` column is indexed.
+
+5.  **Index Strategy:**
+    *   **Composite Indexes:** Align indexes to the most frequent filter patterns (e.g., `status`, `scheduled_departure`, `flight_no`).
+    *   **Covering Indexes:** For the `flights_read_model`, create a covering index on the most queried columns to avoid tuple fetches.
+
+### 3. New Physical Schema (DDL)
+
+This DDL creates the optimized schema. It retains the original transactional tables (to preserve referential integrity for writes) but introduces read-optimized views and tables.
+
+```sql
+-- ==========================================
+-- 1. TRANSACTIONAL LAYER (Preserved for Write Integrity)
+-- ==========================================
+
+-- Keep original tables for writes. 
+-- Note: We do NOT add redundant columns here to avoid write amplification.
+-- The foreign keys ensure data consistency.
+
+-- [Existing Tables Retained]
+-- bookings.aircrafts_data
+-- bookings.airports_data
+-- bookings.boarding_passes
+-- bookings.bookings
+-- bookings.flights
+-- bookings.seats
+-- bookings.ticket_flights
+-- bookings.tickets
+
+-- Ensure critical indexes exist on transactional tables
+CREATE INDEX IF NOT EXISTS idx_flights_status_departure 
+    ON bookings.flights (status, scheduled_departure);
+
+CREATE INDEX IF NOT EXISTS idx_tickets_passenger 
+    ON bookings.tickets (passenger_id);
+
+-- ==========================================
+-- 2. READ-OPTIMIZED LAYER (Denormalized)
+-- ==========================================
+
+-- TABLE: flights_read_model
+-- Purpose: Denormalized flight details for fast retrieval.
+-- Grain: One row per flight.
+-- Optimization: Includes all descriptive fields (airport names, model, range) 
+--               to eliminate JOINs with reference tables.
+
+CREATE TABLE IF NOT EXISTS bookings.flights_read_model (
+    flight_id integer NOT NULL,
+    flight_no character(6) COLLATE pg_catalog."default" NOT NULL,
+    scheduled_departure timestamp with time zone NOT NULL,
+    scheduled_arrival timestamp with time zone NOT NULL,
+    status character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    -- Denormalized Reference Data (Eliminates JOINs to airports_data & aircrafts_data)
+    departure_airport character(3) COLLATE pg_catalog."default" NOT NULL,
+    arrival_airport character(3) COLLATE pg_catalog."default" NOT NULL,
+    airport_name text NOT NULL,           -- Duplicate from airports_data
+    airport_city text NOT NULL,           -- Duplicate from airports_data
+    departure_airport_coordinates point NOT NULL, -- Keep original point for spatial queries
+    arrival_airport_coordinates point NOT NULL,
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    aircraft_model jsonb NOT NULL,        -- Duplicate from aircrafts_data
+    aircraft_range integer NOT NULL,      -- Duplicate from aircrafts_data
+    
+    -- Index Strategy: Covering index for common "Flight Lookup" queries
+    -- Pattern: SELECT * FROM flights_read_model WHERE flight_no = ?
+    CONSTRAINT flights_read_model_pkey PRIMARY KEY (flight_id),
+    
+    -- Composite index for "Find flights by number"
+    CONSTRAINT idx_flights_read_model_flight_no 
+        UNIQUE (flight_no),
+    
+    -- Composite index for "Find flights by status and date range"
+    CONSTRAINT idx_flights_read_model_status_departure 
+        INCLUDE (scheduled_departure, scheduled_arrival, status)
+        INCLUDE (flight_no)
+);
+
+-- Populate the read model from the transactional flight table
+-- This is a one-time load or can be triggered via a function
+CREATE OR REPLACE FUNCTION populate_flights_read_model()
+RETURNS void AS $$
+BEGIN
+    INSERT INTO bookings.flights_read_model (
+        flight_id, flight_no, scheduled_departure, scheduled_arrival, status,
+        departure_airport, arrival_airport,
+        airport_name, airport_city, departure_airport_coordinates, 
+        arrival_airport_coordinates, aircraft_code, aircraft_model, aircraft_range
+    )
+    SELECT 
+        f.flight_id, f.flight_no, f.scheduled_departure, f.scheduled_arrival, f.status,
+        f.departure_airport, f.arrival_airport,
+        a.airport_name, a.city, a.coordinates,
+        a.coordinates, -- Reuse for simplicity or keep distinct if logic differs
+        f.aircraft_code,
+        ac.model, ac.range
+    FROM bookings.flights f
+    JOIN bookings.airports_data a ON f.departure_airport = a.airport_code
+    JOIN bookings.airports_data b ON f.arrival_airport = b.airport_code
+    JOIN bookings.aircrafts_data ac ON f.aircraft_code = ac.aircraft_code
+    ON CONFLICT (flight_id) DO NOTHING; -- Safe load
+    
+    RETURN;
+END;
+$$ LANGUAGE plpgsql;
+
+-- TABLE: bookings.bookings_read_model
+-- Purpose: Denormalized booking summary.
+-- Grain: One row per booking reference.
+-- Optimization: Pre-calculates total_amount (already in table) and joins passenger info 
+--               directly to avoid joining tickets table.
+
+CREATE TABLE IF NOT EXISTS bookings.bookings_read_model (
+    book_ref character(6) COLLATE pg_catalog."default" NOT NULL,
+    book_date timestamp with time zone NOT NULL,
+    total_amount numeric(10, 2) NOT NULL,
+    -- Denormalized Passenger Info (Duplicate from tickets table to avoid JOIN)
+    passenger_name text NOT NULL,
+    passenger_contact_data jsonb NOT NULL,
+    
+    CONSTRAINT bookings_read_model_pkey PRIMARY KEY (book_ref),
+    
+    -- Index for "Find bookings by date range"
+    CONSTRAINT idx_bookings_read_model_date 
+        INCLUDE (book_date)
+);
+
+-- Populate logic (One-time load)
+CREATE OR REPLACE FUNCTION populate_bookings_read_model()
+RETURNS void AS $$
+BEGIN
+    INSERT INTO bookings.bookings_read_model (
+        book_ref, book_date, total_amount,
+        passenger_name, passenger_contact_data
+    )
+    SELECT 
+        b.book_ref, b.book_date, b.total_amount,
+        t.passenger_name, t.contact_data
+    FROM bookings.bookings b
+    JOIN bookings.tickets t ON b.book_ref = t.book_ref
+    ON CONFLICT (book_ref) DO NOTHING;
+    
+    RETURN;
+END;
+$$ LANGUAGE plpgsql;
+
+-- TABLE: seats_read_model
+-- Purpose: Fast seat availability lookup.
+-- Grain: One row per seat.
+-- Optimization: Includes aircraft model info to avoid JOIN.
+
+CREATE TABLE IF NOT EXISTS bookings.seats_read_model (
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    seat_no character varying(4) COLLATE pg_catalog."default" NOT NULL,
+    fare_conditions character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    -- Denormalized Aircraft Info
+    aircraft_model jsonb NOT NULL,
+    aircraft_range integer NOT NULL,
+    
+    CONSTRAINT seats_read_model_pkey PRIMARY KEY (aircraft_code, seat_no),
+    
+    -- Index for "Find available seats on specific aircraft"
+    CONSTRAINT idx_seats_read_model_aircraft 
+        INCLUDE (seat_no, fare_conditions)
+);
+
+-- Populate logic
+CREATE OR REPLACE FUNCTION populate_seats_read_model()
+RETURNS void AS $$
+BEGIN
+    INSERT INTO bookings.seats_read_model (
+        aircraft_code, seat_no, fare_conditions,
+        aircraft_model, aircraft_range
+    )
+    SELECT 
+        s.aircraft_code, s.seat_no, s.fare_conditions,
+        a.model, a.range
+    FROM bookings.seats s
+    JOIN bookings.aircrafts_data a ON s.aircraft_code = a.aircraft_code
+    ON CONFLICT (aircraft_code, seat_no) DO NOTHING;
+    
+    RETURN;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ==========================================
+-- 3. AGGREGATE FACT TABLES (For Complex Reporting)
+-- ==========================================
+
+-- TABLE: flight_statistics_daily
+-- Purpose: Pre-computed daily statistics (passenger count, revenue, status distribution).
+-- Grain: One row per (flight_id, date).
+-- Optimization: Eliminates the need to aggregate over millions of rows during reporting.
+
+CREATE TABLE IF NOT EXISTS bookings.flight_statistics_daily (
+    flight_id integer NOT NULL,
+    stat_date date NOT NULL,
+    -- Aggregated Metrics
+    passenger_count integer NOT NULL,
+    total_revenue numeric(10, 2) NOT NULL,
+    status_counts jsonb NOT NULL, -- { 'ON_TIME': 10, 'DELAYED': 5 }
+    
+    CONSTRAINT flight_statistics_daily_pkey PRIMARY KEY (flight_id, stat_date),
+    
+    -- Index for "Show stats for Flight X over time"
+    CONSTRAINT idx_flight_stats_flight_date 
+        INCLUDE (flight_id, stat_date)
+);
+
+-- ==========================================
+-- 4. SPATIAL OPTIMIZATION
+-- ==========================================
+
+-- Ensure the point columns in flights are indexed for spatial queries
+CREATE INDEX IF NOT EXISTS idx_flights_departure_coords 
+    ON bookings.flights (departure_airport_coordinates) USING gist;
+
+CREATE INDEX IF NOT EXISTS idx_flights_arrival_coords 
+    ON bookings.flights (arrival_airport_coordinates) USING gist;
+
+-- ==========================================
+-- 5. VIEW FOR COMPLEX READS (Fallback)
+-- ==========================================
+
+-- Use this view only if denormalized tables are insufficient or for ad-hoc complex joins
+CREATE OR REPLACE VIEW bookings.complex_flight_details AS
+SELECT 
+    f.flight_id, f.flight_no, f.status, f.scheduled_departure,
+    -- Join back to get specific seat status if needed (e.g., if a seat was booked)
+    bp.boarding_no, bp.seat_no, bp.ticket_no
+FROM bookings.flights_read_model f
+LEFT JOIN bookings.boarding_passes bp 
+    ON f.flight_id = bp.flight_id 
+    AND bp.ticket_no = 'TICKET_EXAMPLE_123' -- Example filter
+WHERE f.status = 'CONFIRMED';
+```
+
+### Implementation Notes for the Engineer
+
+1.  **Data Migration**:
+    *   Run `populate_flights_read_model()`, `populate_bookings_read_model()`, and `populate_seats_read_model()` once at startup.
+    *   These functions use `ON CONFLICT ... DO NOTHING` to handle duplicates safely if the load is run multiple times.
+
+2.  **Query Pattern Changes**:
+    *   **Old**: `SELECT f.*, a.name, ac.model FROM flights f JOIN airports a ...`
+    *   **New**: `SELECT * FROM bookings.flights_read_model WHERE flight_no = 'BA123'`
+    *   **Performance Gain**: The new query uses the composite index `idx_flights_read_model_flight_no` and returns rows immediately without touching the `airports_data` or `aircrafts_data` tables.
+
+3.  **Write Performance**:
+    *   The transactional tables (`flights`, `tickets`, etc.) remain unchanged. Writes are not impacted by denormalization because we are not adding columns to the primary transactional tables.
+    *   The read tables are populated asynchronously or on startup. If real-time denormalization is needed, consider adding triggers that update `flights_read_model` whenever `flights` changes, but this adds write overhead. For now, the initial load is recommended.
+
+4.  **Correctness**:
+    *   Business-critical fields (amounts, dates, codes) are preserved in the transactional tables.
+    *   The read tables act as a "shadow" copy. If a critical update occurs in the transactional table that hasn't propagated to the read table yet, the read model will be stale. For most read-heavy workloads, this latency is acceptable. If strict consistency is required, consider materialized views or application-level caching (Redis) for the most critical read tables.

@@ -1,0 +1,160 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-20_10-09-12
+Model: ollama_api
+Prompt: RACE
+Schema: ex07
+==================================================
+
+# Denormalization Analysis and Design for Hydroelectric Power Plant Database
+
+## Step 1: Deep Analysis of the Provided Schema
+
+The current normalized schema represents a hydroelectric power plant management system with the following key entities:
+- **Usina** (Power Plants): Main entity containing plant details
+- **Proprietarios** (Owners): Owners of the plants
+- **Localizacoes** (Locations): Geographical locations with municipality references
+- **Municipios** (Municipalities): Municipal divisions with state references
+- **Estados** (States): State/province information
+- **Rios** (Rivers): River information where plants are located
+
+Key relationships include:
+- Usina → Proprietarios (many-to-one)
+- Usina → Rios (many-to-one)
+- Usina → Localizacoes (many-to-one)
+- Localizacoes → Municipios (many-to-two, primary and secondary)
+- Municipios → Estados (many-to-one)
+
+## Step 2: Frequent Query Analysis / Workload Context
+
+For analytical workloads, common queries would likely include:
+1. **Plant listings with full geographic context**: Show all plants with their rivers, municipalities, and states
+2. **Owner-based reporting**: List plants by owner with location details
+3. **Geographic analysis**: Count plants by state, municipality, or river
+4. **Capacity analysis**: Aggregate plant capacities by various dimensions
+5. **Temporal analysis**: Track plant updates over time by location
+
+JOIN bottlenecks identified:
+- Multiple JOINs required to get complete plant information (up to 6 tables)
+- Location table requires joining twice to get both municipalities
+- Geographic aggregations require traversing the entire hierarchy
+
+## Step 3: Evaluation of Common Denormalization Techniques
+
+Based on the schema and workload patterns:
+
+### Most Suitable Techniques:
+1. **Adding Redundant Attributes**: Critical for eliminating JOINs in frequent queries
+2. **Collapsing Relations**: Appropriate given the hierarchical nature of geographic data
+3. **Adding Derived Attributes**: Useful for capacity aggregations and counts
+
+### Less Suitable:
+4. **Vertical Partitioning**: Not applicable as tables are already well-sized
+
+## Step 4: Design Multiple Possible Denormalized Schemas
+
+### Option A: Single Consolidated Table
+Merge all entities into one comprehensive "UsinaCompleta" table with all attributes.
+
+### Option B: Two-Tier Approach
+- Geographic dimension table consolidating location hierarchies
+- Main fact table with plants including owner and river information plus geographic keys
+
+### Option C: Hierarchical Collapse
+- Collapse geographic hierarchy (municipality+state) into location records
+- Keep separate tables for owners and rivers but enrich main table with descriptive fields
+
+## Step 5: Evaluation of Options
+
+| Option | Simplicity | Performance | Maintainability | Storage Efficiency |
+|--------|------------|-------------|-----------------|--------------------|
+| A | High | Highest | Low | Low |
+| B | Medium | High | Medium | Medium |
+| C | Medium-High | High | High | High |
+
+**Selected Option B** as it provides the best balance between performance gains and maintainability while being storage-efficient.
+
+## Step 6: Final Denormalized Schema Design
+
+```sql
+-- Denormalized schema for analytical workloads
+BEGIN;
+
+-- Dimension table for geographic hierarchies
+CREATE TABLE IF NOT EXISTS public."DimLocalizacao" (
+    id_localizacao INTEGER PRIMARY KEY,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    municipio1_nome VARCHAR NOT NULL,
+    municipio1_uf CHAR(2) NOT NULL,
+    municipio2_nome VARCHAR,  -- Nullable as in original
+    municipio2_uf CHAR(2),     -- Nullable as in original
+    estado_nome CHAR(2) NOT NULL
+);
+
+-- Dimension table for plant owners
+CREATE TABLE IF NOT EXISTS public."DimProprietario" (
+    id_proprietario INTEGER PRIMARY KEY,
+    proprietario_nome VARCHAR NOT NULL
+);
+
+-- Dimension table for rivers
+CREATE TABLE IF NOT EXISTS public."DimRio" (
+    id_rio INTEGER PRIMARY KEY,
+    rio_nome VARCHAR NOT NULL
+);
+
+-- Fact table for power plants with denormalized attributes
+CREATE TABLE IF NOT EXISTS public."FatoUsina" (
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    iniciop DATE,
+    atualizacao DATE,
+    lat DOUBLE PRECISION,
+    long DOUBLE PRECISION,
+    estagio VARCHAR,
+    
+    -- Denormalized foreign keys with descriptive names
+    id_proprietario INTEGER,
+    proprietario_nome VARCHAR,
+    
+    id_rio INTEGER NOT NULL,
+    rio_nome VARCHAR NOT NULL,
+    
+    id_localizacao INTEGER NOT NULL,
+    localizacao_latitude DOUBLE PRECISION,
+    localizacao_longitude DOUBLE PRECISION,
+    municipio1_nome VARCHAR NOT NULL,
+    municipio1_uf CHAR(2) NOT NULL,
+    municipio2_nome VARCHAR,
+    municipio2_uf CHAR(2),
+    estado_nome CHAR(2) NOT NULL,
+    
+    -- Derived attributes for analytical performance
+    qtde_usinas_estado INTEGER DEFAULT 0,
+    qtde_usinas_municipio INTEGER DEFAULT 0,
+    capacidade_total_estado_kw FLOAT DEFAULT 0,
+    capacidade_media_estado_kw FLOAT DEFAULT 0
+);
+
+-- Indexes for improved analytical query performance
+CREATE INDEX idx_fatusina_estado ON public."FatoUsina"(estado_nome);
+CREATE INDEX idx_fatusina_municipio ON public."FatoUsina"(municipio1_nome);
+CREATE INDEX idx_fatusina_rio ON public."FatoUsina"(rio_nome);
+CREATE INDEX idx_fatusina_proprietario ON public."FatoUsina"(proprietario_nome);
+CREATE INDEX idx_fatusina_atualizacao ON public."FatoUsina"(atualizacao);
+CREATE INDEX idx_fatusina_potkw ON public."FatoUsina"(potkw);
+
+COMMIT;
+```
+
+This design offers several advantages:
+1. **Eliminates JOINs**: All frequently accessed data is available in a single table scan
+2. **Improves query performance**: Complex geographic and ownership queries execute much faster
+3. **Supports analytical workloads**: Includes derived attributes for common aggregations
+4. **Maintains flexibility**: Dimension tables still exist for detailed analysis if needed
+5. **Storage efficiency**: Reduces storage overhead compared to fully denormalized approach
+6. **Maintainable**: Clear separation between facts and dimensions facilitates updates
+
+The schema transforms 6 JOINs in typical queries to zero while preserving all necessary information for analytical processing.

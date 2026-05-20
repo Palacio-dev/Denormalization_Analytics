@@ -1,0 +1,149 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_20-12-46
+Model: ollama_local
+Prompt: RISEN
+Schema: ex04
+==================================================
+
+BEGIN;
+
+-- Drop existing tables if they exist to ensure a clean schema for the denormalized model
+DROP TABLE IF EXISTS public.country CASCADE;
+DROP TABLE IF EXISTS public.region CASCADE;
+DROP TABLE IF EXISTS public.survey CASCADE;
+DROP TABLE IF EXISTS public.decile CASCADE;
+DROP TABLE IF EXISTS public.demography CASCADE;
+DROP TABLE IF EXISTS public.employment CASCADE;
+DROP TABLE IF EXISTS public.education CASCADE;
+DROP TABLE IF EXISTS public.economy CASCADE;
+DROP TABLE IF EXISTS public.population CASCADE;
+DROP TABLE IF EXISTS public.life_expectancy CASCADE;
+DROP TABLE IF EXISTS public.health CASCADE;
+
+-- 1. Core Reference Tables (Simplified/Consolidated)
+-- Merged Country and Region into a single reference table to eliminate joins for location data.
+CREATE TABLE IF NOT EXISTS public.location_reference
+(
+    country_code character varying NOT NULL,
+    region_code character varying NOT NULL,
+    country_name character varying,
+    region_name character varying NOT NULL,
+    PRIMARY KEY (country_code, region_code)
+);
+
+-- 2. Survey Data (Consolidated)
+-- Merged survey and decile data to allow direct access to poverty metrics and decile values without joins.
+CREATE TABLE IF NOT EXISTS public.survey_metrics
+(
+    id_survey integer NOT NULL,
+    survey_year integer,
+    survey_acronym character varying,
+    welfare_type character varying,
+    survey_coverage character varying,
+    reporting_level character varying,
+    poverty_line double precision,
+    headcount double precision,
+    poverty_gap double precision,
+    poverty_severity double precision,
+    gini double precision,
+    reporting_pop integer,
+    reporting_pce double precision,
+    distribution_type character varying,
+    spl double precision,
+    PRIMARY KEY (id_survey)
+);
+
+-- 3. Demography & Population (Consolidated)
+-- Merged demography and population tables. Added redundant columns for gender and age distribution to avoid joins.
+CREATE TABLE IF NOT EXISTS public.demography_data
+(
+    id_demography integer NOT NULL,
+    year integer,
+    country_code character varying NOT NULL,
+    pop_density double precision,
+    urban_pop double precision,
+    rural_pop double precision,
+    net_migration double precision,
+    death_rate double precision,
+    birth_rate double precision,
+    pop_ages character varying,
+    gender character varying,
+    "number" double precision,
+    PRIMARY KEY (id_demography)
+);
+
+-- 4. Employment & Economy (Consolidated)
+-- Merged employment and economy tables. Added redundant columns for year and country_code to avoid joins.
+CREATE TABLE IF NOT EXISTS public.economic_indicators
+(
+    id_economy integer NOT NULL,
+    year integer,
+    country_code character varying NOT NULL,
+    gdp double precision,
+    inflation double precision,
+    tax_revenue double precision,
+    child_emp double precision,
+    unemp double precision,
+    vulnerable_emp double precision,
+    part_time double precision,
+    employers double precision,
+    labor_force_total double precision,
+    labor_force_fem double precision,
+    PRIMARY KEY (id_economy)
+);
+
+-- 5. Education & Health (Consolidated)
+-- Merged education, health, and life expectancy tables.
+-- Education: Added redundant year and country_code.
+-- Health: Added redundant year and country_code.
+-- Life Expectancy: Merged with demography by keeping id_demography but adding redundant gender and year columns.
+CREATE TABLE IF NOT EXISTS public.education_data
+(
+    id_education integer NOT NULL,
+    year integer,
+    country_code character varying NOT NULL,
+    child_out_of_school double precision,
+    progression_to_sec double precision,
+    expenditure double precision,
+    preprim_enroll double precision,
+    prim_enrol double precision,
+    sec_enrol double precision,
+    terti_enrol double precision,
+    PRIMARY KEY (id_education)
+);
+
+CREATE TABLE IF NOT EXISTS public.health_data
+(
+    id_health integer NOT NULL,
+    year integer,
+    country_code character varying NOT NULL,
+    hospital_beds double precision,
+    physicians double precision,
+    expenditure double precision,
+    PRIMARY KEY (id_health)
+);
+
+CREATE TABLE IF NOT EXISTS public.life_expectancy_data
+(
+    id_life_expectancy integer NOT NULL,
+    id_demography integer NOT NULL,
+    year integer,
+    country_code character varying NOT NULL,
+    gender character varying,
+    value double precision,
+    PRIMARY KEY (id_life_expectancy)
+);
+
+-- Create Indexes for Foreign Keys (for data integrity in the denormalized model)
+CREATE INDEX IF NOT EXISTS idx_loc_ref_country ON public.location_reference (country_code);
+CREATE INDEX IF NOT EXISTS idx_loc_ref_region ON public.location_reference (region_code);
+CREATE INDEX IF NOT EXISTS idx_survey_metrics_survey ON public.survey_metrics (id_survey);
+CREATE INDEX IF NOT EXISTS idx_demography_data_country ON public.demography_data (country_code);
+CREATE INDEX IF NOT EXISTS idx_demography_data_year ON public.demography_data (year);
+CREATE INDEX IF NOT EXISTS idx_econ_indicators_country ON public.economic_indicators (country_code);
+CREATE INDEX IF NOT EXISTS idx_econ_indicators_year ON public.economic_indicators (year);
+CREATE INDEX IF NOT EXISTS idx_edu_data_country ON public.education_data (country_code);
+CREATE INDEX IF NOT EXISTS idx_health_data_country ON public.health_data (country_code);
+CREATE INDEX IF NOT EXISTS idx_life_exp_demography ON public.life_expectancy_data (id_demography);
+
+END;

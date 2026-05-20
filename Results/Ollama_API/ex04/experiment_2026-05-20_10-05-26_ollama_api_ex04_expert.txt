@@ -1,0 +1,242 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-20_10-05-26
+Model: ollama_api
+Prompt: expert
+Schema: ex04
+==================================================
+
+# **Executive Summary**
+
+This document outlines a denormalized read-optimized schema designed to significantly improve query performance on analytical workloads involving poverty metrics, socio-economic indicators, and country-level development statistics. The approach focuses on reducing join overhead by pre-joining frequently accessed dimension tables (`country`, `region`) into fact tables such as `survey` and related demographic/health/economic entities. Additionally, we introduce snapshot tables for point-in-time analysis of current country status and aggregate rollups grouped by geographic region or temporal buckets.
+
+All transformations preserve logical correctness via strict lineage tracking and controlled refresh strategies with defined staleness windows (< 1 hour). The implementation is designed to be fully reversible using materialized views or scheduled ETL pipelines without reliance on triggers.
+
+---
+
+## **Access-Pattern Matrix**
+
+| Query Type | Tables Accessed | Columns Touched | Join Hotspots |
+|------------|------------------|------------------|---------------|
+| Country Overview | `survey`, `country`, `region` | `country_code`, `country_name`, `region_name`, `welfare_type`, `poverty_line`, `headcount`, `gini` | `country.region_code → region.region_code`<br>`survey.country_code → country.country_code` |
+| Time-Series Analysis | `demography`, `economy`, `employment`, `education`, `health`, `country` | All numerical fields across years | Multiple joins to `country` |
+| Regional Aggregation | `survey`, `country`, `region` | Aggregate over `region_code` | Same as above |
+| Decile Distribution | `decile`, `survey` | `value`, `name`, `id_survey` | `decile.id_survey → survey.id_survey` |
+| Population Breakdown | `population`, `demography` | `pop_ages`, `gender`, `number` | `population.id_demography → demography.id_demography` |
+
+> ✅ **Hotspot Insight**: Most queries involve joining `country` to either `region` or `survey`. These are prime candidates for wide-table denormalization.
+
+---
+
+## **Proposed Denormalized Schema (DDL)**
+
+### 1. Wide Read Table: `country_survey_summary`
+
+**Purpose:** Prejoin `survey`, `country`, and `region` for fast retrieval of poverty and welfare indicators per country/year.
+
+```sql
+CREATE TABLE IF NOT EXISTS public.country_survey_summary (
+    id_survey INTEGER NOT NULL PRIMARY KEY,
+    survey_year INTEGER,
+    country_code VARCHAR NOT NULL,
+    country_name VARCHAR,
+    region_code VARCHAR NOT NULL,
+    region_name VARCHAR NOT NULL,
+    
+    -- Survey Metrics
+    welfare_type VARCHAR,
+    survey_acronym VARCHAR,
+    survey_comparability INTEGER,
+    comparable_spell VARCHAR,
+    poverty_line DOUBLE PRECISION,
+    headcount DOUBLE PRECISION,
+    poverty_gap DOUBLE PRECISION,
+    poverty_severity DOUBLE PRECISION,
+    gini DOUBLE PRECISION,
+    reporting_pop INTEGER,
+    reporting_pce DOUBLE PRECISION,
+    distribution_type VARCHAR,
+    spl DOUBLE PRECISION,
+    survey_coverage VARCHAR,
+    reporting_level VARCHAR,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+**Index Strategy:**
+```sql
+CREATE INDEX idx_css_region_year ON public.country_survey_summary(region_code, survey_year DESC);
+CREATE INDEX idx_css_country_year ON public.country_survey_summary(country_code, survey_year DESC);
+```
+
+---
+
+### 2. Snapshot Table: `current_country_status`
+
+**Purpose:** Store latest known values per country for quick dashboard rendering or API endpoints.
+
+```sql
+CREATE TABLE IF NOT EXISTS public.current_country_status (
+    country_code VARCHAR PRIMARY KEY,
+    country_name VARCHAR,
+    region_code VARCHAR,
+    region_name VARCHAR,
+    last_survey_year INTEGER,
+    last_gini DOUBLE PRECISION,
+    last_headcount DOUBLE PRECISION,
+    last_poverty_line DOUBLE PRECISION,
+    last_urban_pop DOUBLE PRECISION,
+    last_birth_rate DOUBLE PRECISION,
+    last_inflation DOUBLE PRECISION,
+    last_unemp DOUBLE PRECISION,
+    last_expenditure DOUBLE PRECISION,
+    last_physicians DOUBLE PRECISION,
+    last_hospital_beds DOUBLE PRECISION,
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+**Index Strategy:**
+```sql
+CREATE INDEX idx_ccs_region ON public.current_country_status(region_code);
+```
+
+---
+
+### 3. Time-Series Rollup Table: `regional_annual_stats`
+
+**Purpose:** Aggregated annual stats at regional level to avoid repeated aggregation during reporting.
+
+```sql
+CREATE TABLE IF NOT EXISTS public.regional_annual_stats (
+    region_code VARCHAR NOT NULL,
+    survey_year INTEGER NOT NULL,
+    avg_gini DOUBLE PRECISION,
+    avg_headcount DOUBLE PRECISION,
+    total_reporting_pop BIGINT,
+    avg_birth_rate DOUBLE PRECISION,
+    avg_unemp DOUBLE PRECISION,
+    avg_inflation DOUBLE PRECISION,
+    count_countries INTEGER,
+    PRIMARY KEY (region_code, survey_year)
+);
+```
+
+**Index Strategy:**
+```sql
+CREATE INDEX idx_ras_year ON public.regional_annual_stats(survey_year DESC);
+```
+
+---
+
+### 4. Decile Summary View: `v_decile_distribution`
+
+**Purpose:** Simplify access to decile distributions with associated survey metadata.
+
+```sql
+CREATE MATERIALIZED VIEW IF NOT EXISTS public.v_decile_distribution AS
+SELECT 
+    d.id_decile,
+    s.country_code,
+    c.country_name,
+    r.region_name,
+    s.survey_year,
+    d.name AS decile_label,
+    d.value AS income_share
+FROM decile d
+JOIN survey s ON d.id_survey = s.id_survey
+JOIN country c ON s.country_code = c.country_code
+JOIN region r ON c.region_code = r.region_code;
+```
+
+**Refresh Strategy:** Refresh nightly after main ETL pipeline completes.
+
+---
+
+## **Consistency Architecture & Lineage Mapping**
+
+| Denormalized Column | Source Table.Column(s) | Refresh Frequency | Staleness Window |
+|---------------------|------------------------|--------------------|------------------|
+| `country_survey_summary.*` | `survey.*`, `country.country_name`, `region.region_name` | On insert/update to `survey` | < 1 hr |
+| `current_country_status.*` | Latest rows from multiple fact tables | Daily snapshot | Up to 1 day |
+| `regional_annual_stats.*` | Aggregates over `country_survey_summary` | Monthly rollup | End-of-month lag acceptable |
+| `v_decile_distribution.*` | Joins of `decile`, `survey`, `country`, `region` | Nightly | < 1 day |
+
+> 🔐 **Correctness Note**: Full audit trail maintained through timestamped snapshots and optional hash-based row checksumming in production.
+
+---
+
+## **Risk Analysis**
+
+### Write Amplification
+Denormalized writes increase due to cascading updates. Mitigated via:
+- Batched refreshes instead of real-time propagation
+- Logical partitioning where applicable
+
+### Lock Contention
+High write volume may block readers temporarily. Solution:
+- Use MVCC-compatible engines (PostgreSQL, Snowflake)
+- Employ table swapping techniques for atomic refreshes
+
+### Failure Modes
+- Data drift between base and summary tables → Monitor via reconciliation diffs
+- Long-running refresh jobs → Implement timeout alerts and partial rebuilds
+
+### Backfill Runtime
+Estimated full backfill time:
+- `country_survey_summary`: ~30 mins
+- `current_country_status`: ~10 mins
+- `regional_annual_stats`: ~5 mins
+- `v_decile_distribution`: ~5 mins
+
+### Storage Growth
+Approximate growth estimate:
+- Original size: ~1GB
+- Denormalized artifacts add ~15% additional space (~150MB)
+
+---
+
+## **Monitoring & Observability**
+
+| Metric | Alert Threshold | Tooling Suggestion |
+|-------|------------------|--------------------|
+| Lag in `updated_at` vs source timestamps | >1hr | Prometheus + Grafana |
+| Row count diff between base and summary | >1% deviation | Custom reconciliation job |
+| Query latency regression (>2x baseline) | N/A | APM (e.g., New Relic, Datadog) |
+| Disk usage spikes | >90% utilization | CloudWatch / pgBadger |
+
+---
+
+## **Implementation Plan**
+
+### Phase 1: Build Infrastructure
+- Deploy new empty tables/views
+- Set up refresh jobs using Airflow/dbt/Cron depending on environment
+- Validate structure against sample data
+
+### Phase 2: Populate Initial Data
+- Backfill all historical records into summary tables
+- Enable materialized view refresh schedule
+
+### Phase 3: Redirect Reads
+- Update application layer to prefer new tables/views
+- Monitor performance improvements and regressions
+
+### Phase 4: Reversibility Mechanism
+- Maintain both normalized and denormalized versions side-by-side until proven stable
+- Retain ability to rollback via config toggle or feature flag
+
+---
+
+## **Assumptions Explicitly Made**
+
+- Workload is predominantly read-heavy analytical reporting
+- No real-time SLAs required beyond daily refresh cycles
+- Triggers disallowed; hence no event-driven sync mechanism used
+- CDC not currently enabled; refresh based on batch window only
+- Engine supports materialized views (PostgreSQL assumed)
+
+--- 
+
+Let me know your operational constraints (batch windows, CDC availability, etc.) so I can tailor the refresh mechanism accordingly.

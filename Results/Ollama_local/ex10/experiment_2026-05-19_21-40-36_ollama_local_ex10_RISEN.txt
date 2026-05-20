@@ -1,0 +1,124 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_21-40-36
+Model: ollama_local
+Prompt: RISEN
+Schema: ex10
+==================================================
+
+BEGIN;
+
+-- Drop existing tables if they exist to ensure a clean state
+DROP TABLE IF EXISTS public.consumo_anual_denormalizado CASCADE;
+DROP TABLE IF EXISTS public.continente_denormalizado CASCADE;
+DROP TABLE IF EXISTS public.paises_denormalizado CASCADE;
+DROP TABLE IF EXISTS public.populacao_denormalizado CASCADE;
+DROP TABLE IF EXISTS public.emissao_g_efeito_estufa_denormalizado CASCADE;
+
+-- 1. Create the Denormalized 'Paises' Table
+-- Merges 'paises' and 'continente' by flattening the foreign key relationship.
+CREATE TABLE IF NOT EXISTS public.paises_denormalizado
+(
+    id_paises integer NOT NULL,
+    nome_paises character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    fundacao integer NOT NULL,
+    nome_continente character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT paises_denormalizado_pkey PRIMARY KEY (id_paises)
+);
+
+-- 2. Create the Denormalized 'Populacao' Table
+-- Merges 'populacao' and 'paises' by flattening the foreign key relationship.
+-- Note: We do not join with 'continente' here to keep the granularity specific to the population data per year per country,
+-- unless a global join is inferred as the primary bottleneck. Given the schema, joining Paises is the immediate optimization.
+CREATE TABLE IF NOT EXISTS public.populacao_denormalizado
+(
+    id_pop integer NOT NULL,
+    id_paises integer NOT NULL,
+    ano integer NOT NULL,
+    quantidade_hab integer NOT NULL,
+    nome_paises character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    nome_continente character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT populacao_denormalizado_pkey PRIMARY KEY (id_pop)
+);
+
+-- 3. Create the Denormalized 'Consumo_anual' Table
+-- Merges 'consumo_anual', 'paises', and 'fonte_energia' into a single analytical table.
+-- This eliminates the need for multiple joins when querying consumption data by country, year, and energy type.
+CREATE TABLE IF NOT EXISTS public.consumo_anual_denormalizado
+(
+    id_consumo integer NOT NULL,
+    id_paises integer NOT NULL,
+    ano integer NOT NULL,
+    porcentagem integer NOT NULL,
+    tipo_energia character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    nome_paises character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    nome_continente character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT consumo_anual_denormalizado_pkey PRIMARY KEY (id_consumo)
+);
+
+-- 4. Create the Denormalized 'Emissao_g_efeito_estufa' Table
+-- Merges 'emissao_g_efeito_estufa' and 'paises' into a single analytical table.
+CREATE TABLE IF NOT EXISTS public.emissao_g_efeito_estufa_denormalizado
+(
+    id_emissao integer NOT NULL,
+    id_paises integer NOT NULL,
+    ano integer NOT NULL,
+    quantidade_emitida bigint NOT NULL,
+    nome_paises character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    nome_continente character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT emissao_g_efeito_estufa_denormalizado_pkey PRIMARY KEY (id_emissao)
+);
+
+-- Add Foreign Keys (Logical only, as physical enforcement is often bypassed in denormalized data warehouses for performance)
+-- We define them to maintain semantic integrity within the new schema.
+
+ALTER TABLE IF EXISTS public.paises_denormalizado
+    ADD CONSTRAINT paises_denormalizado_continente_fkey FOREIGN KEY (nome_continente)
+    REFERENCES public.continente_denormalizado (nome_continente) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+ALTER TABLE IF EXISTS public.populacao_denormalizado
+    ADD CONSTRAINT populacao_denormalizado_id_paises_fkey FOREIGN KEY (id_paises)
+    REFERENCES public.paises_denormalizado (id_paises) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+ALTER TABLE IF EXISTS public.consumo_anual_denormalizado
+    ADD CONSTRAINT consumo_anual_denormalizado_id_paises_fkey FOREIGN KEY (id_paises)
+    REFERENCES public.paises_denormalizado (id_paises) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+ALTER TABLE IF EXISTS public.consumo_anual_denormalizado
+    ADD CONSTRAINT consumo_anual_denormalizado_tipo_energia_fkey FOREIGN KEY (tipo_energia)
+    REFERENCES public.fonte_energia (id_fonte_energia) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+ALTER TABLE IF EXISTS public.emissao_g_efeito_estufa_denormalizado
+    ADD CONSTRAINT emissao_g_efeito_estufa_denormalizado_id_paises_fkey FOREIGN KEY (id_paises)
+    REFERENCES public.paises_denormalizado (id_paises) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+-- Create a denormalized reference table for 'continente' to support the FKs added above
+CREATE TABLE IF NOT EXISTS public.continente_denormalizado
+(
+    id_continente integer NOT NULL,
+    nome_continente character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT continente_denormalizado_pkey PRIMARY KEY (id_continente)
+);
+
+-- Note: The original schema had 'fonte_energia' as an array type. For denormalization in a relational context,
+-- we assume a standard lookup table structure. If the original data was a single value per row, the FK constraint
+-- on 'tipo_energia' in 'consumo_anual' suggests it acts as an ID. We preserve the FK relationship.
+-- If 'tipo_energia' was intended to be the array itself, the denormalized approach would require splitting
+-- the rows into a 'consumo_energia' table. However, based on the FK constraint provided in the input:
+-- "tipo_energia" references "fonte_energia", we treat it as a standard integer ID column in the denormalized table.
+
+END;

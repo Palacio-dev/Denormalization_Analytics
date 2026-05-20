@@ -1,0 +1,191 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_20-57-26
+Model: ollama_local
+Prompt: expert
+Schema: ex07
+==================================================
+
+# Executive Summary
+
+The current normalized schema (`Usina`, `Proprietarios`, `Municipios`, `Rios`, `Localizacoes`) suffers from the classic "N+1 join" problem. Queries requiring a complete picture of a power plant (e.g., "Show me all hydro plants in State 'SP' owned by 'X' with their coordinates") must traverse five tables, joining on foreign keys that are often implicit or require multiple steps.
+
+The proposed solution is a **Read-Optimized Denormalized Schema** centered on a `Usina_Vista` (Snapshot Table). This table pre-joins all dimension data (`Proprietarios`, `Rios`, `Municipios`, `Localizacoes`) into a single row per plant, eliminating runtime joins.
+*   **Correctness Strategy**: We introduce a `data_refreshed_at` column. The source of truth remains the normalized tables; the denormalized table is a read-only snapshot refreshed via a scheduled batch job (or CDC). We explicitly document a **T+5 minute staleness window** for this denormalized table.
+*   **Performance Gain**: This reduces a 5-table join query to a simple `WHERE` filter and `SELECT`, potentially improving latency by 60–80% for analytical reports.
+*   **Complexity Trade-off**: We accept write amplification and a background maintenance window to gain instant query performance. No triggers are used; changes are batched.
+
+---
+
+# 1. Model-to-Workload Mapping
+
+Based on typical operational patterns for a utility database (USINA), the access patterns are:
+
+| Query Class | Description | Tables Touched | Join Complexity | Aggregation Needs |
+| :--- | :--- | :--- | :--- :--- |
+| **Q1: Geographic Scope** | "List all plants in State 'SP' sorted by name." | `Usina`, `Municipios`, `Estados` | 2-3 Joins | None |
+| **Q2: Ownership Report** | "Total capacity of plants owned by 'Company X'." | `Usina`, `Proprietarios` | 1 Join | `SUM(potkw)` |
+| **Q3: Asset Details** | "Get details for Plant ID 101 (Name, Owner, River, Location, Stage)." | `Usina`, `Proprietarios`, `Rios`, `Localizacoes`, `Municipios` | 4-5 Joins | None |
+| **Q4: Time-Series Agg** | "Monthly hydro production by state." | `Usina` (if time exists), `Estados` | 1 Join | `GROUP BY` |
+| **Q5: Complex Filter** | "Plants in 'SP' owned by 'X' with >500MW, sorted by lat/long." | All 5 tables | 4-5 Joins | None |
+
+**Identified Hotspots:**
+*   **Join Hotspot**: `Usina` is the central hub. Every query touches it, and joins to `Proprietarios`, `Rios`, and `Localizacoes` are frequent.
+*   **Aggregation Hotspot**: Queries often need `SUM(potkw)` or `COUNT(*)` grouped by `uf` (State) or `nome_proprietario`.
+
+---
+
+# 2. Denormalization Patterns & Justification
+
+Given the constraint of **no triggers** and the need for **immediate read performance**, we adopt the following pattern:
+
+### Pattern: Snapshot Table (Wide Read)
+*   **Justification**: Unlike Materialized Views (which require engine-specific syntax and can be complex to maintain in some RDBMS without triggers), a dedicated table allows explicit control over the refresh mechanism. It guarantees that the data is physically available as a single table, avoiding the optimizer's inability to efficiently execute joins in complex analytical queries.
+*   **Selection**: We will denormalize the **Current State** of a plant. We do *not* denormalize historical time-series data (which would require a Fact table), as the source schema lacks a `data_date` column. We assume the `atualizacao` column in `Usina` indicates the last update time, which we use to drive the refresh.
+
+### Pattern: Pre-Aggregated Rollups (Optional)
+*   **Justification**: If the workload shows heavy grouping by State (`uf`) or Owner (`nome_proprietario`), we can create a separate small table `Usina_Rollup` containing only the aggregated stats.
+*   **Decision**: For this initial design, we stick to the **Wide Read Snapshot** to minimize schema complexity. If `SUM(potkw)` by state is the #1 query, we can add a rollup table in Phase 2.
+
+---
+
+# 3. Physical Design Details (DDL)
+
+### Assumptions
+1.  **Engine**: PostgreSQL (inferred from `SERIAL`, `VARCHAR`, `DOUBLE PRECISION`).
+2.  **Staleness**: The denormalized table will be T+5 minutes stale (refreshed every 5 mins or on data change via CDC).
+3.  **No Triggers**: All data updates go to the normalized tables; the denormalized table is updated via a background job.
+4.  **Source of Truth**: The normalized `Usina` table. The denormalized table is a read-only view of the current state.
+
+### DDL: `Usina_Vista` (Denormalized Snapshot)
+
+```sql
+-- Create the denormalized snapshot table
+CREATE TABLE IF NOT EXISTS public."Usina_Vista" (
+    -- Primary Key: Matches Usina.id for easy linking if needed, 
+    -- but we use a surrogate PK for the snapshot itself to allow bulk loads
+    id_snapshot SERIAL PRIMARY KEY,
+    
+    -- Business Entity Identifiers (Preserved for joins if needed)
+    id_usina INTEGER NOT NULL, -- Reference to source PK
+    
+    -- Denormalized Dimension Data (Pre-joined)
+    nome VARCHAR(255) NOT NULL,
+    potkw FLOAT NOT NULL,
+    potfis FLOAT NOT NULL,
+    estagio VARCHAR(50),
+    
+    -- Location & Geography (Flattened)
+    lat DOUBLE PRECISION,
+    long DOUBLE PRECISION,
+    municipio VARCHAR(100), -- Flattened from Municipios
+    uf CHAR(2) NOT NULL,   -- Flattened from Estados
+    
+    -- Ownership (Flattened)
+    nome_proprietario VARCHAR(255), -- Flattened from Proprietarios
+    
+    -- Resource (Flattened)
+    nome_rio VARCHAR(100), -- Flattened from Rios
+    
+    -- Metadata for Consistency & Freshness
+    data_refreshed TIMESTAMP WITH TIME ZONE NOT NULL,
+    source_version VARCHAR(50), -- Optional: Track which normalized batch this matches
+    
+    -- Constraints
+    CONSTRAINT uk_usina_vista_unique UNIQUE (id_usina)
+);
+
+-- Indexes for the Denormalized Table
+-- Targeting the most common filter patterns (State, Owner, Geo)
+CREATE INDEX idx_usina_vista_uf ON public."Usina_Vista"(uf);
+CREATE INDEX idx_usina_vista_proprietario ON public."Usina_Vista"(nome_proprietario);
+CREATE INDEX idx_usina_vista_lat_long ON public."Usina_Vista"(lat, long);
+CREATE INDEX idx_usina_vista_pot_kw ON public."Usina_Vista"(potkw);
+
+-- Link back to source for debugging/reconciliation
+CREATE INDEX idx_usina_vista_src_id ON public."Usina_Vista"(id_usina);
+```
+
+### Implementation Plan (Safe & Observable)
+
+#### Step 1: Data Lineage Definition
+*   **Source**: `public."Usina"` (Primary Key `id`).
+*   **Dimensions**: Joined via `id_proprietario`, `id_rio`, `id_localizacao`.
+*   **Lineage Rule**: `Usina_Vista` columns `nome_proprietario`, `municipio`, etc., are derived from the normalized tables.
+*   **Staleness Window**: `data_refreshed` is updated. Queries using `Usina_Vista` should ideally filter `WHERE data_refreshed > NOW() - INTERVAL '5 minutes'` for strict consistency, or accept the trade-off for speed.
+
+#### Step 2: Refresh Mechanism (No Triggers)
+Since triggers are forbidden, we implement a **Batch Refresh Job** (run via Cron or Airflow).
+
+**Pseudocode for Refresh Job:**
+```sql
+-- 1. Clear old snapshot (keep last 24h for safety, or drop if confident)
+TRUNCATE TABLE public."Usina_Vista";
+
+-- 2. Perform the denormalization query (The "Denormalized View" logic)
+INSERT INTO public."Usina_Vista" (
+    id_usina, nome, potkw, potfis, estagio, 
+    lat, long, municipio, uf, 
+    nome_proprietario, nome_rio, 
+    data_refreshed, source_version
+)
+SELECT 
+    u.id,
+    u.nome, u.potkw, u.potfis, u.estagio,
+    u.lat, u.long,
+    m.municipio, m.uf,
+    p.nome_proprietario,
+    r.nome_rio,
+    CURRENT_TIMESTAMP,
+    'batch_' || EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::INT
+FROM public."Usina" u
+JOIN public."Proprietarios" p ON u.id_proprietario = p.id_proprietario
+JOIN public."Rios" r ON u.id_rio = r.id_rio
+JOIN public."Localizacoes" l ON u.id_localizacao = l.id_localizacao
+JOIN public."Municipios" m ON l.id_municipio1 = m.id_municipio -- Assuming id_municipio2 is null or same logic
+WHERE u.atualizacao >= CURRENT_TIMESTAMP - INTERVAL '1 hour'; -- Only refresh recently updated rows to save I/O
+```
+
+#### Step 3: Operational Complexity & Backfill
+*   **Backfill**: Run the `INSERT` query once manually or via the job on startup to populate historical data.
+*   **Reversibility**: If the job fails, the `TRUNCATE` has not happened. The table remains empty. The job can be retried. The normalized data is never touched.
+
+---
+
+# 4. Consistency Architecture
+
+| Component | Role | Staleness |
+| :--- | :--- | :--- |
+| **Normalized Tables** | Source of Truth | Real-time (ACID) |
+| **Usina_Vista** | Read Optimizer | T+5 mins (Batch) |
+| **Reconciliation** | Verification | Daily Diff |
+
+**Data Lineage Diagram:**
+`Usina` (PK) + `Proprietarios` (FK) + `Rios` (FK) + `Localizacoes` (FK) + `Municipios` (FK)
+$\xrightarrow{\text{Batch Job}}$
+`Usina_Vista` (PK + All Columns)
+
+**Handling Intentional Staleness:**
+*   **Query Pattern**: `SELECT * FROM Usina_Vista WHERE uf = 'SP'`.
+*   **Correctness Impact**: The list of plants in SP will reflect the state at the last refresh. If a new plant was added to the normalized DB at 10:01 and the job ran at 10:05, the new plant will **not** appear in `Usina_Vista` until the next run.
+*   **Mitigation**: Document this in the API/Schema doc: *"Usina_Vista data is updated every 5 minutes. New entities may take up to 5 minutes to appear."*
+
+---
+
+# 5. Risk Analysis
+
+| Risk Category | Description | Mitigation Strategy |
+| :--- | :--- | :--- |
+| **Write Amplification** | Bulk inserts into `Usina_Vista` during refresh can spike I/O. | Limit the refresh scope to `WHERE atualizacao > ...` (last 1 hour). Do not scan the whole table if data is static. |
+| **Lock Contention** | Truncate + Insert on a large table during peak hours. | Run refresh job during off-peak (e.g., 02:00–04:00). Use `CONCURRENTLY` if the DB supports it for the insert phase. |
+| **Failure Modes** | Job crashes mid-way, leaving partial data. | `TRUNCATE` is atomic. If the job fails after truncate, the table is empty (safe state). Retry logic is required. |
+| **Storage Growth** | Duplicate data increases storage. | `Usina_Vista` size $\approx$ `Usina` size + dimensions. With ~10 columns added, storage impact is minimal (<5% for typical utility data). |
+| **Query Latency Regression** | Join logic moved to app layer (bad practice). | **Never** join `Usina_Vista` with other tables for this data. If you need to join `Usina_Vista` with a new table, do it there. |
+
+### Monitoring & Alerts
+
+1.  **Lag Alert**: `SELECT MAX(NOW() - data_refreshed) FROM Usina_Vista;` > 5 mins $\rightarrow$ Alert "Snapshot Stale".
+2.  **Row Count Alert**: Compare `COUNT(*)` in `Usina_Vista` vs `COUNT(*)` in `Usina`. If they differ, investigate.
+3.  **Refresh Duration**: Monitor the duration of the batch job. If > 10 mins, optimize the join logic or increase batch size limits.
+
+### Conclusion
+This design strictly adheres to the **no-triggers** constraint while delivering a **measurable read performance boost**. By moving the join logic from the query execution phase to a background maintenance phase, we reduce query complexity and CPU usage during reads, at the cost of a predictable, manageable staleness window.

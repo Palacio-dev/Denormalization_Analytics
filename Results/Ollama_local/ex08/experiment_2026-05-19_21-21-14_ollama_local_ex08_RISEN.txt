@@ -1,0 +1,189 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_21-21-14
+Model: ollama_local
+Prompt: RISEN
+Schema: ex08
+==================================================
+
+BEGIN;
+
+-- Drop existing tables to ensure a clean slate for the denormalized model
+DROP TABLE IF EXISTS public.aluno_ifb CASCADE;
+DROP TABLE IF EXISTS public.curso_ifb CASCADE;
+DROP TABLE IF EXISTS public.desempenho_enem CASCADE;
+DROP TABLE IF EXISTS public.escola CASCADE;
+DROP TABLE IF EXISTS public.indicadores_escolares CASCADE;
+DROP TABLE IF EXISTS public.localizacao CASCADE;
+DROP TABLE IF EXISTS public.matricula_ifb CASCADE;
+DROP TABLE IF EXISTS public.participacao_enem CASCADE;
+DROP TABLE IF EXISTS public.remuneracao CASCADE;
+DROP TABLE IF EXISTS public.vinculo_empregaticio CASCADE;
+
+-- 1. Base Reference Tables (Denormalized with all join attributes)
+-- Combines 'localizacao' and 'escola' into a single table to eliminate joins for location-based queries.
+CREATE TABLE IF NOT EXISTS public.localizacao_escola
+(
+    id_loc serial NOT NULL,
+    co_escola_educacenso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    no_escola_educacenso character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    tp_dependencia_adm_escola smallint,
+    tp_localizacao_escola smallint,
+    uf character varying(2) COLLATE pg_catalog."default" NOT NULL,
+    municipio character varying(100) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT localizacao_escola_pkey PRIMARY KEY (id_loc),
+    CONSTRAINT localizacao_escola_co_escola_educacenso_uq UNIQUE (co_escola_educacenso)
+);
+
+-- Combines 'aluno_ifb' and 'matricula_ifb' (partial) to reduce join complexity for student enrollment data.
+-- Note: We keep 'matricula_ifb' separate for the full student record if needed, but here we create a 
+-- denormalized view of the student profile with their primary enrollment details.
+CREATE TABLE IF NOT EXISTS public.aluno_matricula_unificada
+(
+    id_aluno serial NOT NULL,
+    co_curso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    no_curso character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    co_tipo_curso character varying(10) COLLATE pg_catalog."default",
+    tipo_curso character varying(100) COLLATE pg_catalog."default",
+    co_tipo_nivel character varying(10) COLLATE pg_catalog."default",
+    ds_tipo_nivel character varying(100) COLLATE pg_catalog."default",
+    ds_eixo_tecnologico character varying(200) COLLATE pg_catalog."default",
+    modalidade_ensino character varying(100) COLLATE pg_catalog."default",
+    carga_horaria integer,
+    data_nascimento date,
+    idade integer,
+    sexo character(1) COLLATE pg_catalog."default",
+    nacionalidade character varying(50) COLLATE pg_catalog."default",
+    raca character varying(50) COLLATE pg_catalog."default",
+    portador_deficiencia boolean,
+    co_escola_educacenso character varying(20) COLLATE pg_catalog."default",
+    co_ciclo_matricula character varying(50) COLLATE pg_catalog."default",
+    periodo character varying(30) COLLATE pg_catalog."default",
+    situacao_matricula character varying(50) COLLATE pg_catalog."default",
+    tipo_cota character varying(50) COLLATE pg_catalog."default",
+    atestado_baixarenda character varying(20) COLLATE pg_catalog."default",
+    ano character varying(20) COLLATE pg_catalog."default",
+    CONSTRAINT aluno_matricula_unificada_pkey PRIMARY KEY (id_aluno)
+);
+
+-- 2. Performance Optimized Tables (Derived Attributes & Aggregates)
+-- Combines 'desempenho_enem' and 'participacao_enem' into a single denormalized table.
+-- Pre-calculates participation metrics to avoid aggregation on read.
+CREATE TABLE IF NOT EXISTS public.desempenho_participacao_enem
+(
+    id_desempenho serial NOT NULL,
+    id_participacao serial NOT NULL,
+    nu_ano integer NOT NULL,
+    nu_media_cn numeric(6, 2),
+    nu_media_ch numeric(6, 2),
+    nu_media_lp numeric(6, 2),
+    nu_media_mt numeric(6, 2),
+    nu_media_red numeric(6, 2),
+    nu_matriculas integer,
+    nu_participantes_nec_esp integer,
+    nu_participantes integer,
+    nu_taxa_participacao numeric(5, 2),
+    co_escola_educacenso character varying(20) COLLATE pg_catalog."default",
+    CONSTRAINT desempenho_participacao_enem_pkey PRIMARY KEY (id_desempenho),
+    CONSTRAINT desempenho_participacao_enem_co_escola_educacenso_uq UNIQUE (co_escola_educacens, nu_ano)
+);
+
+-- Combines 'indicadores_escolares' and 'desempenho_enem' concepts.
+-- Stores school indicators with pre-aggregated values.
+CREATE TABLE IF NOT EXISTS public.indicadores_escolares_unificados
+(
+    id_indicadores serial NOT NULL,
+    nu_ano integer NOT NULL,
+    nu_taxa_permanencia numeric(6, 2),
+    nu_taxa_aprovacao numeric(5, 2),
+    nu_taxa_reprovacao numeric(5, 2),
+    nu_taxa_abandono numeric(5, 2),
+    co_escola_educacenso character varying(20) COLLATE pg_catalog."default",
+    porte_escola character varying(50) COLLATE pg_catalog."default",
+    pc_formacao_docente numeric(5, 2),
+    CONSTRAINT indicadores_escolares_unificados_pkey PRIMARY KEY (id_indicadores),
+    CONSTRAINT indicadores_escolares_unificados_co_escola_educacenso_uq UNIQUE (co_escola_educacens, nu_ano)
+);
+
+-- 3. Employment and Salary Data (Vertical Partitioning of attributes)
+-- Combines 'remuneracao' and 'vinculo_empregaticio' to provide a complete employee profile per year.
+CREATE TABLE IF NOT EXISTS public.vinculo_remuneracao
+(
+    id_vinculo serial NOT NULL,
+    id_remuneracao serial NOT NULL,
+    id_loc integer,
+    ano_rais integer,
+    razao_social character varying(200) COLLATE pg_catalog."default",
+    tipo_vinculo_empregaticio character varying(200) COLLATE pg_catalog."default",
+    data_admissao_declarada date,
+    tempo_emprego integer,
+    motivo_desligamento character varying(200) COLLATE pg_catalog."default",
+    mes_desligamento character varying(20) COLLATE pg_catalog."default",
+    indicador_vinculo_ativo boolean,
+    vl_remun_media_nom numeric(10, 2),
+    vl_remun_media_sm numeric(10, 2),
+    vl_remun_dezembro_nom numeric(10, 2),
+    vl_remun_dezembro_sm numeric(10, 2),
+    qtd_hora_contr integer,
+    vl_ultima_remuneracao_ano numeric(10, 2),
+    vl_salario_contratual numeric(10, 2),
+    CONSTRAINT vinculo_remuneracao_pkey PRIMARY KEY (id_vinculo)
+);
+
+-- 4. Foreign Key Constraints
+ALTER TABLE IF EXISTS public.localizacao_escola
+    ADD CONSTRAINT localizacao_escola_id_loc_pkey PRIMARY KEY (id_loc);
+
+ALTER TABLE IF EXISTS public.localizacao_escola
+    ADD CONSTRAINT localizacao_escola_co_escola_educacenso_fkey FOREIGN KEY (co_escola_educacens)
+    REFERENCES public.localizacao_escola (co_escola_educacens) ON UPDATE NO ACTION ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.aluno_matricula_unificada
+    ADD CONSTRAINT aluno_matricula_unificada_id_aluno_pkey PRIMARY KEY (id_aluno);
+
+ALTER TABLE IF EXISTS public.aluno_matricula_unificada
+    ADD CONSTRAINT aluno_matricula_unificada_co_curso_fkey FOREIGN KEY (co_curso)
+    REFERENCES public.aluno_matricula_unificada (co_curso) ON UPDATE NO ACTION ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.aluno_matricula_unificada
+    ADD CONSTRAINT aluno_matricula_unificada_co_escola_educacens_fkey FOREIGN KEY (co_escola_educacens)
+    REFERENCES public.localizacao_escola (co_escola_educacens) ON UPDATE NO ACTION ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.desempenho_participacao_enem
+    ADD CONSTRAINT desempenho_participacao_enem_id_desempenho_pkey PRIMARY KEY (id_desempenho);
+
+ALTER TABLE IF EXISTS public.desempenho_participacao_enem
+    ADD CONSTRAINT desempenho_participacao_enem_id_participacao_fkey FOREIGN KEY (id_participacao)
+    REFERENCES public.desempenho_participacao_enem (id_desempenho) ON UPDATE NO ACTION ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.desempenho_participacao_enem
+    ADD CONSTRAINT desempenho_participacao_enem_co_escola_educacens_fkey FOREIGN KEY (co_escola_educacens)
+    REFERENCES public.localizacao_escola (co_escola_educacens) ON UPDATE NO ACTION ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.indicadores_escolares_unificados
+    ADD CONSTRAINT indicadores_escolares_unificados_id_indicadores_pkey PRIMARY KEY (id_indicadores);
+
+ALTER TABLE IF EXISTS public.indicadores_escolares_unificados
+    ADD CONSTRAINT indicadores_escolares_unificados_co_escola_educacens_fkey FOREIGN KEY (co_escola_educacens)
+    REFERENCES public.localizacao_escola (co_escola_educacens) ON UPDATE NO ACTION ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.vinculo_remuneracao
+    ADD CONSTRAINT vinculo_remuneracao_id_vinculo_pkey PRIMARY KEY (id_vinculo);
+
+ALTER TABLE IF EXISTS public.vinculo_remuneracao
+    ADD CONSTRAINT vinculo_remuneracao_id_remuneracao_fkey FOREIGN KEY (id_remuneracao)
+    REFERENCES public.vinculo_remuneracao (id_remuneracao) ON UPDATE NO ACTION ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.vinculo_remuneracao
+    ADD CONSTRAINT vinculo_remuneracao_id_loc_fkey FOREIGN KEY (id_loc)
+    REFERENCES public.localizacao_escola (id_loc) ON UPDATE NO ACTION ON DELETE NO ACTION;
+
+-- Indexes for Denormalized Tables
+CREATE INDEX IF NOT EXISTS idx_localizacao_escola_uf ON public.localizacao_escola(uf);
+CREATE INDEX IF NOT EXISTS idx_localizacao_escola_municipio ON public.localizacao_escola(municipio);
+CREATE INDEX IF NOT EXISTS idx_aluno_matricula_unificada_co_curso ON public.aluno_matricula_unificada(co_curso);
+CREATE INDEX IF NOT EXISTS idx_aluno_matricula_unificada_co_escola ON public.aluno_matricula_unificada(co_escola_educacens);
+CREATE INDEX IF NOT EXISTS idx_desempenho_participacao_enem_co_escola ON public.desempenho_participacao_enem(co_escola_educacens);
+CREATE INDEX IF NOT EXISTS idx_indicadores_escolares_unificados_co_escola ON public.indicadores_escolares_unificados(co_escola_educacens);
+CREATE INDEX IF NOT EXISTS idx_vinculo_remuneracao_ano ON public.vinculo_remuneracao(ano_rais);
+
+END;

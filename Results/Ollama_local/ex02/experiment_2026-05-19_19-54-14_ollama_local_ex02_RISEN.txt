@@ -1,0 +1,122 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_19-54-14
+Model: ollama_local
+Prompt: RISEN
+Schema: ex02
+==================================================
+
+BEGIN;
+
+-- Drop existing tables to ensure clean state
+DROP TABLE IF EXISTS public.bioma CASCADE;
+DROP TABLE IF EXISTS public.categoria_manejo CASCADE;
+DROP TABLE IF EXISTS public.coleta_de_lixo CASCADE;
+DROP TABLE IF EXISTS public.esfera_administrativa CASCADE;
+DROP TABLE IF EXISTS public.instituicao_organizadora CASCADE;
+DROP TABLE IF EXISTS public.local_de_coleta CASCADE;
+DROP TABLE IF EXISTS public.mutirao_de_limpeza CASCADE;
+DROP TABLE IF EXISTS public.regiao CASCADE;
+DROP TABLE IF EXISTS public.unidade_de_conservacao CASCADE;
+
+-- 1. Base Reference Tables (Denormalized where relationships are frequent)
+-- Merging 'regiao' into 'bioma' and 'unidade_de_conservacao' logic for location context
+CREATE TABLE IF NOT EXISTS public.bioma
+(
+    id_bioma integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    id_municipio integer NOT NULL, -- Denormalized from regiao
+    estado text COLLATE pg_catalog."default" NOT NULL, -- Denormalized from regiao
+    CONSTRAINT bioma_pkey PRIMARY KEY (id_bioma)
+);
+
+CREATE TABLE IF NOT EXISTS public.esfera_administrativa
+(
+    id_esfera integer NOT NULL,
+    tipo text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT esfera_administrativa_pkey PRIMARY KEY (id_esfera)
+);
+
+CREATE TABLE IF NOT EXISTS public.categoria_manejo
+(
+    id_manejo integer NOT NULL,
+    categoria text COLLATE pg_catalog."default" NOT NULL,
+    categoria_iucn text COLLATE pg_catalog."default" NOT NULL,
+    plano text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT categoria_manejo_pkey PRIMARY KEY (id_manejo)
+);
+
+-- 2. Institutional and Location Tables (Denormalized for frequent lookups)
+CREATE TABLE IF NOT EXISTS public.instituicao_organizadora
+(
+    id_instituicao_organizadora integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    carater text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT instituicao_organizadora_pkey PRIMARY KEY (id_instituicao_organizadora)
+);
+
+CREATE TABLE IF NOT EXISTS public.local_de_coleta
+(
+    id_mutirao integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT local_de_coleta_pkey PRIMARY KEY (id_mutirao)
+);
+
+-- 3. Event Table (Mutirao) - Kept normalized as it is the central event, but optimized
+CREATE TABLE IF NOT EXISTS public.mutirao_de_limpeza
+(
+    id_mutirao integer NOT NULL,
+    data_do_ocorrido date NOT NULL,
+    horario_de_inicio time without time zone NOT NULL,
+    numero_aproximado_de_participantes integer,
+    duracao_total time without time zone NOT NULL,
+    id_municipio integer NOT NULL, -- Denormalized from regiao
+    id_instituicao_organizadora integer NOT NULL, -- Denormalized lookup
+    CONSTRAINT mutirao_de_limpeza_pkey PRIMARY KEY (id_mutirao)
+);
+
+-- 4. Collection Data (Heavily Denormalized)
+-- Merging 'coleta_de_lixo' with 'mutirao_de_limpeza' context to avoid joins on collection stats
+CREATE TABLE IF NOT EXISTS public.coleta_de_lixo
+(
+    id_mutirao integer NOT NULL,
+    plastico integer,
+    borracha integer,
+    madeira integer,
+    produtos_texteis integer,
+    papel integer,
+    metal integer,
+    vidro integer,
+    materiais_de_pesca integer,
+    outros_residuos integer,
+    id_municipio integer NOT NULL, -- Denormalized from regiao
+    id_instituicao_organizadora integer NOT NULL, -- Denormalized lookup
+    nome_local_de_coleta text COLLATE pg_catalog."default", -- Denormalized from local_de_coleta
+    CONSTRAINT coleta_de_lixo_pkey PRIMARY KEY (id_mutirao)
+);
+
+-- 5. Conservation Units (Denormalized)
+-- Merging all foreign key references into single table to eliminate JOINs
+CREATE TABLE IF NOT EXISTS public.unidade_de_conservacao
+(
+    id_uc integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    ano_de_criacao integer,
+    area_soma_biomas double precision,
+    area_soma_biomas_continentais double precision,
+    area_marinha double precision,
+    id_bioma text COLLATE pg_catalog."default", -- Stored as text to allow direct join with denormalized bioma table
+    id_municipio integer NOT NULL, -- Denormalized from regiao
+    id_manejo text COLLATE pg_catalog."default", -- Stored as text to allow direct join with denormalized categoria_manejo table
+    id_esfera text COLLATE pg_catalog."default", -- Stored as text to allow direct join with denormalized esfera_administrativa table
+    CONSTRAINT unidade_de_conservacao_pkey PRIMARY KEY (id_uc)
+);
+
+-- Indexes for performance on denormalized columns
+CREATE INDEX IF NOT EXISTS idx_bioma_id_municipio ON public.bioma(id_municipio);
+CREATE INDEX IF NOT EXISTS idx_bioma_estado ON public.bioma(estado);
+CREATE INDEX IF NOT EXISTS idx_uc_id_bioma ON public.unidade_de_conservacao(id_bioma);
+CREATE INDEX IF NOT EXISTS idx_uc_id_municipio ON public.unidade_de_conservacao(id_municipio);
+CREATE INDEX IF NOT EXISTS idx_uc_id_manejo ON public.unidade_de_conservacao(id_manejo);
+CREATE INDEX IF NOT EXISTS idx_uc_id_esfera ON public.unidade_de_conservacao(id_esfera);
+
+END;

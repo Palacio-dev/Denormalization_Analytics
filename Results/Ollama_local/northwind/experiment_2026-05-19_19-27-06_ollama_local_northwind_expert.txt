@@ -1,0 +1,200 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_19-27-06
+Model: ollama_local
+Prompt: expert
+Schema: northwind
+==================================================
+
+# Executive Summary
+
+The provided schema is a classic normalized "Northwind" sample database. While structurally sound for transactional integrity (ACID), it suffers from significant join overhead for analytical reporting. A single query like "Top 10 customers by sales in Region 1" currently requires joining `customers` → `orders` → `order_details` → `products` → `categories` → `regions`, resulting in a 6-table join tree.
+
+This design proposes a **Read-Optimized Denormalized Schema** that introduces two primary artifacts:
+1.  **`view_customer_sales_summary`**: A pre-aggregated wide table denormalizing `customer_id`, `region_id`, `order_date`, and `total_sales`. This eliminates the need to join `orders`, `order_details`, and `products` for standard reporting.
+2.  **`materialized_view_order_metrics`**: A star-schema-style table denormalizing `order_id`, `product_id`, `quantity`, `unit_price`, and `discount` into a single fact table, eliminating the need to join `order_details` and `products` for line-item analysis.
+
+**Correctness Strategy**: We introduce a **15-minute staleness window**. This is acceptable for reporting workloads where real-time transactional consistency is not the primary bottleneck. We enforce this via a `last_refresh_ts` column and a background refresh job (no triggers), ensuring data lineage is explicit and observable.
+
+---
+
+## 1. Model-to-Workload Mapping
+
+Based on standard Northwind reporting patterns and the provided schema structure, the access patterns are:
+
+| Query Class | Typical SQL Pattern | Tables Involved (Normalized) | Join Complexity | Bottleneck |
+| :--- | :--- | :--- | :--- :--- |
+| **Customer Sales Analysis** | `SELECT SUM(...) FROM orders, order_details, products, categories, regions...` | `orders`, `order_details`, `products`, `categories`, `regions` | 5-way Join | I/O latency on `order_details` and `products` (smallint/varchar mix) |
+| **Top Customers by Region** | `SELECT c.*, SUM(od.quantity*od.unit_price) ...` | `customers`, `orders`, `order_details` | 3-way Join | Scan of `orders` table |
+| **Product Stock Status** | `SELECT p.*, s.company_name ...` | `products`, `suppliers` | 2-way Join | Low, but `units_in_stock` often needs context |
+| **Employee Hierarchy** | `SELECT e.*, t.region ...` | `employees`, `employee_territories`, `territories` | 3-way Join | Recursive nature makes joins expensive |
+
+**Identified Hotspots:**
+*   **`orders` & `order_details`**: High cardinality, frequent joins.
+*   **`products` & `suppliers`**: Often queried with location filters (`region`, `country`).
+*   **`customers` & `regions`**: Frequently aggregated by geography.
+
+---
+
+## 2. Denormalization Patterns & Justification
+
+We will implement **Wide Read Tables** and **Pre-Aggregated Rollups**.
+
+1.  **`fact_customer_sales` (Wide Read + Aggregation)**
+    *   *Pattern*: Pre-joined dimensions (`customer`, `region`) + Aggregated metrics (`total_sales`, `avg_discount`).
+    *   *Justification*: Eliminates the 3-table join (`orders`+`details`+`products`) required to calculate sales. Allows filtering by `region_id` directly on the denormalized table.
+    *   *Staleness*: ~15 minutes.
+
+2.  **`fact_order_line_items` (Star Schema Style)**
+    *   *Pattern*: Denormalized `product` info (`category`, `supplier`, `unit_price`) attached to `order_details`.
+    *   *Justification*: Removes the need to join `products` and `categories` for every line item query. Essential for "Sales per Category" reports.
+    *   *Staleness*: Real-time (on write) or near-real-time (batch).
+
+3.  **`fact_employees_territories` (Snapshot)**
+    *   *Pattern*: Pre-joined `employee` and `territory` data.
+    *   *Justification*: Simplifies hierarchy queries and region-based employee reporting.
+
+---
+
+## 3. Proposed Denormalized Schema (DDL)
+
+*Note: This DDL assumes PostgreSQL. It includes `last_refresh_ts` for monitoring and explicit `denormalized` flags for lineage.*
+
+### Artifact 1: Pre-Aggregated Customer Sales
+*Target Queries: "Total Sales by Region", "Top 10 Customers"*
+
+```sql
+CREATE TABLE IF NOT EXISTS public.fact_customer_sales (
+    customer_id character varying(5) NOT NULL,
+    region_id smallint NOT NULL,
+    order_date date NOT NULL,
+    -- Aggregated Metrics (Denormalized)
+    total_sales numeric(18, 2) NOT NULL,
+    total_quantity smallint NOT NULL,
+    avg_discount numeric(5, 2) NOT NULL,
+    -- Lineage & Metadata
+    denormalized_source_table character varying(50) NOT NULL DEFAULT 'orders',
+    denormalized_source_columns character varying(255) NOT NULL DEFAULT 'order_id, quantity, unit_price, discount',
+    last_refresh_ts timestamp with time zone NOT NULL DEFAULT NOW(),
+    -- Partitioning: By Month for efficient pruning on order_date
+    PARTITION BY RANGE (order_date)
+);
+
+-- Create Index for common report filters
+CREATE INDEX idx_fact_customer_sales_region_date ON public.fact_customer_sales (region_id, order_date);
+```
+
+### Artifact 2: Pre-Joined Order Line Items (Star Schema)
+*Target Queries: "Sales by Category", "Product Stock Analysis"*
+
+```sql
+CREATE TABLE IF NOT EXISTS public.fact_order_line_items (
+    order_id smallint NOT NULL,
+    product_id smallint NOT NULL,
+    quantity smallint NOT NULL,
+    unit_price real NOT NULL,
+    discount real NOT NULL,
+    -- Denormalized Dimensions
+    category_id smallint NOT NULL,
+    category_name character varying(15) NOT NULL,
+    supplier_id smallint NOT NULL,
+    supplier_company_name character varying(40) NOT NULL,
+    region_id smallint NOT NULL, -- Derived from product territory or order region? 
+    -- *Assumption*: We use Product Category Region if available, else Order Region. 
+    -- *Correction*: Northwind products don't have regions. We must link via Territory or keep Order Region.
+    -- *Decision*: Link via Order Region for consistency with sales reports.
+    order_region_id smallint NOT NULL,
+    -- Lineage
+    denormalized_source_table character varying(50) NOT NULL DEFAULT 'order_details, products, orders',
+    denormalized_source_columns character varying(500) NOT NULL DEFAULT 'order_id, product_id, unit_price, discount, category_id, supplier_id, order_region_id',
+    -- Partitioning: By Order Date
+    PARTITION BY RANGE (order_date)
+);
+
+-- Create Index for Category Analysis
+CREATE INDEX idx_fact_order_line_items_category_region ON public.fact_order_line_items (category_id, order_region_id);
+```
+
+### Artifact 3: Pre-Joined Employee Territories
+*Target Queries: "Employees by Region", "Manager Hierarchy Report"*
+
+```sql
+CREATE TABLE IF NOT EXISTS public.fact_employees_territories (
+    employee_id smallint NOT NULL,
+    first_name character varying(10) NOT NULL,
+    last_name character varying(20) NOT NULL,
+    title character varying(30) NOT NULL,
+    territory_id character varying(20) NOT NULL,
+    territory_description character varying(60) NOT NULL,
+    region_id smallint NOT NULL,
+    -- Lineage
+    denormalized_source_table character varying(50) NOT NULL DEFAULT 'employees, employee_territories, territories',
+    denormalized_source_columns character varying(500) NOT NULL DEFAULT 'employee_id, first_name, last_name, title, territory_id, territory_description, region_id',
+    -- Partitioning: By Hire Date
+    PARTITION BY RANGE (hire_date)
+);
+
+CREATE INDEX idx_fact_emp_territ_region ON public.fact_employees_territories (region_id, hire_date);
+```
+
+---
+
+## 4. Consistency Architecture & Data Lineage
+
+### Data Lineage Map
+| Source Table | Source Column | Denormalized Target Table | Target Column | Staleness |
+| :--- | :--- | :--- | :--- | :--- |
+| `orders` | `order_id` | `fact_customer_sales` | `order_id` (Implied) | N/A (Key) |
+| `order_details` | `quantity`, `unit_price` | `fact_customer_sales` | `total_sales`, `total_qty` | ~15 min |
+| `products` | `category_id` | `fact_order_line_items` | `category_id` | ~15 min |
+| `orders` | `customer_id` | `fact_customer_sales` | `customer_id` | ~15 min |
+| `customers` | `region_id` | `fact_customer_sales` | `region_id` | ~15 min |
+| `employees` | `employee_id` | `fact_employees_territories` | `employee_id` | Real-time |
+| `territories` | `region_id` | `fact_employees_territories` | `region_id` | Real-time |
+
+### Refresh Strategy (No Triggers)
+Since triggers are restricted or discouraged for complex logic:
+1.  **Trigger-Free Approach**: Use a scheduled `pg_cron` job (or application logic) to run a `MERGE` or `INSERT INTO ... SELECT` statement.
+2.  **Lag Tolerance**: The `last_refresh_ts` column allows the application to detect if data is stale (e.g., `NOW() - last_refresh_ts > 15 mins`).
+3.  **Fallback**: If the denormalized table is stale, the application falls back to the normalized schema with a timeout warning.
+
+---
+
+## 5. Risk Analysis & Operational Plan
+
+### Risk Assessment
+
+| Risk | Impact | Mitigation Strategy |
+| :--- | :--- | :--- |
+| **Write Amplification** | Increased I/O on `INSERT` if denormalized on write. | **Strategy**: Denormalize on **Batch** (e.g., every 15 mins) rather than row-by-row. This keeps write latency low while maintaining consistency for reads. |
+| **Data Staleness** | Reports show outdated figures. | **Strategy**: Explicit `last_refresh_ts`. Alerts if lag > 20 mins. Acceptable for reporting, not for transactional updates. |
+| **Reconciliation Failures** | Denormalized values differ from source. | **Strategy**: Run a nightly `RECONCILIATION` query comparing `fact_customer_sales.total_sales` vs `SUM(order_details.quantity * unit_price)` from source. Log discrepancies to an `audit_log` table. |
+| **Storage Growth** | Duplicate data consumes space. | **Strategy**: Enable **Row-Level Security** or **Compression** (`bloom filter` indexes) if using Postgres. The overhead is negligible compared to the I/O savings of 3-4 joins. |
+| **Lock Contention** | Batch writes lock tables during peak hours. | **Strategy**: Schedule refresh jobs during off-peak (e.g., 02:00 UTC). Use `INSERT ... ON CONFLICT DO NOTHING` to prevent failures if data is already up to date. |
+
+### Implementation Plan (Safe, Observable, Reversible)
+
+1.  **Phase 1: Validation (Safe)**
+    *   Run the `SELECT` statements against the normalized schema to establish baseline query times.
+    *   Create the denormalized tables as **empty** or **read-only** (initially).
+    *   *Goal*: Verify query plans on the new tables match expectations.
+
+2.  **Phase 2: Controlled Backfill (Observable)**
+    *   Execute a `COPY` or `INSERT ... SELECT` job to populate the tables with historical data.
+    *   Capture the `last_refresh_ts` for the initial load.
+    *   *Goal*: Populate data without affecting online writes.
+
+3.  **Phase 3: Read-Only Traffic (Reversible)**
+    *   Update application code to query the new tables for specific report endpoints.
+    *   Monitor latency metrics. If latency improves by >30%, proceed.
+    *   *Reversibility*: If a bug is found, simply revert the application code to use the normalized schema. The denormalized tables are immutable once populated (no triggers).
+
+4.  **Phase 4: Automated Refresh (Operational)**
+    *   Deploy the background job (e.g., `refresh_fact_jobs`).
+    *   Set up alerts on `last_refresh_ts` lag.
+
+### Monitoring & Alerts
+*   **Lag Alert**: `last_refresh_ts < NOW() - INTERVAL '20 minutes'`
+*   **Recon Alert**: `ABS(fact_customer_sales.total_sales - calculated_source_sum) > 0.01`
+*   **Query Latency Alert**: Denormalized query latency > 100ms (should be < 20ms).
+
+This design achieves a **3x to 5x reduction in join depth** for the identified hotspots, significantly improving read performance while maintaining strict control over data consistency through batch processing and monitoring.

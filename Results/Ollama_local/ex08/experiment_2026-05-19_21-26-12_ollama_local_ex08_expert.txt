@@ -1,0 +1,227 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_21-26-12
+Model: ollama_local
+Prompt: expert
+Schema: ex08
+==================================================
+
+# Executive Summary
+
+This design transforms the existing normalized schema into a **Read-Optimized Physical Schema** targeting high-frequency analytical queries (e.g., "Average ENEM score by school," "Student performance trends," "Employment rate by location"). The core strategy is **Pre-Aggregation and Denormalization**, specifically creating a "Fact Table" (`fato_estados_escolar_anual`) that merges student demographics, school metrics, and ENEM performance into a single row per entity-per-year.
+
+**Key Trade-offs:**
+*   **Correctness:** Intentional staleness of up to **15 minutes** for denormalized columns. This allows batch refreshes during off-peak hours without impacting real-time transactional integrity of the source tables.
+*   **Complexity:** Introduction of a dedicated refresh job and a reconciliation view to detect data drift between source and denormalized tables.
+*   **Performance:** Expected **3x–5x latency reduction** for multi-table joins, as the optimizer no longer needs to traverse `matricula_ifb` $\to$ `aluno_ifb` $\to$ `curso_ifb` $\to$ `desempenho_enem`.
+
+---
+
+# 1. Model-to-Workload Mapping
+
+Based on the DDL provided, the primary read workloads involve aggregating student attributes with school performance metrics.
+
+| Query Class | Typical SQL Pattern | Join Hotspots | Aggregation Hotspots | Latency Bottleneck |
+| :--- | :--- | :--- | :--- :--- |
+| **School Performance** | `SELECT avg(nu_media_cn) FROM desempenho_enem ... GROUP BY co_escola` | `desempenho_enem` $\leftrightarrow$ `escola` (via `co_escola`) | `GROUP BY co_escola`, `nu_ano` | Scanning `desempenho_enem` + Join lookup |
+| **Student Profile** | `SELECT aluno.sexo, curso.no_curso FROM matricula... JOIN aluno...` | `matricula_ifb` $\leftrightarrow$ `aluno_ifb` $\leftrightarrow$ `curso_ifb` | `GROUP BY co_curso`, `situacao_matricula` | Multi-table join on foreign keys |
+| **Employment Stats** | `SELECT count(*) FROM vinculo... WHERE indicador_vinculo_ativo` | `vinculo_empregaticio` $\leftrightarrow$ `aluno`, `remuneracao`, `localizacao` | `GROUP BY uf`, `ano_rais` | Join chain of 4 tables |
+
+**Critical Observation:** The `matricula_ifb` table acts as the central hub. Queries often join it to fetch `aluno` data, `curso` data, and `escola` data simultaneously. The current index strategy supports point lookups but struggles with complex multi-table aggregations.
+
+---
+
+# 2. Denormalization Patterns & Justification
+
+We will implement three specific patterns:
+
+1.  **Pre-Aggregated Fact Table (`fato_estados_escolar_anual`)**:
+    *   *Justification:* Replaces the most frequent join pattern (School + Year + Performance + Demographics).
+    *   *Granularity:* One row per `co_escola_educacenso` + `nu_ano`.
+    *   *Benefit:* Eliminates the need to join `desempenho_enem`, `indicadores_escolares`, and `matricula_ifb` for standard reporting.
+
+2.  **Wide Read Snapshot (`snap_aluno_curso_ativo`)**:
+    *   *Justification:* For queries requiring current student details (sex, race, disability status) linked to their active course.
+    *   *Granularity:* One row per `id_aluno` (snapshot at refresh time).
+    *   *Benefit:* Eliminates joins to `aluno_ifb`, `curso_ifb`, and `matricula_ifb` for ad-hoc profiling.
+
+3.  **Materialized Geography Map (`geo_escola_map`)**:
+    *   *Justification:* To avoid joining `escola` $\to$ `localizacao` (often slow due to string comparisons on `co_escola` or integer lookups on `id_loc`).
+    *   *Granularity:* One row per `co_escola_educacenso` with `uf`, `municipio` pre-computed.
+
+---
+
+# 3. Proposed Denormalized Schema (DDL)
+
+*Assumptions: PostgreSQL 14+. Refresh runs via `pg_cron` every 15 mins. `id_remuneracao` is treated as a static reference for this schema (if dynamic, a separate job is needed).*
+
+### A. Pre-Aggregated Fact Table
+*Replaces aggregations across `desempenho_enem`, `indicadores_escolares`, and `matricula_ifb`.*
+
+```sql
+CREATE TABLE IF NOT EXISTS public.fato_estados_escolar_anual (
+    id_fato serial NOT NULL,
+    co_escola_educacenso character varying(50) NOT NULL,
+    nu_ano integer NOT NULL,
+    
+    -- Denormalized Performance Metrics (Avg per year)
+    nu_media_cn numeric(6, 2),
+    nu_media_ch numeric(6, 2),
+    nu_media_lp numeric(6, 2),
+    nu_media_mt numeric(6, 2),
+    nu_media_red numeric(6, 2),
+    
+    -- Denormalized School Indicators (Avg per year)
+    nu_taxa_permanencia numeric(6, 2),
+    nu_taxa_aprovacao numeric(5, 2),
+    nu_taxa_reprovacao numeric(5, 2),
+    nu_taxa_abandono numeric(5, 2),
+    
+    -- Denormalized Participation Metrics (Avg per year)
+    nu_matriculas integer,
+    nu_participantes_nec_esp integer,
+    nu_participantes integer,
+    nu_taxa_participacao numeric(5, 2),
+    
+    -- Denormalized School Context (Pre-joined)
+    no_escola character varying(200),
+    porte_escola character varying(50),
+    co_tipo_curso character varying(10), -- Example: Most common course type
+    ds_eixo_tecnologico character varying(200), -- Example: Primary axis
+    
+    -- Partitioning Key for Time Pruning
+    nu_ano integer NOT NULL,
+    
+    CONSTRAINT fato_pkey PRIMARY KEY (id_fato),
+    CONSTRAINT fato_escola_ano_uq UNIQUE (co_escola_educacenso, nu_ano)
+);
+
+-- Indexing Strategy
+CREATE INDEX idx_fato_escola ON public.fato_estados_escolar_anual (co_escola_educacenso);
+CREATE INDEX idx_fato_ano ON public.fato_estados_escolar_anual (nu_ano);
+CREATE INDEX idx_fato_geo ON public.fato_estados_escolar_anual (co_escola_educacenso, no_escola);
+```
+
+### B. Wide Read Snapshot Table
+*Pre-joins `aluno_ifb`, `curso_ifb`, and `matricula_ifb` for active students.*
+
+```sql
+CREATE TABLE IF NOT EXISTS public.snap_aluno_curso_ativo (
+    id_snap serial NOT NULL,
+    id_aluno integer NOT NULL,
+    
+    -- Denormalized Student Attributes
+    sexo character(1),
+    nacionalidade character varying(50),
+    raca character varying(50),
+    portador_deficiencia boolean,
+    
+    -- Denormalized Course Attributes (Active Course only)
+    co_curso character varying(50),
+    no_curso character varying(200),
+    co_tipo_curso character varying(10),
+    ds_eixo_tecnologico character varying(200),
+    
+    -- Denormalized Matricula Context (Active Status)
+    situacao_matricula character varying(50),
+    co_ciclo_matricula character varying(50),
+    
+    -- Partitioning Key for Student ID (for point lookups)
+    id_aluno integer NOT NULL,
+    
+    CONSTRAINT snap_pkey PRIMARY KEY (id_snap),
+    CONSTRAINT snap_aluno_uq UNIQUE (id_aluno)
+);
+
+-- Indexing Strategy
+CREATE INDEX idx_snap_aluno ON public.snap_aluno_curso_ativo (id_aluno);
+CREATE INDEX idx_snap_curso ON public.snap_aluno_curso_ativo (co_curso);
+```
+
+### C. Geography Map Table
+*Pre-joins `escola` and `localizacao`.*
+
+```sql
+CREATE TABLE IF NOT EXISTS public.geo_escola_map (
+    id_geo serial NOT NULL,
+    co_escola_educacenso character varying(50) NOT NULL,
+    no_escola character varying(200),
+    uf character varying(2),
+    municipio character varying(100),
+    
+    CONSTRAINT geo_pkey PRIMARY KEY (id_geo),
+    CONSTRAINT geo_escola_uq UNIQUE (co_escola_educacenso)
+);
+
+CREATE INDEX idx_geo_escola ON public.geo_escola_map (co_escola_educacenso);
+```
+
+---
+
+# 4. Consistency Architecture & Data Lineage
+
+To ensure business correctness despite staleness, we define a strict lineage map.
+
+| Source Column | Target Denormalized Column | Staleness Window | Refresh Trigger |
+| :--- | :--- | :--- | :--- |
+| `desempenho_enem.nu_ano` | `fato_estados_escolar_anual.nu_ano` | 0s (Exact match) | Daily Batch |
+| `desempenho_enem.nu_media_cn` | `fato_estados_escolar_anual.nu_media_cn` | 15m (Batch lag) | Every 15 mins |
+| `indicadores_escolares.nu_taxa_permanencia` | `fato_estados_escolar_anual.nu_taxa_permanencia` | 15m | Every 15 mins |
+| `matricula_ifb.situacao_matricula` | `snap_aluno_curso_ativo.situacao_matricula` | 15m | Every 15 mins |
+| `aluno_ifb.sexo` | `snap_aluno_curso_ativo.sexo` | 15m | Every 15 mins |
+| `localizacao.uf` | `geo_escola_map.uf` | 15m | Every 15 mins |
+
+**Reconciliation Mechanism:**
+A view `view_reconcile_diff` will be created to alert on significant deviations:
+```sql
+CREATE VIEW public.view_reconcile_diff AS
+SELECT 
+    f.co_escola_educacenso,
+    f.nu_ano,
+    (SELECT AVG(nu_media_cn) FROM desempenho_enem d WHERE d.co_escola_educacenso = f.co_escola_educacenso AND d.nu_ano = f.nu_ano) as source_val,
+    f.nu_media_cn as denormalized_val,
+    ABS((SELECT AVG(nu_media_cn) ...) - f.nu_media_cn) as diff
+FROM public.fato_estados_escolar_anual f
+WHERE ABS((SELECT AVG(nu_media_cn) FROM desempenho_enem ...) - f.nu_media_cn) > 0.5; -- Threshold
+```
+
+---
+
+# 5. Risk Analysis & Operational Plan
+
+### Risk Matrix
+
+| Risk Category | Description | Mitigation Strategy |
+| :--- | :--- | :--- |
+| **Write Amplification** | `snap_aluno_curso_ativo` requires updating rows on every student change. | **Strategy:** Use `INSERT ... ON CONFLICT (id_aluno) DO UPDATE`. Limit refresh to peak hours (02:00-04:00). |
+| **Lock Contention** | High volume of concurrent refresh jobs. | **Strategy:** Single refresh job scheduled via `pg_cron`. Use `SERIALIZABLE` isolation only during critical updates if needed. |
+| **Storage Growth** | Wide tables consume more space than normalized. | **Strategy:** Enable `page_checksum` and `tablespace` with compression (if supported). Monitor size growth; archive old snapshots (>1 year) if policy allows. |
+| **Failure Mode** | Refresh job fails silently. | **Strategy:** Alert on job failure. Use `pg_stat_progress_copy` or `EXPLAIN (ANALYZE, BUFFERS)` in the refresh script to log row counts. |
+| **Query Latency Regression** | Queries hit the denormalized table but expect fresh data. | **Strategy:** Document in API/UI that data is "refreshed every 15 mins". Use a `refresh_timestamp` column in the denormalized table for debugging. |
+
+### Implementation Plan (Safe & Reversible)
+
+1.  **Phase 1: Validation (Day 1)**
+    *   Create empty tables with correct DDL.
+    *   Run `EXPLAIN ANALYZE` on existing production queries against the new schema to confirm query plans.
+    *   **Do not populate data yet.**
+
+2.  **Phase 2: Seed Data (Day 2)**
+    *   Run a one-time `INSERT` into the new tables using `CTE` (Common Table Expressions) to pre-calculate aggregates.
+    *   Verify row counts match expectations (e.g., `COUNT(*)` in new table vs `COUNT(DISTINCT co_escola_educacenso, nu_ano)` in source).
+    *   **Reversibility:** If row counts differ significantly, rollback the `INSERT` statement immediately.
+
+3.  **Phase 3: Job Creation (Day 3)**
+    *   Create a PostgreSQL function `refresh_fato_job()` containing the logic to `DELETE` old rows and `INSERT` new data.
+    *   Schedule via `pg_cron` (every 15 mins).
+    *   Add logging: `INSERT INTO log_refresh (job_name, start_time, end_time, rows_affected) ...`
+
+4.  **Phase 4: Traffic Shift (Day 4+)**
+    *   Update application queries to use the new tables.
+    *   Monitor `pg_stat_statements` for latency improvements.
+    *   Monitor `view_reconcile_diff` for data integrity issues.
+
+### Monitoring Alerts
+
+*   **Lag Alert:** `SELECT MAX(AGE(now(), last_refresh_ts)) FROM fato_estados_escolar_anual > INTERVAL '5 minutes'`.
+*   **Drift Alert:** `SELECT COUNT(*) FROM view_reconcile_diff WHERE diff > 0.5`.
+*   **Performance Alert:** `SELECT query, avg_exec_time FROM pg_stat_statements ORDER BY avg_exec_time DESC LIMIT 10` (Check if new queries are faster).

@@ -1,0 +1,265 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-20_10-13-34
+Model: ollama_api
+Prompt: expert
+Schema: ex08
+==================================================
+
+# **Executive Summary**
+
+This document outlines a comprehensive plan to optimize read performance by introducing a **denormalized, read-optimized physical schema** derived from your current normalized PostgreSQL schema. The proposed design focuses on reducing join overhead and pre-computing aggregations for frequently accessed data paths in analytical or reporting workloads.
+
+We begin by analyzing the most common access patterns across core entities such as `aluno_ifb`, `matricula_ifb`, `escola`, and related dimension tables (`curso_ifb`, `localizacao`). Based on this analysis, we propose three primary denormalization strategies:
+
+1. A **wide student profile table**, which combines demographic information with academic outcomes and employment status.
+2. An **aggregated school performance summary table**, capturing key metrics like ENEM scores, participation rates, and permanence indicators at yearly granularity.
+3. A **current-state snapshot of active students**, optimized for fast lookup of recent enrollments.
+
+All artifacts are designed with clear lineage back to their source-of-truth tables and include reconciliation fields to ensure correctness. Implementation is structured around incremental refresh jobs using scheduled SQL scripts, ensuring minimal write impact and full reversibility.
+
+---
+
+## **Access-Pattern Matrix**
+
+| Query ID | Description | Tables Accessed | Join Paths |
+|----------|-------------|------------------|------------|
+| Q1       | List enrolled students with course & location info | aluno_ifb, matricula_ifb, curso_ifb, escola, localizacao | aluno_ifb.id_aluno → matricula_ifb.id_aluno<br>matricula_ifb.co_curso → curso_ifb.co_curso<br>matricula_ifb.co_escola_educacenso → escola.co_escola_educacenso<br>escola.id_loc → localizacao.id_loc |
+| Q2       | Aggregate student performance per school/year | escola, desempenho_enem, indicadores_escolares | escola.co_escola_educacenso ↔ desempenho_enem.co_escola_educacenso<br>escola.co_escola_educacenso ↔ indicadores_escolares.co_escola_educacenso |
+| Q3       | Retrieve latest enrollment status for each student | aluno_ifb, matricula_ifb | aluno_ifb.id_aluno → matricula_ifb.id_aluno (latest record by date) |
+| Q4       | Analyze student employability post-graduation | aluno_ifb, vinculo_empregaticio, remuneracao | aluno_ifb.id_aluno → vinculo_empregaticio.id_aluno<br>vinculo_empregaticio.id_remuneracao → remuneracao.id_remuneracao |
+
+---
+
+## **Proposed Denormalized Schema (DDL)**
+
+### **1. Wide Student Profile Table**
+```sql
+CREATE TABLE public.student_profile (
+    id_aluno int NOT NULL PRIMARY KEY,
+    
+    -- Demographics
+    data_nascimento date,
+    idade integer,
+    sexo char(1),
+    nacionalidade varchar(50),
+    raca varchar(50),
+    portador_deficiencia boolean,
+
+    -- Academic Outcome (ENEM)
+    nu_ano integer,
+    nu_media_cn numeric(6,2),
+    nu_media_ch numeric(6,2),
+    nu_media_lp numeric(6,2),
+    nu_media_mt numeric(6,2),
+    nu_media_red numeric(6,2),
+
+    -- Enrollment Info
+    periodo varchar(30),
+    situacao_matricula varchar(50),
+    tipo_cota varchar(50),
+    ano varchar(20),
+    co_curso varchar(50),
+    nome_curso varchar(200),
+    modalidade_ensino varchar(100),
+    carga_horaria integer,
+
+    -- School Info
+    co_escola_educacenso varchar(50),
+    nome_escola varchar(200),
+    tp_dependencia_adm_escola smallint,
+    uf varchar(2),
+    municipio varchar(100),
+
+    -- Employment Status
+    razao_social varchar(200),
+    tipo_vinculo_empregaticio varchar(200),
+    data_admissao_declarada date,
+    tempo_emprego integer,
+    indicador_vinculo_ativo boolean,
+
+    -- Remuneration
+    vl_remun_media_nom numeric(10,2),
+    vl_remun_media_sm numeric(10,2),
+    qtd_hora_contr integer,
+
+    _source_last_updated timestamp DEFAULT now()
+);
+```
+
+#### Indexes:
+```sql
+CREATE INDEX idx_student_profile_curso ON student_profile(co_curso);
+CREATE INDEX idx_student_profile_escola ON student_profile(co_escola_educacenso);
+CREATE INDEX idx_student_profile_uf ON student_profile(uf);
+```
+
+#### Purpose:
+Optimize queries involving student demographics + education + job outcomes (e.g., Q1, Q4).
+
+---
+
+### **2. Aggregated School Performance Summary**
+```sql
+CREATE TABLE public.school_performance_summary (
+    co_escola_educacenso varchar(50) NOT NULL,
+    nu_ano integer NOT NULL,
+    nome_escola varchar(200),
+    uf varchar(2),
+    municipio varchar(100),
+    
+    -- ENEM Metrics
+    avg_nu_media_cn numeric(6,2),
+    avg_nu_media_ch numeric(6,2),
+    avg_nu_media_lp numeric(6,2),
+    avg_nu_media_mt numeric(6,2),
+    avg_nu_media_red numeric(6,2),
+
+    -- Indicators
+    avg_nu_taxa_permanencia numeric(6,2),
+    avg_nu_taxa_aprovacao numeric(5,2),
+    avg_nu_taxa_reprovacao numeric(5,2),
+    avg_nu_taxa_abandono numeric(5,2),
+    pc_formacao_docente_avg numeric(5,2),
+
+    -- Participation Stats
+    total_participantes integer,
+    taxa_participacao numeric(5,2),
+
+    -- Metadata
+    _last_refreshed timestamp DEFAULT now(),
+    PRIMARY KEY (co_escola_educacenso, nu_ano)
+);
+```
+
+#### Indexes:
+```sql
+CREATE INDEX idx_school_perf_year ON school_performance_summary(nu_ano DESC);
+CREATE INDEX idx_school_perf_uf ON school_performance_summary(uf);
+```
+
+#### Purpose:
+Support high-level analytics on school effectiveness over time (Q2).
+
+---
+
+### **3. Active Students Snapshot Table**
+```sql
+CREATE TABLE public.active_students_snapshot (
+    id_aluno int NOT NULL PRIMARY KEY,
+    nome_aluno varchar(200), -- Could be joined via function/index-only scan if needed
+    data_nascimento date,
+    idade integer,
+    co_curso varchar(50),
+    nome_curso varchar(200),
+    ano varchar(20),
+    periodo varchar(30),
+    situacao_matricula varchar(50),
+    co_escola_educacenso varchar(50),
+    nome_escola varchar(200),
+    uf varchar(2),
+    municipio varchar(100),
+    _snapshot_time timestamptz DEFAULT now()
+);
+```
+
+#### Indexes:
+```sql
+CREATE INDEX idx_active_students_curso ON active_students_snapshot(co_curso);
+CREATE INDEX idx_active_students_estado ON active_students_snapshot(uf);
+```
+
+#### Purpose:
+Provide real-time view of currently enrolled students without joins.
+
+---
+
+## **Consistency Architecture**
+
+Each denormalized table includes `_source_last_updated` or `_last_refreshed` fields to track freshness. Source lineage can be traced through these columns:
+
+| Denormalized Column         | Source Tables                     |
+|----------------------------|-----------------------------------|
+| All demographic fields     | aluno_ifb                         |
+| Course info                | curso_ifb                         |
+| School info                | escola, localizacao               |
+| ENEM metrics               | desempenho_enem                   |
+| Indicators                 | indicadores_escolares             |
+| Employment data            | vinculo_empregaticio, remuneracao |
+| Enrollment metadata        | matricula_ifb                     |
+
+A daily ETL process updates these tables using simple SELECT...JOIN statements. For example:
+```sql
+INSERT INTO student_profile ...
+SELECT ... FROM aluno_ifb JOIN matricula_ifb USING(id_aluno) ...
+ON CONFLICT (id_aluno) DO UPDATE SET ...
+```
+
+Freshness monitoring is achieved by comparing `_source_last_updated` against known upstream timestamps.
+
+---
+
+## **Risk Analysis**
+
+### **Write Amplification**
+Each update to a base table may trigger multiple writes to denormalized copies — especially true for frequently changing facts like `matricula_ifb`. Mitigated via batching and asynchronous processing.
+
+### **Lock Contention**
+Denormalized tables should use row-level locking only during upsert operations. Use advisory locks where necessary.
+
+### **Backfill Runtime**
+Initial load could take hours depending on volume. Suggested approach:
+- Load historical batches partitioned by year.
+- Use parallel workers and temp staging tables.
+
+### **Storage Growth**
+Estimated increase of ~3x due to duplication. Recommend compression settings (TOAST) and archiving old snapshots.
+
+### **Monitoring & Alerts**
+Set up:
+- Lag detection between source and target tables.
+- Reconciliation diffs using checksums or row counts.
+- Query latency baselines to detect regressions after deployment.
+
+Use Prometheus/Grafana or similar tools for dashboards tracking:
+- `_last_refreshed`
+- Row count deltas
+- Query duration trends
+
+---
+
+## **Implementation Plan**
+
+### Phase 1: Setup Infrastructure
+- Create new schema `read_optimized`.
+- Deploy DDL for all denormalized tables above.
+- Set up logging infrastructure for tracking refreshes.
+
+### Phase 2: Backfill Historical Data
+- Schedule nightly jobs using cron/scheduler:
+  ```bash
+  psql -f refresh_student_profiles.sql
+  psql -f refresh_school_summaries.sql
+  ```
+- Validate outputs using sample reconciliations before enabling full pipeline.
+
+### Phase 3: Go Live
+- Redirect read-heavy BI/reporting queries to new tables.
+- Monitor query plans and execution times.
+- Rollback option: disable materialization jobs and revert queries to original schema.
+
+### Phase 4: Ongoing Maintenance
+- Add alerting for lag > threshold.
+- Periodically review index usage and adjust based on actual query patterns.
+- Archive older versions of snapshot tables when retention policy applies.
+
+---
+
+## Assumptions Explicitly Made
+
+- No triggers allowed; refresh handled externally via scheduler.
+- Batch window available once/day (~4h minimum).
+- CDC not enabled but manual diff-based refresh acceptable.
+- Queries predominantly read-focused; writes remain centralized in OLTP schema.
+- Compression and TOAST support available in underlying DB engine.
+
+If you have additional context about query frequency, concurrency levels, or SLAs, those would allow further tuning of refresh cadence and indexing strategy.

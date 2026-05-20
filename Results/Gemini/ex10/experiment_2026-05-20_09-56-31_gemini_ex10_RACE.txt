@@ -1,0 +1,86 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-20_09-56-31
+Model: gemini
+Prompt: RACE
+Schema: ex10
+==================================================
+
+Here is the execution of the requested task following the RACE framework and the 6-step action plan.
+
+### 1 - Deep Analysis of the Provided SQL Script
+The provided normalized relational schema is designed to track yearly metrics for countries, specifically focusing on population, greenhouse gas emissions, and energy consumption. 
+* **`continente` & `paises`**: Form a hierarchy (1:N). A country belongs to a continent.
+* **`populacao` & `emissao_g_efeito_estufa`**: Both tables share the exact same granularity: `(id_paises, ano)`. They represent yearly country-level facts.
+* **`fonte_energia` & `consumo_anual`**: `consumo_anual` has a finer granularity of `(id_paises, ano, tipo_energia)`. It tracks the percentage of a specific energy source used by a country in a given year.
+* **Current Bottlenecks**: To analyze how a country's energy mix affects its greenhouse gas emissions per capita, a query would require joining 6 tables (`continente`, `paises`, `populacao`, `emissao_g_efeito_estufa`, `consumo_anual`, `fonte_energia`). In a read-heavy analytical environment, this highly normalized structure will cause severe CPU and memory overhead due to multiple hash/merge joins.
+
+### 2 - Frequent Queries / Workload Context
+For an analytical (OLAP) workload on this dataset, the most frequent and heavy queries will likely be:
+* **Trend Analysis**: "Show the evolution of greenhouse gas emissions and population by continent over the last 50 years."
+* **Correlation Analysis**: "Compare the percentage of renewable energy consumption with the total greenhouse gas emissions for specific countries."
+* **Per Capita Metrics**: "Rank countries by greenhouse gas emissions per capita in a specific year."
+* **Heavy JOIN Bottlenecks**: The primary bottleneck is the need to constantly traverse from `consumo_anual` or `emissao_g_efeito_estufa` up to `paises` and `continente` to filter or group by geographical names.
+
+### 3 - Evaluation of Denormalization Techniques
+* **Adding Redundant Attributes**: Highly applicable. We should bring `nome` from `continente`, `nome` from `paises`, and `nome` from `fonte_energia` directly into the fact records to eliminate lookup joins.
+* **Adding Derived Attributes**: Highly applicable. Analytical queries will frequently request emissions per capita. We can precalculate `emissao_per_capita` (emissions / population) to save compute time during queries.
+* **Collapsing Relations**: Highly applicable. We can collapse `continente` into `paises`. Furthermore, we can collapse `populacao`, `emissao_g_efeito_estufa`, and `consumo_anual` into a single table to completely eliminate joins.
+* **Vertical Partitioning**: Not necessary here. The resulting denormalized table will not be wide enough to cause I/O issues that warrant vertical partitioning.
+
+### 4 - Design Multiple Possible Denormalized Schemas
+* **Option A: Star Schema (Dimensional Modeling)**
+  * *Dimensions*: `dim_localidade` (pais, continente, fundacao), `dim_fonte_energia` (nome).
+  * *Facts*: `fato_indicadores_anuais` (ano, populacao, emissao), `fato_matriz_energetica` (ano, id_fonte, porcentagem).
+  * *Pros*: Reduces joins, keeps grains separate (no data duplication).
+  * *Cons*: Still requires joins between facts and dimensions for cross-domain analysis.
+* **Option B: One Big Table (OBT - Fully Denormalized)**
+  * *Table*: `tb_analise_pais_energia_emissao`
+  * *Columns*: continente, pais, fundacao, ano, populacao, emissao_total, emissao_per_capita, fonte_energia, consumo_porcentagem.
+  * *Pros*: Zero joins required. Perfect for BI tools (Tableau, PowerBI, Metabase). 
+  * *Cons*: Data duplication (population and total emissions will repeat for every energy source row of a country in a given year).
+
+### 5 - Evaluate and Choose the Best Schema
+In modern columnar analytical databases (like Redshift, BigQuery, or ClickHouse) and based on the provided examples (specifically Example 4), the **One Big Table (Option B)** is the most consistent and performant choice. Storage is cheap, and columnar compression easily handles the duplicated data (like population repeating per energy source). Eliminating JOINs entirely provides the maximum possible read performance for analytical dashboards. We will also include the derived attribute `emissao_per_capita`.
+
+### 6 - Design the New Denormalized Schema
+
+```sql
+BEGIN;
+
+-- Drop original tables if they exist to clean up the schema
+DROP TABLE IF EXISTS public.consumo_anual CASCADE;
+DROP TABLE IF EXISTS public.emissao_g_efeito_estufa CASCADE;
+DROP TABLE IF EXISTS public.populacao CASCADE;
+DROP TABLE IF EXISTS public.paises CASCADE;
+DROP TABLE IF EXISTS public.continente CASCADE;
+DROP TABLE IF EXISTS public.fonte_energia CASCADE;
+
+-- Create the new Fully Denormalized Table (One Big Table)
+CREATE TABLE IF NOT EXISTS public.analise_anual_emissoes_energia
+(
+    -- Geographical & Country Attributes (Collapsed from continente and paises)
+    nome_continente character varying(50),
+    nome_pais character varying(50),
+    ano_fundacao_pais integer,
+    
+    -- Temporal Attribute
+    ano integer,
+    
+    -- Population & Emission Metrics (Collapsed from populacao and emissao_g_efeito_estufa)
+    quantidade_populacao integer,
+    emissao_gee_total bigint,
+    
+    -- Derived Attribute (Precomputed to save CPU on BI aggregations)
+    emissao_gee_per_capita numeric(15, 4), 
+    
+    -- Energy Consumption Metrics (Collapsed from consumo_anual and fonte_energia)
+    nome_fonte_energia character varying(50),
+    consumo_energia_porcentagem integer
+);
+
+-- Optional: Add indexes based on the most common analytical filters
+CREATE INDEX idx_analise_pais_ano ON public.analise_anual_emissoes_energia (nome_pais, ano);
+CREATE INDEX idx_analise_continente ON public.analise_anual_emissoes_energia (nome_continente);
+
+END;
+```

@@ -1,0 +1,231 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_17-14-27
+Model: ollama_local
+Prompt: RACE
+Schema: TPC_H
+==================================================
+
+Hello. As a Senior Data Engineer with 15 years of experience in relational and analytical database optimization, I have analyzed the TPC-H schema provided.
+
+The current schema is highly normalized (3NF), which is excellent for data integrity and transactional consistency but suboptimal for the **read-heavy analytical workload** described in the context. Analytical queries on TPC-H data often involve joining `CUSTOMER`, `NATION`, `REGION`, `SUPPLIER`, `PART`, and `LINEITEM` tables to calculate complex metrics (e.g., "Top 10 customers by total spend in a specific region"). These joins can become bottlenecks due to the lack of indexed foreign keys in the physical model (as provided) and the overhead of traversing multiple tables.
+
+Below is the step-by-step analysis and the resulting denormalized schema design.
+
+---
+
+### Step 1: Deep Analysis of the Schema
+The provided schema represents the standard TPC-H benchmark. Key characteristics:
+*   **Star-like Structure:** `REGION` -> `NATION` -> `SUPPLIER` / `CUSTOMER`. `REGION` -> `NATION` -> `CUSTOMER`.
+*   **Many-to-Many Relationships:** `PART` and `SUPPLIER` relate via `PARTSUPP`. `CUSTOMER` and `SUPPLIER` relate via `ORDERS` and `LINEITEM`.
+*   **High Cardinality:** `LINEITEM` and `ORDERS` tables have high cardinality, making aggregation expensive without proper indexing or denormalization.
+*   **Missing Indexes:** The provided `CREATE TABLE` statements do not include `CREATE INDEX` statements. In an analytical environment, foreign keys (`O_CUSTKEY`, `L_ORDERKEY`, etc.) must be indexed for efficient joins.
+
+### Step 2: Inferred Workload & Bottlenecks
+Based on standard TPC-H analytical queries, the most likely heavy workloads are:
+1.  **Regional Sales Analysis:** Joining `REGION`, `NATION`, `SUPPLIER`, `PART`, `PARTSUPP`, `ORDERS`, and `LINEITEM` to get sales totals by region, filtered by supplier or part type.
+    *   *Bottleneck:* Joining 6+ tables with multiple joins on foreign keys.
+2.  **Customer Spend Ranking:** Joining `CUSTOMER`, `NATION`, `REGION`, `ORDERS`, and `LINEITEM` to find top customers.
+    *   *Bottleneck:* Aggregating `LINEITEM` data up through `ORDERS` and joining back to demographic data (`NATION`, `REGION`).
+3.  **Supplier Performance:** Calculating average supply cost per part per supplier.
+    *   *Bottleneck:* Aggregating `PARTSUPP` data.
+
+**Conclusion:** The join overhead is the primary performance limiter. We need to reduce the number of joins by pre-calculating aggregates or merging related entities.
+
+### Step 3: Evaluation of Denormalization Techniques
+
+1.  **Adding Redundant Attributes:**
+    *   *Application:* Store `R_NAME` in `NATION` and `S_NAME` in `SUPPLIER` directly? No, that's too granular. However, we can pre-calculate **Region-Sales** or **Customer-Spend** aggregates.
+    *   *Verdict:* High value. Creating a "Sales" or "Orders" denormalized table that includes `REGION_NAME` and `CUST_NAME` avoids joining back up the hierarchy.
+
+2.  **Adding Derived Attributes:**
+    *   *Application:* Precompute `TOTAL_SALES`, `AVG_PRICE`, `TOTAL_QUANTITY` for specific dimensions (e.g., per customer per year, or per region per month).
+    *   *Verdict:* Critical. Instead of summing `L_EXTENDEDPRICE * L_QUANTITY` in every query, we store the result.
+
+3.  **Collapsing Relations:**
+    *   *Application:* Merge `NATION`, `REGION`, and `CUSTOMER` into a single `DIM_CUSTOMER_REGION` table. Merge `PART` and `SUPPLIER` into `DIM_PART_SUPPLIER`.
+    *   *Verdict:* Very High. This eliminates the need to join the dimension tables during analytical queries.
+
+4.  **Vertical Partitioning:**
+    *   *Application:* Split `LINEITEM` into `DIM_PRODUCT` (attributes like `P_TYPE`, `P_SIZE`) and `FACT_LINEITEM` (transactional data like `L_QUANTITY`, `L_PRICE`).
+    *   *Verdict:* Useful for caching, but for a pure analytical schema, a single wide fact table or a few pre-aggregated fact tables are often more efficient than splitting unless the data is massive (TB+). Given the prompt's focus on "denormalizing the physical model," we will focus on **Collapsing** and **Pre-aggregation** (Derived Attributes).
+
+### Step 4 & 5: Design Options & Evaluation
+
+**Option A: Wide Fact Table + Denormalized Dimensions**
+*   *Approach:* Create a single `FACT_ORDERS` table that includes all columns from `LINEITEM` plus redundant columns from `CUSTOMER`, `NATION`, `REGION`, `SUPPLIER`, and `PART`.
+*   *Pros:* Single table scan, zero joins for complex queries.
+*   *Cons:* Data duplication, potential for accidental updates if not managed strictly (though read-only is implied).
+*   *Suitability:* Excellent for ad-hoc analysis where the user doesn't care about data consistency across dimensions.
+
+**Option B: Pre-aggregated Fact Tables (Cube-like)**
+*   *Approach:* Create tables like `FCT_REGIONAL_SALES` (Region, Year, Sales) and `FCT_SUPPLIER_PART_COST` (Supplier, Part, Cost).
+*   *Pros:* Extremely fast aggregation (just sum a column).
+*   *Cons:* Requires complex ETL to maintain up-to-date data. Might not answer queries needing raw line-item details.
+*   *Suitability:* Good, but Option A provides more flexibility.
+
+**Selected Strategy:** We will adopt a hybrid approach similar to **Option A** but structured logically. We will create:
+1.  A denormalized **Dimension Table** (`DIM_HIERARCHY`) combining Region, Nation, and Customer info.
+2.  A denormalized **Dimension Table** (`DIM_PRODUCT_SUPPLIER`) combining Part and Supplier info.
+3.  A denormalized **Fact Table** (`FACT_ORDERS_LINEITEM`) that includes redundant keys and calculated aggregates (Total Price, Total Qty) to avoid re-computing sums.
+
+This approach utilizes **Collapsing Relations** (merging dimensions) and **Adding Derived Attributes** (pre-calculating sums).
+
+---
+
+### Step 6: The Denormalized Schema Design
+
+Here is the optimized physical schema. Note the removal of Foreign Key constraints (as this is an analytical model, not a transactional one) and the inclusion of redundant columns to eliminate joins.
+
+```sql
+-- =============================================
+-- DENORMALIZED ANALYTICAL SCHEMA
+-- Strategy: Collapsing Relations & Adding Derived Attributes
+-- =============================================
+
+-- 1. DIM_HIERARCHY
+-- Merges REGION, NATION, and CUSTOMER into a single table.
+-- Eliminates the need to join REGION -> NATION -> CUSTOMER.
+-- Adds redundant attributes: C_NAME, C_PHONE, C_NATIONKEY (kept for reference), N_NAME, R_NAME.
+CREATE TABLE IF NOT EXISTS DIM_HIERARCHY (
+    C_CUSTKEY     INTEGER NOT NULL,
+    C_NAME        VARCHAR(25) NOT NULL,
+    C_PHONE       CHAR(15) NOT NULL,
+    C_ACCTBAL     DECIMAL(15,2) NOT NULL,
+    C_MKTSEGMENT  CHAR(10) NOT NULL,
+    C_COMMENT     VARCHAR(117) NOT NULL,
+    
+    -- Redundant: NATION details
+    N_NATIONKEY   INTEGER NOT NULL,
+    N_NAME        CHAR(25) NOT NULL,
+    N_COMMENT     VARCHAR(152),
+    
+    -- Redundant: REGION details
+    R_REGIONKEY   INTEGER NOT NULL,
+    R_NAME        CHAR(25) NOT NULL,
+    R_COMMENT     VARCHAR(152),
+    
+    -- Primary Key: Customer Key is the unique identifier for this dimension
+    PRIMARY KEY (C_CUSTKEY)
+);
+
+-- 2. DIM_PRODUCT_SUPPLIER
+-- Merges PART and SUPPLIER into a single table.
+-- Eliminates the need to join PART -> SUPPLIER.
+-- Adds redundant attributes: S_NAME, S_ADDRESS, S_PHONE, P_TYPE, P_SIZE, P_RETAILPRICE.
+CREATE TABLE IF NOT EXISTS DIM_PRODUCT_SUPPLIER (
+    P_PARTKEY     INTEGER NOT NULL,
+    P_NAME        VARCHAR(55) NOT NULL,
+    P_MFGR        CHAR(25) NOT NULL,
+    P_BRAND       CHAR(10) NOT NULL,
+    P_TYPE        VARCHAR(25) NOT NULL,
+    P_SIZE        INTEGER NOT NULL,
+    P_CONTAINER   CHAR(10) NOT NULL,
+    P_RETAILPRICE DECIMAL(15,2) NOT NULL,
+    P_COMMENT     VARCHAR(23) NOT NULL,
+    
+    -- Redundant: SUPPLIER details
+    S_SUPPKEY     INTEGER NOT NULL,
+    S_NAME        CHAR(25) NOT NULL,
+    S_ADDRESS     VARCHAR(40) NOT NULL,
+    S_NATIONKEY   INTEGER NOT NULL,
+    S_PHONE       CHAR(15) NOT NULL,
+    S_ACCTBAL     DECIMAL(15,2) NOT NULL,
+    S_COMMENT     VARCHAR(101) NOT NULL,
+    
+    -- Primary Key: Part Key is the unique identifier for this dimension
+    PRIMARY KEY (P_PARTKEY)
+);
+
+-- 3. FACT_ORDERS_LINEITEM_DENORMALIZED
+-- This is the core analytical table.
+-- It includes redundant keys (O_CUSTKEY, L_ORDERKEY, L_PARTKEY, L_SUPPKEY) for fast joins.
+-- It includes REDUNDANT AGGREGATES (TOTAL_PRICE, TOTAL_QUANTITY) to avoid expensive SUM/AVG operations.
+-- It includes REDUNDANT DIMENSION DATA (CUST_NAME, SUPPLIER_NAME, PART_NAME) for single-table queries.
+CREATE TABLE IF NOT EXISTS FACT_ORDERS_LINEITEM_DENORMALIZED (
+    -- Order Dimensions (Redundant for fast joins)
+    O_ORDERKEY       INTEGER NOT NULL,
+    O_CUSTKEY        INTEGER NOT NULL,
+    O_ORDERSTATUS    CHAR(1) NOT NULL,
+    O_ORDERDATE      DATE NOT NULL,
+    O_ORDERPRIORITY  CHAR(15) NOT NULL,
+    O_CLERK          CHAR(15) NOT NULL,
+    O_SHIPPRIORITY   INTEGER NOT NULL,
+    O_COMMENT        VARCHAR(79) NOT NULL,
+    
+    -- Customer & Region Data (Redundant)
+    CUST_NAME        VARCHAR(25) NOT NULL,
+    CUST_PHONE       CHAR(15) NOT NULL,
+    CUST_NATION      CHAR(25) NOT NULL, -- Derived from NATION table in original schema
+    REGION_NAME       CHAR(25) NOT NULL, -- Derived from REGION table in original schema
+    
+    -- Line Item Dimensions (Redundant)
+    PART_NAME        VARCHAR(55) NOT NULL,
+    SUPPLIER_NAME    CHAR(25) NOT NULL,
+    SUPPLIER_NATION  CHAR(25) NOT NULL, -- Derived from NATION table
+    
+    -- Original Transactional Data
+    L_LINENUMBER     INTEGER NOT NULL,
+    L_QUANTITY       DECIMAL(15,2) NOT NULL,
+    L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,
+    L_DISCOUNT       DECIMAL(15,2) NOT NULL,
+    L_TAX            DECIMAL(15,2) NOT NULL,
+    L_RETURNFLAG     CHAR(1) NOT NULL,
+    L_LINESTATUS     CHAR(1) NOT NULL,
+    L_SHIPDATE       DATE NOT NULL,
+    L_COMMITDATE     DATE NOT NULL,
+    L_RECEIPTDATE    DATE NOT NULL,
+    L_SHIPINSTRUCT   CHAR(25) NOT NULL,
+    L_SHIPMODE       CHAR(10) NOT NULL,
+    L_COMMENT        VARCHAR(44) NOT NULL,
+    
+    -- DERIVED ATTRIBUTES (Pre-calculated Aggregates)
+    -- These columns allow queries like "SELECT SUM(TOTAL_PRICE) FROM FACT..." 
+    -- to run in O(1) instead of O(N) with aggregation.
+    TOTAL_PRICE       DECIMAL(15,2) NOT NULL, -- Calculated as EXTENDEDPRICE * (1-DISCOUNT) * (1+TAX)
+    TOTAL_QUANTITY    DECIMAL(15,2) NOT NULL,
+    UNIT_PRICE        DECIMAL(15,2) NOT NULL,
+    
+    -- Primary Key: Order Key ensures uniqueness per order
+    PRIMARY KEY (O_ORDERKEY)
+);
+
+-- =============================================
+-- INDEXES FOR ANALYTICAL PERFORMANCE
+-- =============================================
+-- While the schema is denormalized, indexes are still required for filtering
+-- large datasets efficiently.
+
+CREATE INDEX IF NOT EXISTS IDX_FACT_REGION_ON_DENORM 
+    ON FACT_ORDERS_LINEITEM_DENORMALIZED (REGION_NAME, O_ORDERDATE);
+
+CREATE INDEX IF NOT EXISTS IDX_FACT_SUPPLIER_ON_DENORM 
+    ON FACT_ORDERS_LINEITEM_DENORMALIZED (SUPPLIER_NATION, SUPPLIER_NAME);
+
+CREATE INDEX IF NOT EXISTS IDX_FACT_PART_ON_DENORM 
+    ON FACT_ORDERS_LINEITEM_DENORMALIZED (PART_NAME, P_TYPE);
+
+CREATE INDEX IF NOT EXISTS IDX_FACT_CUSTOMER_ON_DENORM 
+    ON FACT_ORDERS_LINEITEM_DENORMALIZED (CUST_NATION, CUST_NAME);
+
+-- Optional: Create a materialized view for pre-aggregated yearly sales 
+-- if the dataset is extremely large (TB scale).
+CREATE VIEW IF NOT EXISTS V_WI_THOUGHT_VW 
+AS 
+SELECT 
+    REGION_NAME,
+    YEAR(O_ORDERDATE) AS YEAR,
+    SUM(TOTAL_PRICE) AS TOTAL_SALES,
+    AVG(TOTAL_PRICE) AS AVG_ORDER_VALUE,
+    COUNT(*) AS ORDER_COUNT
+FROM FACT_ORDERS_LINEITEM_DENORMALIZED
+GROUP BY REGION_NAME, YEAR(O_ORDERDATE);
+```
+
+### Summary of Improvements
+
+1.  **Eliminated Joins:** Queries that previously required `JOIN REGION, JOIN NATION, JOIN CUSTOMER, JOIN SUPPLIER, JOIN PART` can now be executed against a single table (`DIM_HIERARCHY` or `FACT_ORDERS_LINEITEM_DENORMALIZED`).
+2.  **Reduced Join Depth:** Complex queries analyzing regional sales now require only 1-2 joins (e.g., `DIM_HIERARCHY` + `FACT_ORDERS_LINEITEM_DENORMALIZED`), drastically reducing I/O and CPU usage.
+3.  **Pre-computed Aggregates:** The `TOTAL_PRICE` and `TOTAL_QUANTITY` columns in the fact table allow immediate retrieval of sums without executing `SUM()` functions during query time.
+4.  **Read-Optimized:** By removing Foreign Key constraints (which are unnecessary for a pure analytical read-only workload), we reduce write overhead and allow for more flexible data modeling.
+
+This schema is ready for deployment into a columnar storage engine (like PostgreSQL with Parquet extensions, ClickHouse, or Snowflake) to maximize analytical performance.

@@ -1,0 +1,181 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-20_10-03-59
+Model: ollama_api
+Prompt: RACE
+Schema: ex04
+==================================================
+
+# Denormalization Strategy for Read-Heavy Analytical Database
+
+## Step 1: Schema Analysis
+
+After analyzing the provided schema, I identified several key patterns:
+
+### Core Entity Relationships:
+- **Country** is central to most fact tables (survey, demography, employment, education, economy, health)
+- **Region** provides geographical hierarchy through country
+- **Survey** connects to deciles (income distribution data)
+- **Demography** links to detailed population and life expectancy data
+- Time-series data distributed across multiple tables (year-based)
+
+### Key Performance Issues:
+1. Multiple JOINs required for comprehensive country analysis
+2. Survey-decile relationship creates hierarchical querying complexity
+3. Demography-population-life expectancy chain requires multiple lookups
+4. Year-based partitioning across separate tables increases query complexity
+
+## Step 2: Frequent Query Patterns (Inferred)
+
+Based on the schema structure, typical analytical queries would include:
+
+1. **Country-level socio-economic analysis**: Joining country, region, survey, economy, education, health data
+2. **Time-series analysis**: Cross-table year-based comparisons across demographics, employment, education
+3. **Poverty/welfare trend analysis**: Survey data combined with economic indicators
+4. **Regional comparative studies**: Aggregating data across countries within regions
+5. **Decile distribution analysis**: Income distribution trends over time
+
+## Step 3: Applicable Denormalization Techniques
+
+The following techniques are most suitable for this schema:
+
+1. **Adding Redundant Attributes**: Country names, region codes/names in fact tables
+2. **Collapsing Relations**: Merging related entities (country-region, survey-decile)
+3. **Vertical Partitioning**: Separating frequently accessed core metrics from detailed attributes
+
+## Step 4: Potential Denormalized Schemas
+
+### Option A: Comprehensive Country Fact Table
+Merge all country-related metrics into a single wide table with year dimension.
+
+### Option B: Specialized Analytical Tables
+Create focused tables for specific analysis domains (socioeconomic, demographic, educational).
+
+### Option C: Time-Series Consolidated View
+Consolidate all year-based metrics into unified temporal structures.
+
+## Step 5: Evaluation & Selection
+
+Option A provides the best balance of:
+- Reduced JOIN complexity for most queries
+- Improved cache efficiency
+- Simplified analytical processing
+- Maintained data integrity through careful design
+
+However, it could become too wide. Option B offers better manageability while still significantly improving performance.
+
+I'll implement a hybrid approach combining elements of both.
+
+## Step 6: Final Denormalized Schema Design
+
+```sql
+-- Main analytical table combining key country metrics
+CREATE TABLE IF NOT EXISTS public.country_analytics (
+    id bigserial PRIMARY KEY,
+    country_code character varying NOT NULL,
+    country_name character varying,
+    region_code character varying,
+    region_name character varying,
+    year integer,
+    
+    -- Survey/Poverty metrics
+    welfare_type character varying,
+    survey_acronym character varying,
+    poverty_line double precision,
+    headcount double precision,
+    poverty_gap double precision,
+    poverty_severity double precision,
+    gini double precision,
+    spl double precision,
+    survey_year integer,
+    
+    -- Economic indicators
+    gdp double precision,
+    inflation double precision,
+    tax_revenue double precision,
+    
+    -- Employment data
+    child_emp double precision,
+    unemp double precision,
+    vulnerable_emp double precision,
+    labor_force_total double precision,
+    
+    -- Education metrics
+    child_out_of_school double precision,
+    progression_to_sec double precision,
+    education_expenditure double precision,
+    
+    -- Health indicators
+    hospital_beds double precision,
+    physicians double precision,
+    health_expenditure double precision,
+    
+    -- Demographics
+    pop_density double precision,
+    urban_pop double precision,
+    rural_pop double precision,
+    net_migration double precision,
+    death_rate double precision,
+    birth_rate double precision,
+    
+    -- Population summary metrics
+    total_population double precision,
+    male_population double precision,
+    female_population double precision,
+    
+    -- Life expectancy
+    life_expectancy_male double precision,
+    life_expectancy_female double precision,
+    life_expectancy_overall double precision
+);
+
+-- Decile distribution table (maintaining granularity)
+CREATE TABLE IF NOT EXISTS public.income_distribution (
+    id bigserial PRIMARY KEY,
+    country_code character varying NOT NULL,
+    country_name character varying,
+    region_code character varying,
+    region_name character varying,
+    survey_year integer,
+    decile_number integer,
+    decile_value double precision,
+    decile_name character varying,
+    
+    -- Redundant survey metadata for faster access
+    welfare_type character varying,
+    poverty_line double precision,
+    gini double precision
+);
+
+-- Education detailed metrics (vertical partition)
+CREATE TABLE IF NOT EXISTS public.education_detailed (
+    id bigserial PRIMARY KEY,
+    country_code character varying NOT NULL,
+    country_name character varying,
+    region_code character varying,
+    region_name character varying,
+    year integer,
+    
+    preprim_enroll double precision,
+    prim_enrol double precision,
+    sec_enrol double precision,
+    terti_enrol double precision,
+    expenditure double precision
+);
+
+-- Indexes for optimized querying
+CREATE INDEX idx_country_analytics_country_year ON public.country_analytics(country_code, year);
+CREATE INDEX idx_country_analytics_region_year ON public.country_analytics(region_code, year);
+CREATE INDEX idx_income_distribution_country_year ON public.income_distribution(country_code, survey_year);
+CREATE INDEX idx_income_distribution_region ON public.income_distribution(region_code);
+```
+
+## Benefits of This Denormalized Design:
+
+1. **Eliminates Complex JOINs**: Most analytical queries can now run against single tables
+2. **Improves Query Performance**: Significantly reduced I/O operations for common analytical patterns
+3. **Maintains Flexibility**: Separate specialized tables for detailed analysis needs
+4. **Optimized Storage**: Strategic redundancy only where it matters most for performance
+5. **Enhanced Cache Efficiency**: Frequently accessed data grouped together logically
+6. **Simplified Analytics**: Data scientists can work with flatter, more intuitive structures
+
+This design maintains referential integrity concepts while dramatically improving read performance for analytical workloads, making it ideal for business intelligence tools and reporting systems.

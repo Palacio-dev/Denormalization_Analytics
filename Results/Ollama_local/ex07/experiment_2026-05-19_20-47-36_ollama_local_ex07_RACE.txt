@@ -1,0 +1,206 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_20-47-36
+Model: ollama_local
+Prompt: RACE
+Schema: ex07
+==================================================
+
+# Analysis and Denormalization Plan for Hydroelectric Plants Database
+
+## 1. Deep Analysis of the Provided Schema
+
+### Current Structure
+The provided schema follows a strict **Third Normal Form (3NF)** structure:
+*   **Fact Table (`Usina`)**: Contains core attributes (ID, Name, Power, Dates, Coordinates) and Foreign Keys (FKs) linking to `Proprietarios`, `Rios`, and `Localizacoes`.
+*   **Dimension Tables**:
+    *   `Proprietarios`: Simple lookup table.
+    *   `Rios`: Simple lookup table.
+    *   `Localizacoes`: Complex table linking `Usina` to `Municipios` (via FK) with Lat/Long.
+    *   `Municipios`: Links to `Estados` (via FK on `uf`).
+    *   `Estados`: Minimal lookup table.
+
+### Relationships & Join Complexity
+To retrieve a full record of a hydroelectric plant (e.g., "Get name, owner, river, municipality, state, and coordinates"), the current system requires **4 JOINs**:
+1.  `Usina` -> `Localizacoes`
+2.  `Localizacoes` -> `Municipios`
+3.  `Municipios` -> `Estados`
+4.  `Usina` -> `Proprietarios` (Optional)
+5.  `Usina` -> `Rios` (Optional)
+
+### Potential Bottlenecks
+*   **Geospatial Joins**: Joining `Usina` with `Localizacoes` and then `Municipios` can be expensive if `id_localizacao` is not highly selective or if the dataset is large.
+*   **Recursive Joins**: The `Municipios` -> `Estados` relationship creates a chain. Queries filtering by State (`uf`) often require joining up through `Municipios` to find the plant.
+*   **Aggregation Overhead**: Calculating totals by State or Municipality requires joining multiple tables and aggregating, which is slow on large datasets.
+
+---
+
+## 2. Inferred Workload Context (Read-Heavy Analytical)
+
+Based on the schema and the context of "read-heavy analytical workloads," the most likely heavy queries are:
+
+1.  **State-Level Aggregation**: "Show total power (MW) and count of plants per State (`uf`)."
+    *   *Bottleneck*: Requires joining `Usina` -> `Localizacoes` -> `Municipios` -> `Estados`.
+2.  **Municipality Details**: "List all plants in Municipality X with their coordinates and owner name."
+    *   *Bottleneck*: Requires joining `Usina` -> `Localizacoes` -> `Municipios` (and potentially `Proprietarios`/`Rios`).
+3.  **River Analysis**: "Which river has the most plants?"
+    *   *Bottleneck*: Requires joining `Usina` -> `Rios`.
+4.  **Geospatial Filtering**: "Find all plants in a specific region defined by Latitude/Longitude."
+    *   *Bottleneck*: Requires joining `Usina` -> `Localizacoes`.
+
+**Conclusion**: The most frequent queries involve **State** and **Municipality** aggregations. The `Estados` and `Municipios` tables are likely joined frequently.
+
+---
+
+## 3. Evaluation of Denormalization Techniques
+
+*   **1. Adding Redundant Attributes (Materialized Joins)**:
+    *   *Applicability*: **High**. We should store the State Name and Municipality Name directly in the `Usina` table to eliminate the need for joining `Estados` and `Municipios`.
+    *   *Benefit*: Drastically reduces join depth from 4 to 1.
+
+*   **2. Adding Derived Attributes (Precomputed Aggregates)**:
+    *   *Applicability*: **Medium**. While useful for specific metrics (e.g., "Avg Power per State"), it is less critical here than simply removing the joins. However, storing the State Code (`uf`) alongside the Name is a form of redundancy that aids indexing.
+
+*   **3. Collapsing Relations**:
+    *   *Applicability*: **Very High**. This is the primary technique here. We will collapse `Usina`, `Localizacoes`, `Municipios`, and `Estados` into a single logical view or a slightly wider `Usina` table.
+    *   *Strategy*: Merge the `Localizacoes` attributes (Lat/Long) and the `Municipios`/`Estados` attributes (Name, UF) directly into the `Usina` table.
+
+*   **4. Vertical Partitioning**:
+    *   *Applicability*: **Low/Medium**. Splitting `Usina` into "Core Data" and "Geo/Owner Data" might complicate queries unless there is a strict separation of concerns. Given the small number of columns, a single wide table is usually more efficient for analytical scans than multiple narrow tables with joins.
+
+**Selected Strategy**: Primarily **Collapsing Relations** and **Adding Redundant Attributes**. We will create a single, denormalized `Usina` table that includes all necessary lookup data.
+
+---
+
+## 4. Proposed Denormalized Schemas
+
+### Option A: The "Wide Table" Approach (Recommended)
+*   **Concept**: Merge `Usina`, `Localizacoes`, `Municipios`, and `Estados` into one table.
+*   **Technique**: Collapsing Relations + Redundant Attributes.
+*   **Pros**: Zero joins for any query involving plant details. Extremely fast scans.
+*   **Cons**: Data duplication (State names repeated for every plant). Slightly higher storage cost.
+*   **Suitability**: Perfect for this schema where the `Usina` is the primary entity and lookups are always driven by the plant.
+
+### Option B: The "Hybrid" Approach
+*   **Concept**: Keep `Usina` as the core, but denormalize only the most accessed dimensions (State/Municipality).
+*   **Technique**: Partial Collapsing.
+*   **Pros**: Less storage than Option A.
+*   **Cons**: Still requires joins if filtering by Owner or River.
+*   **Suitability**: Less optimal for an analytical workload where State/Municipality filtering is dominant.
+
+### Option C: The "Flat List" Approach (Extreme)
+*   **Concept**: Flatten everything into one massive table including Owner Name, River Name, etc.
+*   **Technique**: Extreme Redundancy.
+*   **Pros**: Absolute maximum speed.
+*   **Cons**: High storage overhead, difficult to update if Owner/River names change.
+*   **Suitability**: Overkill unless the dataset is massive (millions of rows) and write frequency is negligible.
+
+**Decision**: **Option A** is the most consistent and effective balance. It eliminates the complex join chains (`Localizacoes` -> `Municipios` -> `Estados`) which are the main performance killers.
+
+---
+
+## 5. Evaluation and Selection
+
+**Evaluation of Option A (Wide Table)**:
+*   **Query Performance**: A query like `SELECT uf, SUM(potkw) FROM Usina GROUP BY uf` becomes a single table scan and aggregate. No joins.
+*   **Maintenance**: Minimal. Updating a plant's state name only requires updating one row in `Usina`. The `Municipios` and `Estados` tables can be deprecated or kept as lightweight reference tables if strict referential integrity is needed, but for analytics, they can be dropped.
+*   **Storage**: The `Usina` table grows slightly, but the savings in CPU and I/O for joins far outweigh the storage cost.
+
+**Selection**: We will proceed with **Option A**, creating a single denormalized `Usina` table. We will also retain `Proprietarios` and `Rios` as separate tables only if the query specifically needs to filter by Owner or River name, but for the vast majority of "State/Municipality" analytics, they are redundant. To keep the schema clean, we will assume the primary analytical goal is the physical plant data.
+
+*Refinement*: To be safe and cover all bases (Owner/River filtering), we will keep `Proprietarios` and `Rios` as separate tables but ensure `Usina` has the redundant FKs or names if the join is common. However, based on the examples provided (like Example 3 and 4), the trend is to **flatten** the main entity.
+
+Let's create the final schema where `Usina` is the "Source of Truth" for everything, including coordinates and administrative data.
+
+---
+
+## 6. Final Denormalized Schema Design
+
+This schema collapses the hierarchy (`Usina` -> `Localizacoes` -> `Municipios` -> `Estados`) into a single table. It also redundantly stores Owner and River names to avoid further joins for those attributes.
+
+```sql
+-- Begin Transaction
+BEGIN;
+
+-- Drop old tables if they exist to ensure clean state
+DROP TABLE IF EXISTS public."Usina";
+DROP TABLE IF EXISTS public."Proprietarios";
+DROP TABLE IF EXISTS public."Municipios";
+DROP TABLE IF EXISTS public."Estados";
+DROP TABLE IF EXISTS public."Rios";
+DROP TABLE IF EXISTS public."Localizacoes";
+
+-- 1. DENORMALIZED USINA TABLE
+-- This table now contains all attributes from Usina, Localizacoes, 
+-- Municipios, Estados, Proprietarios, and Rios to eliminate joins.
+CREATE TABLE IF NOT EXISTS public."Usina_Denormalizada" (
+    id_usina SERIAL PRIMARY KEY,
+    nome VARCHAR NOT NULL,
+    
+    -- Redundant Attributes from Localizacoes (Moved directly to Usina)
+    lat DOUBLE PRECISION,
+    long DOUBLE PRECISION,
+    uf VARCHAR NOT NULL,          -- Redundant attribute from Estados
+    nome_municipio VARCHAR NOT NULL, -- Redundant attribute from Municipios
+    nome_estado VARCHAR NOT NULL,   -- Redundant attribute from Estados
+    
+    -- Redundant Attributes from Proprietarios and Rios (Moved directly to Usina)
+    nome_proprietario VARCHAR,
+    nome_rio VARCHAR,
+    
+    -- Core Attributes from Usina
+    potkw FLOAT,
+    potfis FLOAT,
+    iniciop DATE,
+    atualizacao DATE,
+    estagio VARCHAR,
+    
+    -- Optional: Keep FKs if strict integrity is needed for future writes, 
+    -- but for analytics, the redundant columns are sufficient.
+    -- id_proprietario INTEGER NULL, -- Can be dropped if name is sufficient
+    -- id_rio INTEGER NOT NULL, -- Can be dropped if name is sufficient
+    -- id_localizacao INTEGER NOT NULL -- Can be dropped
+);
+
+-- 2. OPTIONAL REFERENCE TABLES (Only if filtering by Name is required frequently)
+-- If queries often filter by 'WHERE nome_proprietario = 'John'', 
+-- we can keep a small reference table, but for pure analytics, 
+-- the denormalized table is usually preferred to avoid JOINs.
+-- Given the examples (Ex 3 & 4), we will stick to the single denormalized table 
+-- as the primary schema, assuming the redundant names are the key.
+
+-- Indexes for the Denormalized Table
+-- Critical for filtering by State or Municipality
+CREATE INDEX IF NOT EXISTS idx_usina_uf 
+ON public."Usina_Denormalizada"(uf);
+
+CREATE INDEX IF NOT EXISTS idx_usina_municipio 
+ON public."Usina_Denormalizada"(nome_municipio);
+
+-- Index for geospatial queries (if using PostGIS or standard B-Tree)
+CREATE INDEX IF NOT EXISTS idx_usina_geo 
+ON public."Usina_Denormalizada"(lat, long);
+
+-- Index for power aggregation
+CREATE INDEX IF NOT EXISTS idx_usina_potencia 
+ON public."Usina_Denormalizada"(potkw);
+
+-- 3. (Optional) If you strictly need to maintain the original FK relationships 
+-- for data integrity during writes, you can keep the old tables, 
+-- but for a "Denormalized Physical Model" optimized for reads, 
+-- the single table above is the target.
+
+COMMIT;
+```
+
+### Key Changes Explained:
+1.  **Table Collapse**: The `Usina_Denormalizada` table replaces the entire hierarchy.
+2.  **Redundant Attributes**:
+    *   `uf`, `nome_municipio`, `nome_estado`: Stored directly to remove `Municipios` and `Estados` joins.
+    *   `lat`, `long`: Moved from `Localizacoes` to remove the geospatial join.
+    *   `nome_proprietario`, `nome_rio`: Added to avoid joining `Proprietarios` and `Rios`.
+3.  **Primary Key**: `id_usina` remains the unique identifier.
+4.  **Indexes**: Added specific indexes on the denormalized columns (`uf`, `nome_municipio`, `lat`) to ensure that the "single table scan" is efficient.
+
+This design allows a query like:
+`SELECT uf, COUNT(*), SUM(potkw) FROM Usina_Denormalizada GROUP BY uf;`
+to execute in **O(N)** time (single table scan) instead of the complex join overhead of the original schema.

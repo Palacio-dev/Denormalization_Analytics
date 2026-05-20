@@ -1,0 +1,138 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_16-58-26
+Model: ollama_local
+Prompt: RISEN
+Schema: TPC_DS
+==================================================
+
+BEGIN;
+
+-- Drop existing tables if they exist to ensure a clean state for the denormalized model
+DROP TABLE IF EXISTS s_purchase_lineitem CASCADE;
+DROP TABLE IF EXISTS s_purchase CASCADE;
+DROP TABLE IF EXISTS s_catalog_order CASCADE;
+DROP TABLE IF EXISTS s_web_order CASCADE;
+DROP TABLE IF EXISTS s_catalog_order_lineitem CASCADE;
+DROP TABLE IF EXISTS s_web_order_lineitem CASCADE;
+DROP TABLE IF EXISTS s_store_returns CASCADE;
+DROP TABLE IF EXISTS s_catalog_returns CASCADE;
+DROP TABLE IF EXISTS s_inventory CASCADE;
+
+-- 1. Denormalized Order Lines (Combines s_purchase_lineitem, s_catalog_order_lineitem, s_web_order_lineitem)
+-- Strategy: Collapsing Relations + Adding Redundant Attributes.
+-- We merge all line item details into a single table, including redundant columns from order tables (customer_id, store_id, etc.)
+-- to avoid expensive JOINs during analytical reads.
+CREATE TABLE s_order_lineitem (
+    order_type_id INTEGER NOT NULL,
+    order_id INTEGER NOT NULL,
+    line_number INTEGER NOT NULL,
+    item_id CHAR(16) NOT NULL,
+    promotion_id CHAR(16),
+    quantity INTEGER NOT NULL,
+    sale_price NUMERIC(7,2) NOT NULL,
+    coupon_amt NUMERIC(7,2),
+    warehouse_id CHAR(16),
+    ship_date CHAR(10),
+    ship_cost NUMERIC(7,2),
+    -- Redundant attributes from Order Header (Added for Read Performance)
+    bill_customer_id CHAR(16),
+    ship_customer_id CHAR(16),
+    order_date CHAR(10),
+    order_time INTEGER,
+    ship_mode_id CHAR(16),
+    -- Specific attributes per order type (Redundant)
+    store_id CHAR(16),
+    clerk_id INTEGER,
+    register_id INTEGER,
+    purchase_comment CHAR(100),
+    clerk_comment CHAR(100),
+    catalog_number INTEGER,
+    catalog_page_number INTEGER,
+    web_site_id CHAR(16),
+    web_page_id CHAR(16),
+    catalog_comments VARCHAR(100),
+    order_comments CHAR(100)
+);
+
+-- 2. Denormalized Orders (Combines s_purchase, s_catalog_order, s_web_order)
+-- Strategy: Collapsing Relations.
+-- Merges all order header data into one table. Includes redundant line item count or specific flags if needed,
+-- but primarily focuses on joining the line items to this table.
+CREATE TABLE s_order (
+    order_type_id INTEGER NOT NULL,
+    order_id INTEGER NOT NULL,
+    bill_customer_id CHAR(16),
+    ship_customer_id CHAR(16),
+    order_date CHAR(10) NOT NULL,
+    order_time INTEGER NOT NULL,
+    ship_mode_id CHAR(16) NOT NULL,
+    -- Redundant attributes from specific order types
+    store_id CHAR(16),
+    clerk_id INTEGER,
+    register_id INTEGER,
+    purchase_comment CHAR(100),
+    clerk_comment CHAR(100),
+    web_site_id CHAR(16),
+    order_comments CHAR(100),
+    catalog_comments VARCHAR(100)
+);
+
+-- 3. Denormalized Returns (Combines s_store_returns, s_catalog_returns)
+-- Strategy: Collapsing Relations.
+-- Merges return data, including redundant customer IDs and warehouse info.
+CREATE TABLE s_returns (
+    return_type_id INTEGER NOT NULL,
+    return_id INTEGER NOT NULL,
+    line_number INTEGER NOT NULL,
+    item_id CHAR(16) NOT NULL,
+    return_customer_id CHAR(16) NOT NULL,
+    refund_customer_id CHAR(16),
+    return_date CHAR(10) NOT NULL,
+    return_time CHAR(10) NOT NULL,
+    ticket_number CHAR(20),
+    return_qty INTEGER NOT NULL,
+    return_amt NUMERIC(7,2) NOT NULL,
+    return_tax NUMERIC(7,2),
+    return_fee NUMERIC(7,2),
+    return_ship_cost NUMERIC(7,2),
+    refunded_cash NUMERIC(7,2),
+    reversed_charge NUMERIC(7,2),
+    store_credit NUMERIC(7,2),
+    merchant_credit NUMERIC(7,2),
+    reason_id CHAR(16),
+    -- Redundant attributes from specific return types
+    store_id CHAR(16),
+    purchase_id CHAR(16),
+    call_center_id CHAR(16),
+    shipmode_id CHAR(16),
+    catalog_page_id CHAR(16),
+    warehouse_id CHAR(16)
+);
+
+-- 4. Denormalized Inventory (s_inventory)
+-- Strategy: Keeping as is but ensuring it is linked directly to the denormalized order line items.
+-- In a pure denormalized model, inventory might be joined, but here we keep it separate as it's a snapshot table
+-- often queried independently or joined via item_id/warehouse_id.
+CREATE TABLE s_inventory (
+    warehouse_id CHAR(16) NOT NULL,
+    item_id CHAR(16) NOT NULL,
+    date CHAR(10) NOT NULL,
+    qty_on_hand INTEGER
+);
+
+-- 5. Create Indexes for common join patterns to optimize the denormalized reads
+CREATE INDEX IF NOT EXISTS idx_s_order_lineitem_order_type ON s_order_lineitem (order_type_id);
+CREATE INDEX IF NOT EXISTS idx_s_order_lineitem_order_id ON s_order_lineitem (order_id);
+CREATE INDEX IF NOT EXISTS idx_s_order_lineitem_item_id ON s_order_lineitem (item_id);
+CREATE INDEX IF NOT EXISTS idx_s_order_lineitem_ship_date ON s_order_lineitem (ship_date);
+CREATE INDEX IF NOT EXISTS idx_s_order_lineitem_warehouse_id ON s_order_lineitem (warehouse_id);
+
+CREATE INDEX IF NOT EXISTS idx_s_returns_return_type ON s_returns (return_type_id);
+CREATE INDEX IF NOT EXISTS idx_s_returns_return_id ON s_returns (return_id);
+CREATE INDEX IF NOT EXISTS idx_s_returns_item_id ON s_returns (item_id);
+CREATE INDEX IF NOT EXISTS idx_s_returns_return_date ON s_returns (return_date);
+
+CREATE INDEX IF NOT EXISTS idx_s_inventory_item_date ON s_inventory (item_id, date);
+CREATE INDEX IF NOT EXISTS idx_s_inventory_warehouse_date ON s_inventory (warehouse_id, date);
+
+END;

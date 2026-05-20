@@ -1,0 +1,226 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_20-26-52
+Model: ollama_local
+Prompt: RACE
+Schema: ex06
+==================================================
+
+Hello. I am your Senior Data Engineer. Based on your request to denormalize the provided educational analytics schema for a read-heavy workload, I have performed a deep analysis of the current physical model, identified performance bottlenecks, and designed an optimized denormalized schema.
+
+### 1. Analysis of the Provided Schema
+
+The current schema follows a strict normalized design (3NF/BCNF principles), which is excellent for data integrity but suboptimal for analytical reporting.
+
+**Current Structure:**
+*   **Core Entity:** `MUNICIPIO` acts as the central hub, linking to `UF`, `IES`, and `ESCOLA`.
+*   **Metrics Tables:** `IDE`, `ENADE`, `SAEB`, and `AN` (Year/Linker) are separate.
+*   **Hierarchy:** UF -> MUNICIPIO -> IES/ESCOLA.
+*   **Linker Table:** `AN` serves as the bridge between schools, years, and specific metrics (`id_ideb`, `id_enade`, etc.).
+
+**Identified Bottlenecks & Heavy Workloads:**
+In an analytical context (BI dashboards, trend analysis), the following patterns are most common:
+1.  **Wide Joins on `MUNICIPIO`:** Queries often need: *State Name + City Name + IES Count + School Count + IDEB Note + ENADE Avg + SAEB Score*. Currently, this requires joining `UF`, `MUNICIPIO`, `IDE`, `ENADE`, and `SAEB`.
+2.  **The `AN` Table Overhead:** Every query calculating metrics per year must join `AN` to fetch the specific `id_ideb` or `id_enade` associated with that year. If a user asks for "Average IDEB across Brazil for 2020-2023", the database must join `MUNICIPIO` -> `AN` -> `IDE` and repeat this for `ENADE` and `SAEB`.
+3.  **Redundant Aggregations:** Calculating `AVG(nota_bruta_ce)` across thousands of municipalities is expensive if done on the fly.
+
+---
+
+### 2. Strategy: Denormalization Techniques Applied
+
+I will apply the following techniques from your context list:
+
+1.  **Adding Redundant Attributes (Materialized Joins):**
+    *   *Action:* Instead of joining `MUNICIPIO` with `IDE`, `ENADE`, and `SAEB`, we will create a "Fact-like" table or expand `MUNICIPIO` to include the direct metric values.
+    *   *Benefit:* Eliminates the need to join three separate metric tables per query.
+
+2.  **Collapsing Relations:**
+    *   *Action:* Merge the `UF`, `MUNICIPIO`, and the "Year-Metric" relationships into a single comprehensive table per metric (e.g., `FATIA_IDEB`, `FATIA_ENADE`).
+    *   *Benefit:* Reduces join complexity from $N$ joins to 0 (single table scan).
+
+3.  **Adding Derived Attributes (Pre-computed Aggregates):**
+    *   *Action:* Since the source tables (`IDE`, `ENADE`, `SAEB`) appear to be static reference data (or aggregated once per year), we will pre-calculate the averages/counts at the municipality level.
+    *   *Benefit:* Avoids runtime aggregation (`GROUP BY`), which is the most expensive operation in analytical queries.
+
+4.  **Vertical Partitioning (Implicit):**
+    *   *Action:* While we are merging, we effectively treat the "Municipality" entity and the "Metric Facts" as one logical unit for reporting.
+
+---
+
+### 3. Proposed Denormalized Schema Design
+
+I will create a schema consisting of three main tables:
+1.  **`REGIAO_ESCOLAR`**: Contains the static hierarchy (UF, Municipality Name, State Name).
+2.  **`METRICAS_ESCOLA`**: A "Fact" table that denormalizes the relationship between a Municipality, a specific Year, and all available metrics (IDEB, ENADE, SAEB, Counts). This table replaces the need to join `MUNICIPIO`, `AN`, `IDE`, `ENADE`, and `SAEB`.
+3.  **`CURSO`**: Kept minimal as it links to `IES`, but can be denormalized if needed. For this optimization, we will focus on the Municipality/Metric bottleneck.
+
+#### Step-by-Step SQL Generation
+
+```sql
+-- ==========================================
+-- STEP 1: Drop Old Tables (Clean Slate)
+-- ==========================================
+DROP TABLE IF EXISTS METRICAS_ESCOLA CASCADE;
+DROP TABLE IF EXISTS REGIAO_ESCOLAR CASCADE;
+DROP TABLE IF EXISTS UF CASCADE;
+DROP TABLE IF EXISTS MUNICIPIO CASCADE;
+DROP TABLE IF EXISTS IDEB CASCADE;
+DROP TABLE IF EXISTS ENADE CASCADE;
+DROP TABLE IF EXISTS SAEB CASCADE;
+DROP TABLE IF EXISTS AN CASCADE;
+DROP TABLE IF EXISTS ESCOLA CASCADE;
+DROP TABLE IF EXISTS IES CASCADE;
+DROP TABLE IF EXISTS CURSO CASCADE;
+
+-- ==========================================
+-- STEP 2: Create Denormalized Hierarchy Table
+-- ==========================================
+-- This table replaces UF, MUNICIPIO, and the geographic context.
+-- It stores static data + the ability to link metrics directly.
+CREATE TABLE REGIAO_ESCOLAR (
+    id_regiao INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    -- We store the count of schools/IES here if they are static per municipality,
+    -- or we leave them null and aggregate them in the fact table if they vary by year.
+    -- For this design, we assume the counts are static attributes of the municipality.
+    qtd_ies_estimada INT, 
+    qtd_escolas_estimadas INT,
+    -- Placeholder for dynamic metrics that might vary by year if not pre-calculated
+    -- Note: In a true denormalized fact table, we would repeat these columns per year.
+    -- Given the examples, we will create a dedicated Fact table for the heavy lifting.
+);
+
+-- ==========================================
+-- STEP 3: Create the Main Denormalized Fact Table
+-- ==========================================
+-- This is the critical change. Instead of joining MUNICIPIO + AN + IDE + ENADE + SAEB,
+-- we store the result of these joins here.
+-- 
+-- Structure: [Geo_ID, Year, IDEB_Note, IDEB_Avg, ENADE_Note, ENADE_Avg, SAEB_Note, SAEB_Avg, Total_Participantes]
+CREATE TABLE METRICAS_ESCOLA (
+    id_metricas_escola INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_regiao INT NOT NULL REFERENCES REGIAO_ESCOLAR(id_regiao) ON DELETE CASCADE,
+    ano INT NOT NULL,
+    
+    -- IDEB Metrics (Denormalized from IDEB + AN + MUNICIPIO join)
+    nota_ideb_bruta REAL,
+    nota_ideb_padronizada REAL,
+    qtd_participantes_ideb INT,
+    media_ideb REAL,
+    
+    -- ENADE Metrics (Denormalized from ENADE + AN + MUNICIPIO join)
+    nota_enade_bruta_ce REAL,
+    nota_enade_padronizada_ce REAL,
+    nota_enade_bruta_fg REAL,
+    nota_enade_padronizada_fg REAL,
+    qtd_participantes_enade INT,
+    media_enade REAL,
+    
+    -- SAEB Metrics (Denormalized from SAEB + AN + MUNICIPIO join)
+    nota_saeb_mat REAL,
+    nota_saeb_port REAL,
+    nota_saeb_padrao REAL,
+    qtd_participantes_saeb INT,
+    
+    -- Aggregated Counts (Denormalized from MUNICIPIO + AN join)
+    total_participantes_anual INT,
+    qtd_escolas_ativas INT,
+    
+    -- Constraints to ensure data consistency (Optional but recommended)
+    CONSTRAINT uk_regiao_ano UNIQUE (id_regiao, ano)
+);
+
+-- ==========================================
+-- STEP 4: Create Minimal Entity Tables (Optional)
+-- ==========================================
+-- Keep these for reference data if not fully denormalized, 
+-- but the heavy lifting is in METRICAS_ESCOLA.
+CREATE TABLE UF (
+    id_uf INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    sigla_uf VARCHAR(2) UNIQUE NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL
+);
+
+CREATE TABLE MUNICIPIO (
+    id_municipio INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_uf INT NOT NULL REFERENCES UF(id_uf) ON DELETE CASCADE,
+    nome_municipio VARCHAR(100) NOT NULL,
+    -- Keep static counts here if they don't change, to avoid duplication in REGIAO_ESCOLAR
+    qtd_ies INT CHECK (qtd_ies >= 0),
+    qtd_escolas INT CHECK (qtd_escolas >= 0)
+);
+
+-- ==========================================
+-- STEP 5: Data Loading Strategy (Insertion Example)
+-- ==========================================
+-- This demonstrates how the data is populated to achieve denormalization.
+-- We simulate the aggregation that would normally happen in a complex JOIN.
+
+-- 1. Populate Base Geography
+INSERT INTO UF (sigla_uf, nome_uf) VALUES ('SP', 'São Paulo'), ('RJ', 'Rio de Janeiro');
+
+INSERT INTO MUNICIPIO (id_municipio, id_uf, nome_municipio, qtd_ies, qtd_escolas) 
+VALUES (1, 1, 'São Paulo', 10, 50), 
+       (2, 1, 'Campinas', 5, 20);
+
+-- 2. Populate Denormalized Metrics
+-- Simulating the result of: 
+-- SELECT m.nome_municipio, i.nota_ideb, e.nota_bruta_ce, s.nota_mat, a.ano
+-- FROM MUNICIPIO m 
+-- JOIN METRICAS_ESCOLA m_e ON m.id_municipio = m_e.id_regiao -- (Logic adjusted for ID mapping)
+-- ... (This is a conceptual representation of the data load)
+
+INSERT INTO METRICAS_ESCOLA (id_regiao, ano, nota_ideb_bruta, nota_ideb_padronizada, 
+                             nota_enade_bruta_ce, nota_enade_padronizada_ce, 
+                             nota_saeb_mat, nota_saeb_padrao, total_participantes_anual)
+VALUES 
+    (1, 2023, 5.8, 6.2, 6.5, 6.8, 7.0, 7.5, 150000),
+    (1, 2022, 5.7, 6.1, 6.4, 6.7, 6.9, 7.4, 148000),
+    (2, 2023, 5.5, 5.9, 6.0, 6.3, 6.8, 7.2, 45000);
+
+-- ==========================================
+-- STEP 6: Query Performance Demonstration
+-- ==========================================
+-- BEFORE (Normalized): 
+-- SELECT m.nome_municipio, a.ano, AVG(i.nota_ideb) as avg_ideb
+-- FROM MUNICIPIO m
+-- JOIN AN a ON ...
+-- JOIN IDEB i ON ...
+-- GROUP BY ...
+-- (Requires multiple joins and aggregation)
+
+-- AFTER (Denormalized):
+-- SELECT r.nome_municipio, m.ano, m.nota_ideb_bruta as avg_ideb
+-- FROM REGIAO_ESCOLAR r
+-- JOIN METRICAS_ESCOLA m ON r.id_regiao = m.id_regiao
+-- WHERE r.sigla_uf = 'SP' AND m.ano = 2023;
+-- (Single Join, No Aggregation needed if data is pre-calculated)
+
+-- ==========================================
+-- INDEXES FOR PERFORMANCE
+-- ==========================================
+CREATE INDEX idx_metricas_ano ON METRICAS_ESCOLA (ano);
+CREATE INDEX idx_metricas_regiao_ano ON METRICAS_ESCOLA (id_regiao, ano);
+CREATE INDEX idx_regiao_uf ON REGIAO_ESCOLAR (sigla_uf);
+
+-- ==========================================
+-- FINAL SCHEMA SUMMARY
+-- ==========================================
+-- The new physical model consists of:
+-- 1. REGIAO_ESCOLAR: Stores the hierarchy (UF, City).
+-- 2. METRICAS_ESCOLA: The denormalized fact table containing all metrics per year.
+-- 
+-- This approach eliminates the need to join 5+ tables for any analytical query,
+-- drastically reducing query execution time from seconds to milliseconds.
+```
+
+### 4. Evaluation of the Design
+
+1.  **Consistency:** By storing `nota_ideb_bruta` directly in `METRICAS_ESCOLA`, we avoid the risk of `IDE` table updates causing inconsistencies in the report if the source data changes slightly. However, we must ensure the ETL process recalculates these values accurately.
+2.  **Read Performance:** Queries that previously required `JOIN MUNICIPIO JOIN AN JOIN IDE JOIN ENADE JOIN SAEB` now require only `JOIN REGIAO_ESCOLAR JOIN METRICAS_ESCOLA`. This is a massive performance gain.
+3.  **Storage:** There is a slight increase in storage overhead due to redundancy (copying `UF` and `MUNICIPIO` data), but this is negligible compared to the CPU savings gained from avoiding joins and aggregations.
+4.  **Maintainability:** The schema is simpler. Developers no longer need to understand the complex foreign key relationships between `AN`, `IDE`, `ENADE`, and `SAEB` to build reports; they just query `METRICAS_ESCOLA`.
+
+### Conclusion
+The denormalized schema **`REGIAO_ESCOLAR`** and **`METRICAS_ESCOLA`** is the most consistent and effective solution for your read-heavy analytical workload. It leverages **Collapsing Relations** and **Adding Redundant Attributes** to transform a complex multi-table join scenario into a simple, fast-to-query structure.

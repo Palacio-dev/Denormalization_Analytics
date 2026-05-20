@@ -1,0 +1,290 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_20-40-17
+Model: ollama_local
+Prompt: intermediate
+Schema: ex06
+==================================================
+
+### 1. Workload-Driven Analysis
+
+Based on the provided schema, I infer a **Read-Heavy Analytical Workload** typical of educational data reporting (e.g., Ministry of Education dashboards).
+
+#### High-Cost Join Paths & Operations
+The current schema forces a "deep join" pattern for almost every report:
+1.  **The "Mega-Join"**: A query to get "Top 10 Universities by IDEB" requires joining:
+    `MUNICIPIO` → `IES` (via `id_municipio`) → `CURSO` (via `id_IES`) → `ANO` (to filter year) → `ANADE` / `SAEB` / `IDEB` (to get metrics).
+    *   *Cost*: High CPU and I/O due to joining multiple large fact-like tables on small keys.
+2.  **Multi-Table Aggregates**: Queries asking for "Average IDEB per UF for 2023" require aggregating across `MUNICIPIO`, `IES`, `CURSO`, and `ANADE`/`IDEB` tables simultaneously.
+3.  **Filtering Granularity**: Filtering by `sigla_uf` requires a join to `UF` to get the name, then a join to `MUNICIPIO` to get city stats, etc.
+
+#### Denormalization Candidates
+To optimize latency, we must break the dependency chain into a **Star Schema** centered on the entity being reported (usually `IES` or `UF`), duplicating the "Fact" data (`ANADE`, `SAEB`, `IDEB`) into the dimension tables or creating dedicated Fact tables that are pre-joined.
+
+**Key Candidates:**
+*   **Duplicate `UF` columns**: Move `nome` and `sigla_uf` into `MUNICIPIO` to avoid the join.
+*   **Pre-compute Aggregates**: `MUNICIPIO` already has aggregates, but `IES` and `CURSO` do not. We need tables that hold the *latest* or *aggregated* metrics per entity to avoid grouping in the query.
+*   **Snapshot Fact Tables**: Create wide tables that combine `IES` attributes with `ANADE`, `SAEB`, and `IDEB` data for specific years, eliminating the need to join across multiple metric tables.
+
+---
+
+### 2. Denormalization Design Strategy
+
+#### A. Dimension Tables (Read-Optimized)
+*   **`UF`**: Keep as is (small, rarely joined).
+*   **`MUNICIPIO`**: **Denormalize** `sigla_uf` and `nome`.
+    *   *Why*: Eliminates the join `MUNICIPIO` → `UF`.
+*   **`IES`**: **Denormalize** `id_municipio` (keep reference) but add a `nome_uf` column (extracted from the joined UF data if available, or derived). *Better approach*: Since `IES` doesn't have UF data, we will create a **Wide Fact Table** for `IES` that includes the UF context.
+
+#### B. Fact Tables (Wide & Precomputed)
+We will create three "Wide Fact" tables to act as the primary read targets. These tables store the pre-joined data.
+
+1.  **`FATO_IES_METRICAS`**:
+    *   *Grain*: One row per `IES` per `ANO`.
+    *   *Content*: Contains `IES` attributes (`nome`, `rede`, `sigla_ies`) **PLUS** all `ANADE`, `SAEB`, and `IDEB` columns for that year.
+    *   *Benefit*: A query for "IES performance in 2023" is now a single table scan with a filter on `id_ies` and `id_ano`. No joins to `ENADE`, `SAEB`, or `IDEB` tables.
+
+2.  **`FATO_UF_METRICAS`**:
+    *   *Grain*: One row per `UF` per `ANO`.
+    *   *Content*: Contains `UF` attributes (`nome`, `sigla_uf`) **PLUS** aggregated metrics from all `MUNICIPIO`s, `IES`s, and metric tables for that year.
+    *   *Benefit*: Eliminates the need to aggregate over millions of `IES` rows in the application logic.
+
+#### C. Index Strategy
+*   **Covering Indexes**: Critical for read performance.
+    *   On `FATO_IES_METRICAS`: `(id_ies, id_ano, nome_uf)` to support `SELECT * FROM FATO_IES_METRICAS WHERE id_ies = ? AND id_ano = ?`.
+    *   On `FATO_UF_METRICAS`: `(id_uf, id_ano, nome)` for UF reports.
+*   **Filter Indexes**: On the wide tables, include columns frequently used in `WHERE` clauses (e.g., `sigla_uf`, `rede`, `ano`).
+
+#### D. Partitioning
+*   **Strategy**: Range partition by `id_ano` on the Wide Fact tables.
+*   **Reason**: Historical data grows rapidly. Partitioning allows the DB to ignore data from 2020 when querying 2024, reducing I/O significantly.
+
+---
+
+### 3. New Physical Schema (DDL)
+
+This DDL creates the denormalized schema. It preserves the original tables (in case you need to regenerate them) but focuses on the new **Wide Fact Tables** which are the primary read targets.
+
+```sql
+-- ==========================================
+-- 1. DIMENSION TABLES (Optimized for Joins)
+-- ==========================================
+
+-- UF Table: Unchanged, serves as root dimension
+DROP TABLE IF EXISTS UF CASCADE;
+CREATE TABLE UF (
+    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    sigla_uf VARCHAR(2) UNIQUE NOT NULL,
+    nome VARCHAR(100) NOT NULL,
+    qtd_habitantes INT CHECK(qtd_habitantes >= 0)
+);
+-- Index: Essential for root lookups
+CREATE INDEX IDX_UF_SIGLA ON UF(sigla_uf);
+
+-- MUNICIPIO Table: DENORMALIZED
+-- Added sigla_uf to avoid JOIN with UF
+DROP TABLE IF EXISTS MUNICIPIO CASCADE;
+CREATE TABLE MUNICIPIO (
+    id_municipio INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_uf INT NOT NULL REFERENCES UF(id) ON DELETE CASCADE,
+    nome_municipio VARCHAR(100) NOT NULL,
+    -- DENORMALIZATION: Copy UF sigla to avoid JOIN
+    sigla_uf VARCHAR(2) NOT NULL, 
+    
+    -- Existing metrics
+    qtd_ies INT CHECK(qtd_ies >= 0),
+    qtd_escolas INT CHECK(qtd_escolas >= 0),
+    media_ideb REAL,
+    media_saeb REAL,
+    media_enade REAL,
+    total_participantes INT CHECK(total_participantes >= 0)
+);
+-- Index: Covering (id_uf, sigla_uf) for common filters
+CREATE INDEX IDX_MUNICIPIO_UF_SIGLA ON MUNICIPIO(id_uf, sigla_uf);
+
+-- IES Table: DENORMALIZED
+-- Added id_municipio_ref (kept for integrity) but we will rely on FATO tables for metrics
+DROP TABLE IF EXISTS IES CASCADE;
+CREATE TABLE IES (
+    id_ies INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_municipio INT NOT NULL REFERENCES MUNICIPIO(id_municipio) ON DELETE CASCADE,
+    nome_ies VARCHAR(100) NOT NULL,
+    sigla_ies VARCHAR(20),
+    codigo_ies INT UNIQUE NOT NULL,
+    rede VARCHAR(100) NOT NULL
+);
+-- Index: Fast lookup by code or name
+CREATE INDEX IDX_IES_CODIGO ON IES(codigo_ies);
+CREATE INDEX IDX_IES_REDE ON IES(rede);
+
+-- ANO Table: Simplified
+DROP TABLE IF EXISTS ANO CASCADE;
+CREATE TABLE ANO (
+    id_ano INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ano INT NOT NULL
+);
+-- Index: Essential for time-series filtering
+CREATE INDEX IDX_ANO_ANO ON ANO(ano);
+
+-- ==========================================
+-- 2. WIDE FACT TABLES (The Core Read Model)
+-- ==========================================
+
+-- FATO_IES_METRICAS: 
+-- Grain: 1 row per IES per Year
+-- Purpose: Replace JOINs between IES, ANADE, SAEB, IDEB, MUNICIPIO
+DROP TABLE IF EXISTS FATO_IES_METRICAS CASCADE;
+
+CREATE TABLE FATO_IES_METRICAS (
+    id_fato_ies INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_ies INT NOT NULL REFERENCES IES(id_ies) ON DELETE CASCADE,
+    id_ano INT NOT NULL REFERENCES ANO(id_ano) ON DELETE CASCADE,
+    
+    -- DIMENSIONAL ATTRIBUTES (Denormalized from IES/MUNICIPIO)
+    nome_ies VARCHAR(100) NOT NULL,
+    sigla_ies VARCHAR(20),
+    codigo_ies INT,
+    rede VARCHAR(100) NOT NULL,
+    nome_municipio VARCHAR(100),
+    sigla_uf VARCHAR(2), -- Denormalized from MUNICIPIO
+    
+    -- METRIC FACTS (Pre-joined from ANADE, SAEB, IDEB)
+    -- IDEB Metrics
+    media_ideb REAL,
+    nota_ideb REAL,
+    rend_1 REAL,
+    rend_2 REAL,
+    rend_3 REAL,
+    rend_4 REAL,
+    ind_rend REAL,
+    
+    -- ENADE Metrics
+    total_inscritos INT,
+    total_concluintes INT,
+    nota_bruta_ce REAL,
+    nota_padronizada_ce REAL,
+    nota_bruta_fg REAL,
+    nota_padronizada_fg REAL,
+    nota_enade_continua REAL,
+    nota_enade_faixa REAL,
+    
+    -- SAEB Metrics
+    nota_mat REAL,
+    nota_port REAL,
+    nota_padrao REAL,
+    
+    -- Computed Aggregates (Example: Total students per IES)
+    total_alunos INT
+);
+
+-- Index Strategy for FATO_IES_METRICAS
+-- 1. Covering Index for "Find IES by ID and Year" (Most common pattern)
+CREATE INDEX IDX_FATO_IES_COVERING 
+    ON FATO_IES_METRICAS (id_ies, id_ano) 
+    INCLUDE (nome_ies, sigla_uf, rede, media_ideb, total_alunos);
+
+-- 2. Index for "Search IES by Name/Rede and Year"
+CREATE INDEX IDX_FATO_IES_SEARCH 
+    ON FATO_IES_METRICAS (nome_ies, rede, id_ano) 
+    INCLUDE (id_ies, media_ideb);
+
+-- 3. Partitioning by Year (Critical for historical growth)
+ALTER TABLE FATO_IES_METRICAS 
+    PARTITION BY RANGE (id_ano) (
+        PARTITION p2020 VALUES LESS THAN (2021),
+        PARTITION p2021 VALUES LESS THAN (2022),
+        PARTITION p2022 VALUES LESS THAN (2023),
+        PARTITION p2023 VALUES LESS THAN (2024),
+        PARTITION p2024 VALUES LESS THAN (2025),
+        PARTITION pfuture VALUES LESS THAN MAXVALUE
+    );
+
+
+-- FATO_UF_METRICAS:
+-- Grain: 1 row per UF per Year
+-- Purpose: Replace JOINs between UF, MUNICIPIO, IES, and Metric Tables
+DROP TABLE IF EXISTS FATO_UF_METRICAS CASCADE;
+
+CREATE TABLE FATO_UF_METRICAS (
+    id_fato_uf INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_uf INT NOT NULL REFERENCES UF(id) ON DELETE CASCADE,
+    id_ano INT NOT NULL REFERENCES ANO(id_ano) ON DELETE CASCADE,
+    
+    -- DIMENSIONAL ATTRIBUTES (Denormalized from UF/MUNICIPIO)
+    nome_uf VARCHAR(100) NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    
+    -- Aggregated Metrics (Pre-computed from MUNICIPIO/IES)
+    -- Example: Avg IDEB, Total IES count, Total Students
+    media_ideb_media REAL,
+    qtd_ies_total INT,
+    total_participantes_uf INT,
+    
+    -- Derived: Count of specific redes
+    qtd_ies_publica INT,
+    qtd_ies_privada INT
+);
+
+-- Index Strategy for FATO_UF_METRICAS
+CREATE INDEX IDX_FATO_UF_COVERING 
+    ON FATO_UF_METRICAS (id_uf, id_ano) 
+    INCLUDE (nome_uf, media_ideb_media, qtd_ies_total);
+
+-- Partitioning by Year
+ALTER TABLE FATO_UF_METRICAS 
+    PARTITION BY RANGE (id_ano) (
+        PARTITION p2020 VALUES LESS THAN (2021),
+        PARTITION p2021 VALUES LESS THAN (2022),
+        PARTITION p2022 VALUES LESS THAN (2023),
+        PARTITION p2023 VALUES LESS THAN (2024),
+        PARTITION p2024 VALUES LESS THAN (2025),
+        PARTITION pfuture VALUES LESS THAN MAXVALUE
+    );
+
+
+-- ==========================================
+-- 3. VIEWS (For Legacy Queries)
+-- ==========================================
+
+-- View to simulate the old complex join for backward compatibility
+-- Performance will be slightly degraded compared to Wide Fact tables, 
+-- but ensures data consistency if Wide Fact tables are not updated in sync.
+DROP VIEW IF EXISTS VIEWS_UNIFIED_METRICS CASCADE;
+
+CREATE VIEW VIEWS_UNIFIED_METRICS AS
+SELECT 
+    f.ies_id,
+    f.nome_ies,
+    f.rede,
+    f.sigla_uf,
+    f.media_ideb,
+    f.nota_ideb,
+    f.total_inscritos,
+    f.nota_bruta_ce,
+    f.nota_mat
+FROM FATO_IES_METRICAS f
+WHERE f.id_ano = 2023; -- Example filter
+```
+
+### Key Changes Summary & Rationale
+
+1.  **Elimination of Multi-Table Joins**:
+    *   **Old**: `SELECT ... FROM IES i JOIN ANADE a ON ... JOIN SAEB s ON ...`
+    *   **New**: `SELECT * FROM FATO_IES_METRICAS WHERE id_ies = ? AND id_ano = ?`
+    *   **Impact**: Reduces query complexity from 4+ table joins to a single table scan (plus an index lookup).
+
+2.  **Data Redundancy Trade-off**:
+    *   We duplicated `sigla_uf` in `MUNICIPIO` and `nome_uf` in `FATO_IES_METRICAS`.
+    *   **Cost**: Slight increase in storage and write latency (ETL process must update these columns).
+    *   **Benefit**: Massive reduction in read latency and CPU usage during analytics.
+
+3.  **Partitioning**:
+    *   Added `PARTITION BY RANGE (id_ano)` to the Wide Fact tables.
+    *   **Benefit**: If you query data for 2024, the database engine ignores partitions for 2015-2023, drastically reducing I/O for large datasets.
+
+4.  **Covering Indexes**:
+    *   Created indexes that include the `SELECT` columns (e.g., `INCLUDE (nome_ies, sigla_uf, ...)`).
+    *   **Benefit**: Enables "Index Only Scans," where the database does not need to look up data in the main table heap, further speeding up reads.
+
+5.  **Precomputed Aggregates**:
+    *   `FATO_UF_METRICAS` contains `media_ideb_media` and `qtd_ies_total`.
+    *   **Benefit**: Queries asking for "Average IDEB per UF" no longer require `GROUP BY` operations over millions of `IES` rows; the answer is already sitting in the pre-aggregated row.

@@ -1,0 +1,245 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_20-17-25
+Model: ollama_local
+Prompt: expert
+Schema: ex04
+==================================================
+
+# Executive Summary
+
+This design addresses the read-optimized denormalization of a multi-dimensional economic and demographic dataset. The primary bottleneck in the current normalized schema is the repeated joining of `country`, `demography`, `employment`, `education`, `economy`, and `health` tables for every query, resulting in high I/O latency and complex query plans.
+
+The proposed solution introduces **Pre-Aggregated Fact Tables** and **Wide Read Dimension Tables**. Instead of joining 6-8 tables per query, the system will materialize "Country-Year" snapshots containing pre-calculated aggregates (e.g., total population, GDP, average life expectancy) and pre-joined dimension data. This reduces query complexity from $O(N \times M)$ joins to $O(1)$ table lookups.
+
+**Correctness Strategy:** We will not use transactional materialized views (which are unsupported in most SQL engines). Instead, we will use **Batch Refresh Jobs** that run outside business hours. A defined "Staleness Window" of 2–4 hours will be explicitly documented; data in the denormalized tables will be at most 2 hours behind the source of truth. This trade-off is necessary to achieve sub-second read latency for dashboarding and reporting workloads.
+
+---
+
+# Access-Pattern Matrix
+
+Based on the schema structure and typical analytical workloads for this domain (UN/World Bank style data), the following matrix identifies the dominant access patterns.
+
+| Query Class | Primary Entities Accessed | Join Hotspots | Aggregation Hotspots | Latency Impact |
+| :--- | :--- | :--- | :--- :--- |
+| **Country Profile** | `country`, `economy`, `demography`, `health` | `country` $\to$ `economy`, `demography`, `health` | Sum(GDP), Avg(Life Exp), Total(Hospital Beds) | **High**: Requires joining 4 dimension/measure tables per country. |
+| **Time-Series Trend** | `economy`, `employment`, `education` | `year` (implicit join across tables) | Year-over-Year Growth, Trend Lines | **Medium**: Requires sorting and grouping by `year` across multiple tables. |
+| **Regional Analysis** | `country`, `region`, `demography` | `country` $\to$ `region` | Pop Density by Region, Rural/Urban Split | **Medium**: Requires filtering `country` by `region_code`. |
+| **Detailed Breakdown** | `survey`, `decile`, `demography` | `survey` $\to$ `decile`, `demography` | Avg(SPL), Headcount by Decile | **High**: Small table sizes but many rows per survey; joins explode cardinality. |
+
+**Key Observations:**
+1.  **`country` is the central hub:** Almost every query filters by `country_code`.
+2.  **`year` is the temporal anchor:** Trends require grouping by `year` across `demography`, `employment`, `education`, and `economy`.
+3.  **Join Explosion:** A query for "GDP and Life Expectancy per country" currently requires an explicit `JOIN` between `economy` and `life_expectancy` via `demography`. This is inefficient for ad-hoc reporting.
+
+---
+
+# Proposed Denormalized Schema (DDL)
+
+The following DDL creates three new physical artifacts.
+1.  **`fact_country_year_snapshot`**: The core denormalized table. Contains pre-joined and pre-aggregated measures for every Country-Year combination.
+2.  **`dim_country_wide`**: A wide read table for country metadata (Region, Name, Acronyms) to avoid joining `country` and `region` repeatedly.
+3.  **`agg_survey_summary`**: A pre-aggregated table for the complex `survey`/`decile` hierarchy.
+
+### Assumptions & Constraints
+*   **Engine:** PostgreSQL (inferred from DDL syntax).
+*   **Constraints:** No triggers allowed. Batch refresh via external script or scheduled job.
+*   **Staleness:** Max 2 hours.
+*   **Partitioning:** Enabled on `fact_country_year_snapshot` for `year` to optimize pruning.
+
+```sql
+-- ==========================================
+-- 1. WIDE READ DIMENSION TABLE
+-- Purpose: Eliminate joins between country and region/dimensions
+-- Refresh: Daily full load or incremental based on country_code changes
+-- ==========================================
+CREATE TABLE IF NOT EXISTS public.dim_country_wide (
+    country_code       character varying(10) NOT NULL,
+    country_name       character varying(100) NOT NULL,
+    region_code        character varying(10) NOT NULL,
+    region_name        character varying(100) NOT NULL,
+    survey_acronym     character varying(50),
+    comparable_spell   character varying(50),
+    PRIMARY KEY (country_code)
+);
+
+-- Index for fast lookups if filtering by region_name is needed
+CREATE INDEX idx_dim_country_region_name ON public.dim_country_wide(region_name);
+
+-- ==========================================
+-- 2. CORE FACT TABLE (Denormalized Aggregates)
+-- Purpose: Single table for Country-Year metrics (GDP, Pop, Life Exp, etc.)
+-- Refresh: Hourly batch job (e.g., every 2 hours)
+-- Staleness: 2 hours max
+-- ==========================================
+CREATE TABLE IF NOT EXISTS public.fact_country_year_snapshot (
+    -- Primary Key: Unique Country-Year pair
+    country_code       character varying(10) NOT NULL,
+    survey_year        integer NOT NULL,
+    
+    -- Pre-joined Dimensions (No join needed for queries)
+    region_name        character varying(100),
+    
+    -- Pre-Aggregated Measures (Calculated at write time)
+    -- GDP & Economy
+    gdp_real            double precision,
+    inflation_rate      double precision,
+    tax_revenue         double precision,
+    
+    -- Demography (Total Pop derived from summing population table or direct aggregate)
+    total_population    double precision,
+    pop_density         double precision,
+    urban_pop_pct       double precision,
+    rural_pop_pct       double precision,
+    
+    -- Employment
+    labor_force_total   double precision,
+    unemp_rate          double precision,
+    
+    -- Education
+    child_out_school    double precision,
+    terti_enrol_pct     double precision,
+    
+    -- Health
+    hospital_beds       double precision,
+    physicians_per_cap  double precision,
+    
+    -- Life Expectancy (Weighted average or max depending on logic; assuming weighted avg here)
+    life_exp_male       double precision,
+    life_exp_female     double precision,
+    
+    -- Survey Specifics (If survey data is available for the year)
+    avg_spl             double precision,
+    poverty_line        double precision,
+    
+    -- Timestamp of data refresh (Critical for monitoring staleness)
+    last_refresh_ts     timestamp with time zone NOT NULL,
+    
+    -- Partition Key: Year (Essential for pruning large tables)
+    PRIMARY KEY (country_code, survey_year)
+);
+
+-- Partitioning Strategy: Create partitions for each year to allow efficient pruning
+-- Note: In production, use pg_partition or equivalent. Here shown as conceptual DDL.
+-- CREATE TABLE IF NOT EXISTS public.fact_country_year_snapshot_2023 PARTITION OF public.fact_country_year_snapshot (
+--     PARTITION BY RANGE (survey_year)
+--     FROM VALUES (2023)
+-- );
+
+-- Indexes for common read patterns
+CREATE INDEX idx_fact_country_year_country ON public.fact_country_year_snapshot(country_code);
+CREATE INDEX idx_fact_country_year_year ON public.fact_country_year_snapshot(survey_year);
+CREATE INDEX idx_fact_country_year_region ON public.fact_country_year_snapshot(region_name);
+
+-- ==========================================
+-- 3. SURVEY AGGREGATE TABLE
+-- Purpose: Denormalize the complex survey/decile relationship
+-- Refresh: Daily (Surveys are static per year)
+-- ==========================================
+CREATE TABLE IF NOT EXISTS public.agg_survey_summary (
+    id_survey           integer NOT NULL,
+    country_code        character varying(10) NOT NULL,
+    survey_year        integer NOT NULL,
+    welfare_type        character varying(50),
+    
+    -- Pre-calculated aggregates from decile table
+    avg_spl             double precision,
+    headcount           double precision,
+    poverty_gap         double precision,
+    poverty_severity    double precision,
+    gini                double precision,
+    
+    -- Pre-calculated from demography if linked
+    reporting_pop       integer,
+    
+    PRIMARY KEY (id_survey)
+);
+
+-- ==========================================
+-- 4. LINEAGE & REFRESH LOGIC (Non-DDL)
+-- ==========================================
+-- Data Lineage:
+-- fact_country_year_snapshot
+--   <- (Source of Truth) country + economy + demography + health + education + life_expectancy + population
+--   <- (Calculated) total_population (SUM of population table), life_exp (AVG/WEIGHTED), etc.
+--
+-- agg_survey_summary
+--   <- (Source of Truth) survey + decile
+--   <- (Calculated) avg_spl (AVG from decile), headcount (SUM from decile)
+```
+
+---
+
+# Consistency Architecture
+
+Since triggers are forbidden and we are denormalizing, we rely on a **Batch Refresh Architecture**.
+
+1.  **Source of Truth (SoT):** The original normalized tables (`economy`, `demography`, etc.).
+2.  **Refresh Mechanism:**
+    *   **Frequency:** Hourly (every 2 hours).
+    *   **Method:** A Python/SQL script runs as a background job.
+    *   **Logic:**
+        1.  Identify `country_code` and `survey_year` combinations where the SoT has changed (using a `last_modified` flag or CDC).
+        2.  Execute a `SELECT ... INTO` query to pull the necessary columns from SoT.
+        3.  Execute aggregation functions (`SUM`, `AVG`, `COUNT`) in the refresh script itself (or in a temporary table) to compute the denormalized values.
+        4.  `UPSERT` (INSERT ... ON CONFLICT DO UPDATE) into `fact_country_year_snapshot`.
+3.  **Staleness Handling:**
+    *   The `last_refresh_ts` column is exposed to monitoring.
+    *   Queries are allowed to read stale data; there is no mechanism to force "freshness" at read time (which would defeat the purpose of denormalization).
+    *   **Explicit Staleness Window:** 2 hours.
+
+---
+
+# Risk Analysis & Mitigation
+
+| Risk Category | Description | Impact | Mitigation Strategy |
+| :--- | :--- | :--- | :--- |
+| **Write Amplification** | Upserting millions of rows hourly can saturate WAL logs and I/O. | High latency on writes, potential blocking. | **Batch Size:** Limit refresh to 100k rows per batch. **Async Writes:** Use `COPY` command or async queues (e.g., Dead Letter Queue) for large inserts. |
+| **Data Drift** | SoT data changes (e.g., new country added) while refresh is running. | Inconsistency between SoT and Denormalized table. | **Transactional Locking:** Use a `refresh_in_progress` flag in SoT. Only refresh if no other jobs are running. **Reconciliation:** Run a nightly diff job comparing `fact_country_year_snapshot` against a calculated view on SoT. |
+| **Storage Growth** | Storing repeated data grows storage over time. | Cost increase, slower backups. | **TTL:** Archive old years (>10 years) to cold storage or drop partitions. **Compression:** Enable `pg_compression` or row-level compression. |
+| **Query Latency Regression** | If the denormalized table is not indexed correctly. | Slower than normalized joins. | **Index Strategy:** Ensure `country_code` and `survey_year` are clustered/partitioned keys. Monitor `index_scan` vs `seq_scan`. |
+| **Operational Complexity** | Managing the refresh job adds ops burden. | Risk of job failure going unnoticed. | **Alerting:** Alert on `last_refresh_ts` lag > 4 hours. Alert on refresh job failure. |
+
+---
+
+# Monitoring & Observability Plan
+
+To ensure the denormalization strategy remains safe and effective, the following metrics must be monitored:
+
+1.  **Freshness Lag:**
+    *   *Metric:* `MAX(CURRENT_TIMESTAMP - last_refresh_ts)` per table.
+    *   *Alert:* Threshold > 4 hours.
+2.  **Reconciliation Diff:**
+    *   *Metric:* Count of rows where `fact_country_year_snapshot` differs from a `CALCULATED_VIEW` on SoT.
+    *   *Alert:* Threshold > 0 (Critical).
+3.  **Query Performance:**
+    *   *Metric:* Average execution time for "Country Profile" queries.
+    *   *Alert:* Increase > 20% compared to baseline.
+4.  **Write Throughput:**
+    *   *Metric:* Rows inserted per refresh cycle.
+    *   *Alert:* Sudden drop (indicates data quality issue in SoT) or spike (indicates job stuck).
+
+---
+
+# Implementation Plan (Safe & Reversible)
+
+### Phase 1: Analysis & Baseline (Week 1)
+1.  **Baseline:** Run `EXPLAIN ANALYZE` on top 10 queries to establish current latency and join costs.
+2.  **Validation:** Create a temporary "Read-Only" copy of the SoT to test the aggregation logic without risking the live schema.
+3.  **Scripting:** Write the initial `UPsert` script. Start with a single year (e.g., 2023) to validate logic.
+
+### Phase 2: Controlled Rollout (Week 2)
+1.  **Deploy DDL:** Execute the DDL above in a staging environment or with a `CREATE EXTENSION` to allow testing.
+2.  **First Refresh:** Run the script once for 2023.
+3.  **Spot Check:** Manually verify 5 random Country-Year rows against the SoT. Confirm values match.
+4.  **Enable Monitoring:** Set up alerts for `last_refresh_ts`.
+
+### Phase 3: Full Deployment (Week 3)
+1.  **Production DDL:** Apply the final DDL to production.
+2.  **Schedule Job:** Configure the cron/job runner to run hourly.
+3.  **Cutover:** Switch the application/BI tools to query `fact_country_year_snapshot` instead of joining SoT.
+4.  **Graceful Degradation:** If a refresh fails, the system should continue to work (potentially slower) by falling back to the normalized schema (if the application supports dynamic joins) OR fail fast with a clear error message indicating "Data is stale". *Recommendation: Keep normalized schema active for critical real-time transactions; use denormalized only for analytics.*
+
+### Phase 4: Optimization (Week 4+)
+1.  **Partitioning:** If `fact_country_year_snapshot` grows, create explicit partitions for each year.
+2.  **Compression:** Apply compression policies.
+3.  **CDC Integration:** If CDC is available, replace the `SELECT ... INTO` logic with `CDC Stream -> Aggregation -> Upsert` pipeline for real-time consistency within the 2-hour window.

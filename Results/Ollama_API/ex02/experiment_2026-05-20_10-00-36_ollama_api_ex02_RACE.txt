@@ -1,0 +1,200 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-20_10-00-36
+Model: ollama_api
+Prompt: RACE
+Schema: ex02
+==================================================
+
+<STEP1_ANALYSIS>
+Looking at the normalized schema, I can identify the main entities and their relationships:
+
+Main Entities:
+1. **mutirao_de_limpeza** - Core entity representing cleanup events
+2. **coleta_de_lixo** - Waste collection data linked to cleanup events
+3. **unidade_de_conservacao** - Conservation units with rich contextual data
+4. **Supporting reference tables**: bioma, categoria_manejo, esfera_administrativa, instituicao_organizadora, regiao
+
+Key Relationships:
+- mutirao_de_limpeza → coleta_de_lixo (1:1 via id_mutirao)
+- mutirao_de_limpeza → instituicao_organizadora (many:1)
+- mutirao_de_limpeza → regiao/municipio (many:1)
+- unidade_de_conservacao → bioma, categoria_manejo, esfera_administrativa, regiao (all many:1)
+
+Performance Concerns:
+- Multiple JOINs required for comprehensive reporting
+- Lookup tables scattered across multiple small tables
+- Read-heavy analytical workload will suffer from join overhead
+</STEP1_ANALYSIS>
+
+<STEP2_FREQUENT_QUERIES>
+Based on the schema structure, likely frequent analytical queries would include:
+
+1. **Waste Collection Analysis**: Total waste collected by type, over time periods, by organizing institution
+   - Requires joining: mutirao_de_limpeza + coleta_de_lixo + instituicao_organizadora
+
+2. **Geographic Distribution Reports**: Waste collection patterns by municipality/region
+   - Requires joining: mutirao_de_limpeza + coleta_de_lixo + regiao
+
+3. **Conservation Unit Analytics**: Analysis of conservation units by various dimensions
+   - Requires joining: unidade_de_conservacao + all its reference tables (bioma, categoria_manejo, etc.)
+
+4. **Temporal Trend Analysis**: Waste collection trends over time by different categories
+   - Requires joining: mutirao_de_limpeza + coleta_de_lixo + various dimension tables
+
+JOIN Bottlenecks:
+- The mutirao_de_limpeza table requires up to 3 JOINs to get complete context
+- The unidade_de_conservacao table requires up to 4 JOINs for full information
+- Small lookup tables create fragmentation without significant benefit in analytical context
+</STEP2_FREQUENT_QUERIES>
+
+<STEP3_DENORMALIZATION_TECHNIQUES_EVALUATION>
+Applying the common denormalization techniques to this schema:
+
+1. **Adding Redundant Attributes**: HIGHLY SUITED
+   - mutirao_de_limpeza and coleta_de_lixo should be merged (they share the same PK)
+   - Reference table data (institution names, municipality names, etc.) should be embedded
+   - This eliminates multiple JOINs for the most frequent queries
+
+2. **Adding Derived Attributes**: MODERATELY SUITED
+   - Could add computed totals for waste types in coleta_de_lixo
+   - Time-based aggregations could be precomputed in separate summary tables
+   - Less critical than redundant attributes for immediate performance gain
+
+3. **Collapsing Relations**: HIGHLY SUITED
+   - The tight coupling between mutirao_de_limpeza and coleta_de_lixo (1:1 relationship) makes them ideal candidates
+   - Reference tables like instituicao_organizadora, regiao, bioma should be collapsed into main fact tables
+   - Eliminates numerous small table lookups
+
+4. **Vertical Partitioning**: LESS SUITED
+   - Tables are not particularly wide
+   - Most attributes seem relevant to analytical queries
+   - Could potentially separate detailed conservation unit metrics from basic identification, but marginal benefit
+</STEP3_DENORMALIZATION_TECHNIQUES_EVALUATION>
+
+<STEP4_POSSIBLE_SCHEMAS>
+Option 1: Single Consolidated Fact Table + Reference Table
+- Merge mutirao_de_limpeza and coleta_de_lixo into one table
+- Add redundant attributes from instituicao_organizadora and regiao
+- Keep unidade_de_conservacao separate with embedded reference data
+
+Option 2: Two Main Tables Approach
+- Enhanced mutirao_de_limpeza/coleta_de_lixo consolidated table with all contextual data
+- Enhanced unidade_de_conservacao table with embedded reference data
+- Eliminate all small lookup tables
+
+Option 3: Comprehensive Single Table
+- One massive table combining cleanup events and conservation units
+- All reference data embedded
+- Maximum denormalization but potential for sparse data
+</STEP4_POSSIBLE_SCHEMAS>
+
+<STEP5_SCHEMA_EVALUATION>
+Evaluating the options:
+
+Option 1: 
+PROS: Clean separation of concerns, manageable table sizes
+CONS: Still requires some JOINs, doesn't fully address the analytical workload
+
+Option 2:
+PROS: Addresses both major analytical domains (cleanup events and conservation units), eliminates most JOINs, balanced approach
+CONS: Slight redundancy between the two main tables
+
+Option 3:
+PROS: Maximum performance for reads
+CONS: Potential data sparsity issues, overly complex, violates principle of keeping related data together
+
+CHOICE: Option 2 is the most consistent approach as it:
+- Maintains logical separation between different analytical domains
+- Eliminates the majority of JOIN overhead
+- Provides comprehensive denormalized views for analytical queries
+- Balances performance gains with data organization principles
+</STEP5_SCHEMA_EVALUATION>
+
+<STEP6_FINAL_SCHEMA>
+```sql
+-- Denormalized schema for analytical workloads
+
+-- Main table for cleanup events with embedded contextual data
+CREATE TABLE IF NOT EXISTS public.fato_mutirao_limpeza
+(
+    -- Core mutirao_de_limpeza fields
+    id_mutirao integer NOT NULL,
+    data_do_ocorrido date NOT NULL,
+    horario_de_inicio time without time zone NOT NULL,
+    numero_aproximado_de_participantes integer,
+    duracao_total time without time zone NOT NULL,
+    
+    -- Embedded coleta_de_lixo fields (waste collection data)
+    plastico integer,
+    borracha integer,
+    madeira integer,
+    produtos_texteis integer,
+    papel integer,
+    metal integer,
+    vidro integer,
+    materiais_de_pesca integer,
+    outros_residuos integer,
+    
+    -- Embedded instituicao_organizadora data (redundant attributes)
+    nome_instituicao_organizadora text,
+    carater_instituicao text,
+    
+    -- Embedded regiao/municipio data (redundant attributes)
+    nome_municipio text,
+    estado_municipio text,
+    
+    -- Embedded local_de_coleta data
+    nome_local_coleta text,
+    
+    -- Calculated derived attributes for analytics
+    total_residuos_coletados integer GENERATED ALWAYS AS (
+        COALESCE(plastico, 0) + 
+        COALESCE(borracha, 0) + 
+        COALESCE(madeira, 0) + 
+        COALESCE(produtos_texteis, 0) + 
+        COALESCE(papel, 0) + 
+        COALESCE(metal, 0) + 
+        COALESCE(vidro, 0) + 
+        COALESCE(materiais_de_pesca, 0) + 
+        COALESCE(outros_residuos, 0)
+    ) STORED,
+    
+    CONSTRAINT fato_mutirao_limpeza_pkey PRIMARY KEY (id_mutirao)
+);
+
+-- Denormalized table for conservation units with embedded reference data
+CREATE TABLE IF NOT EXISTS public.dimensao_unidade_conservacao
+(
+    id_uc integer NOT NULL,
+    nome text NOT NULL,
+    ano_de_criacao integer,
+    area_soma_biomas double precision,
+    area_soma_biomas_continentais double precision,
+    area_marinha double precision,
+    
+    -- Embedded bioma data (redundant attributes)
+    nome_bioma text,
+    
+    -- Embedded regiao/municipio data (redundant attributes)
+    nome_municipio_uc text,
+    estado_municipio_uc text,
+    
+    -- Embedded categoria_manejo data (redundant attributes)
+    categoria_manejo text,
+    categoria_iucn text,
+    plano_manejo text,
+    
+    -- Embedded esfera_administrativa data (redundant attributes)
+    tipo_esfera text,
+    
+    CONSTRAINT dimensao_unidade_conservacao_pkey PRIMARY KEY (id_uc)
+);
+
+-- Indexes for analytical performance
+CREATE INDEX IF NOT EXISTS idx_fato_mutirao_data ON public.fato_mutirao_limpeza(data_do_ocorrido);
+CREATE INDEX IF NOT EXISTS idx_fato_mutirao_instituicao ON public.fato_mutirao_limpeza(nome_instituicao_organizadora);
+CREATE INDEX IF NOT EXISTS idx_fato_mutirao_estado ON public.fato_mutirao_limpeza(estado_municipio);
+CREATE INDEX IF NOT EXISTS idx_dimensao_uc_estado ON public.dimensao_unidade_conservacao(estado_municipio_uc);
+CREATE INDEX IF NOT EXISTS idx_dimensao_uc_categoria ON public.dimensao_unidade_conservacao(categoria_manejo);
+```
+</STEP6_FINAL_SCHEMA>

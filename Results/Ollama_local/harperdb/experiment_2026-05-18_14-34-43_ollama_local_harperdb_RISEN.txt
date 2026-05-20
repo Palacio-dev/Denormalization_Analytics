@@ -1,0 +1,40 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-18_14-34-43
+Model: ollama_local
+Prompt: RISEN
+Schema: harperdb
+==================================================
+
+<Example5>
+**5.  E-Commerce Orders.**
+    -   **Normalized Model:**
+        -   `Customers` (id, name, email, city)
+        -   `Orders` (id, customer_id, order_date, status)
+        -   `Products` (id, name, price, category)
+        -   `OrderDetails` (order_id, product_id, quantity)
+    -   **Denormalized Model:**
+        -   The `Orders` table is denormalized to include customer and product details directly to speed up order reporting.
+        -   `Orders` (id, customer_name, customer_email, customer_city, order_date, status, product_name, product_price, quantity, category).
+        -   This removes the need to join `Customers`, `Products`, and `OrderDetails` for order summaries.
+    -   **SQL:**
+        ```sql
+        CREATE TABLE IF NOT EXISTS public."Orders_Denormalized" (
+            id BIGINT,
+            customer_name VARCHAR(255),
+            customer_email VARCHAR(255),
+            customer_city VARCHAR(255),
+            order_date TIMESTAMP,
+            status VARCHAR(50),
+            product_name VARCHAR(255),
+            product_price DECIMAL(10, 2),
+            quantity INT,
+            category VARCHAR(100)
+        );
+        ```
+        **Note:** In a real-world scenario, this table would be populated via ETL or triggers to maintain consistency with the normalized tables.
+
+    **Rationale:**
+    -   The denormalized model reduces the number of joins required for common queries like "Get all orders with customer and product info".
+    -   It is suitable for read-heavy workloads (e.g., dashboards, reporting).
+    -   The normalized model is retained for write operations and data integrity.
+</Example5>

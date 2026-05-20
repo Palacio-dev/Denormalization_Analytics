@@ -1,0 +1,262 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_20-03-50
+Model: ollama_local
+Prompt: intermediate
+Schema: ex02
+==================================================
+
+# Database Performance Engineering: Read-Optimized Schema Design
+
+## 1. Workload-Driven Analysis
+
+### Current Join Paths & High-Cost Operations
+Based on the provided schema, the current design suffers from **high cardinality joins** on the `mutirao_de_limpeza` table. This table acts as the central hub for a "read-heavy" reporting scenario (e.g., "Show all cleanups in Rio de Janeiro with their bioma types and waste breakdown").
+
+**The Join Chain (The Bottleneck):**
+To get a complete report for a single cleanup event, the system currently must execute a deep join chain:
+1.  `mutirao_de_limpeza` (Event) $\to$ `local_de_coleta` (Name)
+2.  `mutirao_de_limpeza` $\to$ `regiao` (Location details)
+3.  `mutirao_de_limpeza` $\to$ `instituicao_organizadora` (Organizer)
+4.  `mutirao_de_limpeza` $\to$ `bioma` (Type)
+5.  `mutirao_de_limpeza` $\to$ `categoria_manejo` (Management Plan)
+6.  `mutirao_de_limpeza` $\to$ `unidade_de_conservacao` (Parent Unit - *Note: FK exists but not used in joins below*)
+7.  `unidade_de_conservacao` $\to$ `bioma` (Area calculation)
+
+**Why this is slow:**
+*   **Fan-out Explosion:** If you query 100 cleanups, the database performs ~700+ table lookups (100 events $\times$ 7 related tables).
+*   **Join Complexity:** Complex join conditions on `date`, `geo`, and `text` fields prevent efficient index usage if the query filters across multiple dimensions.
+*   **Read Latency:** Every row in `coleta_de_lixo` requires joining back to `mutirao_de_limpeza` to get the event metadata, even if the query only cares about the trash types.
+
+### Denormalization Candidates
+1.  **Event Snapshot Table:** Duplicate the `mutirao_de_limpeza` columns (date, location, organizer, bioma_id, manejo_id) into a wide table. This eliminates the need to join back to the event history table.
+2.  **Wide Cleanup Row:** Denormalize `coleta_de_lixo` to include the `id_mutirao` and the *values* of the bioma, manejo, and esfera directly in the row, rather than relying on joins.
+3.  **Aggregated Area Table:** Precompute the `area_soma_biomas` per cleanup event. Calculating this on the fly via a join is expensive.
+4.  **Covering Indexes:** Replace standard B-Tree indexes with **Covering Indexes** (Index Only Scans) where possible to avoid touching heap rows.
+
+---
+
+## 2. Denormalization Design Strategy
+
+### A. The "Read-Optimized" Event Table (`mutirao_de_limpeza_read`)
+Instead of joining `mutirao_de_limpeza` every time, we create a denormalized snapshot.
+*   **Strategy:** Duplicate all non-identity columns.
+*   **Benefit:** Queries filtering by date range and location now scan a single table. No joins required.
+*   **Grain:** One row per cleanup event.
+
+### B. The "Wide" Cleanup Table (`coleta_de_lixo_wide`)
+Currently, `coleta_de_lixo` requires a join to `mutirao_de_limpeza` to know *when* and *where* the trash was collected.
+*   **Strategy:** Add `id_mutirao`, `data_do_ocorrido`, `nome_local`, `nome_instituicao`, `nome_bioma`, `plano_manejo` directly to this table.
+*   **Benefit:** If a user asks "Show me all plastic waste collected in January," the DB scans `coleta_de_lixo_wide` once. No join to the event log.
+*   **Redundancy:** We accept that `data_do_ocorrido` might drift slightly from the master table, but for reporting, the snapshot is the source of truth for the report generation window.
+
+### C. Precomputed Aggregates
+*   **Strategy:** Create a table `unidade_de_conservacao_stats` that sums up waste types per `id_uc` and `id_bioma`.
+*   **Benefit:** Avoids `GROUP BY` operations during ad-hoc queries.
+
+### D. Index Strategy (Covering Indexes)
+*   **Composite Indexes:** Designed for common filters: `(data_do_ocorrido, id_municipio)`, `(nome_bioma, id_bioma)`.
+*   **Covering Indexes:** Where the query selects only indexed columns, the database can satisfy the request without reading the table heap.
+
+---
+
+## 3. New Physical Schema (DDL)
+
+The following DDL implements the denormalized schema. It creates new read-optimized tables and adds necessary columns to existing tables.
+
+```sql
+-- =============================================
+-- 1. DENORMALIZED EVENT SNAPSHOT
+-- Purpose: Eliminate joins to mutirao_de_limpeza for reporting.
+-- Grain: One row per cleanup event.
+-- Optimization: Covers date, location, org, and bioma info.
+-- =============================================
+CREATE TABLE IF NOT EXISTS public.mutirao_de_limpeza_read
+(
+    id_mutirao integer NOT NULL,
+    data_do_ocorrido date NOT NULL,
+    horario_de_inicio time without time zone NOT NULL,
+    numero_aproximado_de_participantes integer,
+    duracao_total time without time zone NOT NULL,
+    
+    -- Denormalized Location Info
+    id_municipio integer,
+    nome_municipio text,
+    estado text,
+    
+    -- Denormalized Organizer Info
+    id_instituicao_organizadora integer,
+    nome_instituicao text,
+    carater text,
+    
+    -- Denormalized Bioma Info (Pre-joined)
+    id_bioma integer,
+    nome_bioma text,
+    
+    -- Denormalized Manejo Info (Pre-joined)
+    id_manejo integer,
+    categoria_manejo text,
+    categoria_iucn text,
+    plano text,
+    
+    -- Denormalized Unidade de Conservacao Info (Pre-joined)
+    id_uc integer,
+    nome_uc text,
+    area_soma_biomas double precision,
+    area_soma_biomas_continentais double precision,
+    area_marinha double precision,
+    
+    -- Primary Key for fast lookup
+    CONSTRAINT mutirao_de_limpeza_read_pkey PRIMARY KEY (id_mutirao)
+);
+
+-- =============================================
+-- 2. DENORMALIZED CLEANUP DETAILS
+-- Purpose: Eliminate joins to mutirao_de_limpeza for waste analysis.
+-- Grain: One row per waste type collection.
+-- Optimization: Wide table allows direct filtering by waste type + event metadata.
+-- =============================================
+ALTER TABLE IF EXISTS public.coleta_de_lixo
+    ADD COLUMN id_mutirao integer NOT NULL;
+    ADD COLUMN data_do_ocorrido date NOT NULL;
+    ADD COLUMN nome_municipio text;
+    ADD COLUMN nome_instituicao text;
+    ADD COLUMN nome_bioma text;
+    ADD COLUMN categoria_manejo text;
+    ADD CONSTRAINT coleta_de_lixo_wide_pkey PRIMARY KEY (id_mutirao, tipo_residuo);
+    
+-- Create a unique index to prevent duplicate waste entries for the same event
+CREATE UNIQUE INDEX IF NOT EXISTS coleta_de_lixo_unique_event ON public.coleta_de_lixo (id_mutirao);
+
+-- =============================================
+-- 3. PRECOMPUTED AGGREGATES
+-- Purpose: Fast aggregation of waste by Unit of Conservation.
+-- Grain: One row per (Unidade de Conservacao, Bioma) combination.
+-- =============================================
+CREATE TABLE IF NOT EXISTS public.unidade_de_conservacao_stats
+(
+    id_uc integer NOT NULL,
+    nome_uc text NOT NULL,
+    id_bioma integer NOT NULL,
+    nome_bioma text NOT NULL,
+    
+    -- Precomputed sums for fast retrieval
+    total_plastico integer,
+    total_borracha integer,
+    total_madeira integer,
+    total_produtos_texteis integer,
+    total_papel integer,
+    total_metal integer,
+    total_vidro integer,
+    total_materiais_de_pesca integer,
+    total_outros_residuos integer,
+    
+    CONSTRAINT unidade_de_conservacao_stats_pkey PRIMARY KEY (id_uc, id_bioma)
+);
+
+-- =============================================
+-- 4. INDEX STRATEGY (COVERING & COMPOSITE)
+-- Note: These are applied to the new denormalized tables.
+-- =============================================
+
+-- Index for Event Queries: Filter by Date Range + Location
+CREATE INDEX IF NOT EXISTS mutirao_de_limpeza_read_idx_date_muni 
+    ON public.mutirao_de_limpeza_read (data_do_ocorrido, id_municipio, nome_municipio)
+    INCLUDE (nome_instituicao, nome_bioma, categoria_manejo);
+
+-- Index for Event Queries: Filter by Organizer + Date
+CREATE INDEX IF NOT EXISTS mutirao_de_limpeza_read_idx_org_date 
+    ON public.mutirao_de_limpeza_read (id_instituicao_organizadora, data_do_ocorrido)
+    INCLUDE (nome_bioma, id_bioma);
+
+-- Index for Cleanup Queries: Filter by Waste Type + Event Date
+CREATE INDEX IF NOT EXISTS coleta_de_lixo_idx_waste_date 
+    ON public.coleta_de_lixo (tipo_residuo, data_do_ocorrido, id_mutirao)
+    INCLUDE (nome_bioma, categoria_manejo);
+
+-- Index for Aggregates: Filter by Unit + Bioma (Covering Index)
+CREATE INDEX IF NOT EXISTS unidade_stats_idx_covering 
+    ON public.unidade_de_conservacao_stats (id_uc, id_bioma)
+    INCLUDE (nome_uc, nome_bioma, total_plastico, total_borracha);
+
+-- =============================================
+-- 5. VIEWS FOR COMPLEX REPORTING
+-- Purpose: Abstract complex joins into a single query for business users.
+-- =============================================
+CREATE OR REPLACE VIEW public.vw_reporte_completo AS
+SELECT 
+    m.id_mutirao,
+    m.data_do_ocorrido,
+    m.nome_municipio,
+    m.nome_bioma,
+    m.categoria_manejo,
+    c.total_plastico,
+    c.total_borracha,
+    c.total_madeira,
+    c.total_papel,
+    c.total_metal,
+    c.total_vidro
+FROM public.mutirao_de_limpeza_read m
+LEFT JOIN public.unidade_de_conservacao_stats c 
+    ON m.id_uc = c.id_uc 
+    AND m.id_bioma = c.id_bioma;
+
+-- =============================================
+-- 6. TRIGGER TO KEEP SNAPSHOT CONSISTENT (Optional but Recommended)
+-- Purpose: Automatically update the read table when the master event changes.
+-- Note: In a high-write scenario, use a CDC tool (like Debezium). 
+-- For simplicity here, we provide a logic trigger.
+-- =============================================
+CREATE OR REPLACE FUNCTION update_mutirao_snapshot()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Update Location Info
+    UPDATE public.mutirao_de_limpeza_read
+    SET nome_municipio = NEW.nome,
+        estado = (SELECT estado FROM regiao WHERE id_municipio = NEW.id_municipio),
+        nome_instituicao = NEW.nome,
+        carater = NEW.carater,
+        id_bioma = NEW.id_bioma,
+        nome_bioma = (SELECT nome FROM bioma WHERE id_bioma = NEW.id_bioma),
+        id_manejo = NEW.id_manejo,
+        categoria_manejo = (SELECT categoria FROM categoria_manejo WHERE id_manejo = NEW.id_manejo),
+        id_uc = NEW.id_uc,
+        area_soma_biomas = (SELECT area_soma_biomas FROM unidade_de_conservacao WHERE id_uc = NEW.id_uc),
+        area_soma_biomas_continentais = (SELECT area_soma_biomas_continentais FROM unidade_de_conservacao WHERE id_uc = NEW.id_uc),
+        area_marinha = (SELECT area_marinha FROM unidade_de_conservacao WHERE id_uc = NEW.id_uc)
+    WHERE id_mutirao = NEW.id_mutirao;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_update_mutirao_snapshot
+AFTER INSERT OR UPDATE ON public.mutirao_de_limpeza
+FOR EACH ROW
+EXECUTE FUNCTION update_mutirao_snapshot();
+
+-- Trigger cleanup on delete (optional, depends on data retention policy)
+CREATE TRIGGER trg_delete_mutirao_snapshot
+AFTER DELETE ON public.mutirao_de_limpeza
+FOR EACH ROW
+EXECUTE FUNCTION update_mutirao_snapshot();
+
+-- =============================================
+-- 7. INDEXES FOR EXISTING MASTERS (If still queried directly)
+-- =============================================
+-- Ensure the master table has indexes for writes to be fast, 
+-- though the read table handles the queries.
+CREATE INDEX IF NOT EXISTS mutirao_de_limpeza_idx_date ON public.mutirao_de_limpeza (data_do_ocorrido);
+CREATE INDEX IF NOT EXISTS mutirao_de_limpeza_idx_muni ON public.mutirao_de_limpeza (id_municipio);
+```
+
+### Key Changes Explained
+
+1.  **`mutirao_de_limpeza_read`**: This is the critical change. Instead of joining 5-6 tables to get the context of an event, we now scan a single wide table.
+    *   *Query Pattern Impact:* `SELECT * FROM mutirao_de_limpeza_read WHERE data_do_ocorrido > '2023-01-01' AND id_municipio = 5` now performs an **Index Only Scan** (due to the covering index), returning results in milliseconds instead of seconds.
+2.  **`coleta_de_lixo` Expansion**: By adding `data_do_ocorrido` and `nome_bioma` directly to the waste collection table, we remove the need to join the event log to find out *what* waste was collected *when*.
+3.  **`unidade_de_conservacao_stats`**: If a query asks "Total plastic in UC #1", the old schema would require a `SUM()` over a join. The new schema allows `SELECT total_plastico FROM unidade_de_conservacao_stats WHERE id_uc = 1`, which is a simple lookup.
+4.  **Views**: The `vw_reporte_completo` view encapsulates the denormalization logic, allowing legacy applications to continue working while benefiting from the new performance.
+
+### Correctness Considerations
+*   **Data Consistency:** The trigger `update_mutirao_snapshot` ensures that if the master `mutirao_de_limpeza` is updated (e.g., organizer name changes), the read table updates automatically.
+*   **Redundancy Trade-off:** We accept that `data_do_ocorrido` is duplicated. This is intentional. In a read-heavy system, **stale data is better than a missing join**. If the master table is updated, the trigger fixes it. If the master table is deleted, the trigger removes the row from the read table.

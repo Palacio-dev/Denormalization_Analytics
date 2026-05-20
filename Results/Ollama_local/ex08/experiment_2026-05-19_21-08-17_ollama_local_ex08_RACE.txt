@@ -1,0 +1,279 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_21-08-17
+Model: ollama_local
+Prompt: RACE
+Schema: ex08
+==================================================
+
+# RACE FRAMEWORK: Database Denormalization Analysis
+
+## <Role>
+Senior Data Engineer with 15 years of experience specializing in relational and non-relational databases, SQL, and analytical database performance.
+
+## <Action>
+### 1. Deep Analysis of the Provided SQL Creation Script
+
+The provided schema represents an **Educação Básica e Ensino Médio (IFB - Instituto Federal de Educação, Ciência e Tecnologia)** ecosystem. It follows a classic **3NF (Third Normal Form)** structure designed for transactional integrity and data normalization.
+
+**Key Tables & Relationships:**
+1.  **`aluno_ifb`**: Student demographics (ID, birth date, race, disability, etc.).
+2.  **`curso_ifb`**: Course definitions (ID, name, type, level, technological axis).
+3.  **`escola`**: School metadata (ID, name, dependency type, location ID).
+4.  **`localizacao`**: Geographic data (UF, Municipality).
+5.  **`matricula_ifb`**: The central transactional table linking Students (`aluno_ifb`) to Courses (`curso_ifb`) and Schools (`escola`).
+6.  **`indicadores_escolares`**: School performance metrics (Retention, Approval, Abandonment rates) by year and school.
+7.  **`participacao_enem`**: ENEM participation stats (Total, NEC-ESP, Tax rate).
+8.  **`desempenho_enem`**: Detailed ENEM scores (CN, CH, LP, MT, RED) linked to schools.
+9.  **`vinculo_empregaticio`**: Employment records linking Students to Salary data and Locations.
+10. **`remuneracao`**: Salary data (Annual mean, December pay, hours).
+
+**Current Bottlenecks:**
+*   **Join Heavyload**: Analytical queries (e.g., "Show ENEM performance by course type for students with disabilities") require joining `desempenho_enem` -> `escola` -> `localizacao`, `matricula_ifb` -> `aluno_ifb`, etc.
+*   **Redundant Scans**: To get a full student profile including their course, school location, and employment status, the system must traverse 4-5 tables.
+*   **Small Cardinality Joins**: Joining `aluno_ifb` (likely 1:1 or 1:many with matricula) with `curso_ifb` and `escola` on every query is expensive if the result set is large.
+
+---
+
+### 2. Analyze 'Frequent Queries / Workload Context'
+
+*Inferred Heavy Read Queries:*
+1.  **Student Profile Report**: "Get all students enrolled in 'Computing' courses at 'Federal' schools in 'São Paulo', including their age, disability status, and current salary."
+    *   *Requires*: `matricula_ifb` (join) + `aluno_ifb` (join) + `curso_ifb` (join) + `escola` (join) + `localizacao` (join) + `vinculo_empregaticio` (join) + `remuneracao` (join).
+2.  **School Performance Dashboard**: "Show approval rates, average ENEM scores, and student demographics (race, gender) grouped by municipality."
+    *   *Requires*: `indicadores_escolares` + `desempenho_enem` + `matricula_ifb` + `aluno_ifb` + `localizacao`.
+3.  **Curriculum Analysis**: "List all courses in the 'Health' axis, the schools offering them, and the average retention rate for those schools."
+    *   *Requires*: `curso_ifb` + `matricula_ifb` + `escola` + `indicadores_escolares`.
+
+**Bottlenecks Identified:**
+*   **Join Explosion**: Queries often involve 5+ joins.
+*   **Data Skew**: `aluno_ifb` and `curso_ifb` are small lookup tables, but `matricula_ifb` is the wide table. Accessing columns from small tables via joins on `matricula_ifb` is costly.
+*   **Redundant Aggregations**: Calculating averages across `desempenho_enem` and `indicadores_escolares` for the same school/year is repeated in every report.
+
+---
+
+### 3. Evaluate [COMMON DENORMALIZATION TECHNIQUES]
+
+| Technique | Suitability for IFB Schema | Rationale |
+| :--- | :--- | :--- |
+| **1. Adding Redundant Attributes** | **High** | Critical for Student and School profiles. Avoids joining `aluno_ifb` + `curso_ifb` + `escola` + `localizacao` repeatedly. |
+| **2. Adding Derived Attributes** | **Medium** | Useful for pre-calculated school averages (e.g., `media_enem_global`), but less critical than structural denormalization for the student/course link. |
+| **3. Collapsing Relations** | **High** | Merge `matricula_ifb` with student/course/school data into a single "Student_Course_School_Fact" table. Merge `vinculo_empregaticio` into the same entity. |
+| **4. Vertical Partitioning** | **Medium** | Could split `aluno_ifb` (demographics) and `curso_ifb` (academic), but given the small size of these tables, **Horizontal Partitioning (Denormalization)** is more effective here. |
+
+---
+
+### 4. Design Multiple Possible Denormalized Schemas
+
+#### **Option A: The "Student Fact Table" Approach (Single Table Denormalization)**
+*Concept*: Create one massive table containing all attributes relevant to a student's academic and professional life.
+*Technique*: **Collapsing Relations + Adding Redundant Attributes**.
+*Pros*: Extremely fast reads for student-centric queries.
+*Cons*: Data duplication risk (e.g., if a student changes schools mid-course, the table becomes inconsistent unless updated via triggers or strict application logic).
+
+#### **Option B: The "School Fact Table" Approach**
+*Concept*: Focus on the school as the anchor. Denormalize `matricula`, `aluno`, `curso`, `desempenho`, and `indicadores` into a single school-wide view.
+*Technique*: **Collapsing Relations**.
+*Pros*: Great for "School Performance" dashboards.
+*Cons*: Student-level details are lost or require massive joins if queried individually.
+
+#### **Option C: The "Dimensionless" Approach (Star Schema Flat)**
+*Concept*: Create a flat table for Facts (Matricula + Demographics + Performance) and separate small lookup tables for Dimensions (Course Types, School Types) that are joined only when necessary.
+*Technique*: **Vertical Partitioning (Reverse)** + **Redundant Attributes**.
+*Pros*: Keeps data organized by domain.
+*Cons*: Still requires joins for cross-domain queries.
+
+---
+
+### 5. Evaluate Each One of the New Schemas
+
+*   **Option A (Student Fact)**: Best for OLAP tools (ClickHouse, Redshift) or complex ad-hoc queries. However, maintaining referential integrity between `aluno_ifb` and `matricula_ifb` becomes a nightmare if not handled by the application layer.
+*   **Option B (School Fact)**: Ideal for the specific context of "School Performance". It aggregates the noisy student data into clean school metrics.
+*   **Option C (Hybrid)**: The most robust solution for a mixed workload. It keeps the "Hard Data" (Student/Course) denormalized for speed, but keeps "Reference Data" (Course Types, School Types) separate to avoid a 200-column table.
+
+**Winner**: **Option C (Hybrid)**. It balances performance with maintainability. We will create a `fato_matricula_aluno` table that flattens the student/course/school/employment relationship, and a `fato_desempenho_escola` table that flattens the school performance metrics.
+
+---
+
+### 6. Design the New Denormalized Schema
+
+Based on the analysis, I propose a **Hybrid Denormalized Schema** focusing on two main fact tables:
+1.  **`fato_matricula_completa`**: Flattens the relationship between Student, Course, School, and Employment.
+2.  **`fato_desempenho_escola`**: Flattens School performance metrics (ENEM + Indicators) directly against the School ID, removing the need to join `matricula` for school-level stats.
+
+This approach uses **Collapsing Relations** to merge the `matricula` fact with dimensions, and **Adding Redundant Attributes** to store course types and school names directly.
+
+```sql
+-- ==========================================
+-- DENORMALIZED SCHEMA: ANALYTICAL PERFORMANCE
+-- ==========================================
+
+-- 1. FATO_MATRICULA_COMPLETA
+-- Technique: Collapsing Relations + Adding Redundant Attributes
+-- Purpose: Single table for all student/course/school/employment data.
+-- Note: Application logic must handle updates to ensure consistency.
+CREATE TABLE IF NOT EXISTS public.fato_matricula_completa (
+    id_matricula serial NOT NULL,
+    
+    -- Student Attributes (Redundant)
+    id_aluno integer NOT NULL,
+    data_nascimento date,
+    idade integer,
+    sexo character(1),
+    nacionalidade character varying(50),
+    raca character varying(50),
+    portador_deficiencia boolean,
+    
+    -- Course Attributes (Redundant)
+    co_curso character varying(50) NOT NULL,
+    no_curso character varying(200) NOT NULL,
+    co_tipo_curso character varying(10),
+    tipo_curso character varying(100),
+    co_tipo_nivel character varying(10),
+    ds_tipo_nivel character varying(100),
+    ds_eixo_tecnologico character varying(200),
+    modalidade_ensino character varying(100),
+    carga_horaria integer,
+    
+    -- School & Location Attributes (Redundant)
+    co_escola_educacenso character varying(20) NOT NULL,
+    no_escola_educacenso character varying(200) NOT NULL,
+    tp_dependencia_adm_escola smallint,
+    tp_localizacao_escola smallint,
+    uf character varying(2),
+    municipio character varying(100),
+    
+    -- Matricula Specifics
+    co_ciclo_matricula character varying(50),
+    periodo character varying(30),
+    situacao_matricula character varying(50),
+    tipo_cota character varying(50),
+    atestado_baixarenda character varying(20),
+    ano character varying(20),
+    
+    -- Employment Attributes (Redundant - Merging vinculo_empregaticio)
+    razao_social character varying(200),
+    tipo_vinculo_empregaticio character varying(200),
+    data_admissao_declarada date,
+    tempo_emprego integer,
+    motivo_desligamento character varying(200),
+    mes_desligamento character varying(20),
+    indicador_vinculo_ativo boolean,
+    
+    -- Employment & Salary Attributes (Redundant - Merging remuneracao)
+    vl_remun_media_nom numeric(10, 2),
+    vl_remun_media_sm numeric(10, 2),
+    vl_remun_dezembro_nom numeric(10, 2),
+    vl_remun_dezembro_sm numeric(10, 2),
+    qtd_hora_contr integer,
+    vl_ultima_remuneracao_ano numeric(10, 2),
+    vl_salario_contratual numeric(10, 2),
+    
+    CONSTRAINT fato_matricula_completa_pkey PRIMARY KEY (id_matricula)
+);
+
+-- Indexes for common analytical filters
+CREATE INDEX IF NOT EXISTS idx_fato_matricula_completa_escola ON public.fato_matricula_completa(co_escola_educacenso);
+CREATE INDEX IF NOT EXISTS idx_fato_matricula_completa_curso ON public.fato_matricula_completa(co_curso);
+CREATE INDEX IF NOT EXISTS idx_fato_matricula_completa_aluno ON public.fato_matricula_completa(id_aluno);
+
+
+-- 2. FATO_DESEMPENHO_ESCOLA
+-- Technique: Collapsing Relations + Adding Derived Attributes
+-- Purpose: Flatten school performance metrics. 
+-- Note: This table aggregates student data into school stats, avoiding joins to 'matricula' for this specific view.
+CREATE TABLE IF NOT EXISTS public.fato_desempenho_escola (
+    id_escola_educacenso character varying(20) NOT NULL,
+    no_escola_educacenso character varying(200) NOT NULL,
+    
+    -- School Context (Redundant)
+    tp_dependencia_adm_escola smallint,
+    tp_localizacao_escola smallint,
+    uf character varying(2),
+    municipio character varying(100),
+    
+    -- Indicadores Escolares (Redundant Aggregates)
+    nu_ano integer NOT NULL,
+    nu_taxa_permanencia numeric(6, 2),
+    nu_taxa_aprovacao numeric(5, 2),
+    nu_taxa_reprovacao numeric(5, 2),
+    nu_taxa_abandono numeric(5, 2),
+    porte_escola character varying(50),
+    pc_formacao_docente numeric(5, 2),
+    
+    -- Desempenho ENEM (Redundant Aggregates)
+    nu_media_cn numeric(6, 2),
+    nu_media_ch numeric(6, 2),
+    nu_media_lp numeric(6, 2),
+    nu_media_mt numeric(6, 2),
+    nu_media_red numeric(6, 2),
+    
+    -- Participacao ENEM (Redundant Aggregates)
+    nu_matriculas integer,
+    nu_participantes_nec_esp integer,
+    nu_participantes integer,
+    nu_taxa_participacao numeric(5, 2),
+    
+    CONSTRAINT fato_desempenho_escola_pkey PRIMARY KEY (id_escola_educacenso, nu_ano)
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_fato_desempenho_escola_escola ON public.fato_desempenho_escola(id_escola_educacenso);
+CREATE INDEX IF NOT EXISTS idx_fato_desempenho_escola_ano ON public.fato_desempenho_escola(nu_ano);
+
+
+-- 3. FATO_VINCULO_ESCOLA (Optional Optimization)
+-- Technique: Collapsing Relations
+-- Purpose: If we need to analyze employment rates per school, we can create a third fact table.
+-- This avoids joining 'vinculo_empregaticio' to 'fato_matricula_completa'.
+CREATE TABLE IF NOT EXISTS public.fato_vinculo_escola (
+    id_escola_educacenso character varying(20) NOT NULL,
+    nu_ano integer NOT NULL,
+    
+    -- Employment Metrics (Redundant Aggregates)
+    qtd_alunos_vinculados integer,
+    taxa_vinculo boolean,
+    
+    -- Sample or Average Salary per School (Derived Attribute)
+    vl_remun_media_escola numeric(10, 2),
+    
+    CONSTRAINT fato_vinculo_escola_pkey PRIMARY KEY (id_escola_educacenso, nu_ano)
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_fato_vinculo_escola_escola ON public.fato_vinculo_escola(id_escola_educacenso);
+
+
+-- ==========================================
+-- DATA MIGRATION SCRIPT (Simplified)
+-- ==========================================
+-- NOTE: In a production environment, this would be a complex ETL process.
+-- Here is the logic to populate the denormalized tables.
+
+-- Populate fato_matricula_completa
+-- 1. Select from matricula_ifb
+-- 2. LEFT JOIN aluno_ifb on id_aluno
+-- 3. LEFT JOIN curso_ifb on co_curso
+-- 4. LEFT JOIN escola on co_escola_educacenso
+-- 5. LEFT JOIN localizacao on id_loc
+-- 6. LEFT JOIN vinculo_empregaticio on id_matricula = id_vinculo (Assuming 1:1 or many-to-many handled)
+-- 7. LEFT JOIN remuneracao on id_vinculo = id_remuneracao
+-- 8. Select * into fato_matricula_completa
+
+-- Populate fato_desempenho_escola
+-- 1. Select distinct co_escola_educacenso, nu_ano from desempenho_enem
+-- 2. LEFT JOIN escola on co_escola_educacenso
+-- 3. Calculate Aggregates:
+--    - Count total students per school/year from matricula_ifb
+--    - Sum approved students from indicadores_escolares (if separate) or derive from matricula
+--    - Calculate avg scores from desempenho_enem
+-- 4. Insert into fato_desempenho_escola
+
+-- Populate fato_vinculo_escola
+-- 1. Select distinct co_escola_educacenso, nu_ano from vinculo_empregaticio
+-- 2. Aggregate counts and averages per school/year.
+```
+
+### Summary of Changes
+1.  **Removed Joins**: Queries for student profiles no longer need to join 5+ tables. They can now `SELECT * FROM fato_matricula_completa WHERE ...`.
+2.  **Improved Read Performance**: The `fato_desempenho_escola` table allows dashboard creation with a single table scan, drastically reducing query latency compared to aggregating across `matricula`, `desempenho_enem`, and `indicadores_escolares`.
+3.  **Trade-off**: Write performance may degrade slightly due to the volume of data being inserted (duplicating columns), but this is acceptable for an analytical warehouse where reads vastly outnumber writes.

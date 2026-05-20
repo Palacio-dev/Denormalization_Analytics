@@ -1,0 +1,180 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-20_09-46-13
+Model: gemini
+Prompt: expert
+Schema: ex06
+==================================================
+
+### Executive Summary
+
+The current normalized schema is highly structured (3NF) but introduces severe read penalties for analytical queries. Answering a simple question like *"What is the average ENADE score by State and Year?"* requires an 8-table join (`ANO` → `CURSO` → `IES` → `MUNICIPIO` → `UF` + `ENADE` + `SAEB` + `IDEB`). 
+
+To optimize for read performance, we will implement a **Command Query Responsibility Segregation (CQRS) inspired read-model**. We will create a One-Big-Table (OBT) denormalized structure and a set of pre-aggregated rollups. Given that this schema models Brazilian educational census data (which is published annually), we assume real-time Change Data Capture (CDC) is unnecessary. Instead, we will use a **batch-refreshed, partition-swapped physical schema**. This guarantees zero-downtime reads, eliminates lock contention with the write workload, and reduces complex query latencies from seconds to milliseconds.
+
+### Explicit Assumptions
+1. **Database Engine:** PostgreSQL (inferred from `GENERATED ALWAYS AS IDENTITY` and `REAL` types).
+2. **Workload:** OLAP/Analytical. Heavy reads, infrequent bulk writes (annual/semester data releases).
+3. **Operational Constraints:** No triggers allowed. A nightly or post-ETL batch window is available.
+4. **Data Grain:** The `ANO` table acts as a fact table at the `Course + Year` grain, linking to specific ENADE, SAEB, and IDEB score records.
+5. **Typo Correction:** Assumed `qtd_ESCOLAS INT (qtd_ESCOLAS >= 0)` in your DDL was meant to be `qtd_ESCOLAS INT CHECK (qtd_ESCOLAS >= 0)`.
+
+---
+
+### 1. Model-to-Workload Mapping
+
+#### Access-Pattern Matrix
+
+| Query Class | Description | Tables Touched (Normalized) | Hotspots & Bottlenecks |
+| :--- | :--- | :--- | :--- |
+| **Q1: Macro-Analytics** | Avg scores (ENADE/SAEB/IDEB) by State (`UF`) and `ano`. | `ANO`, `CURSO`, `IES`, `MUNICIPIO`, `UF`, `ENADE`, `SAEB`, `IDEB` | **Join Hotspot:** 8-table traversal. **Aggregation Hotspot:** Grouping millions of rows by State/Year. |
+| **Q2: Institutional** | IES ranking by ENADE score in a specific year. | `ANO`, `CURSO`, `IES`, `ENADE` | **Join Hotspot:** 4 tables. |
+| **Q3: Micro-Details** | Specific Course performance over time (all metrics). | `ANO`, `CURSO`, `IES`, `ENADE`, `SAEB`, `IDEB` | **Join Hotspot:** 6 tables. |
+| **Q4: City Demographics**| List of schools and IES counts per city/state. | `MUNICIPIO`, `UF`, `ESCOLA`, `IES` | Moderate joins, easily indexed. |
+
+---
+
+### 2. Denormalization Patterns
+
+To address the hotspots, we will implement the following patterns:
+
+1. **Wide Read Table (One-Big-Table / OBT): `read_curso_avaliacao_anual`**
+   * *Justification:* Resolves Q2 and Q3. Pre-joins all dimensions (`CURSO`, `IES`, `MUNICIPIO`, `UF`) and facts (`ENADE`, `SAEB`, `IDEB`) into a single flat table. Eliminates the 8-table join entirely.
+   * *Strategy:* Partitioned by `ano` (Year) to allow fast data pruning and seamless batch updates via partition swapping.
+2. **Pre-aggregated Rollup: `read_uf_ano_resumo`**
+   * *Justification:* Resolves Q1. Dashboards querying state-level averages will hit this tiny table (27 rows per year) instead of scanning millions of rows.
+3. **Materialized View: `read_municipio_infra_resumo`**
+   * *Justification:* Resolves Q4. A simple snapshot of city-level infrastructure (schools, IES).
+
+---
+
+### 3. Proposed Denormalized Schema (DDL)
+
+*Note: These tables live alongside your normalized schema, acting purely as read targets.*
+
+```sql
+-- ==============================================================================
+-- 1. WIDE TABLE: Course Performance by Year (Resolves Q2, Q3)
+-- ==============================================================================
+DROP TABLE IF EXISTS read_curso_avaliacao_anual CASCADE;
+
+CREATE TABLE read_curso_avaliacao_anual (
+    -- Dimensions
+    ano INT NOT NULL,
+    id_curso INT NOT NULL,
+    nome_curso VARCHAR(100) NOT NULL,
+    id_ies INT NOT NULL,
+    nome_ies VARCHAR(100) NOT NULL,
+    sigla_ies VARCHAR(20),
+    rede_ies VARCHAR(100) NOT NULL,
+    id_municipio INT NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    id_uf INT NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    
+    -- ENADE Facts
+    enade_total_inscritos INT,
+    enade_nota_bruta_ce REAL,
+    enade_nota_enade_continua REAL,
+    enade_nota_enade_faixa REAL,
+    
+    -- SAEB Facts
+    saeb_nota_mat REAL,
+    saeb_nota_port REAL,
+    saeb_nota_padrao REAL,
+    
+    -- IDEB Facts
+    ideb_ind_rend REAL,
+    ideb_nota_ideb REAL,
+    
+    -- PK constraint ensures no duplicates per course/year
+    PRIMARY KEY (ano, id_curso)
+) PARTITION BY LIST (ano);
+
+-- Create partitions for current/expected years (Example)
+CREATE TABLE read_curso_avaliacao_2022 PARTITION OF read_curso_avaliacao_anual FOR VALUES IN (2022);
+CREATE TABLE read_curso_avaliacao_2023 PARTITION OF read_curso_avaliacao_anual FOR VALUES IN (2023);
+
+-- Read-optimized Indexes
+CREATE INDEX idx_read_curso_uf ON read_curso_avaliacao_anual(sigla_uf);
+CREATE INDEX idx_read_curso_ies ON read_curso_avaliacao_anual(id_ies);
+CREATE INDEX idx_read_curso_rede ON read_curso_avaliacao_anual(rede_ies);
+
+-- ==============================================================================
+-- 2. PRE-AGGREGATED ROLLUP: State-Level Averages (Resolves Q1)
+-- ==============================================================================
+DROP TABLE IF EXISTS read_uf_ano_resumo CASCADE;
+
+CREATE TABLE read_uf_ano_resumo (
+    ano INT NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    qtd_cursos_avaliados INT NOT NULL,
+    avg_enade_continua REAL,
+    avg_saeb_padrao REAL,
+    avg_ideb_nota REAL,
+    PRIMARY KEY (ano, sigla_uf)
+);
+
+-- ==============================================================================
+-- 3. SNAPSHOT VIEW: City Infrastructure (Resolves Q4)
+-- ==============================================================================
+DROP MATERIALIZED VIEW IF EXISTS read_municipio_infra_resumo;
+
+CREATE MATERIALIZED VIEW read_municipio_infra_resumo AS
+SELECT 
+    u.sigla_uf,
+    m.nome_municipio,
+    m.qtd_IES AS censo_qtd_ies,
+    m.qtd_ESCOLAS AS censo_qtd_escolas,
+    COUNT(DISTINCT i.id_ies) AS actual_ies_count,
+    COUNT(DISTINCT e.id_escola) AS actual_escola_count
+FROM MUNICIPIO m
+JOIN UF u ON m.id_uf = u.id
+LEFT JOIN IES i ON m.id_municipio = i.id_municipio
+LEFT JOIN ESCOLA e ON m.id_municipio = e.id_municipio
+GROUP BY u.sigla_uf, m.nome_municipio, m.qtd_IES, m.qtd_ESCOLAS;
+
+CREATE UNIQUE INDEX idx_mv_mun_infra ON read_municipio_infra_resumo(sigla_uf, nome_municipio);
+```
+
+---
+
+### 4. Consistency Architecture & Implementation Plan
+
+**Data Lineage:**
+*   `read_curso_avaliacao_anual.sigla_uf` ← `UF.sigla_uf`
+*   `read_curso_avaliacao_anual.enade_nota_enade_continua` ← `ENADE.nota_enade_continua`
+*   *(All columns map 1:1 from their normalized source counterparts).*
+
+**Refresh Strategy (Safe, Observable, Reversible):**
+Because this data is updated annually/semesterly, we will use **Partition Swapping** for the Wide Table. This ensures zero read-downtime and atomic updates.
+
+*Implementation Plan (Batch Script / Stored Procedure):*
+1. **Create a staging table** for the target year: `CREATE TABLE staging_2023 (LIKE read_curso_avaliacao_anual INCLUDING ALL);`
+2. **Populate staging** via a single large `INSERT INTO ... SELECT ...` joining the normalized tables for `ano = 2023`.
+3. **Swap partition:** 
+   ```sql
+   BEGIN;
+   ALTER TABLE read_curso_avaliacao_anual DETACH PARTITION read_curso_avaliacao_2023;
+   ALTER TABLE read_curso_avaliacao_anual ATTACH PARTITION staging_2023 FOR VALUES IN (2023);
+   DROP TABLE read_curso_avaliacao_2023;
+   COMMIT;
+   ```
+4. **Refresh Rollups:** `TRUNCATE read_uf_ano_resumo; INSERT INTO read_uf_ano_resumo SELECT ... FROM read_curso_avaliacao_anual;`
+5. **Refresh Materialized View:** `REFRESH MATERIALIZED VIEW CONCURRENTLY read_municipio_infra_resumo;`
+
+**Intentional Staleness Window:**
+Reads will trail writes by a maximum of 24 hours (assuming a nightly batch run). Because educational census data is static once published, this staleness is purely an operational artifact during the ingestion phase and perfectly acceptable for business correctness.
+
+---
+
+### 5. Risk Analysis
+
+| Risk Area | Assessment & Mitigation |
+| :--- | :--- |
+| **Write Amplification & Storage** | **Moderate.** The wide table duplicates dimension strings (e.g., `nome_curso`, `nome_uf`). *Mitigation:* Storage is cheap; PostgreSQL TOAST and page compression handle repetitive strings well. The massive reduction in CPU/Memory usage during reads offsets the storage cost. |
+| **Lock Contention** | **Low.** By using Partition Swapping and `REFRESH MATERIALIZED VIEW CONCURRENTLY`, read queries are never blocked by the refresh process. |
+| **Failure Modes** | **Low.** If the batch ETL fails, the transaction rolls back. The read tables simply serve yesterday's data. The system remains fully operational. |
+| **Monitoring & Alerts** | **Required:** Implement a daily reconciliation query: `SELECT COUNT(*) FROM ANO WHERE ano = X` vs `SELECT COUNT(*) FROM read_curso_avaliacao_anual WHERE ano = X`. Alert if `diff != 0`. Monitor query latency on the read tables to ensure indexes are being hit. |
+| **Reversibility** | **High.** The normalized schema remains the source of truth. If the denormalized schema introduces issues, applications can be pointed back to the normalized views/tables with zero data loss. |

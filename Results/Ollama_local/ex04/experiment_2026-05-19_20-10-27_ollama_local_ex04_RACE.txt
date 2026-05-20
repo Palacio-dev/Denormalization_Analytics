@@ -1,0 +1,339 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_20-10-27
+Model: ollama_local
+Prompt: RACE
+Schema: ex04
+==================================================
+
+Hello. I am your Senior Data Engineer with 15 years of experience in relational and analytical database optimization.
+
+Based on your request, I have analyzed the provided schema, inferred the analytical workload, and applied denormalization techniques to create a high-performance physical schema.
+
+### 1. Analysis of the Provided Schema
+
+**Current Structure:**
+The schema is heavily normalized (Third Normal Form). It separates data into distinct tables for:
+*   **Dimensions:** `country`, `region`, `survey` (metadata), `demography`, `employment`, `education`, `economy`, `health`.
+*   **Facts/Measurements:** `decile` (linked to survey), `population`, `life_expectancy`.
+*   **Temporal Data:** All measurement tables have `year` columns.
+*   **Geospatial Data:** `country` links to `region`.
+
+**Relationships:**
+*   `survey` $\to$ `country` (1:N)
+*   `survey` $\to$ `decile` (1:N)
+*   `demography` $\to$ `country` (1:N)
+*   `demography` $\to$ `population` (1:N)
+*   `demography` $\to$ `life_expectancy` (1:N)
+*   `employment`, `education`, `economy`, `health` $\to$ `country` (1:N)
+
+**Identified Bottlenecks:**
+1.  **Join Explosion:** A typical analytical query (e.g., "Show poverty vs. GDP vs. Education for Country X in Year Y") requires joining 5-6 tables.
+2.  **Filter Scattering:** Filtering by `country_code` and `year` happens across multiple tables, preventing efficient index usage on composite keys.
+3.  **Small Lookup Tables:** `country` and `region` are small dimension tables. Joining them adds negligible overhead compared to the benefit of eliminating the join.
+4.  **Redundant Aggregations:** Queries often need to group by country and year to get totals; this requires an `ORDER BY` and `GROUP BY` operation on large fact-like tables.
+
+---
+
+### 2. Inferred Frequent Queries / Workload Context
+
+Since no specific queries were provided, I infer the most common analytical workloads for this domain (Development Indicators):
+
+1.  **Country Profile Query:**
+    *   *Goal:* Get a snapshot of a specific country's economic, social, and health status for a specific year.
+    *   *Current Cost:* Join `economy`, `education`, `employment`, `health`, `demography`, `life_expectancy`, `region`.
+    *   *Bottleneck:* Multiple `JOIN`s and `WHERE` clause evaluation on foreign keys.
+
+2.  **Time-Series Trend Analysis:**
+    *   *Goal:* Plot GDP growth and Education expenditure over 20 years for a specific country.
+    *   *Current Cost:* Join `economy` and `education` on `country_code` and `year`.
+    *   *Bottleneck:* Scanning large tables for the same `country_code` and `year` combination.
+
+3.  **Comparative Analysis:**
+    *   *Goal:* Compare the "Poverty Gap" across 50 countries in 2020.
+    *   *Current Cost:* Join `survey` and `decile` (potentially) with `country`.
+    *   *Bottleneck:* Joining `survey` (metadata) with `decile` (data) is unnecessary if we just need the metrics; `decile` seems to be a specific breakdown of `survey`.
+
+---
+
+### 3. Evaluation of Denormalization Techniques
+
+We will apply the following techniques from your list:
+
+*   **Technique 1 (Adding Redundant Attributes):** We will duplicate `country_code` and `year` into the `economy`, `education`, `employment`, `health`, and `demography` tables. This eliminates the need to join back to `country` or `region` for almost every query.
+*   **Technique 2 (Adding Derived Attributes):** We will not pre-calculate complex aggregates (like SUM of GDP) in a separate table because the source data is already atomic. However, we will ensure `year` is the primary temporal key.
+*   **Technique 3 (Collapsing Relations):** We will merge `demography`, `population`, and `life_expectancy` into a single `demography` table if the relationships are strictly 1:N per entity, or keep them separate if they represent different dimensions of the same entity. *Decision:* Given `population` and `life_expectancy` have different granularities (age/gender vs just value), they might stay separate, but we can remove the `id_demography` foreign key and rely on `year` + `country_code` + `gender`/`age_group` to identify rows.
+*   **Technique 4 (Vertical Partitioning):** Not strictly applicable here as tables are already relatively flat, but we will ensure that `survey` and `decile` are not joined unnecessarily.
+
+**Strategy:**
+The primary goal is to create **"Fact-like" tables** that contain all attributes for a specific country-year combination, removing the need to join back to dimension tables.
+
+---
+
+### 4. Design of Possible Denormalized Schemas
+
+#### Schema Option A: The "Flat Fact" Approach (Aggressive Denormalization)
+*Concept:* Create one massive table per indicator type (e.g., `Fact_Economy`, `Fact_Education`) where the `country_code` and `year` are columns, not foreign keys.
+*Pros:* Maximum performance for point queries.
+*Cons:* High storage overhead (repeating country names), potential data consistency issues if source data changes (though in analytics, we usually accept this).
+
+#### Schema Option B: The "Country-Year Hub" Approach (Moderate Denormalization)
+*Concept:* Keep `country` and `region` as reference tables (for readability and small table optimization), but denormalize the main fact tables.
+*Pros:* Balance between storage and maintainability.
+*Cons:* Still requires a join to get the `region_name`.
+
+#### Schema Option C: The "Super-Entity" Approach (Extreme Denormalization)
+*Concept:* Merge all indicator tables into one giant `Fact_Indicators` table with columns for every metric.
+*Pros:* Single table scan for everything.
+*Cons:* Extremely wide table, hard to maintain, difficult to index specific subsets of columns effectively.
+
+**Decision:**
+I will proceed with **Schema Option B**, refined into a highly optimized structure. This keeps the small dimension tables (`country`, `region`) for metadata but denormalizes the large measurement tables to remove join overhead. This is the industry standard for Data Warehouses (Star Schema) optimized for read performance.
+
+---
+
+### 5. Evaluation and Selection
+
+*   **Option A** is too aggressive; if we lose the `region` name, it's annoying to look up.
+*   **Option C** is risky; if we need to filter only by `education` columns later, the index strategy becomes complex.
+*   **Option B** is the most consistent. It allows us to keep `country` and `region` small and indexed, but removes the `JOIN` cost for the heavy lifting (GDP, Education, Health).
+
+**Selected Strategy:**
+1.  Keep `country` and `region` as small lookup tables.
+2.  Create denormalized fact tables (`Fact_Economy`, `Fact_Education`, etc.) that include `country_code` and `year` directly.
+3.  Remove `id_survey` from `decile` if it's not strictly needed for a unique identifier, or merge it into `survey` if it represents a specific metric set. Looking at the schema, `decile` seems to be a breakdown of `survey`. We will keep `survey` and `decile` separate but denormalize `decile` to include `country_code` and `year` to avoid joining `survey` back.
+
+---
+
+### 6. Final Denormalized Schema Design
+
+Here is the optimized SQL script.
+
+```sql
+-- ============================================================
+-- OPTIMIZED DENORMALIZED SCHEMA
+-- Strategy: Star Schema with Denormalized Fact Tables
+-- Goal: Eliminate JOINs for Country/Year lookups.
+-- ============================================================
+
+BEGIN;
+
+-- -----------------------------------------------------------
+-- 1. DIMENSION TABLES (Small, Referenced, Indexed)
+-- -----------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.country
+(
+    country_code character varying(10) NOT NULL,
+    country_name character varying(200),
+    region_code character varying(10) NOT NULL,
+    PRIMARY KEY (country_code)
+);
+
+CREATE TABLE IF NOT EXISTS public.region
+(
+    region_code character varying(10) NOT NULL,
+    region_name character varying(200) NOT NULL,
+    PRIMARY KEY (region_code)
+);
+
+-- -----------------------------------------------------------
+-- 2. DENORMALIZED FACT TABLES
+-- -----------------------------------------------------------
+-- Note: country_code and year are redundant columns here.
+-- This eliminates the need to JOIN with 'country' or 'region' tables
+-- for 90% of analytical queries.
+
+-- Fact: Economic Indicators
+CREATE TABLE IF NOT EXISTS public.fact_economy
+(
+    id_economy serial NOT NULL,
+    -- Denormalized Attributes
+    country_code character varying(10) NOT NULL,
+    year integer NOT NULL,
+    gdp double precision,
+    inflation double precision,
+    tax_revenue double precision,
+    -- Index for common queries: Country + Year
+    PRIMARY KEY (id_economy),
+    UNIQUE (country_code, year) -- Ensures one record per country/year
+);
+
+-- Fact: Education Indicators
+CREATE TABLE IF NOT EXISTS public.fact_education
+(
+    id_education serial NOT NULL,
+    -- Denormalized Attributes
+    country_code character varying(10) NOT NULL,
+    year integer NOT NULL,
+    child_out_of_school double precision,
+    progression_to_sec double precision,
+    expenditure double precision,
+    preprim_enroll double precision,
+    prim_enrol double precision,
+    sec_enrol double precision,
+    terti_enrol double precision,
+    PRIMARY KEY (id_education),
+    UNIQUE (country_code, year)
+);
+
+-- Fact: Employment Indicators
+CREATE TABLE IF NOT EXISTS public.fact_employment
+(
+    id_employment serial NOT NULL,
+    -- Denormalized Attributes
+    country_code character varying(10) NOT NULL,
+    year integer NOT NULL,
+    child_emp double precision,
+    unemp double precision,
+    vulnerable_emp double precision,
+    part_time double precision,
+    employers double precision,
+    labor_force_total double precision,
+    labor_force_fem double precision,
+    PRIMARY KEY (id_employment),
+    UNIQUE (country_code, year)
+);
+
+-- Fact: Health Indicators
+CREATE TABLE IF NOT EXISTS public.fact_health
+(
+    id_health serial NOT NULL,
+    -- Denormalized Attributes
+    country_code character varying(10) NOT NULL,
+    year integer NOT NULL,
+    hospital_beds double precision,
+    physicians double precision,
+    expenditure double precision,
+    PRIMARY KEY (id_health),
+    UNIQUE (country_code, year)
+);
+
+-- Fact: Demographics (Merged Population & Life Expectancy for efficiency if granularities align, 
+-- otherwise kept separate but denormalized)
+-- Let's keep them separate for clarity but denormalize keys.
+
+CREATE TABLE IF NOT EXISTS public.fact_demography
+(
+    id_demography serial NOT NULL,
+    -- Denormalized Attributes
+    country_code character varying(10) NOT NULL,
+    year integer NOT NULL,
+    pop_density double precision,
+    urban_pop double precision,
+    rural_pop double precision,
+    net_migration double precision,
+    death_rate double precision,
+    birth_rate double precision,
+    PRIMARY KEY (id_demography),
+    UNIQUE (country_code, year)
+);
+
+-- Fact: Demographic Breakdown (Population by Age/Gender)
+CREATE TABLE IF NOT EXISTS public.fact_population
+(
+    id_population serial NOT NULL,
+    -- Denormalized Attributes
+    country_code character varying(10) NOT NULL,
+    year integer NOT NULL,
+    pop_ages character varying(100), -- e.g., '0-14, 15-64, 65+'
+    gender character varying(10),
+    number double precision,
+    PRIMARY KEY (id_population),
+    -- Composite Index for filtering by country and age group
+    UNIQUE (country_code, year, pop_ages, gender)
+);
+
+-- Fact: Life Expectancy
+CREATE TABLE IF NOT EXISTS public.fact_life_expectancy
+(
+    id_life_expectancy serial NOT NULL,
+    -- Denormalized Attributes
+    country_code character varying(10) NOT NULL,
+    year integer NOT NULL,
+    gender character varying(10),
+    value double precision,
+    PRIMARY KEY (id_life_expectancy),
+    UNIQUE (country_code, year, gender)
+);
+
+-- Fact: Survey & Deciles
+-- We denormalize 'decile' to include country and year to avoid joining 'survey'.
+CREATE TABLE IF NOT EXISTS public.fact_decile
+(
+    id_decile serial NOT NULL,
+    -- Denormalized Attributes
+    country_code character varying(10) NOT NULL,
+    year integer NOT NULL,
+    -- Original Survey Metadata (Optional to keep if needed for filtering)
+    survey_acronym character varying(100),
+    welfare_type character varying(100),
+    poverty_line double precision,
+    headcount double precision,
+    poverty_gap double precision,
+    poverty_severity double precision,
+    gini double precision,
+    reporting_pop integer,
+    reporting_pce double precision,
+    distribution_type character varying(100),
+    spl double precision,
+    survey_coverage character varying(100),
+    reporting_level character varying(100),
+    PRIMARY KEY (id_decile),
+    UNIQUE (country_code, year, id_decile)
+);
+
+-- -----------------------------------------------------------
+-- 3. INDEXES FOR PERFORMANCE
+-- -----------------------------------------------------------
+-- These indexes replace the need for complex JOINs on foreign keys.
+
+CREATE INDEX IF NOT EXISTS idx_country_code ON public.country(country_code);
+CREATE INDEX IF NOT EXISTS idx_region_code ON public.region(region_code);
+
+-- Composite indexes on Fact tables for the most common query pattern:
+-- "SELECT * FROM fact_economy WHERE country_code = 'X' AND year = 2020"
+
+CREATE INDEX IF NOT EXISTS idx_economy_country_year ON public.fact_economy(country_code, year);
+CREATE INDEX IF NOT EXISTS idx_education_country_year ON public.fact_education(country_code, year);
+CREATE INDEX IF NOT EXISTS idx_employment_country_year ON public.fact_employment(country_code, year);
+CREATE INDEX IF NOT EXISTS idx_health_country_year ON public.fact_health(country_code, year);
+CREATE INDEX IF NOT EXISTS idx_demography_country_year ON public.fact_demography(country_code, year);
+CREATE INDEX IF NOT EXISTS idx_population_country_year ON public.fact_population(country_code, year);
+CREATE INDEX IF NOT EXISTS idx_life_expectancy_country_year ON public.fact_life_expectancy(country_code, year);
+CREATE INDEX IF NOT EXISTS idx_decile_country_year ON public.fact_decile(country_code, year);
+
+-- -----------------------------------------------------------
+-- 4. FOREIGN KEY CONSTRAINTS (Optional for Analytics)
+-- -----------------------------------------------------------
+-- In a pure analytical environment, foreign keys are often dropped to speed up writes.
+-- However, if you need data integrity during ingestion, these are added.
+-- Given the goal is PERFORMANCE, we will skip FK constraints on Fact tables 
+-- and rely on the Unique constraints defined above.
+
+-- Example: If you strictly need FKs (e.g., for OLTP hybrid):
+-- ALTER TABLE public.fact_economy ADD CONSTRAINT fk_economy_country 
+-- FOREIGN KEY (country_code) REFERENCES public.country(country_code);
+-- (Commented out for performance: ALTER TABLE ... ADD CONSTRAINT ...)
+
+COMMIT;
+```
+
+### Key Improvements Explained
+
+1.  **Elimination of JOINs:**
+    *   **Before:** To get `GDP` and `Education` for a country, you had to `JOIN fact_economy` and `fact_education` on `country_code`.
+    *   **After:** You simply `SELECT` from both tables. The database engine can now optimize these as simple table scans with a `WHERE` clause filter, or even perform a `UNION ALL` if the query requires combining rows, which is significantly faster than a `JOIN`.
+
+2.  **Redundant Attributes (Technique 1):**
+    *   `country_code` and `year` are repeated in every fact table.
+    *   **Benefit:** No need to look up the country name in the `country` table or the region in the `region` table.
+    *   **Trade-off:** Increased storage (approx. 10-20% more for text columns like `country_code`), but massive gains in query latency.
+
+3.  **Unique Constraints (Replacing Foreign Keys):**
+    *   Instead of `FOREIGN KEY (country_code) REFERENCES country(country_code)`, we use `UNIQUE (country_code, year)`.
+    *   **Benefit:** This enforces data integrity (you can't have two GDP records for the same country in the same year) without the overhead of checking the parent table on every insert. It also allows the database to create a composite index on these two columns.
+
+4.  **Specific Indexes:**
+    *   Added composite indexes on `(country_code, year)` for all fact tables. This is the single most important optimization for this workload, as most analytical queries filter by a specific country and a specific year.
+
+This schema is ready for heavy read workloads.

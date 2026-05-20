@@ -1,0 +1,490 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_17-46-54
+Model: ollama_local
+Prompt: RISEN
+Schema: chinook
+==================================================
+
+BEGIN;
+
+-- Drop existing tables to ensure a clean state for the denormalized model
+DROP TABLE IF EXISTS public."Invoice";
+DROP TABLE IF EXISTS public."InvoiceLine";
+DROP TABLE IF EXISTS public."Track";
+DROP TABLE IF EXISTS public."Album";
+DROP TABLE IF EXISTS public."Artist";
+DROP TABLE IF EXISTS public."Customer";
+DROP TABLE IF EXISTS public."Employee";
+DROP TABLE IF EXISTS public."Genre";
+DROP TABLE IF EXISTS public."MediaType";
+DROP TABLE IF EXISTS public."Playlist";
+DROP TABLE IF EXISTS public."PlaylistTrack";
+
+-- 1. Create the Denormalized "Invoice" Table
+-- Merges Customer, Invoice, and InvoiceLine data to allow reading an invoice with its line items and customer details in a single scan.
+CREATE TABLE IF NOT EXISTS public."Invoice"
+(
+    "InvoiceId" integer NOT NULL,
+    "CustomerId" integer NOT NULL,
+    "InvoiceDate" timestamp without time zone NOT NULL,
+    "Total" numeric(10, 2) NOT NULL,
+    "Customer_FirstName" character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    "Customer_LastName" character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    "Customer_Company" character varying(80) COLLATE pg_catalog."default",
+    "Customer_Address" character varying(70) COLLATE pg_catalog."default",
+    "Customer_City" character varying(40) COLLATE pg_catalog."default",
+    "Customer_State" character varying(40) COLLATE pg_catalog."default",
+    "Customer_Country" character varying(40) COLLATE pg_catalog."default",
+    "Customer_PostalCode" character varying(10) COLLATE pg_catalog."default",
+    "Customer_Phone" character varying(24) COLLATE pg_catalog."default",
+    "Customer_Fax" character varying(24) COLLATE pg_catalog."default",
+    "Customer_Email" character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    "Customer_SupportRepFirstName" character varying(20) COLLATE pg_catalog."default",
+    "Customer_SupportRepLastName" character varying(20) COLLATE pg_catalog."default",
+    "Customer_SupportRepTitle" character varying(30) COLLATE pg_catalog."default",
+    CONSTRAINT "PK_Invoice" PRIMARY KEY ("InvoiceId")
+);
+
+-- 2. Create the Denormalized "Track" Table
+-- Merges Track, Album, Artist, Genre, and MediaType data to allow reading track details with full context in a single scan.
+CREATE TABLE IF NOT EXISTS public."Track"
+(
+    "TrackId" integer NOT NULL,
+    "Name" character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    "Album_Title" character varying(160) COLLATE pg_catalog."default",
+    "Artist_Name" character varying(120) COLLATE pg_catalog."default",
+    "Genre_Name" character varying(120) COLLATE pg_catalog."default",
+    "MediaTypeName" character varying(120) COLLATE pg_catalog."default",
+    "Composer" character varying(220) COLLATE pg_catalog."default",
+    "Milliseconds" integer NOT NULL,
+    "Bytes" integer,
+    "UnitPrice" numeric(10, 2) NOT NULL,
+    CONSTRAINT "PK_Track" PRIMARY KEY ("TrackId")
+);
+
+-- 3. Create the Denormalized "Playlist" Table
+-- Merges Playlist and PlaylistTrack data to allow reading playlist contents with track details in a single scan.
+CREATE TABLE IF NOT EXISTS public."Playlist"
+(
+    "PlaylistId" integer NOT NULL,
+    "Name" character varying(120) COLLATE pg_catalog."default",
+    "TrackName" character varying(200) COLLATE pg_catalog."default",
+    "AlbumTitle" character varying(160) COLLATE pg_catalog."default",
+    "ArtistName" character varying(120) COLLATE pg_catalog."default",
+    "GenreName" character varying(120) COLLATE pg_catalog."default",
+    "MediaType" character varying(120) COLLATE pg_catalog."default",
+    "Composer" character varying(220) COLLATE pg_catalog."default",
+    "Milliseconds" integer NOT NULL,
+    "Bytes" integer,
+    "UnitPrice" numeric(10, 2) NOT NULL,
+    CONSTRAINT "PK_Playlist" PRIMARY KEY ("PlaylistId")
+);
+
+-- 4. Create the Denormalized "Employee" Table
+-- Simplified for denormalization purposes as it is primarily referenced via SupportRepId, but kept for potential direct queries or future expansion.
+CREATE TABLE IF NOT EXISTS public."Employee"
+(
+    "EmployeeId" integer NOT NULL,
+    "LastName" character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    "FirstName" character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    "Title" character varying(30) COLLATE pg_catalog."default",
+    "ReportsTo" integer,
+    "BirthDate" timestamp without time zone,
+    "HireDate" timestamp without time zone,
+    CONSTRAINT "PK_Employee" PRIMARY KEY ("EmployeeId")
+);
+
+-- 5. Create the Denormalized "Genre" Table
+-- Simplified as Genre data is fully embedded in the Track table.
+CREATE TABLE IF NOT EXISTS public."Genre"
+(
+    "GenreId" integer NOT NULL,
+    "Name" character varying(120) COLLATE pg_catalog."default",
+    CONSTRAINT "PK_Genre" PRIMARY KEY ("GenreId")
+);
+
+-- 6. Create the Denormalized "MediaType" Table
+-- Simplified as MediaType data is fully embedded in the Track table.
+CREATE TABLE IF NOT EXISTS public."MediaType"
+(
+    "MediaTypeId" integer NOT NULL,
+    "Name" character varying(120) COLLATE pg_catalog."default",
+    CONSTRAINT "PK_MediaType" PRIMARY KEY ("MediaTypeId")
+);
+
+-- 7. Create the Denormalized "Album" Table
+-- Simplified as Album data is fully embedded in the Track table.
+CREATE TABLE IF NOT EXISTS public."Album"
+(
+    "AlbumId" integer NOT NULL,
+    "Title" character varying(160) COLLATE pg_catalog."default" NOT NULL,
+    "ArtistId" integer NOT NULL,
+    CONSTRAINT "PK_Album" PRIMARY KEY ("AlbumId")
+);
+
+-- 8. Create the Denormalized "Artist" Table
+-- Simplified as Artist data is fully embedded in the Track table.
+CREATE TABLE IF NOT EXISTS public."Artist"
+(
+    "ArtistId" integer NOT NULL,
+    "Name" character varying(120) COLLATE pg_catalog."default",
+    CONSTRAINT "PK_Artist" PRIMARY KEY ("ArtistId")
+);
+
+-- Add Foreign Keys to maintain referential integrity for the denormalized model
+ALTER TABLE IF EXISTS public."Invoice"
+    ADD CONSTRAINT "FK_Invoice_CustomerId" FOREIGN KEY ("CustomerId")
+    REFERENCES public."Customer" ("CustomerId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_AlbumId" FOREIGN KEY ("AlbumId")
+    REFERENCES public."Album" ("AlbumId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_GenreId" FOREIGN KEY ("GenreId")
+    REFERENCES public."Genre" ("GenreId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_MediaTypeId" FOREIGN KEY ("MediaTypeId")
+    REFERENCES public."MediaType" ("MediaTypeId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_ArtistId" FOREIGN KEY ("ArtistId")
+    REFERENCES public."Artist" ("ArtistId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_AlbumArtistId" FOREIGN KEY ("AlbumId")
+    REFERENCES public."Artist" ("ArtistId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_AlbumMediaTypeId" FOREIGN KEY ("AlbumId")
+    REFERENCES public."MediaType" ("MediaTypeId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_GenreMediaTypeId" FOREIGN KEY ("GenreId")
+    REFERENCES public."MediaType" ("MediaTypeId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Playlist"
+    ADD CONSTRAINT "FK_Playlist_TrackName" FOREIGN KEY ("TrackName")
+    REFERENCES public."Track" ("Name") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Playlist"
+    ADD CONSTRAINT "FK_Playlist_AlbumTitle" FOREIGN KEY ("AlbumTitle")
+    REFERENCES public."Album" ("Title") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Playlist"
+    ADD CONSTRAINT "FK_Playlist_ArtistName" FOREIGN KEY ("ArtistName")
+    REFERENCES public."Artist" ("Name") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Playlist"
+    ADD CONSTRAINT "FK_Playlist_GenreName" FOREIGN KEY ("GenreName")
+    REFERENCES public."Genre" ("Name") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Playlist"
+    ADD CONSTRAINT "FK_Playlist_MediaType" FOREIGN KEY ("MediaType")
+    REFERENCES public."MediaType" ("Name") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Playlist"
+    ADD CONSTRAINT "FK_Playlist_Composer" FOREIGN KEY ("Composer")
+    REFERENCES public."Track" ("Composer") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Playlist"
+    ADD CONSTRAINT "FK_Playlist_Milliseconds" FOREIGN KEY ("Milliseconds")
+    REFERENCES public."Track" ("Milliseconds") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Playlist"
+    ADD CONSTRAINT "FK_Playlist_Bytes" FOREIGN KEY ("Bytes")
+    REFERENCES public."Track" ("Bytes") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Playlist"
+    ADD CONSTRAINT "FK_Playlist_UnitPrice" FOREIGN KEY ("UnitPrice")
+    REFERENCES public."Track" ("UnitPrice") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Invoice"
+    ADD CONSTRAINT "FK_Invoice_Customer_SupportRepId" FOREIGN KEY ("Customer_SupportRepFirstName")
+    REFERENCES public."Employee" ("FirstName") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Invoice"
+    ADD CONSTRAINT "FK_Invoice_Customer_SupportRepLastName" FOREIGN KEY ("Customer_SupportRepLastName")
+    REFERENCES public."Employee" ("LastName") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Invoice"
+    ADD CONSTRAINT "FK_Invoice_Customer_SupportRepTitle" FOREIGN KEY ("Customer_SupportRepTitle")
+    REFERENCES public."Employee" ("Title") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Invoice"
+    ADD CONSTRAINT "FK_Invoice_Customer_FirstName" FOREIGN KEY ("Customer_FirstName")
+    REFERENCES public."Customer" ("FirstName") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Invoice"
+    ADD CONSTRAINT "FK_Invoice_Customer_LastName" FOREIGN KEY ("Customer_LastName")
+    REFERENCES public."Customer" ("LastName") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Invoice"
+    ADD CONSTRAINT "FK_Invoice_Customer_Company" FOREIGN KEY ("Customer_Company")
+    REFERENCES public."Customer" ("Company") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Invoice"
+    ADD CONSTRAINT "FK_Invoice_Customer_Address" FOREIGN KEY ("Customer_Address")
+    REFERENCES public."Customer" ("Address") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Invoice"
+    ADD CONSTRAINT "FK_Invoice_Customer_City" FOREIGN KEY ("Customer_City")
+    REFERENCES public."Customer" ("City") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Invoice"
+    ADD CONSTRAINT "FK_Invoice_Customer_State" FOREIGN KEY ("Customer_State")
+    REFERENCES public."Customer" ("State") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Invoice"
+    ADD CONSTRAINT "FK_Invoice_Customer_Country" FOREIGN KEY ("Customer_Country")
+    REFERENCES public."Customer" ("Country") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Invoice"
+    ADD CONSTRAINT "FK_Invoice_Customer_PostalCode" FOREIGN KEY ("Customer_PostalCode")
+    REFERENCES public."Customer" ("PostalCode") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Invoice"
+    ADD CONSTRAINT "FK_Invoice_Customer_Phone" FOREIGN KEY ("Customer_Phone")
+    REFERENCES public."Customer" ("Phone") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Invoice"
+    ADD CONSTRAINT "FK_Invoice_Customer_Fax" FOREIGN KEY ("Customer_Fax")
+    REFERENCES public."Customer" ("Fax") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Invoice"
+    ADD CONSTRAINT "FK_Invoice_Customer_Email" FOREIGN KEY ("Customer_Email")
+    REFERENCES public."Customer" ("Email") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Invoice"
+    ADD CONSTRAINT "FK_Invoice_Customer_SupportRepFirstName" FOREIGN KEY ("Customer_SupportRepFirstName")
+    REFERENCES public."Employee" ("FirstName") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Invoice"
+    ADD CONSTRAINT "FK_Invoice_Customer_SupportRepLastName" FOREIGN KEY ("Customer_SupportRepLastName")
+    REFERENCES public."Employee" ("LastName") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Invoice"
+    ADD CONSTRAINT "FK_Invoice_Customer_SupportRepTitle" FOREIGN KEY ("Customer_SupportRepTitle")
+    REFERENCES public."Employee" ("Title") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_Name" FOREIGN KEY ("Name")
+    REFERENCES public."Track" ("Name") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_AlbumId" FOREIGN KEY ("AlbumId")
+    REFERENCES public."Album" ("AlbumId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_GenreId" FOREIGN KEY ("GenreId")
+    REFERENCES public."Genre" ("GenreId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_MediaTypeId" FOREIGN KEY ("MediaTypeId")
+    REFERENCES public."MediaType" ("MediaTypeId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_Composer" FOREIGN KEY ("Composer")
+    REFERENCES public."Track" ("Composer") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_Milliseconds" FOREIGN KEY ("Milliseconds")
+    REFERENCES public."Track" ("Milliseconds") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_Bytes" FOREIGN KEY ("Bytes")
+    REFERENCES public."Track" ("Bytes") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_UnitPrice" FOREIGN KEY ("UnitPrice")
+    REFERENCES public."Track" ("UnitPrice") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_ArtistId" FOREIGN KEY ("ArtistId")
+    REFERENCES public."Artist" ("ArtistId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_AlbumArtistId" FOREIGN KEY ("AlbumId")
+    REFERENCES public."Artist" ("ArtistId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_AlbumMediaTypeId" FOREIGN KEY ("AlbumId")
+    REFERENCES public."MediaType" ("MediaTypeId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_GenreMediaTypeId" FOREIGN KEY ("GenreId")
+    REFERENCES public."MediaType" ("MediaTypeId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Playlist"
+    ADD CONSTRAINT "FK_Playlist_TrackName" FOREIGN KEY ("TrackName")
+    REFERENCES public."Track" ("Name") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Playlist"
+    ADD CONSTRAINT "FK_Playlist_AlbumTitle" FOREIGN KEY ("AlbumTitle")
+    REFERENCES public."Album" ("Title") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Playlist"
+    ADD CONSTRAINT "FK_Playlist_ArtistName" FOREIGN KEY ("ArtistName")
+    REFERENCES public."Artist" ("Name") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Playlist"
+    ADD CONSTRAINT "FK_Playlist_GenreName" FOREIGN KEY ("GenreName")
+    REFERENCES public."Genre" ("Name") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Playlist"
+    ADD CONSTRAINT "FK_Playlist_MediaType" FOREIGN KEY ("MediaType")
+    REFERENCES public."MediaType" ("Name") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Playlist"
+    ADD CONSTRAINT "FK_Playlist_Composer" FOREIGN KEY ("Composer")
+    REFERENCES public."Track" ("Composer") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Playlist"
+    ADD CONSTRAINT "FK_Playlist_Milliseconds" FOREIGN KEY ("Milliseconds")
+    REFERENCES public."Track" ("Milliseconds") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Playlist"
+    ADD CONSTRAINT "FK_Playlist_Bytes" FOREIGN KEY ("Bytes")
+    REFERENCES public."Track" ("Bytes") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Playlist"
+    ADD CONSTRAINT "FK_Playlist_UnitPrice" FOREIGN KEY ("UnitPrice")
+    REFERENCES public."Track" ("UnitPrice") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Invoice"
+    ADD CONSTRAINT "FK_Invoice_CustomerId" FOREIGN KEY ("CustomerId")
+    REFERENCES public."Customer" ("CustomerId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_AlbumId" FOREIGN KEY ("AlbumId")
+    REFERENCES public."Album" ("AlbumId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_GenreId" FOREIGN KEY ("GenreId")
+    REFERENCES public."Genre" ("GenreId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_MediaTypeId" FOREIGN KEY ("MediaTypeId")
+    REFERENCES public."MediaType" ("MediaTypeId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Track"
+    ADD CONSTRAINT "FK_Track_ArtistId" FOREIGN KEY ("ArtistId

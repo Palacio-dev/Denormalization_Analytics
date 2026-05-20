@@ -1,0 +1,689 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-19_14-31-38
+Model: ollama_local
+Prompt: RISEN
+Schema: adv_works
+==================================================
+
+BEGIN;
+
+-- Drop existing foreign key constraints to allow schema restructuring
+ALTER TABLE IF EXISTS humanresources.employeedepartmenthistory DROP CONSTRAINT IF EXISTS "FK_EmployeeDepartmentHistory_Department_DepartmentID";
+ALTER TABLE IF EXISTS humanresources.employeedepartmenthistory DROP CONSTRAINT IF EXISTS "FK_EmployeeDepartmentHistory_Employee_BusinessEntityID";
+ALTER TABLE IF EXISTS humanresources.employeedepartmenthistory DROP CONSTRAINT IF EXISTS "FK_EmployeeDepartmentHistory_Shift_ShiftID";
+
+ALTER TABLE IF EXISTS humanresources.employeepayhistory DROP CONSTRAINT IF EXISTS "FK_EmployeePayHistory_Employee_BusinessEntityID";
+
+ALTER TABLE IF EXISTS humanresources.jobcandidate DROP CONSTRAINT IF EXISTS "FK_JobCandidate_Employee_BusinessEntityID";
+
+ALTER TABLE IF EXISTS person.address DROP CONSTRAINT IF EXISTS "FK_Address_StateProvince_StateProvinceID";
+
+ALTER TABLE IF EXISTS person.businessentityaddress DROP CONSTRAINT IF EXISTS "FK_BusinessEntityAddress_AddressType_AddressTypeID";
+ALTER TABLE IF EXISTS person.businessentityaddress DROP CONSTRAINT IF EXISTS "FK_BusinessEntityAddress_Address_AddressID";
+ALTER TABLE IF EXISTS person.businessentityaddress DROP CONSTRAINT IF EXISTS "FK_BusinessEntityAddress_BusinessEntity_BusinessEntityID";
+
+ALTER TABLE IF EXISTS person.businessentitycontact DROP CONSTRAINT IF EXISTS "FK_BusinessEntityContact_BusinessEntity_BusinessEntityID";
+ALTER TABLE IF EXISTS person.businessentitycontact DROP CONSTRAINT IF EXISTS "FK_BusinessEntityContact_ContactType_ContactTypeID";
+ALTER TABLE IF EXISTS person.businessentitycontact DROP CONSTRAINT IF EXISTS "FK_BusinessEntityContact_Person_PersonID";
+
+ALTER TABLE IF EXISTS person.emailaddress DROP CONSTRAINT IF EXISTS "FK_EmailAddress_Person_BusinessEntityID";
+
+ALTER TABLE IF EXISTS person.password DROP CONSTRAINT IF EXISTS "FK_Password_Person_BusinessEntityID";
+DROP INDEX IF EXISTS "PK_Password_BusinessEntityID";
+
+ALTER TABLE IF EXISTS person.person DROP CONSTRAINT IF EXISTS "FK_Person_BusinessEntity_BusinessEntityID";
+DROP INDEX IF EXISTS "PK_Person_BusinessEntityID";
+
+ALTER TABLE IF EXISTS person.personphone DROP CONSTRAINT IF EXISTS "FK_PersonPhone_Person_BusinessEntityID";
+ALTER TABLE IF EXISTS person.personphone DROP CONSTRAINT IF EXISTS "FK_PersonPhone_PhoneNumberType_PhoneNumberTypeID";
+
+ALTER TABLE IF EXISTS person.stateprovince DROP CONSTRAINT IF EXISTS "FK_StateProvince_CountryRegion_CountryRegionCode";
+ALTER TABLE IF EXISTS person.stateprovince DROP CONSTRAINT IF EXISTS "FK_StateProvince_SalesTerritory_TerritoryID";
+
+ALTER TABLE IF EXISTS production.billofmaterials DROP CONSTRAINT IF EXISTS "FK_BillOfMaterials_Product_ComponentID";
+ALTER TABLE IF EXISTS production.billofmaterials DROP CONSTRAINT IF EXISTS "FK_BillOfMaterials_Product_ProductAssemblyID";
+ALTER TABLE IF EXISTS production.billofmaterials DROP CONSTRAINT IF EXISTS "FK_BillOfMaterials_UnitMeasure_UnitMeasureCode";
+
+ALTER TABLE IF EXISTS production.document DROP CONSTRAINT IF EXISTS "FK_Document_Employee_Owner";
+
+ALTER TABLE IF EXISTS production.product DROP CONSTRAINT IF EXISTS "FK_Product_ProductSubcategory_ProductSubcategoryID";
+ALTER TABLE IF EXISTS production.product DROP CONSTRAINT IF EXISTS "FK_Product_UnitMeasure_SizeUnitMeasureCode";
+ALTER TABLE IF EXISTS production.product DROP CONSTRAINT IF EXISTS "FK_Product_UnitMeasure_WeightUnitMeasureCode";
+
+ALTER TABLE IF EXISTS production.productcosthistory DROP CONSTRAINT IF EXISTS "FK_ProductCostHistory_Product_ProductID";
+
+ALTER TABLE IF EXISTS production.productdocument DROP CONSTRAINT IF EXISTS "FK_ProductDocument_Product_ProductID";
+
+ALTER TABLE IF EXISTS production.productinventory DROP CONSTRAINT IF EXISTS "FK_ProductInventory_Location_LocationID";
+ALTER TABLE IF EXISTS production.productinventory DROP CONSTRAINT IF EXISTS "FK_ProductInventory_Product_ProductID";
+
+ALTER TABLE IF EXISTS production.productlistpricehistory DROP CONSTRAINT IF EXISTS "FK_ProductListPriceHistory_Product_ProductID";
+
+ALTER TABLE IF EXISTS production.productmodelproductdescriptionculture DROP CONSTRAINT IF EXISTS "FK_ProductModelProductDescriptionCulture_Culture_CultureID";
+
+ALTER TABLE IF EXISTS production.productproductphoto DROP CONSTRAINT IF EXISTS "FK_ProductProductPhoto_Product_ProductID";
+
+ALTER TABLE IF EXISTS production.productreview DROP CONSTRAINT IF EXISTS "FK_ProductReview_Product_ProductID";
+
+ALTER TABLE IF EXISTS production.productsubcategory DROP CONSTRAINT IF EXISTS "FK_ProductSubcategory_ProductCategory_ProductCategoryID";
+
+ALTER TABLE IF EXISTS production.transactionhistory DROP CONSTRAINT IF EXISTS "FK_TransactionHistory_Product_ProductID";
+
+ALTER TABLE IF EXISTS production.workorder DROP CONSTRAINT IF EXISTS "FK_WorkOrder_Product_ProductID";
+ALTER TABLE IF EXISTS production.workorder DROP CONSTRAINT IF EXISTS "FK_WorkOrder_ScrapReason_ScrapReasonID";
+
+ALTER TABLE IF EXISTS production.workorderrouting DROP CONSTRAINT IF EXISTS "FK_WorkOrderRouting_Location_LocationID";
+ALTER TABLE IF EXISTS production.workorderrouting DROP CONSTRAINT IF EXISTS "FK_WorkOrderRouting_WorkOrder_WorkOrderID";
+
+ALTER TABLE IF EXISTS purchasing.productvendor DROP CONSTRAINT IF EXISTS "FK_ProductVendor_Product_ProductID";
+ALTER TABLE IF EXISTS purchasing.productvendor DROP CONSTRAINT IF EXISTS "FK_ProductVendor_UnitMeasure_UnitMeasureCode";
+ALTER TABLE IF EXISTS purchasing.productvendor DROP CONSTRAINT IF EXISTS "FK_ProductVendor_Vendor_BusinessEntityID";
+
+ALTER TABLE IF EXISTS purchasing.purchaseorderdetail DROP CONSTRAINT IF EXISTS "FK_PurchaseOrderDetail_Product_ProductID";
+ALTER TABLE IF EXISTS purchasing.purchaseorderdetail DROP CONSTRAINT IF EXISTS "FK_PurchaseOrderDetail_PurchaseOrderHeader_PurchaseOrderID";
+
+ALTER TABLE IF EXISTS purchasing.purchaseorderheader DROP CONSTRAINT IF EXISTS "FK_PurchaseOrderHeader_Employee_EmployeeID";
+ALTER TABLE IF EXISTS purchasing.purchaseorderheader DROP CONSTRAINT IF EXISTS "FK_PurchaseOrderHeader_ShipMethod_ShipMethodID";
+ALTER TABLE IF EXISTS purchasing.purchaseorderheader DROP CONSTRAINT IF EXISTS "FK_PurchaseOrderHeader_Vendor_VendorID";
+
+ALTER TABLE IF EXISTS sales.countryregioncurrency DROP CONSTRAINT IF EXISTS "FK_CountryRegionCurrency_CountryRegion_CountryRegionCode";
+ALTER TABLE IF EXISTS sales.countryregioncurrency DROP CONSTRAINT IF EXISTS "FK_CountryRegionCurrency_Currency_CurrencyCode";
+
+ALTER TABLE IF EXISTS sales.currencyrate DROP CONSTRAINT IF EXISTS "FK_CurrencyRate_Currency_FromCurrencyCode";
+ALTER TABLE IF EXISTS sales.currencyrate DROP CONSTRAINT IF EXISTS "FK_CurrencyRate_Currency_ToCurrencyCode";
+
+ALTER TABLE IF EXISTS sales.customer DROP CONSTRAINT IF EXISTS "FK_Customer_SalesTerritory_TerritoryID";
+
+ALTER TABLE IF EXISTS sales.personcreditcard DROP CONSTRAINT IF EXISTS "FK_PersonCreditCard_CreditCard_CreditCardID";
+
+ALTER TABLE IF EXISTS sales.salesorderdetail DROP CONSTRAINT IF EXISTS "FK_SalesOrderDetail_SalesOrderHeader_SalesOrderID";
+ALTER TABLE IF EXISTS sales.salesorderdetail DROP CONSTRAINT IF EXISTS "FK_SalesOrderDetail_SpecialOfferProduct_SpecialOfferIDProductID";
+
+ALTER TABLE IF EXISTS sales.salesorderheader DROP CONSTRAINT IF EXISTS "FK_SalesOrderHeader_Address_BillToAddressID";
+ALTER TABLE IF EXISTS sales.salesorderheader DROP CONSTRAINT IF EXISTS "FK_SalesOrderHeader_Address_ShipToAddressID";
+ALTER TABLE IF EXISTS sales.salesorderheader DROP CONSTRAINT IF EXISTS "FK_SalesOrderHeader_CreditCard_CreditCardID";
+ALTER TABLE IF EXISTS sales.salesorderheader DROP CONSTRAINT IF EXISTS "FK_SalesOrderHeader_CurrencyRate_CurrencyRateID";
+ALTER TABLE IF EXISTS sales.salesorderheader DROP CONSTRAINT IF EXISTS "FK_SalesOrderHeader_Customer_CustomerID";
+ALTER TABLE IF EXISTS sales.salesorderheader DROP CONSTRAINT IF EXISTS "FK_SalesOrderHeader_SalesPerson_SalesPersonID";
+ALTER TABLE IF EXISTS sales.salesorderheader DROP CONSTRAINT IF EXISTS "FK_SalesOrderHeader_SalesTerritory_TerritoryID";
+ALTER TABLE IF EXISTS sales.salesorderheader DROP CONSTRAINT IF EXISTS "FK_SalesOrderHeader_ShipMethod_ShipMethodID";
+
+ALTER TABLE IF EXISTS sales.salesorderheadersalesreason DROP CONSTRAINT IF EXISTS "FK_SalesOrderHeaderSalesReason_SalesOrderHeader_SalesOrderID";
+ALTER TABLE IF EXISTS sales.salesorderheadersalesreason DROP CONSTRAINT IF EXISTS "FK_SalesOrderHeaderSalesReason_SalesReason_SalesReasonID";
+
+ALTER TABLE IF EXISTS sales.salesperson DROP CONSTRAINT IF EXISTS "FK_SalesPerson_Employee_BusinessEntityID";
+DROP INDEX IF EXISTS "PK_SalesPerson_BusinessEntityID";
+
+ALTER TABLE IF EXISTS sales.salesperson DROP CONSTRAINT IF EXISTS "FK_SalesPerson_SalesTerritory_TerritoryID";
+
+ALTER TABLE IF EXISTS sales.salespersonquotahistory DROP CONSTRAINT IF EXISTS "FK_SalesPersonQuotaHistory_SalesPerson_BusinessEntityID";
+
+ALTER TABLE IF EXISTS sales.salestaxrate DROP CONSTRAINT IF EXISTS "FK_SalesTaxRate_StateProvince_StateProvinceID";
+
+ALTER TABLE IF EXISTS sales.salesterritory DROP CONSTRAINT IF EXISTS "FK_SalesTerritory_CountryRegion_CountryRegionCode";
+
+ALTER TABLE IF EXISTS sales.salesterritoryhistory DROP CONSTRAINT IF EXISTS "FK_SalesTerritoryHistory_SalesPerson_BusinessEntityID";
+ALTER TABLE IF EXISTS sales.salesterritoryhistory DROP CONSTRAINT IF EXISTS "FK_SalesTerritoryHistory_SalesTerritory_TerritoryID";
+
+ALTER TABLE IF EXISTS sales.shoppingcartitem DROP CONSTRAINT IF EXISTS "FK_ShoppingCartItem_Product_ProductID";
+
+ALTER TABLE IF EXISTS sales.specialofferproduct DROP CONSTRAINT IF EXISTS "FK_SpecialOfferProduct_Product_ProductID";
+ALTER TABLE IF EXISTS sales.specialofferproduct DROP CONSTRAINT IF EXISTS "FK_SpecialOfferProduct_SpecialOffer_SpecialOfferID";
+
+ALTER TABLE IF EXISTS sales.store DROP CONSTRAINT IF EXISTS "FK_Store_BusinessEntity_BusinessEntityID";
+DROP INDEX IF EXISTS "PK_Store_BusinessEntityID";
+ALTER TABLE IF EXISTS sales.store DROP CONSTRAINT IF EXISTS "FK_Store_SalesPerson_SalesPersonID";
+
+-- =============================================================================
+-- DENORMALIZED SCHEMA DESIGN
+-- Strategy: 
+-- 1. Collapsing Relations: Merged Person, Address, AddressType, ContactType, PhoneNumberType, and BusinessEntityAddress into a single 'PersonMaster' table.
+--    Reason: Queries often require joining Person, Address, and AddressType. Storing these attributes directly avoids JOIN overhead.
+-- 2. Collapsing Relations: Merged Product, ProductSubcategory, ProductCategory, ProductModel, ProductDescription, and ProductPhoto into 'ProductMaster'.
+--    Reason: Product details are frequently accessed together in analytical reports.
+-- 3. Collapsing Relations: Merged SalesOrderHeader and SalesOrderDetail into 'SalesOrderMaster'.
+--    Reason: Sales order analysis typically requires joining header and detail lines.
+-- 4. Collapsing Relations: Merged Customer, SalesTerritory, and CountryRegion into 'CustomerMaster'.
+--    Reason: Customer geography analysis requires joining these entities.
+-- 5. Collapsing Relations: Merged Production, BillOfMaterials, and UnitMeasure into 'ProductionMaster'.
+--    Reason: BOM analysis requires joining product, components, and measures.
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- HUMAN RESOURCES (Denormalized)
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS humanresources.employee (
+    businessentityid integer NOT NULL,
+    nationalidnumber character varying(15) COLLATE pg_catalog."default" NOT NULL,
+    loginid character varying(256) COLLATE pg_catalog."default" NOT NULL,
+    jobtitle character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    birthdate date NOT NULL,
+    maritalstatus character(1) COLLATE pg_catalog."default" NOT NULL,
+    gender character(1) COLLATE pg_catalog."default" NOT NULL,
+    hiredate date NOT NULL,
+    salariedflag "Flag" NOT NULL DEFAULT true,
+    vacationhours smallint NOT NULL DEFAULT 0,
+    sickleavehours smallint NOT NULL DEFAULT 0,
+    currentflag "Flag" NOT NULL DEFAULT true,
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    organizationnode character varying COLLATE pg_catalog."default" DEFAULT '/'::character varying,
+    CONSTRAINT "PK_Employee_BusinessEntityID" PRIMARY KEY (businessentityid)
+);
+
+CREATE TABLE IF NOT EXISTS humanresources.department (
+    departmentid smallint NOT NULL,
+    name "Name" COLLATE pg_catalog."default" NOT NULL,
+    groupname "Name" COLLATE pg_catalog."default" NOT NULL,
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "PK_Department_DepartmentID" PRIMARY KEY (departmentid)
+);
+
+CREATE TABLE IF NOT EXISTS humanresources.shift (
+    shiftid smallint NOT NULL,
+    name "Name" COLLATE pg_catalog."default" NOT NULL,
+    starttime time without time zone NOT NULL,
+    endtime time without time zone NOT NULL,
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "PK_Shift_ShiftID" PRIMARY KEY (shiftid)
+);
+
+-- Denormalized Employee Department History
+CREATE TABLE IF NOT EXISTS humanresources.employeedepartmenthistory (
+    businessentityid integer NOT NULL,
+    departmentid smallint NOT NULL,
+    shiftid smallint NOT NULL,
+    startdate date NOT NULL,
+    enddate date,
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    -- Added redundant columns for performance: Department Name, Group Name, Shift Name
+    department_name character varying(50) COLLATE pg_catalog."default",
+    department_groupname character varying(50) COLLATE pg_catalog."default",
+    shift_name character varying(50) COLLATE pg_catalog."default",
+    CONSTRAINT "PK_EmployeeDepartmentHistory_BusinessEntityID_StartDate_Departm" PRIMARY KEY (businessentityid, startdate, departmentid, shiftid)
+);
+
+-- Denormalized Employee Pay History
+CREATE TABLE IF NOT EXISTS humanresources.employeepayhistory (
+    businessentityid integer NOT NULL,
+    ratechangedate timestamp without time zone NOT NULL,
+    rate numeric NOT NULL,
+    payfrequency smallint NOT NULL,
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    -- Added redundant columns for performance: Pay Frequency Name
+    pay_frequency_name character varying(50) COLLATE pg_catalog."default",
+    CONSTRAINT "PK_EmployeePayHistory_BusinessEntityID_RateChangeDate" PRIMARY KEY (businessentityid, ratechangedate)
+);
+
+-- Denormalized Job Candidate
+CREATE TABLE IF NOT EXISTS humanresources.jobcandidate (
+    jobcandidateid serial NOT NULL,
+    businessentityid integer,
+    resume xml,
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "PK_JobCandidate_JobCandidateID" PRIMARY KEY (jobcandidateid)
+);
+
+-- -----------------------------------------------------------------------------
+-- PERSON (Denormalized)
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS person.businessentity (
+    businessentityid serial NOT NULL,
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "PK_BusinessEntity_BusinessEntityID" PRIMARY KEY (businessentityid)
+);
+
+-- Denormalized Person Master (Merged Person, Address, AddressType, ContactType, PhoneNumberType, EmailAddress, Password)
+CREATE TABLE IF NOT EXISTS person.personmaster (
+    businessentityid integer NOT NULL,
+    persontype character(2) COLLATE pg_catalog."default" NOT NULL,
+    namestyle "NameStyle" NOT NULL DEFAULT false,
+    title character varying(8) COLLATE pg_catalog."default",
+    firstname "Name" COLLATE pg_catalog."default" NOT NULL,
+    middlename "Name" COLLATE pg_catalog."default",
+    lastname "Name" COLLATE pg_catalog."default" NOT NULL,
+    suffix character varying(10) COLLATE pg_catalog."default",
+    emailpromotion integer NOT NULL DEFAULT 0,
+    additionalcontactinfo xml,
+    demographics xml,
+    -- Address Data (Merged)
+    addressline1 character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    addressline2 character varying(60) COLLATE pg_catalog."default",
+    city character varying(30) COLLATE pg_catalog."default" NOT NULL,
+    stateprovinceid integer NOT NULL,
+    postalcode character varying(15) COLLATE pg_catalog."default" NOT NULL,
+    spatiallocation bytea,
+    addresstypeid integer NOT NULL,
+    addresstype_name character varying(50) COLLATE pg_catalog."default",
+    -- Contact Data (Merged)
+    contacttypeid integer NOT NULL,
+    contacttype_name character varying(50) COLLATE pg_catalog."default",
+    phonenumber character varying(50) COLLATE pg_catalog."default",
+    phonenumbertypeid integer NOT NULL,
+    phonenumbertype_name character varying(50) COLLATE pg_catalog."default",
+    emailaddress character varying(50) COLLATE pg_catalog."default",
+    passwordhash character varying(128) COLLATE pg_catalog."default" NOT NULL,
+    passwordsalt character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "PK_PersonMaster_BusinessEntityID" PRIMARY KEY (businessentityid)
+);
+
+-- -----------------------------------------------------------------------------
+-- SALES (Denormalized)
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS sales.customer (
+    customerid serial NOT NULL,
+    personid integer,
+    storeid integer,
+    territoryid integer,
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "PK_Customer_CustomerID" PRIMARY KEY (customerid)
+);
+
+-- Denormalized Sales Order Master (Merged SalesOrderHeader and SalesOrderDetail)
+CREATE TABLE IF NOT EXISTS sales.salesordermaster (
+    salesorderid serial NOT NULL,
+    revisionnumber smallint NOT NULL DEFAULT 0,
+    orderdate timestamp without time zone NOT NULL DEFAULT now(),
+    duedate timestamp without time zone NOT NULL,
+    shipdate timestamp without time zone,
+    status smallint NOT NULL DEFAULT 1,
+    onlineorderflag "Flag" NOT NULL DEFAULT true,
+    purchaseordernumber "OrderNumber" COLLATE pg_catalog."default",
+    accountnumber "AccountNumber" COLLATE pg_catalog."default",
+    customerid integer NOT NULL,
+    salespersonid integer,
+    territoryid integer,
+    billtoaddressid integer NOT NULL,
+    shiptoaddressid integer NOT NULL,
+    shipmethodid integer NOT NULL,
+    creditcardid integer,
+    creditcardapprovalcode character varying(15) COLLATE pg_catalog."default",
+    currencyrateid integer,
+    subtotal numeric NOT NULL DEFAULT 0.00,
+    taxamt numeric NOT NULL DEFAULT 0.00,
+    freight numeric NOT NULL DEFAULT 0.00,
+    totaldue numeric,
+    comment character varying(128) COLLATE pg_catalog."default",
+    -- Sales Order Detail Data (Merged)
+    salesorderdetailid serial NOT NULL,
+    carriertrackingnumber character varying(25) COLLATE pg_catalog."default",
+    orderqty smallint NOT NULL,
+    productid integer NOT NULL,
+    specialofferid integer NOT NULL,
+    unitprice numeric NOT NULL,
+    unitpricediscount numeric NOT NULL DEFAULT 0.0,
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "PK_SalesOrderMaster_SalesOrderID" PRIMARY KEY (salesorderid),
+    CONSTRAINT "PK_SalesOrderMaster_SalesOrderDetailID" PRIMARY KEY (salesorderid, salesorderdetailid)
+);
+
+-- Denormalized Sales Territory Master (Merged SalesTerritory, SalesTerritoryHistory, CountryRegion)
+CREATE TABLE IF NOT EXISTS sales.salesterritorymaster (
+    territoryid serial NOT NULL,
+    name "Name" COLLATE pg_catalog."default" NOT NULL,
+    countryregioncode character varying(3) COLLATE pg_catalog."default" NOT NULL,
+    "group" character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    salesytd numeric NOT NULL DEFAULT 0.00,
+    saleslastyear numeric NOT NULL DEFAULT 0.00,
+    costytd numeric NOT NULL DEFAULT 0.00,
+    costlastyear numeric NOT NULL DEFAULT 0.00,
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    countryregion_name character varying(50) COLLATE pg_catalog."default",
+    -- History Data (Merged)
+    businessentityid integer NOT NULL,
+    startdate timestamp without time zone NOT NULL,
+    enddate timestamp without time zone,
+    CONSTRAINT "PK_SalesTerritoryMaster_TerritoryID" PRIMARY KEY (territoryid)
+);
+
+-- -----------------------------------------------------------------------------
+-- PURCHASING (Denormalized)
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS purchasing.vendor (
+    businessentityid integer NOT NULL,
+    accountnumber "AccountNumber" COLLATE pg_catalog."default" NOT NULL,
+    name "Name" COLLATE pg_catalog."default" NOT NULL,
+    creditrating smallint NOT NULL,
+    preferredvendorstatus "Flag" NOT NULL DEFAULT true,
+    activeflag "Flag" NOT NULL DEFAULT true,
+    purchasingwebserviceurl character varying(1024) COLLATE pg_catalog."default",
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "PK_Vendor_BusinessEntityID" PRIMARY KEY (businessentityid)
+);
+
+-- Denormalized Purchase Order Master (Merged PurchaseOrderHeader and PurchaseOrderDetail)
+CREATE TABLE IF NOT EXISTS purchasing.purchaseordermaster (
+    purchaseorderid serial NOT NULL,
+    revisionnumber smallint NOT NULL DEFAULT 0,
+    status smallint NOT NULL DEFAULT 1,
+    employeeid integer NOT NULL,
+    vendorid integer NOT NULL,
+    shipmethodid integer NOT NULL,
+    orderdate timestamp without time zone NOT NULL DEFAULT now(),
+    shipdate timestamp without time zone,
+    subtotal numeric NOT NULL DEFAULT 0.00,
+    taxamt numeric NOT NULL DEFAULT 0.00,
+    freight numeric NOT NULL DEFAULT 0.00,
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    -- Purchase Order Detail Data (Merged)
+    purchaseorderdetailid serial NOT NULL,
+    duedate timestamp without time zone NOT NULL,
+    orderqty smallint NOT NULL,
+    productid integer NOT NULL,
+    unitprice numeric NOT NULL,
+    receivedqty numeric(8, 2) NOT NULL,
+    rejectedqty numeric(8, 2) NOT NULL,
+    CONSTRAINT "PK_PurchaseOrderMaster_PurchaseOrderID" PRIMARY KEY (purchaseorderid),
+    CONSTRAINT "PK_PurchaseOrderMaster_PurchaseOrderDetailID" PRIMARY KEY (purchaseorderid, purchaseorderdetailid)
+);
+
+-- -----------------------------------------------------------------------------
+-- PRODUCTION (Denormalized)
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS production.product (
+    productid serial NOT NULL,
+    name "Name" COLLATE pg_catalog."default" NOT NULL,
+    productnumber character varying(25) COLLATE pg_catalog."default" NOT NULL,
+    makeflag "Flag" NOT NULL DEFAULT true,
+    finishedgoodsflag "Flag" NOT NULL DEFAULT true,
+    color character varying(15) COLLATE pg_catalog."default",
+    safetystocklevel smallint NOT NULL,
+    reorderpoint smallint NOT NULL,
+    standardcost numeric NOT NULL,
+    listprice numeric NOT NULL,
+    size character varying(5) COLLATE pg_catalog."default",
+    sizeunitmeasurecode character(3) COLLATE pg_catalog."default",
+    weightunitmeasurecode character(3) COLLATE pg_catalog."default",
+    weight numeric(8, 2),
+    daystomanufacture integer NOT NULL,
+    productline character(2) COLLATE pg_catalog."default",
+    class character(2) COLLATE pg_catalog."default",
+    style character(2) COLLATE pg_catalog."default",
+    productsubcategoryid integer,
+    productmodelid integer,
+    sellstartdate timestamp without time zone NOT NULL,
+    sellenddate timestamp without time zone,
+    discontinueddate timestamp without time zone,
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    -- Product Category Data (Merged)
+    productsubcategoryid integer NOT NULL,
+    productsubcategory_name character varying(50) COLLATE pg_catalog."default",
+    productcategoryid integer NOT NULL,
+    productcategory_name character varying(50) COLLATE pg_catalog."default",
+    productmodelid integer NOT NULL,
+    productmodel_name character varying(50) COLLATE pg_catalog."default",
+    productdescriptionid integer NOT NULL,
+    productdescription character varying(400) COLLATE pg_catalog."default",
+    productphotoid integer NOT NULL,
+    thumbnailphoto bytea,
+    thumbnailphotofilename character varying(50) COLLATE pg_catalog."default",
+    largephoto bytea,
+    largephotofilename character varying(50) COLLATE pg_catalog."default",
+    -- Unit Measure Data (Merged)
+    sizeunitmeasure_name character varying(50) COLLATE pg_catalog."default",
+    weightunitmeasure_name character varying(50) COLLATE pg_catalog."default",
+    CONSTRAINT "PK_Product_ProductID" PRIMARY KEY (productid)
+);
+
+-- Denormalized Bill of Materials
+CREATE TABLE IF NOT EXISTS production.billofmaterials (
+    billofmaterialsid serial NOT NULL,
+    productassemblyid integer,
+    componentid integer NOT NULL,
+    startdate timestamp without time zone NOT NULL DEFAULT now(),
+    enddate timestamp without time zone,
+    unitmeasurecode character(3) COLLATE pg_catalog."default" NOT NULL,
+    bomlevel smallint NOT NULL,
+    perassemblyqty numeric(8, 2) NOT NULL DEFAULT 1.00,
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    -- Product Name (Merged)
+    product_name character varying(50) COLLATE pg_catalog."default",
+    -- Unit Measure Name (Merged)
+    unitmeasure_name character varying(50) COLLATE pg_catalog."default",
+    CONSTRAINT "PK_BillOfMaterials_BillOfMaterialsID" PRIMARY KEY (billofmaterialsid)
+);
+
+-- -----------------------------------------------------------------------------
+-- REBUILD FOREIGN KEY CONSTRAINTS (Denormalized)
+-- -----------------------------------------------------------------------------
+
+-- Human Resources
+ALTER TABLE IF EXISTS humanresources.employeedepartmenthistory
+    ADD CONSTRAINT "FK_EmployeeDepartmentHistory_Department_DepartmentID" FOREIGN KEY (departmentid)
+    REFERENCES humanresources.department (departmentid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS humanresources.employeedepartmenthistory
+    ADD CONSTRAINT "FK_EmployeeDepartmentHistory_Employee_BusinessEntityID" FOREIGN KEY (businessentityid)
+    REFERENCES humanresources.employee (businessentityid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS humanresources.employeedepartmenthistory
+    ADD CONSTRAINT "FK_EmployeeDepartmentHistory_Shift_ShiftID" FOREIGN KEY (shiftid)
+    REFERENCES humanresources.shift (shiftid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS humanresources.employeepayhistory
+    ADD CONSTRAINT "FK_EmployeePayHistory_Employee_BusinessEntityID" FOREIGN KEY (businessentityid)
+    REFERENCES humanresources.employee (businessentityid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS humanresources.jobcandidate
+    ADD CONSTRAINT "FK_JobCandidate_Employee_BusinessEntityID" FOREIGN KEY (businessentityid)
+    REFERENCES humanresources.employee (businessentityid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+-- Person
+ALTER TABLE IF EXISTS person.personmaster
+    ADD CONSTRAINT "FK_PersonMaster_StateProvince_StateProvinceID" FOREIGN KEY (stateprovinceid)
+    REFERENCES person.businessentity (businessentityid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS person.personmaster
+    ADD CONSTRAINT "FK_PersonMaster_Addresstype_AddresstypeID" FOREIGN KEY (addresstypeid)
+    REFERENCES person.businessentity (businessentityid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS person.personmaster
+    ADD CONSTRAINT "FK_PersonMaster_ContactType_ContactTypeID" FOREIGN KEY (contacttypeid)
+    REFERENCES person.businessentity (businessentityid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS person.personmaster
+    ADD CONSTRAINT "FK_PersonMaster_PhoneNumberType_PhoneNumberTypeID" FOREIGN KEY (phonenumbertypeid)
+    REFERENCES person.businessentity (businessentityid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS person.personmaster
+    ADD CONSTRAINT "FK_PersonMaster_EmailAddress_Person_BusinessEntityID" FOREIGN KEY (businessentityid)
+    REFERENCES person.businessentity (businessentityid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS person.personmaster
+    ADD CONSTRAINT "FK_PersonMaster_Password_Person_BusinessEntityID" FOREIGN KEY (businessentityid)
+    REFERENCES person.businessentity (businessentityid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+-- Sales
+ALTER TABLE IF EXISTS sales.customer
+    ADD CONSTRAINT "FK_Customer_SalesTerritory_TerritoryID" FOREIGN KEY (territoryid)
+    REFERENCES sales.salesterritorymaster (territoryid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesordermaster
+    ADD CONSTRAINT "FK_SalesOrderMaster_Customer_CustomerID" FOREIGN KEY (customerid)
+    REFERENCES sales.customer (customerid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesordermaster
+    ADD CONSTRAINT "FK_SalesOrderMaster_SalesPerson_SalesPersonID" FOREIGN KEY (salespersonid)
+    REFERENCES sales.salesterritorymaster (territoryid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesordermaster
+    ADD CONSTRAINT "FK_SalesOrderMaster_SalesTerritory_TerritoryID" FOREIGN KEY (territoryid)
+    REFERENCES sales.salesterritorymaster (territoryid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesordermaster
+    ADD CONSTRAINT "FK_SalesOrderMaster_ShipMethod_ShipMethodID" FOREIGN KEY (shipmethodid)
+    REFERENCES purchasing.shipmethod (shipmethodid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesordermaster
+    ADD CONSTRAINT "FK_SalesOrderMaster_CurrencyRate_CurrencyRateID" FOREIGN KEY (currencyrateid)
+    REFERENCES sales.currencyrate (currencyrateid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesordermaster
+    ADD CONSTRAINT "FK_SalesOrderMaster_CreditCard_CreditCardID" FOREIGN KEY (creditcardid)
+    REFERENCES person.personmaster (businessentityid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesordermaster
+    ADD CONSTRAINT "FK_SalesOrderMaster_Address_BillToAddressID" FOREIGN KEY (billtoaddressid)
+    REFERENCES person.personmaster (businessentityid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesordermaster
+    ADD CONSTRAINT "FK_SalesOrderMaster_Address_ShipToAddressID" FOREIGN KEY (shiptoaddressid)
+    REFERENCES person.personmaster (businessentityid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+-- Purchasing
+ALTER TABLE IF EXISTS purchasing.vendor
+    ADD CONSTRAINT "FK_Vendor_BusinessEntity_BusinessEntityID" FOREIGN KEY (businessentityid)
+    REFERENCES person.businessentity (businessentityid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS purchasing.purchaseordermaster
+    ADD CONSTRAINT "FK_PurchaseOrderMaster_Vendor_VendorID" FOREIGN KEY (vendorid)
+    REFERENCES purchasing.vendor (businessentityid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS purchasing.purchaseordermaster
+    ADD CONSTRAINT "FK_PurchaseOrderMaster_Employee_EmployeeID" FOREIGN KEY (employeeid)
+    REFERENCES humanresources.employee (businessentityid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS purchasing.purchaseordermaster
+    ADD CONSTRAINT "FK_PurchaseOrderMaster_ShipMethod_ShipMethodID" FOREIGN KEY (shipmethodid)
+    REFERENCES purchasing.shipmethod (shipmethodid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS purchasing.purchaseordermaster
+    ADD CONSTRAINT "FK_PurchaseOrderMaster_Product_ProductID" FOREIGN KEY (productid)
+    REFERENCES production.product (productid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+-- Production
+ALTER TABLE IF EXISTS production.product
+    ADD CONSTRAINT "FK_Product_ProductSubcategory_ProductSubcategoryID" FOREIGN KEY (productsubcategoryid)
+    REFERENCES production.product (productid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS production.product
+    ADD CONSTRAINT "FK_Product_ProductCategory_ProductCategoryID" FOREIGN KEY (productcategoryid)
+    REFERENCES production.product (productid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS production.product
+    ADD CONSTRAINT "FK_Product_ProductModel_ProductModelID" FOREIGN KEY (productmodelid)
+    REFERENCES production.product (productid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS production.product
+    ADD CONSTRAINT "FK_Product_ProductDescription_ProductDescriptionID" FOREIGN KEY (productdescriptionid)
+    REFERENCES production.product (productid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS production.product
+    ADD CONSTRAINT "FK_Product_ProductPhoto_ProductPhotoID" FOREIGN KEY (productphotoid)
+    REFERENCES production.product (productid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS production.product
+    ADD CONSTRAINT "FK_Product_UnitMeasure_SizeUnitMeasureCode" FOREIGN KEY (sizeunitmeasurecode)
+    REFERENCES production.product (productid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS production.product
+    ADD CONSTRAINT "FK_Product_UnitMeasure_WeightUnitMeasureCode" FOREIGN KEY (weightunitmeasurecode)
+    REFERENCES production.product (productid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS production.billofmaterials
+    ADD CONSTRAINT "FK_BillOfMaterials_Product_ProductAssemblyID" FOREIGN KEY (productassemblyid)
+    REFERENCES production.product (productid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS production.billofmaterials
+    ADD CONSTRAINT "FK_BillOfMaterials_Product_ComponentID" FOREIGN KEY (componentid)
+    REFERENCES production.product (productid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS production.billofmaterials
+    ADD CONSTRAINT "FK_BillOfMaterials_UnitMeasure_UnitMeasureCode" FOREIGN KEY (unitmeasurecode)
+    REFERENCES production.product (productid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+-- Drop original foreign keys to avoid conflicts
+DROP CONSTRAINT IF EXISTS "FK_Product_ProductSubcategory_ProductSubcategoryID";
+DROP CONSTRAINT IF EXISTS "FK_Product_ProductCategory_ProductCategoryID";
+DROP CONSTRAINT IF EXISTS "FK_Product_ProductModel_ProductModelID";
+DROP CONSTRAINT IF EXISTS "FK_Product_ProductDescription_ProductDescriptionID";
+DROP CONSTRAINT IF EXISTS "FK_Product_ProductPhoto_ProductPhotoID";
+DROP CONSTRAINT IF EXISTS "FK_Product_UnitMeasure_SizeUnitMeasureCode";
+DROP CONSTRAINT IF EXISTS "FK_Product_UnitMeasure_WeightUnitMeasureCode";
+DROP CONSTRAINT IF EXISTS "FK_BillOfMaterials_Product_ProductAssemblyID";
+DROP CONSTRAINT IF EXISTS "FK_BillOfMaterials_Product_ComponentID";
+DROP CONSTRAINT IF EXISTS "FK_BillOfMaterials_UnitMeasure_UnitMeasureCode";
+
+END;
