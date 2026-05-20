@@ -100,26 +100,6 @@ def inject_schema(prompt_content: str, schema_content: str) -> str:
     return prompt_content.replace("{SCHEMA_CONTENT}", schema_content)
 
 
-def format_for_qwen(prompt_content: str, schema_content: str) -> str:
-    """
-    Format prompt and schema for Qwen models with schema appended at end.
-    
-    Args:
-        prompt_content: Prompt text with {SCHEMA_CONTENT} placeholder
-        schema_content: Actual schema content to embed
-        
-    Returns:
-        Formatted prompt with schema appended with delimiter
-    """
-    # First inject the schema
-    injected = inject_schema(prompt_content, schema_content)
-    
-    # The schema is already injected in the prompt via {SCHEMA_CONTENT}
-    # For Qwen, we don't add extra delimiter since it's already integrated
-    # The placeholder replacement IS the embedding
-    return injected
-
-
 def save_result(model_name: str, prompt_name: str, schema_name: str, 
                 output_text: str, config: ExperimentConfig) -> str:
     """

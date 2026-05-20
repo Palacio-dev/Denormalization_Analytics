@@ -39,30 +39,13 @@ class GeminiHandler:
         
         self.client = genai.Client(api_key=api_key)
     
-    def upload_schema_file(self, schema_path: str) -> object:
-        """
-        Upload schema file to Gemini Files API.
-        
-        Args:
-            schema_path: Path to schema file
-            
-        Returns:
-            Uploaded file object
-        """
-        try:
-            schema_name = Path(schema_path).name
-            print(f"  Uploading schema file to Gemini API: {schema_name}")
-            return self.client.files.upload(file=schema_path)
-        except Exception as e:
-            raise RuntimeError(f"Failed to upload schema file to Gemini: {e}")
-    
-    def generate_denormalization(self, prompt_with_schema: str, schema_file) -> str:
+
+    def generate_denormalization(self, prompt_with_schema: str) -> str:
         """
         Generate denormalized schema using Gemini API.
         
         Args:
             prompt_with_schema: Prompt text with schema already injected
-            schema_file: Uploaded schema file object from Gemini Files API
             
         Returns:
             LLM generated denormalized schema as string
@@ -96,32 +79,13 @@ class GeminiHandler:
                 topK=10,
                 maxOutputTokens=16384,
             )
-            
-            # Build prompt with file reference
-            prompt_parts = [
-                prompt_with_schema,
-                types.Part.from_uri(
-                    file_uri=schema_file.uri,
-                    mime_type=schema_file.mime_type,
-                ),
-            ]
-            
-            # Stream response
-            print("  Calling Gemini API (streaming response)...")
-            response_text = ""
-            
-            stream = self.client.models.generate_content_stream(
+            print("  Calling Gemini API ...")
+            response = self.client.models.generate_content(
                 model=self.model,
-                contents=prompt_parts,
+                contents=prompt_with_schema,
                 config=generate_content_config,
             )
-            
-            for chunk in stream:
-                response_text += chunk.text
-                print(chunk.text, end="", flush=True)
-            
-            print("\n")  # Add newline after streaming completes
-            return response_text
+            return response.text
         
         except Exception as e:
             raise RuntimeError(f"Failed to generate denormalization with Gemini: {e}")
@@ -149,15 +113,10 @@ class GeminiHandler:
             with open(schema_file_path, 'w', encoding='utf-8') as f:
                 f.write(schema_content)
             
-            # Upload schema
-            schema_file = self.upload_schema_file(str(schema_file_path))
-            
-            # Generate denormalization
-            result = self.generate_denormalization(prompt_with_schema, schema_file)
-            
+            result = self.generate_denormalization(prompt_with_schema)
             return result
         
         finally:
-            # Clean up temp file
+            # Clean up temporary file
             if schema_file_path.exists():
                 schema_file_path.unlink()

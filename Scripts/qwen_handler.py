@@ -48,7 +48,7 @@ class QwenHandler:
         elif self.mode == "local":
             # Local instance mode
             self.client = Client()  # Defaults to localhost
-            self.model = "qwen3.5:9b"
+            self.model = "qwen3.5:4b"
         
         else:
             raise ValueError(f"Invalid mode: {self.mode}. Use 'api' or 'local'.")
@@ -69,17 +69,21 @@ class QwenHandler:
             
             response = self.client.generate(
                 model=self.model,
+                think=False,
                 prompt=formatted_prompt,
                 options={
                     "temperature": 1.0,
                     "top_p": 0.65,
                     "top_k": 10,
-                }
+                    "num_ctx": 14500,
+                    "num_predict": 4700,
+                },
             )
-            
-            response_text = response.get("response", "")
-            return response_text
+            print(response.prompt_eval_count)
+            print(response.eval_count)
+            return response.response
         
+    
         except Exception as e:
             raise RuntimeError(
                 f"Failed to generate denormalization with Qwen ({self.mode}): {e}"
@@ -100,12 +104,6 @@ class QwenHandler:
         
         # Inject schema into prompt
         formatted_prompt = inject_schema(prompt_content, schema_content)
-        
         # Generate denormalization
         result = self.generate_denormalization(formatted_prompt)
-        
-        # Stream output to stdout for user to see
-        if result:
-            print(result)
-        
         return result
