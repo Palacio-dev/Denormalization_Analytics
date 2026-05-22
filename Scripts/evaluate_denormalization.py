@@ -28,10 +28,23 @@ class SQLParser:
         
         tables = {}
         # Find all CREATE TABLE statements
-        table_pattern = r'CREATE TABLE\s+(\w+)\s*\((.*?)\);'
+        # Updated pattern to handle:
+        # - CREATE TABLE IF NOT EXISTS
+        # - Schema-qualified names (e.g., public."Album")
+        # - Quoted identifiers (e.g., "TableName")
+        # Pattern: CREATE TABLE [IF NOT EXISTS] [schema.]table_name (...)
+        table_pattern = r'CREATE TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:\w+\.)?(?:"[^"]+"|\'[^\']+\'|\w+)\s*\((.*?)\);'
         matches = re.findall(table_pattern, content, re.DOTALL | re.IGNORECASE)
         
-        for table_name, table_body in matches:
+        # Also match table names separately with adjusted pattern
+        table_pattern_with_name = r'CREATE TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:(\w+)\.)?(?:"([^"]+)"|\'([^\']+)\'|(\w+))\s*\((.*?)\);'
+        matches_with_names = re.findall(table_pattern_with_name, content, re.DOTALL | re.IGNORECASE)
+        
+        for match in matches_with_names:
+            # match is (schema, quoted_name1, quoted_name2, unquoted_name, table_body)
+            schema = match[0]
+            table_name = match[1] or match[2] or match[3]
+            table_body = match[4]
             columns = []
             constraints = []
             
@@ -196,6 +209,9 @@ class ModelComparator:
         """
         rel_count = len(self.relational_attrs)
         denorm_count = len(self.denormalized_attrs)
+        
+        if rel_count == 0:
+            return 0.0
 
         return denorm_count / rel_count
     
@@ -264,7 +280,7 @@ class ModelComparator:
             
             rel_info = rel_columns_list[best_i]
             denorm_info = denorm_columns_list[best_j]
-            pairs.append((rel_info['name'], denorm_info['name']))
+            pairs.append((rel_info['full_def'], denorm_info['full_def']))
             rel_paired[best_i] = True
             denorm_paired[best_j] = True
 
@@ -285,16 +301,16 @@ class ModelComparator:
         
         return pairs
     
-    def tokenize_sql(self, sql_string: str) -> List[str]:
-        """Tokenize SQL string for metric calculation"""
-        # Remove extra spaces and split
-        tokens = re.findall(r'\w+|\(|\)', sql_string)
-        return tokens
+    # def tokenize_sql(self, sql_string: str) -> List[str]:
+    #     """Tokenize SQL string for metric calculation"""
+    #     # Remove extra spaces and split
+    #     tokens = re.findall(r'\w+|\(|\)', sql_string)
+    #     return tokens
     
-    def calculate_bleu(self, reference: str, candidate: str, weights=(0.5, 0.5)) -> float:
+    def calculate_bleu(self, reference: str, candidate: str, weights=(1.0,)) -> float:
         """Calculate BLEU score"""
-        ref_tokens = self.tokenize_sql(reference)
-        cand_tokens = self.tokenize_sql(candidate)
+        ref_tokens = reference.split()
+        cand_tokens = candidate.split()
         
         try:
             score = sentence_bleu([ref_tokens], cand_tokens, weights=weights)
@@ -304,14 +320,12 @@ class ModelComparator:
         return score
     
     def calculate_rouge(self, reference: str, candidate: str) -> Dict:
-        """Calculate ROUGE scores (ROUGE-1, ROUGE-2, ROUGE-L)"""
-        scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True)
+        """Calculate ROUGE scores (ROUGE-1)"""
+        scorer = rouge_scorer.RougeScorer(['rouge1'], use_stemmer=True)
         scores = scorer.score(reference, candidate)
         
         return {
             'rouge1': scores['rouge1'].fmeasure,
-            'rouge2': scores['rouge2'].fmeasure,
-            'rougeL': scores['rougeL'].fmeasure
         }
     
     def calculate_meteor(self, reference: str, candidate: str) -> float:
@@ -342,7 +356,6 @@ class ModelComparator:
         """
         results = {
             'type_preservation': [],
-            'semantic_preservation': [],
             'issues': []
         }
         
@@ -375,6 +388,64 @@ class ModelComparator:
             results['type_preservation_rate'] = type_matches / len(results['type_preservation'])
         else:
             results['type_preservation_rate'] = 0.0
+        
+        return results
+    
+    def build_combined_attribute_text(self, tables: Dict, exclude_junction_tables: bool = True) -> str:
+        """
+        Build combined text from all column names in tables.
+        Extracts all column names, sorts them alphabetically, and joins as space-separated string.
+        
+        Args:
+            tables: Dictionary of tables
+            exclude_junction_tables: If True, skip many-to-many junction tables
+            
+        Returns:
+            Space-separated string of sorted column names
+        """
+        column_names = []
+        
+        for table_name, table_info in tables.items():
+            # Skip junction tables if requested
+            if exclude_junction_tables and SQLParser.is_junction_table(table_info):
+                continue
+            
+            for col_def in table_info['columns']:
+                col_info = SQLParser.extract_column_info(col_def)
+                if col_info:
+                    column_names.append(col_info['name'])
+        
+        # Sort alphabetically for reproducible comparison
+        column_names.sort()
+        
+        # Join as space-separated string
+        return ' '.join(column_names)
+    
+    def calculate_structural_metrics(self) -> Dict:
+        """
+        Calculate BLEU, ROUGE, and METEOR scores on combined, alphabetically-sorted attribute names.
+        This measures structural/naming similarity between relational and denormalized models.
+        
+        Returns:
+            Dictionary with metric scores and combined texts
+        """
+        # Build combined texts from both models
+        rel_text = self.build_combined_attribute_text(self.relational_tables, exclude_junction_tables=True)
+        denorm_text = self.build_combined_attribute_text(self.denormalized_tables, exclude_junction_tables=True)
+        
+        results = {
+            'relational_text': rel_text,
+            'denormalized_text': denorm_text,
+        }
+        
+        # Calculate metrics: reference = relational, candidate = denormalized
+        bleu = self.calculate_bleu(rel_text, denorm_text)
+        rouge = self.calculate_rouge(rel_text, denorm_text)
+        meteor = self.calculate_meteor(rel_text, denorm_text)
+        
+        results['bleu'] = bleu
+        results['rouge1'] = rouge['rouge1']
+        results['meteor'] = meteor
         
         return results
     
@@ -418,7 +489,7 @@ class ModelComparator:
         report_lines.append("\n2. COMPLETENESS ANALYSIS")
         report_lines.append("-" * 80)
         completeness = self.calculate_completeness()
-        report_lines.append(f"Completeness Ratio: {completeness:.4f}")
+        report_lines.append(f"Completeness Ratio: {completeness:.2f}")
         if completeness == 1.0:
             report_lines.append("✓ IDEAL: No information was added or lost")
         elif completeness > 1.0:
@@ -442,58 +513,42 @@ class ModelComparator:
         else:
             report_lines.append("\n✓ No type mismatches found")
         
-        # 4. Metric-based Comparison
-        report_lines.append("\n4. METRIC-BASED COMPARISON")
+        # 4. Structural Similarity Analysis
+        report_lines.append("\n4. STRUCTURAL SIMILARITY ANALYSIS")
+        report_lines.append("-" * 80)
+        report_lines.append("\nThis section measures naming and structural alignment between models.")
+        report_lines.append("Metrics are calculated on combined, alphabetically-sorted column names.\n")
+        
+        structural_metrics = self.calculate_structural_metrics()
+        
+        report_lines.append("Relational Model (Combined Text):")
+        report_lines.append(f"  {structural_metrics['relational_text']}\n")
+        
+        report_lines.append("Denormalized Model (Combined Text):")
+        report_lines.append(f"  {structural_metrics['denormalized_text']}\n")
+        
+        report_lines.append("Structural Similarity Metrics:")
+        report_lines.append(f"  BLEU Score:    {structural_metrics['bleu']:.4f}")
+        report_lines.append(f"  ROUGE-1:       {structural_metrics['rouge1']:.4f}")
+        report_lines.append(f"  METEOR Score:  {structural_metrics['meteor']:.4f}")
+        
+        # 5. Attribute Pairing for Type Validation
+        report_lines.append("\n5. ATTRIBUTE PAIRING FOR TYPE VALIDATION")
         report_lines.append("-" * 80)
         
         pairs = self.pair_identifiers()
-        report_lines.append(f"\nIdentified {len(pairs)} attribute pairs for comparison:\n")
-        
-        all_bleu_scores = []
-        all_rouge1_scores = []
-        all_rouge2_scores = []
-        all_rougeL_scores = []
-        all_meteor_scores = []
+        report_lines.append(f"\nIdentified {len(pairs)} attribute pairs for type checking:\n")
         
         for i, (rel_attr, denorm_attr) in enumerate(pairs, 1):
             report_lines.append(f"Pair {i}:")
             report_lines.append(f"  Relational:    {rel_attr}")
             report_lines.append(f"  Denormalized:  {denorm_attr}")
-            
-            # Calculate metrics
-            bleu = self.calculate_bleu(rel_attr, denorm_attr)
-            rouge = self.calculate_rouge(rel_attr, denorm_attr)
-            meteor = self.calculate_meteor(rel_attr, denorm_attr)
-            
-            all_bleu_scores.append(bleu)
-            all_rouge1_scores.append(rouge['rouge1'])
-            all_rouge2_scores.append(rouge['rouge2'])
-            all_rougeL_scores.append(rouge['rougeL'])
-            all_meteor_scores.append(meteor)
-            
-            report_lines.append(f"  BLEU:     {bleu:.4f}")
-            report_lines.append(f"  ROUGE-1:  {rouge['rouge1']:.4f}")
-            report_lines.append(f"  ROUGE-2:  {rouge['rouge2']:.4f}")
-            report_lines.append(f"  ROUGE-L:  {rouge['rougeL']:.4f}")
-            report_lines.append(f"  METEOR:   {meteor:.4f}")
             report_lines.append("")
-        
-        # 5. Overall Metrics Summary
-        report_lines.append("\n5. OVERALL METRICS SUMMARY")
-        report_lines.append("-" * 80)
-        if all_bleu_scores:
-            report_lines.append(f"Average BLEU Score:    {sum(all_bleu_scores)/len(all_bleu_scores):.4f}")
-            report_lines.append(f"Average ROUGE-1:       {sum(all_rouge1_scores)/len(all_rouge1_scores):.4f}")
-            report_lines.append(f"Average ROUGE-2:       {sum(all_rouge2_scores)/len(all_rouge2_scores):.4f}")
-            report_lines.append(f"Average ROUGE-L:       {sum(all_rougeL_scores)/len(all_rougeL_scores):.4f}")
-            report_lines.append(f"Average METEOR Score:  {sum(all_meteor_scores)/len(all_meteor_scores):.4f}")
-        else:
-            report_lines.append("No paired attributes found for comparison")
         
         report_lines.append("\n" + "=" * 80 + "\n")
         # Print to console
         report_text = "\n".join(report_lines)
-        print(report_text)
+        # print(report_text)
         
         # Save to file if specified
         if output_file:
