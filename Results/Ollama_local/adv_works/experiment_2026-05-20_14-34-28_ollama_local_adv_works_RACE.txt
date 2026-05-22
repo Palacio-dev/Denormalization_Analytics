@@ -1,0 +1,500 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-20_14-34-28
+Model: ollama_local
+Prompt: RACE
+Schema: adv_works
+==================================================
+
+As a Senior Data Engineer with 15 years of experience specializing in relational and analytical database performance, I have analyzed the Adventure Works Cycles schema provided. The goal is to denormalize the physical model to optimize for read-heavy analytical workloads, specifically targeting scenarios involving complex joins between employees, products, and sales data.
+
+### 1. Deep Analysis of the Schema
+
+The provided schema is a classic "Star Schema" or "Normalized Transactional Schema" (OLTP style) found in the Adventure Works sample database.
+*   **Granularity:** Highly granular. For example, `sales.salesorderdetail` links a specific order line to a specific product, while `production.product` holds manufacturing details.
+*   **Join Complexity:** Analytical queries often require joining across multiple domains: `SalesOrderHeader` -> `SalesOrderDetail` -> `Product` -> `ProductModel` -> `ProductModelIllustration` -> `Illustration`.
+*   **Bottlenecks:**
+    *   **Join Overhead:** Queries aggregating sales by product model, filtered by manufacturing location, and enriched with product images or descriptions require multiple nested loops or hash joins.
+    *   **Data Skew:** Aggregations on `ProductID` or `BusinessEntityID` often result in skewed data distributions if not pre-calculated.
+    *   **Column Access:** Queries frequently need to join `Person` tables (first/last name) with `SalesPerson` quotas and `Employee` departments simultaneously.
+
+### 2. Frequent Queries / Workload Context (Inferred)
+
+Based on the structure and typical use cases for this dataset:
+
+1.  **Sales Performance Analysis:**
+    *   *Query:* "Show total sales revenue per product model for the current year, grouped by the manufacturing location of the parts used, including the count of unique customers."
+    *   *Bottleneck:* Joining `SalesOrderHeader`, `SalesOrderDetail`, `Product`, `Production.BillOfMaterials`, `Production.Location`, and `Production.Product` (for components).
+
+2.  **Inventory & Production Planning:**
+    *   *Query:* "Identify products with low stock levels that are currently being manufactured in Location X, along with their standard cost and the list of required components."
+    *   *Bottleneck:* Joining `Production.ProductInventory`, `Production.Product`, `Production.BillOfMaterials`, and `Production.WorkOrder`.
+
+3.  **HR & Sales Alignment:**
+    *   *Query:* "List all salespeople in Territory Y, their current quota, their bonus, and the departments they belong to, including the number of active employees in those departments."
+    *   *Bottleneck:* Joining `SalesPerson`, `SalesTerritory`, `HumanResources.Employee`, `HumanResources.Department`, and `HumanResources.EmployeeDepartmentHistory`.
+
+### 3. Evaluation of Common Denormalization Techniques
+
+*   **Adding Redundant Attributes:** Highly effective for the HR/Sales alignment query. Storing `TerritoryName` directly in `SalesPerson` avoids joining `SalesTerritory`. Storing `FirstName`/`LastName` in `SalesPerson` avoids joining `Person`.
+*   **Adding Derived Attributes:** Essential for financial metrics. Pre-calculating `TotalSales`, `AvgProfit`, or `StockValue` per product model allows for instant retrieval without aggregation.
+*   **Collapsing Relations:** Critical for the Bill of Materials (BOM). The recursive nature of `BillOfMaterials` (parent product has components, components have sub-components) is hard to query efficiently in a normalized form. Flattening this into a single table with `Level` and `ParentID` is a form of collapsing.
+*   **Vertical Partitioning:** Less applicable here. The data is already somewhat separated by domain (Sales, HR, Production). However, splitting `Product` into `ProductMaster` (static attributes like Name, Color) and `ProductPricing` (ListPrice, StandardCost) could help if those columns are rarely accessed together, but in an analytical context, keeping them together often simplifies the query logic.
+
+### 4. Design of Multiple Possible Denormalized Schemas
+
+#### Option A: The "Wide Fact Table" Approach (Focus on Sales)
+This approach creates a massive, denormalized `Fact_Sales_Detailed` table that joins all necessary dimensions (Product, Model, Location, Customer, Salesperson) into a single row per transaction.
+*   *Pros:* Extremely fast reads for complex sales analysis.
+*   *Cons:* Data duplication of dimension attributes (e.g., repeating `Product.Name` 100,000 times). Maintenance of dimension changes is difficult.
+
+#### Option B: The "Dimension Star" Approach (Focus on Readability)
+Create denormalized dimension tables (e.g., `Dim_Product` with `Model`, `Color`, `Weight`, `StandardCost` all in one table) and keep the facts relatively clean but remove the need for self-joins on dimensions.
+*   *Pros:* Good balance. Easier to maintain than Option A.
+*   *Cons:* Still requires some joins if the fact table doesn't contain enough pre-calculated metrics.
+
+#### Option C: The "Aggregated Snapshot" Approach (Focus on Performance)
+Create a denormalized table specifically for the most frequent query pattern (Sales by Product Model + Location), pre-calculating aggregates.
+*   *Pros:* Maximum performance for the specific top queries.
+*   *Cons:* Doesn't support ad-hoc queries that might need different granularities.
+
+**Decision:** We will adopt a hybrid of **Option A and B**. We will create a denormalized `Fact_Sales_Detailed` table that includes key dimension attributes (Product Name, Model Name, Manufacturing Location, Salesperson Name, Territory Name) to eliminate the most expensive joins. We will also add derived attributes for common aggregations.
+
+### 5. Evaluation and Selection
+
+*   **Consistency:** Option A (Wide Fact) is the most consistent with the goal of "read-heavy analytical workloads" where query speed is paramount over data integrity maintenance (which is usually handled by a separate, read-only materialized view or a snapshot process).
+*   **Feasibility:** Given the Adventure Works schema, the number of unique products and models is manageable for denormalization.
+*   **Recommendation:** We will proceed with **Option A (Wide Fact Table)** for the Sales domain, as it is the most common analytical use case. We will also denormalize the HR domain for the employee-department lookup.
+
+### 6. Final Denormalized Schema Design
+
+Below is the SQL script to create the denormalized physical schema. This script drops the original tables (for demonstration purposes of the new physical model) and creates the new denormalized tables.
+
+```sql
+-- ============================================================================
+-- DENORMALIZED SCHEMA FOR ANALYTICAL WORKLOADS
+-- Strategy: 
+-- 1. Create 'Wide Fact' tables that embed dimension attributes to eliminate joins.
+-- 2. Add derived attributes for pre-calculated aggregates.
+-- 3. Flatten complex relationships (e.g., Product Model & Illustrations).
+-- ============================================================================
+
+BEGIN;
+
+-- --------------------------------------------------------------------------
+-- 1. DENORMALIZED SALES FACT TABLE
+-- Purpose: Eliminate joins between SalesOrderHeader, SalesOrderDetail, Product,
+--           ProductModel, ProductModelIllustration, Person, SalesTerritory.
+-- --------------------------------------------------------------------------
+
+DROP TABLE IF EXISTS sales.fact_sales_detailed;
+
+CREATE TABLE IF NOT EXISTS sales.fact_sales_detailed
+(
+    -- Transactional Keys
+    salesorderid integer NOT NULL,
+    salesorderdetailid integer NOT NULL,
+    referenceorderid integer,
+    referenceorderlineid integer,
+    orderdate timestamp without time zone NOT NULL,
+    duedate timestamp without time zone NOT NULL,
+    shipdate timestamp without time zone,
+    status smallint NOT NULL DEFAULT 1,
+    onlineorderflag boolean NOT NULL DEFAULT true,
+    purchaseordernumber character varying(128) COLLATE pg_catalog."default",
+    accountnumber character varying(128) COLLATE pg_catalog."default",
+    creditcardapprovalcode character varying(15) COLLATE pg_catalog."default",
+    comment character varying(128) COLLATE pg_catalog."default",
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+
+    -- Product Dimensions (Denormalized)
+    productid integer NOT NULL,
+    productname character varying(255) COLLATE pg_catalog."default",
+    productnumber character varying(25) COLLATE pg_catalog."default",
+    productcolor character varying(15) COLLATE pg_catalog."default",
+    productsize character varying(5) COLLATE pg_catalog."default",
+    productweight numeric(8, 2),
+    productstandardcost numeric NOT NULL,
+    productlistprice numeric NOT NULL,
+    productdaystomanufacture integer NOT NULL,
+    productproductline character(2) COLLATE pg_catalog."default",
+    productclass character(2) COLLATE pg_catalog."default",
+    productstyle character(2) COLLATE pg_catalog."default",
+    productmodelid integer NOT NULL,
+    productmodelname character varying(255) COLLATE pg_catalog."default",
+    productmodelcatalogdescription text COLLATE pg_catalog."default",
+    productmodelinstructions text COLLATE pg_catalog."default",
+    productsubcategoryid integer,
+    productsubcategoryname character varying(255) COLLATE pg_catalog."default",
+    productcategoryid integer,
+    productcategoryname character varying(255) COLLATE pg_catalog."default",
+
+    -- Manufacturing Dimensions (Denormalized)
+    productassemblyid integer,
+    componentid integer,
+    bomlevel smallint,
+    perassemblyqty numeric(8, 2) NOT NULL DEFAULT 1.00,
+    unitmeasurecode character(3) COLLATE pg_catalog."default",
+    locationid smallint NOT NULL,
+    locationname character varying(255) COLLATE pg_catalog."default",
+    locationcostrate numeric NOT NULL DEFAULT 0.00,
+    locationavailability numeric(8, 2) NOT NULL DEFAULT 0.00,
+
+    -- Salesperson Dimensions (Denormalized)
+    salespersonid integer,
+    salespersonname character varying(255) COLLATE pg_catalog."default",
+    salespersonfirstname character varying(255) COLLATE pg_catalog."default",
+    salespersonlastname character varying(255) COLLATE pg_catalog."default",
+    salespersontitle character varying(8) COLLATE pg_catalog."default",
+    salespersonterritoryid integer,
+    salespersonterritoryname character varying(255) COLLATE pg_catalog."default",
+    salespersonsalesquota numeric NOT NULL DEFAULT 0.00,
+    salespersonbonus numeric NOT NULL DEFAULT 0.00,
+    salespersoncommissionpct numeric NOT NULL DEFAULT 0.00,
+    salespersonsalesytd numeric NOT NULL DEFAULT 0.00,
+    salespersonsaleslastyear numeric NOT NULL DEFAULT 0.00,
+
+    -- Territory Dimensions (Denormalized)
+    territoryid integer NOT NULL,
+    territoryname character varying(255) COLLATE pg_catalog."default",
+    territorycountryregioncode character varying(3) COLLATE pg_catalog."default",
+    territorygroup character varying(50) COLLATE pg_catalog."default",
+    territorysalesytd numeric NOT NULL DEFAULT 0.00,
+    territorysaleslastyear numeric NOT NULL DEFAULT 0.00,
+    territorycostytd numeric NOT NULL DEFAULT 0.00,
+    territorycostlastyear numeric NOT NULL DEFAULT 0.00,
+
+    -- Customer Dimensions (Denormalized)
+    customerid integer NOT NULL,
+    customerpersonid integer,
+    customerstoreid integer,
+    customerterritoryid integer,
+    customerfirstname character varying(255) COLLATE pg_catalog."default",
+    customerlastname character varying(255) COLLATE pg_catalog."default",
+    customeremailaddress character varying(50) COLLATE pg_catalog."default",
+    customerdemographics xml COLLATE pg_catalog."default",
+
+    -- Credit Card Dimensions (Denormalized)
+    creditcardid integer,
+    creditcardtype character varying(50) COLLATE pg_catalog."default",
+    creditcardnumber character varying(25) COLLATE pg_catalog."default",
+    creditcardexpmonth smallint NOT NULL,
+    creditcardexpyear smallint NOT NULL,
+
+    -- Currency Dimensions (Denormalized)
+    currencyrateid integer NOT NULL,
+    currencyratefromcurrencycode character(3) COLLATE pg_catalog."default",
+    currencyratetocurrencycode character(3) COLLATE pg_catalog."default",
+    currencyrateaveragerate numeric NOT NULL,
+    currencyrateendofdayrate numeric NOT NULL,
+
+    -- Shipping Dimensions (Denormalized)
+    shipmethodid integer NOT NULL,
+    shipmethodname character varying(255) COLLATE pg_catalog."default",
+    shipmethodshipbase numeric NOT NULL DEFAULT 0.00,
+    shipmethodshiprate numeric NOT NULL DEFAULT 0.00,
+
+    -- Bill of Materials (Flattened for BOM Analysis)
+    -- Note: This includes the most common BOM structure. For recursive BOMs, 
+    -- additional flattening logic would be needed, but this covers the direct level.
+    -- We assume a 1-to-many relationship from Product to BOM components.
+
+    -- Derived Attributes (Pre-calculated for performance)
+    -- These are calculated from the base columns but stored to avoid runtime aggregation
+    line_total numeric NOT NULL DEFAULT 0.00, -- Calculated as UnitPrice * OrderQty
+    line_discount numeric NOT NULL DEFAULT 0.00, -- Calculated as UnitPrice * UnitPriceDiscount
+    line_total_with_discount numeric NOT NULL DEFAULT 0.00, -- Calculated as LineTotal - LineDiscount
+    order_total numeric NOT NULL DEFAULT 0.00, -- Aggregated at Order Level
+    order_total_with_discount numeric NOT NULL DEFAULT 0.00, -- Aggregated at Order Level
+    order_subtotal numeric NOT NULL DEFAULT 0.00, -- Computed as Sum(LineTotal)
+    order_taxamt numeric NOT NULL DEFAULT 0.00,
+    order_freight numeric NOT NULL DEFAULT 0.00,
+    order_total_due numeric, -- Computed as Subtotal + TaxAmt + Freight
+
+    -- Illustration Dimensions (Denormalized)
+    illustrationid integer,
+    illustrationdiagram xml COLLATE pg_catalog."default",
+    illustrationthumbnailphoto bytea,
+    illustrationthumbnailphotofilename character varying(50) COLLATE pg_catalog."default",
+    illustrationlargephoto bytea,
+    illustrationlargephotofilename character varying(50) COLLATE pg_catalog."default",
+
+    -- Special Offer Dimensions (Denormalized)
+    specialofferid integer NOT NULL,
+    specialofferedescription character varying(255) COLLATE pg_catalog."default",
+    specialofferediscountpct numeric NOT NULL DEFAULT 0.00,
+    specialofferdiscounttype character varying(50) COLLATE pg_catalog."default",
+    specialoffercategory character varying(50) COLLATE pg_catalog."default",
+    specialofferstartdate timestamp without time zone NOT NULL,
+    specialofferenddate timestamp without time zone NOT NULL,
+    specialofferminqty integer NOT NULL DEFAULT 0,
+    specialoffermaxqty integer,
+
+    -- Shipping Tracking (Denormalized)
+    carriertrackingnumber character varying(25) COLLATE pg_catalog."default",
+
+    -- Primary Key
+    CONSTRAINT "PK_Fact_Sales_Detailed" PRIMARY KEY (salesorderid, salesorderdetailid)
+);
+
+-- --------------------------------------------------------------------------
+-- 2. DENORMALIZED HR FACT TABLE (Employee Dept History)
+-- Purpose: Flatten Employee Department History to allow easy analysis of 
+--           department transitions without joins.
+-- --------------------------------------------------------------------------
+
+DROP TABLE IF EXISTS humanresources.fact_employee_dept_history;
+
+CREATE TABLE IF NOT EXISTS humanresources.fact_employee_dept_history
+(
+    -- Employee Info (Denormalized)
+    businessentityid integer NOT NULL,
+    employeejobtitle character varying(50) COLLATE pg_catalog."default",
+    employeebirthdate date NOT NULL,
+    employeegender character(1) COLLATE pg_catalog."default",
+    employeevacationhours smallint NOT NULL DEFAULT 0,
+    employeesickleavehours smallint NOT NULL DEFAULT 0,
+    employeeorganizationnode character varying COLLATE pg_catalog."default",
+    employeehiredate date NOT NULL,
+    employeecurrentflag boolean NOT NULL DEFAULT true,
+
+    -- Department Info (Denormalized)
+    departmentid smallint NOT NULL,
+    departmentname character varying(255) COLLATE pg_catalog."default",
+    departmentgroupname character varying(255) COLLATE pg_catalog."default",
+
+    -- Shift Info (Denormalized)
+    shiftid smallint NOT NULL,
+    shiftname character varying(255) COLLATE pg_catalog."default",
+    shiftstarttime time without time zone NOT NULL,
+    shiftendtime time without time zone NOT NULL,
+
+    -- Time Dimensions (Denormalized)
+    startdate date NOT NULL,
+    enddate date,
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+
+    -- Derived Attributes
+    tenure_days integer NOT NULL DEFAULT 0, -- Calculated based on startdate and enddate
+
+    -- Primary Key
+    CONSTRAINT "PK_Fact_Employee_Dept_History" PRIMARY KEY (businessentityid, startdate, departmentid, shiftid)
+);
+
+-- --------------------------------------------------------------------------
+-- 3. DENORMALIZED PRODUCT MODEL & ILLUSTRATION
+-- Purpose: Flatten Product Model and Illustration to allow easy retrieval 
+--           of product images and descriptions without joins.
+-- --------------------------------------------------------------------------
+
+DROP TABLE IF EXISTS production.fact_product_model_illustration;
+
+CREATE TABLE IF NOT EXISTS production.fact_product_model_illustration
+(
+    -- Product Model Info (Denormalized)
+    productmodelid integer NOT NULL,
+    productmodelname character varying(255) COLLATE pg_catalog."default",
+    productmodelcatalogdescription text COLLATE pg_catalog."default",
+    productmodelinstructions text COLLATE pg_catalog."default",
+
+    -- Illustration Info (Denormalized)
+    illustrationid integer NOT NULL,
+    illustrationdiagram xml COLLATE pg_catalog."default",
+    illustrationthumbnailphoto bytea,
+    illustrationthumbnailphotofilename character varying(50) COLLATE pg_catalog."default",
+    illustrationlargephoto bytea,
+    illustrationlargephotofilename character varying(50) COLLATE pg_catalog."default",
+
+    -- Relationship Flag
+    is_primary boolean NOT NULL DEFAULT false,
+
+    -- Derived Attributes
+    has_large_image boolean NOT NULL DEFAULT false, -- Boolean flag indicating if large photo exists
+
+    -- Primary Key
+    CONSTRAINT "PK_Fact_Product_Model_Illustration" PRIMARY KEY (productmodelid, illustrationid)
+);
+
+-- --------------------------------------------------------------------------
+-- 4. DENORMALIZED BILL OF MATERIALS (Flattened)
+-- Purpose: Simplify the recursive nature of BOMs for common analysis.
+-- --------------------------------------------------------------------------
+
+DROP TABLE IF EXISTS production.fact_bom_flat;
+
+CREATE TABLE IF NOT EXISTS production.fact_bom_flat
+(
+    -- Parent Product Info (Denormalized)
+    productassemblyid integer NOT NULL,
+    productassemblyname character varying(255) COLLATE pg_catalog."default",
+    productassemblycolor character varying(15) COLLATE pg_catalog."default",
+    productassemblystandardcost numeric NOT NULL,
+    productassemblylistprice numeric NOT NULL,
+
+    -- Component Info (Denormalized)
+    componentid integer NOT NULL,
+    componentname character varying(255) COLLATE pg_catalog."default",
+    componentcolor character varying(15) COLLATE pg_catalog."default",
+    componentweight numeric(8, 2),
+    componentstandardcost numeric NOT NULL,
+    componentlistprice numeric NOT NULL,
+
+    -- BOM Structure (Denormalized)
+    billofmaterialsid integer NOT NULL,
+    bomlevel smallint NOT NULL,
+    perassemblyqty numeric(8, 2) NOT NULL DEFAULT 1.00,
+    unitmeasurecode character(3) COLLATE pg_catalog."default",
+
+    -- Derived Attributes
+    component_cost numeric NOT NULL DEFAULT 0.00, -- Calculated as StandardCost * PerAssemblyQty
+
+    -- Primary Key
+    CONSTRAINT "PK_Fact_BOM_Flat" PRIMARY KEY (billofmaterialsid)
+);
+
+-- --------------------------------------------------------------------------
+-- 5. FOREIGN KEY CONSTRAINTS (Minimal Set for Integrity)
+-- Note: In a pure analytical warehouse, foreign keys might be dropped to improve write speed,
+-- but we keep them for referential integrity on the denormalized tables.
+-- --------------------------------------------------------------------------
+
+ALTER TABLE IF EXISTS sales.fact_sales_detailed
+    ADD CONSTRAINT "FK_Fact_Sales_Product_ProductID" FOREIGN KEY (productid)
+    REFERENCES production.product (productid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.fact_sales_detailed
+    ADD CONSTRAINT "FK_Fact_Sales_SalesPerson_BusinessEntityID" FOREIGN KEY (salespersonid)
+    REFERENCES sales.salesperson (businessentityid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.fact_sales_detailed
+    ADD CONSTRAINT "FK_Fact_Sales_Territory_TerritoryID" FOREIGN KEY (territoryid)
+    REFERENCES sales.salesterritory (territoryid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.fact_sales_detailed
+    ADD CONSTRAINT "FK_Fact_Sales_ProductModel_ProductModelID" FOREIGN KEY (productmodelid)
+    REFERENCES production.productmodel (productmodelid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.fact_sales_detailed
+    ADD CONSTRAINT "FK_Fact_Sales_ProductSubcategory_ProductSubcategoryID" FOREIGN KEY (productsubcategoryid)
+    REFERENCES production.productsubcategory (productsubcategoryid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.fact_sales_detailed
+    ADD CONSTRAINT "FK_Fact_Sales_ProductCategory_ProductCategoryID" FOREIGN KEY (productcategoryid)
+    REFERENCES production.productcategory (productcategoryid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.fact_sales_detailed
+    ADD CONSTRAINT "FK_Fact_Sales_ProductModelIllustration_ProductModelID_IllustrationID" FOREIGN KEY (productmodelid, illustrationid)
+    REFERENCES production.productmodelillustration (productmodelid, illustrationid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.fact_sales_detailed
+    ADD CONSTRAINT "FK_Fact_Sales_SpecialOfferProduct_SpecialOfferID_ProductID" FOREIGN KEY (specialofferid, productid)
+    REFERENCES sales.specialofferproduct (specialofferid, productid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.fact_sales_detailed
+    ADD CONSTRAINT "FK_Fact_Sales_ProductProductPhoto_ProductID_ProductPhotoID" FOREIGN KEY (productid, productphotoid)
+    REFERENCES production.productproductphoto (productid, productphotoid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.fact_sales_detailed
+    ADD CONSTRAINT "FK_Fact_Sales_ProductPhoto_ProductPhotoID" FOREIGN KEY (productphotoid)
+    REFERENCES production.productphoto (productphotoid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.fact_sales_detailed
+    ADD CONSTRAINT "FK_Fact_Sales_CountryRegionCurrency_CountryRegionCode_CurrencyCode" FOREIGN KEY (countryregioncode, currencycode)
+    REFERENCES sales.countryregioncurrency (countryregioncode, currencycode) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.fact_sales_detailed
+    ADD CONSTRAINT "FK_Fact_Sales_CurrencyRate_CurrencyRateID" FOREIGN KEY (currencyrateid)
+    REFERENCES sales.currencyrate (currencyrateid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.fact_sales_detailed
+    ADD CONSTRAINT "FK_Fact_Sales_ShipMethod_ShipMethodID" FOREIGN KEY (shipmethodid)
+    REFERENCES purchasing.shipmethod (shipmethodid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.fact_sales_detailed
+    ADD CONSTRAINT "FK_Fact_Sales_PurchaseOrderDetail_PurchaseOrderID_PurchaseOrderDetailID" FOREIGN KEY (purchaseorderid, purchaseorderdetailid)
+    REFERENCES purchasing.purchaseorderdetail (purchaseorderid, purchaseorderdetailid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.fact_sales_detailed
+    ADD CONSTRAINT "FK_Fact_Sales_SalesOrderDetail_SalesOrderID_SalesOrderDetailID" FOREIGN KEY (salesorderid, salesorderdetailid)
+    REFERENCES sales.salesorderdetail (salesorderid, salesorderdetailid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE CASCADE;
+
+ALTER TABLE IF EXISTS sales.fact_sales_detailed
+    ADD CONSTRAINT "FK_Fact_Sales_SalesOrderHeader_SalesOrderID" FOREIGN KEY (salesorderid)
+    REFERENCES sales.salesorderheader (salesorderid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE CASCADE;
+
+ALTER TABLE IF EXISTS humanresources.fact_employee_dept_history
+    ADD CONSTRAINT "FK_Fact_Employee_Dept_History_Employee_BusinessEntityID" FOREIGN KEY (businessentityid)
+    REFERENCES humanresources.employee (businessentityid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS humanresources.fact_employee_dept_history
+    ADD CONSTRAINT "FK_Fact_Employee_Dept_History_Department_DepartmentID" FOREIGN KEY (departmentid)
+    REFERENCES humanresources.department (departmentid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS humanresources.fact_employee_dept_history
+    ADD CONSTRAINT "FK_Fact_Employee_Dept_History_Shift_ShiftID" FOREIGN KEY (shiftid)
+    REFERENCES humanresources.shift (shiftid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS production.fact_product_model_illustration
+    ADD CONSTRAINT "FK_Fact_Product_Model_Illustration_ProductModelID_IllustrationID" FOREIGN KEY (productmodelid, illustrationid)
+    REFERENCES production.productmodelillustration (productmodelid, illustrationid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS production.fact_bom_flat
+    ADD CONSTRAINT "FK_Fact_BOM_ProductAssembly_ProductAssemblyID" FOREIGN KEY (productassemblyid)
+    REFERENCES production.product (productid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS production.fact_bom_flat
+    ADD CONSTRAINT "FK_Fact_BOM_Component_ComponentID" FOREIGN KEY (componentid)
+    REFERENCES production.product (productid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS production.fact_bom_flat
+    ADD CONSTRAINT "FK_Fact_BOM_BillOfMaterials_BillOfMaterialsID" FOREIGN KEY (billofmaterialsid)
+    REFERENCES production.billofmaterials (billofmaterialsid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+COMMIT;
+```

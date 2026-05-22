@@ -203,10 +203,8 @@ class ModelComparator:
     def pair_identifiers(self) -> List[Tuple[str, str]]:
         """
         Pair equivalent identifiers between relational and denormalized models.
-        Uses a multi-stage matching strategy:
-        1. Exact name match
-        2. Partial name match (substring)
-        3. Best Levenshtein distance (for remaining unpaired attributes)
+        Uses the following matching strategy:
+        - Best Levenshtein distance (for remaining unpaired attributes)
         
         Returns list of (relational_attr, denormalized_attr) tuples
         """
@@ -254,7 +252,6 @@ class ModelComparator:
             for j, denorm_info in enumerate(denorm_columns_list):
                 if denorm_paired[j]:
                     continue
-                # Calculate Levenshtein distance (higher is better match)
                 score = Levenshtein.distance(rel_info['name'], denorm_info['name'])
                 if score < best_score:
                     best_score = score
@@ -267,9 +264,7 @@ class ModelComparator:
             
             rel_info = rel_columns_list[best_i]
             denorm_info = denorm_columns_list[best_j]
-            rel_comparison = f"{rel_info['name']} {rel_info['type']}"
-            denorm_comparison = f"{denorm_info['name']} {denorm_info['type']}"
-            pairs.append((rel_comparison, denorm_comparison))
+            pairs.append((rel_info['name'], denorm_info['name']))
             rel_paired[best_i] = True
             denorm_paired[best_j] = True
 

@@ -1,0 +1,116 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-20_11-36-05
+Model: ollama_local
+Prompt: RACE
+Schema: harperdb
+==================================================
+
+Hello. I am a Senior Data Engineer with 15 years of experience in relational and non-relational database architectures. Based on your request, I have analyzed the provided schema (`entitlements`, `users`, `user_entitlements`) and the context of a **read-heavy analytical workload**.
+
+Here is the step-by-step execution following the RACE framework.
+
+---
+
+### Step 0: Schema Analysis
+The current schema consists of:
+1.  **`entitlements`**: Stores feature/package metadata (dates, limits, flags).
+2.  **`users`**: Minimal storage (ID only).
+3.  **`user_entitlements`**: Junction table linking users to entitlements.
+
+**Observations:**
+*   The `users` table is trivial (single ID).
+*   The `entitlements` table is small and likely read-only or rarely updated in an analytical context.
+*   The `user_entitlements` table acts as the bridge. In an analytical load, the most frequent queries will likely be aggregations over `user_entitlements` joined with `entitlements` (e.g., "Count active users per package type").
+
+### Step 1: Frequent Queries / Workload Context Inference
+Since no specific queries were provided, I infer the heavy read workloads typical for this domain (SaaS/Billing Analytics):
+1.  **Feature Adoption Rate**: `SELECT COUNT(*) FROM user_entitlements WHERE activeFlag = 1 GROUP BY packageType`.
+    *   *Bottleneck*: Requires joining `user_entitlements` with `entitlements` to get `packageType`.
+2.  **Usage Limits vs. Actual Usage**: `SELECT SUM(useCount), SUM(useLimit) FROM user_entitlements JOIN entitlements ON ...`.
+    *   *Bottleneck*: Join overhead on large datasets.
+3.  **Active User Count by Feature**: `SELECT COUNT(DISTINCT user_id) FROM user_entitlements WHERE activeFlag = 1`.
+    *   *Bottleneck*: Filtering and aggregation across the junction table.
+
+### Step 2: Evaluation of Denormalization Techniques
+Based on the inferred workload and the provided techniques:
+
+*   **Technique 1 (Adding Redundant Attributes)**: **High Value**. The `packageType`, `featureType`, and date fields in `entitlements` are accessed in almost every analytical query. Repeatedly joining the small `entitlements` table adds unnecessary I/O and CPU cost for aggregation.
+*   **Technique 2 (Adding Derived Attributes)**: **Medium Value**. While `SUM(useCount)` is useful, the `user_entitlements` table is likely a snapshot or transactional record where the `useCount` might be dynamic. Pre-aggregating raw counts might lead to stale data unless updated frequently. However, pre-calculating "Active Users per Package" is a strong candidate.
+*   **Technique 3 (Collapsing Relations)**: **High Value**. Merging `entitlements` and `user_entitlements` into a single wide table is the most effective way to eliminate the join bottleneck for the specific queries identified.
+*   **Technique 4 (Vertical Partitioning)**: **Low Value**. We do not have enough columns to split logically (e.g., physical vs. commercial). The data is uniform enough that splitting won't help cache efficiency.
+
+### Step 3 & 4: Designing Possible Denormalized Schemas
+
+#### Option A: The "Wide User Entitlement" Table (Collapsing Relations)
+Merge `entitlements` and `user_entitlements` into one table.
+*   *Pros*: Eliminates the join entirely. Extremely fast for "Get all features for User X" or "Aggregate stats by feature".
+*   *Cons*: Increases storage slightly (redundant `activeDate`, `packageType`), but negligible given the small size of `entitlements`.
+
+#### Option B: The "Pre-Aggregated Summary" Table (Adding Derived Attributes)
+Create a separate table `user_entitlement_summary` containing aggregated results (e.g., `total_use_count`, `active_user_count` per `packageType`).
+*   *Pros*: Best for high-level dashboard metrics.
+*   *Cons*: Requires a maintenance job to update it. If the data is static, this is over-engineering.
+
+#### Option C: Hybrid Approach (Recommended)
+Combine Option A and B.
+1.  Create a denormalized `user_entitlements` table that includes all columns from `entitlements`.
+2.  Add a `last_updated` timestamp to ensure data freshness if the source changes.
+3.  Optionally, create a materialized view or a separate small table for the most common aggregate (e.g., Total Active Users).
+
+### Step 5: Evaluation and Selection
+**Selection**: **Option C (Hybrid/Collapsing)** is the most consistent.
+*   **Reasoning**: In analytical workloads, the "Join Cost" is often higher than the "Storage Cost". Since `entitlements` is small, duplicating its columns in the `user_entitlements` table (Collapsing Relations) provides an immediate performance boost for read queries without requiring complex ETL pipelines to maintain a separate summary table. This aligns with the principle of "Read Optimization over Write Optimization" in data warehousing.
+
+### Step 6: Final Denormalized Schema Design
+
+Below is the optimized physical schema. I have applied **Collapsing Relations** to merge `entitlements` and `user_entitlements` into a single denormalized table, and added **Redundant Attributes** to ensure `packageType` and `featureType` are available without joins.
+
+```sql
+-- Drop existing tables to ensure clean state
+DROP TABLE IF EXISTS denormalized_user_entitlements;
+
+-- Create the Denormalized Schema
+CREATE TABLE denormalized_user_entitlements (
+    -- Primary Key
+    user_id INT NOT NULL,
+    entitlement_id INT NOT NULL,
+    
+    -- Redundant Attributes from 'entitlements' (Collapsing Relations)
+    -- These are duplicated to eliminate the need for JOINs in analytical queries
+    package_type VARCHAR(4),
+    feature_type VARCHAR(4),
+    active_flag INT,
+    use_limit INT,
+    use_count INT,
+    active_date DATE,
+    inactive_date DATE,
+    
+    -- Composite Primary Key to maintain referential integrity logic (optional for denorm, but good practice)
+    CONSTRAINT pk_user_entitlements PRIMARY KEY (user_id, entitlement_id),
+    
+    -- Indexes for frequent analytical filters
+    -- 1. Filter by Active Flag (Common in "Active Users" queries)
+    INDEX idx_active_flag (active_flag),
+    
+    -- 2. Filter by Package Type (Common in "Usage by Feature" queries)
+    INDEX idx_package_type (package_type),
+    
+    -- 3. Filter by User ID (Common in "User Profile" queries)
+    INDEX idx_user_id (user_id)
+);
+
+-- Note: We do NOT create a foreign key constraint to 'entitlements' in the denormalized table.
+-- In a read-only analytical environment, referential integrity is less critical than query speed.
+-- If strict integrity is needed, we can add a CHECK constraint, but typically we drop FKs for performance.
+```
+
+### Explanation of Changes
+1.  **Merged Tables**: The `entitlements` columns (`package_type`, `feature_type`, etc.) are now directly in the `user_entitlements` table.
+2.  **Removed Join Dependency**: Any query previously looking like:
+    `SELECT ... FROM user_entitlements u JOIN entitlements e ON u.entitlement_id = e.id`
+    Can now be:
+    `SELECT ... FROM denormalized_user_entitlements`
+3.  **Indexes**: Added specific indexes on the redundant columns (`active_flag`, `package_type`) because these are the most common filter conditions in analytical reports.
+4.  **Simplified Schema**: The `users` table is no longer strictly needed for the denormalized view unless you are doing a deep drill-down on user metadata, but the `user_id` remains the primary key.
+
+This schema significantly reduces query latency for the identified analytical workloads.

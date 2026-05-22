@@ -75,8 +75,8 @@ class QwenHandler:
                     "temperature": 1.0,
                     "top_p": 0.65,
                     "top_k": 10,
-                    "num_ctx": 14500,
-                    "num_predict": 4700,
+                    "num_ctx": 57000,
+                    "num_predict": 26000,
                 },
             )
             print(response.prompt_eval_count)

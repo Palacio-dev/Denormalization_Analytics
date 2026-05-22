@@ -1,0 +1,138 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-05-20_11-39-12
+Model: ollama_local
+Prompt: expert
+Schema: harperdb
+==================================================
+
+# Executive Summary
+
+The current normalized schema (`users`, `entitlements`, `user_entitlements`) suffers from the classic "N+1 join problem" for analytical reporting. Under a typical workload where users are queried alongside their feature usage history, the engine must perform a 3-table join for every row, leading to high latency and poor cache utilization.
+
+This design introduces a **Read-Optimized Entitlement View** and a **Pre-Aggregated Usage Table**. The core strategy is to denormalize the `activeFlag` and `featureType` directly into the `user_entitlements` table (with a unique constraint to prevent duplicates) and create a materialized aggregate table for `useCount` and `useLimit` ratios. This eliminates joins for the most common read path while introducing a controlled staleness window (T+5 minutes via CDC) and a reconciliation process to ensure business correctness.
+
+---
+
+# 1. Model-to-Workload Mapping
+
+Based on standard entitlement management workloads, the access patterns are as follows:
+
+| Query Class | Description | Tables Involved | Join Complexity | Latency Impact (Normalized) |
+| :--- | :--- | :--- | :--- : | :--- |
+| **User Profile** | "List features for User X" | `users`, `user_entitlements`, `entitlements` | 2 Joins (User → Entitlements → Features) | High (Scans `entitlements` for every user) |
+| **Quota Check** | "Is User X over limit?" | `users`, `user_entitlements`, `entitlements` | 2 Joins + Aggregation | High (Requires summing `useCount` vs `useLimit`) |
+| **Analytics** | "Total usage by package type today" | `users`, `user_entitlements`, `entitlements` | 2 Joins + Group By | Very High (Large aggregation on `entitlements`) |
+
+**Identified Hotspots:**
+1.  **Join Hotspot:** `user_entitlements` to `entitlements` on `entitlement_id`. This is the primary bottleneck.
+2.  **Aggregation Hotspot:** Calculating `useCount` per user requires summing across `user_entitlements` and joining back to `entitlements` to get `useLimit`.
+
+---
+
+# 2. Denormalization Patterns & Justification
+
+We will implement three specific patterns tailored to this schema:
+
+### A. Wide Read Table (The `user_entitlements` Denormalized Table)
+*   **Pattern:** Expand `user_entitlements` to include `activeFlag` and `featureType` directly.
+*   **Justification:** Eliminates the join to `entitlements` for "User Profile" queries. Since `featureType` is short (4 chars), the cost of storing it is negligible compared to the CPU cost of a join.
+*   **Constraint:** Must enforce uniqueness to prevent duplicate feature flags per user (e.g., User A cannot have two "Email" features).
+
+### B. Pre-Aggregated Rollup (The `user_usage_rollup` Table)
+*   **Pattern:** Create a separate table holding the pre-calculated ratio `useCount / useLimit`.
+*   **Justification:** "Quota Check" queries are frequent and simple. Calculating `SUM(useCount) / SUM(useLimit)` on the fly is slow for large datasets. This table provides O(1) lookup.
+*   **Granularity:** Per User (or Per User + Time Bucket if time-series data is added later).
+
+### C. Snapshot Table (Optional but Recommended)
+*   **Pattern:** A `user_entitlements_snapshot` table updated only when a user's *entitlement status* changes (not every row update).
+*   **Justification:** If the workload involves "Current State" queries where historical data isn't needed, this allows point-in-time queries without scanning the main transactional table. *Decision: Skipped for now to minimize complexity; the Wide Read table is sufficient for current needs.*
+
+---
+
+# 3. Physical Design Details (DDL)
+
+*Assumptions:*
+1.  **Engine:** PostgreSQL 14+ (supports `CHECK` constraints and efficient materialized views).
+2.  **CDC:** Available via logical replication or `binlog` (used for refresh).
+3.  **No Triggers:** All updates must be handled by application logic or CDC listeners.
+
+### 3.1. Denormalized Feature Table (`user_entitlements_wide`)
+*Replaces the read-heavy joins in the original `user_entitlements` table for analytical reads.*
+
+```sql
+CREATE TABLE user_entitlements_wide (
+    user_id INT PRIMARY KEY,
+    entitlement_id INT NOT NULL,
+    feature_type VARCHAR(4) NOT NULL, -- Denormalized from entitlements.featureType
+    active_flag INT NOT NULL DEFAULT 1, -- Denormalized from entitlements.activeFlag
+    -- Constraint: Ensure no duplicate feature types per user per entitlement
+    CONSTRAINT unique_user_feature UNIQUE (user_id, feature_type),
+    -- Constraint: Ensure valid foreign key reference (checked at insert time)
+    CONSTRAINT fk_entitlement_check CHECK (entitlement_id IN (SELECT id FROM entitlements))
+);
+
+-- Index for fast lookups by user
+CREATE INDEX idx_we_user ON user_entitlements_wide(user_id);
+```
+
+### 3.2. Pre-Aggregated Usage Table (`user_usage_rollup`)
+*Stores the calculated ratio to answer "Am I over quota?" instantly.*
+
+```sql
+CREATE TABLE user_usage_rollup (
+    user_id INT PRIMARY KEY,
+    total_use_count INT NOT NULL DEFAULT 0,
+    total_use_limit INT NOT NULL DEFAULT 0,
+    -- Derived column: The actual ratio is stored as an integer percentage or float
+    -- We store the difference to avoid float precision issues, or use a decimal type
+    usage_ratio_pct DECIMAL(5,2) GENERATED ALWAYS AS (total_use_count * 100.0 / NULLIF(total_use_limit, 0)) STORED,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Index for direct user lookup
+CREATE INDEX idx_ur_user ON user_usage_rollup(user_id);
+```
+
+### 3.3. Data Lineage & Staleness Policy
+*   **Source of Truth:** The `entitlements` and `user_entitlements` (normalized) tables.
+*   **Target:** `user_entitlements_wide` and `user_usage_rollup`.
+*   **Staleness Window:** **T+5 Minutes**.
+    *   Data is updated via a CDC listener (or application trigger-free logic) that fires upon `INSERT`/`UPDATE` to the source tables.
+    *   **Intentional Staleness:** The `usage_ratio_pct` will lag by up to 5 minutes. This is acceptable for real-time dashboards but not for critical payment authorization (which should read the normalized tables).
+
+---
+
+# 4. Consistency Architecture & Risk Analysis
+
+### Risk Analysis
+
+| Risk Category | Impact | Mitigation Strategy |
+| :--- | :--- | :--- |
+| **Write Amplification** | Moderate. We are duplicating `feature_type` and `active_flag` for every row. | Storage overhead is minimal (<5% of row size). The benefit in query speed outweighs this cost. |
+| **Lock Contention** | Low. The new tables are read-heavy; writes go only to the CDC queue or specific update triggers. | No row-level locks on the denormalized tables during reads. |
+| **Backfill Runtime** | High. Initial population of `user_usage_rollup` requires a full scan and aggregate. | Use `COPY` command for bulk load or a scheduled background job (e.g., every 15 mins) to catch up. |
+| **Reconciliation Failure** | Medium. If CDC fails, denormalized data lags. | Implement a nightly "Reconciliation Job" that recalculates aggregates from the normalized source and updates the denormalized tables. |
+| **Data Corruption** | Low. Unique constraints prevent logical errors (e.g., duplicate features). | Application logic must validate `entitlement_id` exists before inserting into `user_entitlements_wide`. |
+
+### Monitoring & Alerts
+
+1.  **Lag Alert:** Alert if `MAX(updated_at) - NOW() > 5 minutes` on `user_usage_rollup`.
+2.  **Reconciliation Diff:** A daily job compares `user_usage_rollup` against a re-run of `SUM(useCount) / SUM(useLimit)` on the source. If diff > 0.01%, alert.
+3.  **Query Latency:** Monitor `user_entitlements_wide` query latency. If it degrades (indicating data corruption or bloat), investigate.
+
+### Implementation Plan (Safe & Reversible)
+
+1.  **Phase 1: Infrastructure (Week 1)**
+    *   Create `user_entitlements_wide` and `user_usage_rollup` tables.
+    *   Run a one-time backfill job to populate them from the current state of the normalized schema.
+    *   Set up CDC listener to update these tables on `INSERT`/`UPDATE` to source tables.
+
+2.  **Phase 2: Application Migration (Week 2)**
+    *   **Read Path:** Update SQL queries to read from `user_entitlements_wide` instead of joining.
+    *   **Write Path:** Ensure application logic updates the source tables (normalized) and *also* emits an event to the CDC queue (or calls a dedicated `update_denormalized` procedure).
+    *   **Fallback:** Keep the original normalized queries available for critical transactions (e.g., payment processing) to ensure zero downtime if denormalized data is inconsistent.
+
+3.  **Phase 3: Validation & Rollback (Week 3)**
+    *   Run the reconciliation job daily.
+    *   If any discrepancy is found, pause writes to the denormalized tables and fix the source data.
+    *   If issues persist, drop the new tables and revert to the normalized schema (fully reversible).
