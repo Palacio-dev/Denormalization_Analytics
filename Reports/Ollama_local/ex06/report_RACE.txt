@@ -1,0 +1,255 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 9
+  - Total Attributes: 53
+    * UF: 4 columns
+    * MUNICIPIO: 9 columns
+    * IDEB: 7 columns
+    * ENADE: 9 columns
+    * SAEB: 4 columns
+    * IES: 6 columns
+    * ESCOLA: 5 columns
+    * CURSO: 3 columns
+    * ANO: 6 columns
+
+Denormalized Model:
+  - Tables: 4
+  - Total Attributes: 40
+    * REGIAO_ESCOLAR: 11 columns
+    * METRICAS_ESCOLA: 20 columns
+    * UF: 3 columns
+    * MUNICIPIO: 6 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 0.75
+⚠ WARNING: Normalized model has MORE attributes (40 vs 53)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 47.50%
+
+⚠ Issues Found:
+  - Type mismatch: id (INT) -> -- (We)
+  - Type mismatch: media_enade (REAL) -> id_regiao (INT)
+  - Type mismatch: id_ideb (INT) -> we (assume)
+  - Type mismatch: rend_1 (REAL) -> we (would)
+  - Type mismatch: rend_2 (REAL) -> we (will)
+  - Type mismatch: rend_3 (REAL) -> ano (INT)
+  - Type mismatch: rend_4 (REAL) -> -- (or)
+  - Type mismatch: ind_rend (REAL) -> nome_uf (VARCHAR(100))
+  - Type mismatch: id_enade (INT) -> -- (Placeholder)
+  - Type mismatch: total_inscritos (INT) -> nome_municipio (VARCHAR(100))
+  - Type mismatch: total_concluintes (INT) -> nota_saeb_padrao (REAL)
+  - Type mismatch: nota_bruta_fg (REAL) -> sigla_uf (VARCHAR(2))
+  - Type mismatch: nota_enade_faixa (REAL) -> qtd_escolas_ativas (INT)
+  - Type mismatch: id_saeb (INT) -> -- (IDEB)
+  - Type mismatch: nota_mat (REAL) -> to (avoid)
+  - Type mismatch: nota_port (REAL) -> -- (ENADE)
+  - Type mismatch: nota_padrao (REAL) -> -- (SAEB)
+  - Type mismatch: id_ies (INT) -> -- (Aggregated)
+  - Type mismatch: nome_ies (VARCHAR(100)) -> -- (Constraints)
+  - Type mismatch: sigla_ies (VARCHAR(20)) -> -- (Keep)
+  - Type mismatch: rede (VARCHAR(100)) -> qtd_participantes_enade (INT)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  ano cod_escola codigo_ies id id_IES id_ano id_curso id_curso id_enade id_enade id_escola id_ideb id_ideb id_ies id_municipio id_municipio id_municipio id_saeb id_saeb id_uf ind_rend media_enade media_ideb media_saeb nome nome_curso nome_escola nome_ies nome_municipio nota_bruta_ce nota_bruta_fg nota_enade_continua nota_enade_faixa nota_ideb nota_mat nota_padrao nota_padronizada_ce nota_padronizada_fg nota_port qtd_ESCOLAS qtd_IES qtd_habitantes rede rede rend_1 rend_2 rend_3 rend_4 sigla_ies sigla_uf total_concluintes total_inscritos total_participantes
+
+Denormalized Model (Combined Text):
+  -- -- -- -- -- -- -- -- -- ano id_metricas_escola id_municipio id_regiao id_regiao id_uf id_uf media_enade media_ideb nome_municipio nome_municipio nome_uf nome_uf nota_enade_bruta_fg nota_enade_padronizada_ce nota_enade_padronizada_fg nota_ideb_padronizada nota_saeb_padrao nota_saeb_port qtd_escolas qtd_escolas_ativas qtd_escolas_estimadas qtd_participantes_enade qtd_participantes_ideb qtd_participantes_saeb sigla_uf sigla_uf to we we we
+
+Structural Similarity Metrics:
+  BLEU Score:    0.1264
+  ROUGE-1:       0.5922
+  METEOR Score:  0.1029
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 40 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  -- We store the count of schools/IES here if they are static per municipality
+
+Pair 2:
+  Relational:    sigla_uf VARCHAR(2) UNIQUE NOT NULL
+  Denormalized:  sigla_uf VARCHAR(2) NOT NULL
+
+Pair 3:
+  Relational:    nome VARCHAR(100) NOT NULL
+  Denormalized:  nome_uf VARCHAR(100) NOT NULL
+
+Pair 4:
+  Relational:    qtd_habitantes INT CHECK(qtd_habitantes >= 0)
+  Denormalized:  qtd_escolas INT CHECK (qtd_escolas >= 0)
+
+Pair 5:
+  Relational:    id_municipio INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  id_municipio INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+
+Pair 6:
+  Relational:    id_uf INT NOT NULL REFERENCES UF (id) ON DELETE CASCADE
+  Denormalized:  id_uf INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+
+Pair 7:
+  Relational:    nome_municipio VARCHAR(100) NOT NULL
+  Denormalized:  nome_municipio VARCHAR(100) NOT NULL
+
+Pair 8:
+  Relational:    qtd_IES INT CHECK (qtd_IES >= 0)
+  Denormalized:  id_uf INT NOT NULL REFERENCES UF(id_uf) ON DELETE CASCADE
+
+Pair 9:
+  Relational:    qtd_ESCOLAS INT (qtd_ESCOLAS >= 0)
+  Denormalized:  id_regiao INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+
+Pair 10:
+  Relational:    media_ideb REAL
+  Denormalized:  media_ideb REAL
+
+Pair 11:
+  Relational:    media_saeb REAL
+  Denormalized:  media_enade REAL
+
+Pair 12:
+  Relational:    media_enade REAL
+  Denormalized:  id_regiao INT NOT NULL REFERENCES REGIAO_ESCOLAR(id_regiao) ON DELETE CASCADE
+
+Pair 13:
+  Relational:    total_participantes INT CHECK (total_participantes >= 0)
+  Denormalized:  qtd_participantes_ideb INT
+
+Pair 14:
+  Relational:    id_ideb INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  we assume the counts are static attributes of the municipality.
+    qtd_ies_estimada INT
+
+Pair 15:
+  Relational:    rend_1 REAL
+  Denormalized:  we would repeat these columns per year.
+    -- Given the examples
+
+Pair 16:
+  Relational:    rend_2 REAL
+  Denormalized:  we will create a dedicated Fact table for the heavy lifting.
+
+Pair 17:
+  Relational:    rend_3 REAL
+  Denormalized:  ano INT NOT NULL
+
+Pair 18:
+  Relational:    rend_4 REAL
+  Denormalized:  -- or we leave them null and aggregate them in the fact table if they vary by year.
+    -- For this design
+
+Pair 19:
+  Relational:    ind_rend REAL
+  Denormalized:  nome_uf VARCHAR(100) NOT NULL
+
+Pair 20:
+  Relational:    nota_ideb REAL
+  Denormalized:  nota_saeb_port REAL
+
+Pair 21:
+  Relational:    id_enade INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  -- Placeholder for dynamic metrics that might vary by year if not pre-calculated
+    -- Note: In a true denormalized fact table
+
+Pair 22:
+  Relational:    total_inscritos INT CHECK (total_inscritos >= 0)
+  Denormalized:  nome_municipio VARCHAR(100) NOT NULL
+
+Pair 23:
+  Relational:    total_concluintes INT CHECK (total_concluintes >= 0)
+  Denormalized:  nota_saeb_padrao REAL
+
+Pair 24:
+  Relational:    nota_bruta_ce REAL
+  Denormalized:  nota_enade_bruta_fg REAL
+
+Pair 25:
+  Relational:    nota_padronizada_ce REAL
+  Denormalized:  nota_enade_padronizada_ce REAL
+
+Pair 26:
+  Relational:    nota_bruta_fg REAL
+  Denormalized:  sigla_uf VARCHAR(2) UNIQUE NOT NULL
+
+Pair 27:
+  Relational:    nota_padronizada_fg REAL
+  Denormalized:  nota_enade_padronizada_fg REAL
+
+Pair 28:
+  Relational:    nota_enade_continua REAL
+  Denormalized:  nota_ideb_padronizada REAL
+
+Pair 29:
+  Relational:    nota_enade_faixa REAL
+  Denormalized:  qtd_escolas_ativas INT
+
+Pair 30:
+  Relational:    id_saeb INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  -- IDEB Metrics (Denormalized from IDEB + AN + MUNICIPIO join)
+    nota_ideb_bruta REAL
+
+Pair 31:
+  Relational:    nota_mat REAL
+  Denormalized:  to avoid duplication in REGIAO_ESCOLAR
+    qtd_ies INT CHECK (qtd_ies >= 0)
+
+Pair 32:
+  Relational:    nota_port REAL
+  Denormalized:  -- ENADE Metrics (Denormalized from ENADE + AN + MUNICIPIO join)
+    nota_enade_bruta_ce REAL
+
+Pair 33:
+  Relational:    nota_padrao REAL
+  Denormalized:  -- SAEB Metrics (Denormalized from SAEB + AN + MUNICIPIO join)
+    nota_saeb_mat REAL
+
+Pair 34:
+  Relational:    id_ies INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  -- Aggregated Counts (Denormalized from MUNICIPIO + AN join)
+    total_participantes_anual INT
+
+Pair 35:
+  Relational:    id_municipio INT NOT NULL REFERENCES MUNICIPIO(id_municipio) ON DELETE CASCADE
+  Denormalized:  id_metricas_escola INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+
+Pair 36:
+  Relational:    nome_ies VARCHAR(100) NOT NULL
+  Denormalized:  -- Constraints to ensure data consistency (Optional but recommended)
+    CONSTRAINT uk_regiao_ano UNIQUE (id_regiao, ano)
+
+Pair 37:
+  Relational:    sigla_ies VARCHAR(20)
+  Denormalized:  -- Keep static counts here if they don't change
+
+Pair 38:
+  Relational:    codigo_ies INT UNIQUE NOT NULL
+  Denormalized:  qtd_escolas_estimadas INT
+
+Pair 39:
+  Relational:    rede VARCHAR(100) NOT NULL
+  Denormalized:  qtd_participantes_enade INT
+
+Pair 40:
+  Relational:    id_escola INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  qtd_participantes_saeb INT
+
+
+================================================================================

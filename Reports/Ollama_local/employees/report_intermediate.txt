@@ -1,0 +1,172 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 6
+  - Total Attributes: 30
+    * department: 3 columns
+    * department_employee: 5 columns
+    * department_manager: 5 columns
+    * employee: 7 columns
+    * salary: 5 columns
+    * title: 5 columns
+
+Denormalized Model:
+  - Tables: 3
+  - Total Attributes: 23
+    * employee_facts: 9 columns
+    * employee_history: 8 columns
+    * department_stats: 6 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 0.77
+⚠ WARNING: Normalized model has MORE attributes (23 vs 30)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 22.73%
+
+⚠ Issues Found:
+  - Type mismatch: id (character(4)) -> -- (Denormalized:)
+  - Type mismatch: CONSTRAINT (idx_16979_primary) -> CONSTRAINT (employee_facts_pk)
+  - Type mismatch: from_date (date) -> first_name (character)
+  - Type mismatch: to_date (date) -> last_name (character)
+  - Type mismatch: CONSTRAINT (idx_16982_primary) -> CONSTRAINT (dept_stats_pk)
+  - Type mismatch: department_id (character(4)) -> gender (employees.employee_gender)
+  - Type mismatch: from_date (date) -> -- (Denormalized:)
+  - Type mismatch: to_date (date) -> -- (Denormalized:)
+  - Type mismatch: CONSTRAINT (idx_16985_primary) -> -- (Timestamp)
+  - Type mismatch: id (bigint) -> -- ('dept')
+  - Type mismatch: birth_date (date) -> avg_salary (bigint)
+  - Type mismatch: first_name (character) -> 'salary' (effective_start)
+  - Type mismatch: last_name (character) -> -- (NULL)
+  - Type mismatch: gender (employees.employee_gender) -> -- (Stores)
+  - Type mismatch: hire_date (date) -> attribute_type (character)
+  - Type mismatch: CONSTRAINT (idx_16988_primary) -> total_salary (bigint)
+  - Type mismatch: amount (bigint) -> effective_end (date)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT amount birth_date department_id department_id dept_name employee_id employee_id employee_id employee_id first_name from_date from_date from_date from_date gender hire_date id id last_name title to_date to_date to_date to_date
+
+Denormalized Model (Combined Text):
+  'salary' -- -- -- -- -- -- -- CONSTRAINT CONSTRAINT attribute_type avg_salary dept_id dept_name effective_end employee_count employee_id employee_id first_name gender last_name total_salary
+
+Structural Similarity Metrics:
+  BLEU Score:    0.2528
+  ROUGE-1:       0.4000
+  METEOR Score:  0.2397
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 22 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id character(4) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  -- Denormalized: Department Name (from department_employee join)
+    current_dept_name character varying(40) COLLATE pg_catalog."default" NOT NULL
+
+Pair 2:
+  Relational:    dept_name character varying(40) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  dept_name character varying(40) COLLATE pg_catalog."default" NOT NULL
+
+Pair 3:
+  Relational:    CONSTRAINT idx_16979_primary PRIMARY KEY (id)
+  Denormalized:  CONSTRAINT employee_facts_pk PRIMARY KEY (employee_id)
+
+Pair 4:
+  Relational:    employee_id bigint NOT NULL
+  Denormalized:  employee_id bigint NOT NULL
+
+Pair 5:
+  Relational:    department_id character(4) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  dept_id character(4) COLLATE pg_catalog."default" NOT NULL
+
+Pair 6:
+  Relational:    from_date date NOT NULL
+  Denormalized:  first_name character varying(14) COLLATE pg_catalog."default" NOT NULL
+
+Pair 7:
+  Relational:    to_date date NOT NULL
+  Denormalized:  last_name character varying(16) COLLATE pg_catalog."default" NOT NULL
+
+Pair 8:
+  Relational:    CONSTRAINT idx_16982_primary PRIMARY KEY (employee_id, department_id)
+  Denormalized:  CONSTRAINT dept_stats_pk PRIMARY KEY (dept_id)
+
+Pair 9:
+  Relational:    employee_id bigint NOT NULL
+  Denormalized:  employee_id bigint NOT NULL
+
+Pair 10:
+  Relational:    department_id character(4) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  gender employees.employee_gender NOT NULL
+
+Pair 11:
+  Relational:    from_date date NOT NULL
+  Denormalized:  -- Denormalized: Current Title (from title table join)
+    current_title character varying(50) COLLATE pg_catalog."default" NOT NULL
+
+Pair 12:
+  Relational:    to_date date NOT NULL
+  Denormalized:  -- Denormalized: Current Salary (from salary table join)
+    current_salary bigint NOT NULL
+
+Pair 13:
+  Relational:    CONSTRAINT idx_16985_primary PRIMARY KEY (employee_id, department_id)
+  Denormalized:  -- Timestamp of the snapshot
+    snapshot_time timestamp with time zone DEFAULT CURRENT_TIMESTAMP
+
+Pair 14:
+  Relational:    id bigint NOT NULL DEFAULT nextval('employees.id_employee_seq'::regclass)
+  Denormalized:  -- 'dept'
+
+Pair 15:
+  Relational:    birth_date date NOT NULL
+  Denormalized:  avg_salary bigint NOT NULL
+
+Pair 16:
+  Relational:    first_name character varying(14) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  'salary'
+    effective_start date NOT NULL
+
+Pair 17:
+  Relational:    last_name character varying(16) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  -- NULL if still active
+    value character varying(100) NOT NULL
+
+Pair 18:
+  Relational:    gender employees.employee_gender NOT NULL
+  Denormalized:  -- Stores the actual value (dept_name, title, amount)
+    CONSTRAINT employee_history_pk PRIMARY KEY (employee_id, attribute_type, effective_start)
+
+Pair 19:
+  Relational:    hire_date date NOT NULL
+  Denormalized:  attribute_type character varying(20) NOT NULL
+
+Pair 20:
+  Relational:    CONSTRAINT idx_16988_primary PRIMARY KEY (id)
+  Denormalized:  total_salary bigint NOT NULL
+
+Pair 21:
+  Relational:    employee_id bigint NOT NULL
+  Denormalized:  employee_count bigint NOT NULL
+
+Pair 22:
+  Relational:    amount bigint NOT NULL
+  Denormalized:  effective_end date
+
+
+================================================================================

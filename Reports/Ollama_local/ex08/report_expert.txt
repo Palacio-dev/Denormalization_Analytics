@@ -1,0 +1,289 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 10
+  - Total Attributes: 90
+    * aluno_ifb: 8 columns
+    * curso_ifb: 10 columns
+    * desempenho_enem: 9 columns
+    * escola: 7 columns
+    * indicadores_escolares: 10 columns
+    * localizacao: 4 columns
+    * matricula_ifb: 12 columns
+    * participacao_enem: 8 columns
+    * remuneracao: 9 columns
+    * vinculo_empregaticio: 13 columns
+
+Denormalized Model:
+  - Tables: 3
+  - Total Attributes: 45
+    * fato_estados_escolar_anual: 23 columns
+    * snap_aluno_curso_ativo: 15 columns
+    * geo_escola_map: 7 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 0.50
+⚠ WARNING: Normalized model has MORE attributes (45 vs 90)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 26.67%
+
+⚠ Issues Found:
+  - Type mismatch: id_aluno (serial) -> id_aluno (integer)
+  - Type mismatch: data_nascimento (date) -> id_fato (serial)
+  - Type mismatch: idade (integer) -> id_geo (serial)
+  - Type mismatch: sexo (character(1)) -> -- (Denormalized)
+  - Type mismatch: CONSTRAINT (aluno_ifb_pkey) -> CONSTRAINT (fato_pkey)
+  - Type mismatch: no_curso (character) -> nu_ano (integer)
+  - Type mismatch: ds_tipo_nivel (character) -> nu_media_lp (numeric(6,)
+  - Type mismatch: modalidade_ensino (character) -> nu_taxa_abandono (numeric(5,)
+  - Type mismatch: carga_horaria (integer) -> id_snap (serial)
+  - Type mismatch: CONSTRAINT (curso_ifb_pkey) -> CONSTRAINT (fato_escola_ano_uq)
+  - Type mismatch: id_desempenho (serial) -> nu_media_ch (numeric(6,)
+  - Type mismatch: nu_ano (integer) -> uf (character)
+  - Type mismatch: nu_media_lp (numeric(6,) -> no_escola (character)
+  - Type mismatch: nu_media_mt (numeric(6,) -> municipio (character)
+  - Type mismatch: nu_media_red (numeric(6,) -> nu_participantes (integer)
+  - Type mismatch: CONSTRAINT (desempenho_enem_pkey) -> CONSTRAINT (snap_pkey)
+  - Type mismatch: no_escola_educacenso (character) -> nu_taxa_aprovacao (numeric(5,)
+  - Type mismatch: tp_dependencia_adm_escola (smallint) -> co_ciclo_matricula (character)
+  - Type mismatch: tp_localizacao_escola (smallint) -> nu_taxa_reprovacao (numeric(5,)
+  - Type mismatch: inse (character) -> -- (Denormalized)
+  - Type mismatch: id_loc (integer) -> -- (Denormalized)
+  - Type mismatch: CONSTRAINT (escola_pkey) -> CONSTRAINT (snap_aluno_uq)
+  - Type mismatch: id_indicadores (serial) -> -- (Denormalized)
+  - Type mismatch: nu_ano (integer) -> -- (Example:)
+  - Type mismatch: nu_taxa_permanencia (numeric(6,) -> nu_taxa_participacao (numeric(5,)
+  - Type mismatch: nu_taxa_aprovacao (numeric(5,) -> -- (Example:)
+  - Type mismatch: nu_taxa_reprovacao (numeric(5,) -> nu_participantes_nec_esp (integer)
+  - Type mismatch: nu_taxa_abandono (numeric(5,) -> -- (Denormalized)
+  - Type mismatch: co_escola_educacenso (character) -> -- (Denormalized)
+  - Type mismatch: porte_escola (character) -> -- (Denormalized)
+  - Type mismatch: pc_formacao_docente (numeric(5,) -> -- (Partitioning)
+  - Type mismatch: CONSTRAINT (indicadores_escolares_pkey) -> CONSTRAINT (geo_pkey)
+  - Type mismatch: id_loc (serial) -> CONSTRAINT (geo_escola_uq)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT ano ano_rais atestado_baixarenda carga_horaria co_ciclo_matricula co_curso co_curso co_escola_educacenso co_escola_educacenso co_escola_educacenso co_escola_educacenso co_escola_educacenso co_tipo_curso co_tipo_nivel data_admissao_declarada data_nascimento ds_eixo_tecnologico ds_tipo_nivel id_aluno id_aluno id_aluno id_desempenho id_indicadores id_loc id_loc id_loc id_matricula id_participacao id_remuneracao id_remuneracao id_vinculo idade indicador_vinculo_ativo inse mes_desligamento modalidade_ensino motivo_desligamento municipio nacionalidade no_curso no_escola_educacenso nu_ano nu_ano nu_ano nu_matriculas nu_media_ch nu_media_cn nu_media_lp nu_media_mt nu_media_red nu_participantes nu_participantes_nec_esp nu_taxa_abandono nu_taxa_aprovacao nu_taxa_participacao nu_taxa_permanencia nu_taxa_reprovacao pc_formacao_docente periodo portador_deficiencia porte_escola qtd_hora_contr raca razao_social sexo situacao_matricula tempo_emprego tipo_cota tipo_curso tipo_vinculo_empregaticio tp_dependencia_adm_escola tp_localizacao_escola uf unidade_ensino vl_remun_dezembro_nom vl_remun_dezembro_sm vl_remun_media_nom vl_remun_media_sm vl_salario_contratual vl_ultima_remuneracao_ano
+
+Denormalized Model (Combined Text):
+  -- -- -- -- -- -- -- -- -- -- CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT co_ciclo_matricula co_escola_educacenso co_escola_educacenso co_tipo_curso co_tipo_curso ds_eixo_tecnologico id_aluno id_fato id_geo id_snap municipio nacionalidade no_curso no_escola nu_ano nu_media_ch nu_media_lp nu_media_mt nu_media_red nu_participantes nu_participantes_nec_esp nu_taxa_abandono nu_taxa_aprovacao nu_taxa_participacao nu_taxa_reprovacao portador_deficiencia porte_escola raca uf
+
+Structural Similarity Metrics:
+  BLEU Score:    0.2453
+  ROUGE-1:       0.5233
+  METEOR Score:  0.3330
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 45 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id_aluno serial NOT NULL
+  Denormalized:  id_aluno integer NOT NULL
+
+Pair 2:
+  Relational:    data_nascimento date
+  Denormalized:  id_fato serial NOT NULL
+
+Pair 3:
+  Relational:    idade integer
+  Denormalized:  id_geo serial NOT NULL
+
+Pair 4:
+  Relational:    sexo character(1) COLLATE pg_catalog."default"
+  Denormalized:  -- Denormalized Performance Metrics (Avg per year)
+    nu_media_cn numeric(6, 2)
+
+Pair 5:
+  Relational:    nacionalidade character varying(50) COLLATE pg_catalog."default"
+  Denormalized:  nacionalidade character varying(50)
+
+Pair 6:
+  Relational:    raca character varying(50) COLLATE pg_catalog."default"
+  Denormalized:  raca character varying(50)
+
+Pair 7:
+  Relational:    portador_deficiencia boolean
+  Denormalized:  portador_deficiencia boolean
+
+Pair 8:
+  Relational:    CONSTRAINT aluno_ifb_pkey PRIMARY KEY (id_aluno)
+  Denormalized:  CONSTRAINT fato_pkey PRIMARY KEY (id_fato)
+
+Pair 9:
+  Relational:    co_curso character varying(50) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  no_curso character varying(200)
+
+Pair 10:
+  Relational:    no_curso character varying(200) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  nu_ano integer NOT NULL
+
+Pair 11:
+  Relational:    co_tipo_curso character varying(10) COLLATE pg_catalog."default"
+  Denormalized:  co_tipo_curso character varying(10)
+
+Pair 12:
+  Relational:    tipo_curso character varying(100) COLLATE pg_catalog."default"
+  Denormalized:  co_tipo_curso character varying(10)
+
+Pair 13:
+  Relational:    co_tipo_nivel character varying(10) COLLATE pg_catalog."default"
+  Denormalized:  porte_escola character varying(50)
+
+Pair 14:
+  Relational:    ds_tipo_nivel character varying(100) COLLATE pg_catalog."default"
+  Denormalized:  nu_media_lp numeric(6, 2)
+
+Pair 15:
+  Relational:    ds_eixo_tecnologico character varying(200) COLLATE pg_catalog."default"
+  Denormalized:  ds_eixo_tecnologico character varying(200)
+
+Pair 16:
+  Relational:    modalidade_ensino character varying(100) COLLATE pg_catalog."default"
+  Denormalized:  nu_taxa_abandono numeric(5, 2)
+
+Pair 17:
+  Relational:    carga_horaria integer
+  Denormalized:  id_snap serial NOT NULL
+
+Pair 18:
+  Relational:    CONSTRAINT curso_ifb_pkey PRIMARY KEY (co_curso)
+  Denormalized:  CONSTRAINT fato_escola_ano_uq UNIQUE (co_escola_educacenso, nu_ano)
+
+Pair 19:
+  Relational:    id_desempenho serial NOT NULL
+  Denormalized:  nu_media_ch numeric(6, 2)
+
+Pair 20:
+  Relational:    nu_ano integer NOT NULL
+  Denormalized:  uf character varying(2)
+
+Pair 21:
+  Relational:    nu_media_cn numeric(6, 2)
+  Denormalized:  nu_media_mt numeric(6, 2)
+
+Pair 22:
+  Relational:    nu_media_ch numeric(6, 2)
+  Denormalized:  nu_media_red numeric(6, 2)
+
+Pair 23:
+  Relational:    nu_media_lp numeric(6, 2)
+  Denormalized:  no_escola character varying(200)
+
+Pair 24:
+  Relational:    nu_media_mt numeric(6, 2)
+  Denormalized:  municipio character varying(100)
+
+Pair 25:
+  Relational:    nu_media_red numeric(6, 2)
+  Denormalized:  nu_participantes integer
+
+Pair 26:
+  Relational:    co_escola_educacenso character varying(20) COLLATE pg_catalog."default"
+  Denormalized:  co_escola_educacenso character varying(50) NOT NULL
+
+Pair 27:
+  Relational:    CONSTRAINT desempenho_enem_pkey PRIMARY KEY (id_desempenho)
+  Denormalized:  CONSTRAINT snap_pkey PRIMARY KEY (id_snap)
+
+Pair 28:
+  Relational:    co_escola_educacenso character varying(50) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  co_escola_educacenso character varying(50) NOT NULL
+
+Pair 29:
+  Relational:    no_escola_educacenso character varying(200) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  nu_taxa_aprovacao numeric(5, 2)
+
+Pair 30:
+  Relational:    tp_dependencia_adm_escola smallint
+  Denormalized:  co_ciclo_matricula character varying(50)
+
+Pair 31:
+  Relational:    tp_localizacao_escola smallint
+  Denormalized:  nu_taxa_reprovacao numeric(5, 2)
+
+Pair 32:
+  Relational:    inse character varying(10) COLLATE pg_catalog."default"
+  Denormalized:  -- Denormalized School Indicators (Avg per year)
+    nu_taxa_permanencia numeric(6, 2)
+
+Pair 33:
+  Relational:    id_loc integer
+  Denormalized:  -- Denormalized Participation Metrics (Avg per year)
+    nu_matriculas integer
+
+Pair 34:
+  Relational:    CONSTRAINT escola_pkey PRIMARY KEY (co_escola_educacenso)
+  Denormalized:  CONSTRAINT snap_aluno_uq UNIQUE (id_aluno)
+
+Pair 35:
+  Relational:    id_indicadores serial NOT NULL
+  Denormalized:  -- Denormalized School Context (Pre-joined)
+    no_escola character varying(200)
+
+Pair 36:
+  Relational:    nu_ano integer NOT NULL
+  Denormalized:  -- Example: Most common course type
+    ds_eixo_tecnologico character varying(200)
+
+Pair 37:
+  Relational:    nu_taxa_permanencia numeric(6, 2)
+  Denormalized:  nu_taxa_participacao numeric(5, 2)
+
+Pair 38:
+  Relational:    nu_taxa_aprovacao numeric(5, 2)
+  Denormalized:  -- Example: Primary axis
+    
+    -- Partitioning Key for Time Pruning
+    nu_ano integer NOT NULL
+
+Pair 39:
+  Relational:    nu_taxa_reprovacao numeric(5, 2)
+  Denormalized:  nu_participantes_nec_esp integer
+
+Pair 40:
+  Relational:    nu_taxa_abandono numeric(5, 2)
+  Denormalized:  -- Denormalized Student Attributes
+    sexo character(1)
+
+Pair 41:
+  Relational:    co_escola_educacenso character varying(20) COLLATE pg_catalog."default"
+  Denormalized:  -- Denormalized Course Attributes (Active Course only)
+    co_curso character varying(50)
+
+Pair 42:
+  Relational:    porte_escola character varying(50) COLLATE pg_catalog."default"
+  Denormalized:  -- Denormalized Matricula Context (Active Status)
+    situacao_matricula character varying(50)
+
+Pair 43:
+  Relational:    pc_formacao_docente numeric(5, 2)
+  Denormalized:  -- Partitioning Key for Student ID (for point lookups)
+    id_aluno integer NOT NULL
+
+Pair 44:
+  Relational:    CONSTRAINT indicadores_escolares_pkey PRIMARY KEY (id_indicadores)
+  Denormalized:  CONSTRAINT geo_pkey PRIMARY KEY (id_geo)
+
+Pair 45:
+  Relational:    id_loc serial NOT NULL
+  Denormalized:  CONSTRAINT geo_escola_uq UNIQUE (co_escola_educacenso)
+
+
+================================================================================

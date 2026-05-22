@@ -1,0 +1,99 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 3
+  - Total Attributes: 9
+    * entitlements: 8 columns
+    * users: 1 columns
+    * user_entitlements: 2 columns (junction table - excluded from analysis)
+
+  Note: 1 junction table(s) detected and excluded from analysis:
+    - user_entitlements
+
+Denormalized Model:
+  - Tables: 1
+  - Total Attributes: 17
+    * read_user_entitlements: 17 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 1.89
+⚠ WARNING: Denormalized model has MORE attributes (9 vs 17)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 77.78%
+
+⚠ Issues Found:
+  - Type mismatch: id (INT) -> -- (Source)
+  - Type mismatch: id (INT) -> -- (PRE-COMPUTED:)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  activeDate activeFlag featureType id id inactiveDate packageType useCount useLimit
+
+Denormalized Model (Combined Text):
+  -- -- -- Postgres activeDate entitlement_id featureType featureType) inactiveDate packageType useCount useLimit user_id
+
+Structural Similarity Metrics:
+  BLEU Score:    0.4615
+  ROUGE-1:       0.7619
+  METEOR Score:  0.5921
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 9 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id INT PRIMARY KEY
+  Denormalized:  -- Source of truth data (replicated via CDC)
+    activeFlag INT NOT NULL
+
+Pair 2:
+  Relational:    activeDate DATE
+  Denormalized:  activeDate DATE
+
+Pair 3:
+  Relational:    inactiveDate DATE
+  Denormalized:  inactiveDate DATE
+
+Pair 4:
+  Relational:    useLimit INT
+  Denormalized:  useLimit INT
+
+Pair 5:
+  Relational:    useCount INT
+  Denormalized:  useCount INT
+
+Pair 6:
+  Relational:    featureType VARCHAR(4)
+  Denormalized:  featureType VARCHAR(4) NOT NULL
+
+Pair 7:
+  Relational:    packageType VARCHAR(4)
+  Denormalized:  packageType VARCHAR(4) NOT NULL
+
+Pair 8:
+  Relational:    activeFlag INT
+  Denormalized:  user_id INT NOT NULL
+
+Pair 9:
+  Relational:    id INT PRIMARY KEY
+  Denormalized:  -- PRE-COMPUTED: Shifts CPU load from Read to Write path
+    -- Updated by the stream processor when dates/counts change
+    is_valid_access BOOLEAN NOT NULL
+
+
+================================================================================

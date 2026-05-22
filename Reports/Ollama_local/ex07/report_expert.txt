@@ -1,0 +1,155 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 6
+  - Total Attributes: 25
+    * Usina: 12 columns
+    * Proprietarios: 2 columns
+    * Municipios: 3 columns
+    * Estados: 1 columns
+    * Rios: 2 columns
+    * Localizacoes: 5 columns
+
+Denormalized Model:
+  - Tables: 1
+  - Total Attributes: 16
+    * Usina_Vista: 16 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 0.64
+⚠ WARNING: Normalized model has MORE attributes (16 vs 25)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 12.50%
+
+⚠ Issues Found:
+  - Type mismatch: id (SERIAL) -> -- (Primary)
+  - Type mismatch: nome (VARCHAR) -> long (DOUBLE)
+  - Type mismatch: iniciop (DATE) -> municipio (VARCHAR(100))
+  - Type mismatch: atualizacao (DATE) -> estagio (VARCHAR(50))
+  - Type mismatch: lat (DOUBLE) -> -- (but)
+  - Type mismatch: long (DOUBLE) -> -- (Business)
+  - Type mismatch: estagio (VARCHAR) -> -- (Reference)
+  - Type mismatch: id_proprietario (INTEGER) -> source_version (VARCHAR(50))
+  - Type mismatch: id_rio (INTEGER) -> -- (Location)
+  - Type mismatch: id_localizacao (INTEGER) -> -- (Flattened)
+  - Type mismatch: proprietario (VARCHAR) -> -- (Flattened)
+  - Type mismatch: id_proprietario (INTEGER) -> -- (Flattened)
+  - Type mismatch: municipio (VARCHAR) -> -- (Flattened)
+  - Type mismatch: uf (CHAR(2)) -> -- (Optional:)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  atualizacao estagio id id_localizacao id_localização id_municipio id_municipio1 id_municipio2 id_proprietario id_proprietario id_rio id_rio iniciop lat latitude long longitude municipio nome potfis potkw proprietario rio uf uf
+
+Denormalized Model (Combined Text):
+  -- -- -- -- -- -- -- -- -- -- estagio long municipio potfis potkw source_version
+
+Structural Similarity Metrics:
+  BLEU Score:    0.1781
+  ROUGE-1:       0.2381
+  METEOR Score:  0.1544
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 16 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id SERIAL PRIMARY KEY
+  Denormalized:  -- Primary Key: Matches Usina.id for easy linking if needed
+
+Pair 2:
+  Relational:    nome VARCHAR NOT NULL
+  Denormalized:  long DOUBLE PRECISION
+
+Pair 3:
+  Relational:    potkw FLOAT
+  Denormalized:  potkw FLOAT NOT NULL
+
+Pair 4:
+  Relational:    potfis FLOAT
+  Denormalized:  potfis FLOAT NOT NULL
+
+Pair 5:
+  Relational:    iniciop DATE
+  Denormalized:  municipio VARCHAR(100)
+
+Pair 6:
+  Relational:    atualizacao DATE
+  Denormalized:  estagio VARCHAR(50)
+
+Pair 7:
+  Relational:    lat DOUBLE PRECISION
+  Denormalized:  -- but we use a surrogate PK for the snapshot itself to allow bulk loads
+    id_snapshot SERIAL PRIMARY KEY
+
+Pair 8:
+  Relational:    long DOUBLE PRECISION
+  Denormalized:  -- Business Entity Identifiers (Preserved for joins if needed)
+    id_usina INTEGER NOT NULL
+
+Pair 9:
+  Relational:    estagio VARCHAR
+  Denormalized:  -- Reference to source PK
+    
+    -- Denormalized Dimension Data (Pre-joined)
+    nome VARCHAR(255) NOT NULL
+
+Pair 10:
+  Relational:    id_proprietario INTEGER NULL
+  Denormalized:  source_version VARCHAR(50)
+
+Pair 11:
+  Relational:    id_rio INTEGER NOT NULL
+  Denormalized:  -- Location & Geography (Flattened)
+    lat DOUBLE PRECISION
+
+Pair 12:
+  Relational:    id_localizacao INTEGER NOT NULL
+  Denormalized:  -- Flattened from Municipios
+    uf CHAR(2) NOT NULL
+
+Pair 13:
+  Relational:    proprietario VARCHAR
+  Denormalized:  -- Flattened from Estados
+    
+    -- Ownership (Flattened)
+    nome_proprietario VARCHAR(255)
+
+Pair 14:
+  Relational:    id_proprietario INTEGER PRIMARY KEY NOT NULL
+  Denormalized:  -- Flattened from Proprietarios
+    
+    -- Resource (Flattened)
+    nome_rio VARCHAR(100)
+
+Pair 15:
+  Relational:    municipio VARCHAR NOT NULL
+  Denormalized:  -- Flattened from Rios
+    
+    -- Metadata for Consistency & Freshness
+    data_refreshed TIMESTAMP WITH TIME ZONE NOT NULL
+
+Pair 16:
+  Relational:    uf CHAR(2) NOT NULL
+  Denormalized:  -- Optional: Track which normalized batch this matches
+    
+    -- Constraints
+    CONSTRAINT uk_usina_vista_unique UNIQUE (id_usina)
+
+
+================================================================================

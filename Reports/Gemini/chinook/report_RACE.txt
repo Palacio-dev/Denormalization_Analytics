@@ -1,0 +1,266 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 11
+  - Total Attributes: 75
+    * Album: 4 columns
+    * Artist: 3 columns
+    * Customer: 14 columns
+    * Employee: 16 columns
+    * Genre: 3 columns
+    * Invoice: 10 columns
+    * InvoiceLine: 6 columns
+    * MediaType: 3 columns
+    * Playlist: 3 columns
+    * PlaylistTrack: 3 columns
+    * Track: 10 columns
+
+Denormalized Model:
+  - Tables: 2
+  - Total Attributes: 41
+    * Sales_Analytics: 31 columns
+    * Playlist_Analytics: 10 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 0.55
+⚠ WARNING: Normalized model has MORE attributes (41 vs 75)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 36.59%
+
+⚠ Issues Found:
+  - Type mismatch: "AlbumId" (integer) -> "AlbumTitle" (character)
+  - Type mismatch: "ArtistId" (integer) -> "ArtistName" (character)
+  - Type mismatch: CONSTRAINT ("PK_Album") -> CONSTRAINT ("PK_Playlist_Analytics")
+  - Type mismatch: "ArtistId" (integer) -> "ArtistName" (character)
+  - Type mismatch: CONSTRAINT ("PK_Artist") -> "TrackId" (integer)
+  - Type mismatch: "CustomerId" (integer) -> "CustomerCity" (character)
+  - Type mismatch: "City" (character) -> -- (Primary)
+  - Type mismatch: "State" (character) -> -- (Derived)
+  - Type mismatch: "PostalCode" (character) -> "UnitPrice" (numeric(10,)
+  - Type mismatch: "Phone" (character) -> "InvoiceId" (integer)
+  - Type mismatch: "Fax" (character) -> -- (Location)
+  - Type mismatch: "Email" (character) -> -- (Customer)
+  - Type mismatch: "SupportRepId" (integer) -> "SupportRepFullName" (character)
+  - Type mismatch: CONSTRAINT ("PK_Customer") -> -- (Derived:)
+  - Type mismatch: "Title" (character) -> -- (Employee)
+  - Type mismatch: "ReportsTo" (integer) -> "LineTotal" (numeric(10,)
+  - Type mismatch: "BirthDate" (timestamp) -> "BillingState" (character)
+  - Type mismatch: "HireDate" (timestamp) -> "InvoiceYear" (integer)
+  - Type mismatch: "Address" (character) -> -- (Derived:)
+  - Type mismatch: "City" (character) -> -- (Product)
+  - Type mismatch: "State" (character) -> -- (Metrics)
+  - Type mismatch: "Phone" (character) -> -- (Derived:)
+  - Type mismatch: "Fax" (character) -> -- (Redundant)
+  - Type mismatch: "Email" (character) -> "InvoiceMonth" (integer)
+  - Type mismatch: CONSTRAINT ("PK_Employee") -> "MediaTypeName" (character)
+  - Type mismatch: CONSTRAINT ("PK_Genre") -> "TrackDurationMs" (integer)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  "Address" "Address" "AlbumId" "AlbumId" "ArtistId" "ArtistId" "BillingAddress" "BillingCity" "BillingCountry" "BillingPostalCode" "BillingState" "BirthDate" "Bytes" "City" "City" "Company" "Composer" "Country" "Country" "CustomerId" "CustomerId" "Email" "Email" "EmployeeId" "Fax" "Fax" "FirstName" "FirstName" "GenreId" "GenreId" "HireDate" "InvoiceDate" "InvoiceId" "InvoiceId" "InvoiceLineId" "LastName" "LastName" "MediaTypeId" "MediaTypeId" "Milliseconds" "Name" "Name" "Name" "Name" "Name" "Phone" "Phone" "PlaylistId" "PlaylistId" "PostalCode" "PostalCode" "Quantity" "ReportsTo" "State" "State" "SupportRepId" "Title" "Title" "Total" "TrackId" "TrackId" "TrackId" "UnitPrice" "UnitPrice" CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT
+
+Denormalized Model (Combined Text):
+  "AlbumTitle" "AlbumTitle" "ArtistName" "ArtistName" "BillingCountry" "BillingState" "Composer" "CustomerCity" "CustomerCountry" "CustomerFullName" "CustomerState" "GenreName" "GenreName" "InvoiceId" "InvoiceMonth" "InvoiceQuarter" "InvoiceYear" "LineTotal" "MediaTypeName" "MediaTypeName" "PlaylistId" "PlaylistName" "SupportRepFullName" "TrackDurationMs" "TrackDurationMs" "TrackId" "TrackName" "TrackName" "UnitPrice" -- -- -- -- -- -- -- -- -- -- -- CONSTRAINT
+
+Structural Similarity Metrics:
+  BLEU Score:    0.0851
+  ROUGE-1:       0.1524
+  METEOR Score:  0.3149
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 41 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    "AlbumId" integer NOT NULL
+  Denormalized:  "AlbumTitle" character varying(160)
+
+Pair 2:
+  Relational:    "Title" character varying(160) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  "AlbumTitle" character varying(160)
+
+Pair 3:
+  Relational:    "ArtistId" integer NOT NULL
+  Denormalized:  "ArtistName" character varying(120)
+
+Pair 4:
+  Relational:    CONSTRAINT "PK_Album" PRIMARY KEY ("AlbumId")
+  Denormalized:  CONSTRAINT "PK_Playlist_Analytics" PRIMARY KEY ("PlaylistId", "TrackId")
+
+Pair 5:
+  Relational:    "ArtistId" integer NOT NULL
+  Denormalized:  "ArtistName" character varying(120)
+
+Pair 6:
+  Relational:    "Name" character varying(120) COLLATE pg_catalog."default"
+  Denormalized:  "TrackName" character varying(200) NOT NULL
+
+Pair 7:
+  Relational:    CONSTRAINT "PK_Artist" PRIMARY KEY ("ArtistId")
+  Denormalized:  "TrackId" integer NOT NULL
+
+Pair 8:
+  Relational:    "CustomerId" integer NOT NULL
+  Denormalized:  "CustomerCity" character varying(40)
+
+Pair 9:
+  Relational:    "FirstName" character varying(40) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  "GenreName" character varying(120)
+
+Pair 10:
+  Relational:    "LastName" character varying(20) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  "TrackName" character varying(200) NOT NULL
+
+Pair 11:
+  Relational:    "Company" character varying(80) COLLATE pg_catalog."default"
+  Denormalized:  "Composer" character varying(220)
+
+Pair 12:
+  Relational:    "Address" character varying(70) COLLATE pg_catalog."default"
+  Denormalized:  "GenreName" character varying(120)
+
+Pair 13:
+  Relational:    "City" character varying(40) COLLATE pg_catalog."default"
+  Denormalized:  -- Primary Keys / Granularity
+    "InvoiceLineId" integer NOT NULL
+
+Pair 14:
+  Relational:    "State" character varying(40) COLLATE pg_catalog."default"
+  Denormalized:  -- Derived Time Attributes (Derived Attributes Technique)
+    "InvoiceDate" timestamp without time zone NOT NULL
+
+Pair 15:
+  Relational:    "Country" character varying(40) COLLATE pg_catalog."default"
+  Denormalized:  "BillingCountry" character varying(40)
+
+Pair 16:
+  Relational:    "PostalCode" character varying(10) COLLATE pg_catalog."default"
+  Denormalized:  "UnitPrice" numeric(10, 2) NOT NULL
+
+Pair 17:
+  Relational:    "Phone" character varying(24) COLLATE pg_catalog."default"
+  Denormalized:  "InvoiceId" integer NOT NULL
+
+Pair 18:
+  Relational:    "Fax" character varying(24) COLLATE pg_catalog."default"
+  Denormalized:  -- Location Context (Redundant Attributes)
+    "BillingCity" character varying(40)
+
+Pair 19:
+  Relational:    "Email" character varying(60) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  -- Customer Context (Collapsed Relations)
+    "CustomerId" integer NOT NULL
+
+Pair 20:
+  Relational:    "SupportRepId" integer
+  Denormalized:  "SupportRepFullName" character varying(41)
+
+Pair 21:
+  Relational:    CONSTRAINT "PK_Customer" PRIMARY KEY ("CustomerId")
+  Denormalized:  -- Derived: FirstName + ' ' + LastName
+    "CustomerCompany" character varying(80)
+
+Pair 22:
+  Relational:    "EmployeeId" integer NOT NULL
+  Denormalized:  "PlaylistId" integer NOT NULL
+
+Pair 23:
+  Relational:    "LastName" character varying(20) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  "PlaylistName" character varying(120)
+
+Pair 24:
+  Relational:    "FirstName" character varying(20) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  "MediaTypeName" character varying(120)
+
+Pair 25:
+  Relational:    "Title" character varying(30) COLLATE pg_catalog."default"
+  Denormalized:  -- Employee / Support Rep Context (Collapsed Relations)
+    "SupportRepId" integer
+
+Pair 26:
+  Relational:    "ReportsTo" integer
+  Denormalized:  "LineTotal" numeric(10, 2) NOT NULL
+
+Pair 27:
+  Relational:    "BirthDate" timestamp without time zone
+  Denormalized:  "BillingState" character varying(40)
+
+Pair 28:
+  Relational:    "HireDate" timestamp without time zone
+  Denormalized:  "InvoiceYear" integer
+
+Pair 29:
+  Relational:    "Address" character varying(70) COLLATE pg_catalog."default"
+  Denormalized:  -- Derived: FirstName + ' ' + LastName
+    "SupportRepTitle" character varying(30)
+
+Pair 30:
+  Relational:    "City" character varying(40) COLLATE pg_catalog."default"
+  Denormalized:  -- Product / Track Context (Collapsed Relations)
+    "TrackId" integer NOT NULL
+
+Pair 31:
+  Relational:    "State" character varying(40) COLLATE pg_catalog."default"
+  Denormalized:  -- Metrics (Derived Attributes Technique)
+    "Quantity" integer NOT NULL
+
+Pair 32:
+  Relational:    "Country" character varying(40) COLLATE pg_catalog."default"
+  Denormalized:  "CustomerCountry" character varying(40)
+
+Pair 33:
+  Relational:    "PostalCode" character varying(10) COLLATE pg_catalog."default"
+  Denormalized:  "CustomerState" character varying(40)
+
+Pair 34:
+  Relational:    "Phone" character varying(24) COLLATE pg_catalog."default"
+  Denormalized:  -- Derived: Quantity * UnitPrice
+    "InvoiceTotal" numeric(10, 2) NOT NULL
+
+Pair 35:
+  Relational:    "Fax" character varying(24) COLLATE pg_catalog."default"
+  Denormalized:  -- Redundant from Invoice table
+    
+    CONSTRAINT "PK_Sales_Analytics" PRIMARY KEY ("InvoiceLineId")
+
+Pair 36:
+  Relational:    "Email" character varying(60) COLLATE pg_catalog."default"
+  Denormalized:  "InvoiceMonth" integer
+
+Pair 37:
+  Relational:    CONSTRAINT "PK_Employee" PRIMARY KEY ("EmployeeId")
+  Denormalized:  "MediaTypeName" character varying(120)
+
+Pair 38:
+  Relational:    "GenreId" integer NOT NULL
+  Denormalized:  "InvoiceQuarter" integer
+
+Pair 39:
+  Relational:    "Name" character varying(120) COLLATE pg_catalog."default"
+  Denormalized:  "CustomerFullName" character varying(61)
+
+Pair 40:
+  Relational:    CONSTRAINT "PK_Genre" PRIMARY KEY ("GenreId")
+  Denormalized:  "TrackDurationMs" integer
+
+Pair 41:
+  Relational:    "InvoiceId" integer NOT NULL
+  Denormalized:  "TrackDurationMs" integer
+
+
+================================================================================

@@ -1,0 +1,102 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 3
+  - Total Attributes: 9
+    * entitlements: 8 columns
+    * users: 1 columns
+    * user_entitlements: 2 columns (junction table - excluded from analysis)
+
+  Note: 1 junction table(s) detected and excluded from analysis:
+    - user_entitlements
+
+Denormalized Model:
+  - Tables: 1
+  - Total Attributes: 13
+    * denormalized_user_entitlements: 13 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 1.44
+⚠ WARNING: Denormalized model has MORE attributes (9 vs 13)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 55.56%
+
+⚠ Issues Found:
+  - Type mismatch: id (INT) -> -- (Primary)
+  - Type mismatch: packageType (VARCHAR(4)) -> active_flag (INT)
+  - Type mismatch: activeFlag (INT) -> -- (Redundant)
+  - Type mismatch: id (INT) -> -- (Composite)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  activeDate activeFlag featureType id id inactiveDate packageType useCount useLimit
+
+Denormalized Model (Combined Text):
+  -- -- -- -- -- -- active_date active_flag entitlement_id feature_type inactive_date use_count use_limit
+
+Structural Similarity Metrics:
+  BLEU Score:    0.0000
+  ROUGE-1:       0.0870
+  METEOR Score:  0.0000
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 9 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id INT PRIMARY KEY
+  Denormalized:  -- Primary Key
+    user_id INT NOT NULL
+
+Pair 2:
+  Relational:    activeDate DATE
+  Denormalized:  active_date DATE
+
+Pair 3:
+  Relational:    inactiveDate DATE
+  Denormalized:  inactive_date DATE
+
+Pair 4:
+  Relational:    useLimit INT
+  Denormalized:  use_limit INT
+
+Pair 5:
+  Relational:    useCount INT
+  Denormalized:  use_count INT
+
+Pair 6:
+  Relational:    featureType VARCHAR(4)
+  Denormalized:  feature_type VARCHAR(4)
+
+Pair 7:
+  Relational:    packageType VARCHAR(4)
+  Denormalized:  active_flag INT
+
+Pair 8:
+  Relational:    activeFlag INT
+  Denormalized:  -- Redundant Attributes from 'entitlements' (Collapsing Relations)
+    -- These are duplicated to eliminate the need for JOINs in analytical queries
+    package_type VARCHAR(4)
+
+Pair 9:
+  Relational:    id INT PRIMARY KEY
+  Denormalized:  -- Composite Primary Key to maintain referential integrity logic (optional for denorm, but good practice)
+    CONSTRAINT pk_user_entitlements PRIMARY KEY (user_id, entitlement_id)
+
+
+================================================================================

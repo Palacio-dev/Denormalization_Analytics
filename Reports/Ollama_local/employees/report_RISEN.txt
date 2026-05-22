@@ -1,0 +1,192 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 6
+  - Total Attributes: 30
+    * department: 3 columns
+    * department_employee: 5 columns
+    * department_manager: 5 columns
+    * employee: 7 columns
+    * salary: 5 columns
+    * title: 5 columns
+
+Denormalized Model:
+  - Tables: 7
+  - Total Attributes: 45
+    * employee: 7 columns
+    * department: 3 columns
+    * employee_gender: 3 columns
+    * department_manager: 10 columns
+    * department_employee: 10 columns
+    * salary: 6 columns
+    * title: 6 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 1.50
+⚠ WARNING: Denormalized model has MORE attributes (30 vs 45)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 73.33%
+
+⚠ Issues Found:
+  - Type mismatch: id (character(4)) -> id (bigint)
+  - Type mismatch: CONSTRAINT (idx_16979_primary) -> CONSTRAINT (idx_16988_primary)
+  - Type mismatch: CONSTRAINT (idx_16982_primary) -> CONSTRAINT (idx_16979_primary)
+  - Type mismatch: CONSTRAINT (idx_16985_primary) -> CONSTRAINT (idx_16970_primary)
+  - Type mismatch: id (bigint) -> id (character(4))
+  - Type mismatch: CONSTRAINT (idx_16988_primary) -> CONSTRAINT (idx_16985_primary)
+  - Type mismatch: CONSTRAINT (idx_16991_primary) -> CONSTRAINT (idx_16982_primary)
+  - Type mismatch: CONSTRAINT (idx_16994_primary) -> id (character)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT amount birth_date department_id department_id dept_name employee_id employee_id employee_id employee_id first_name from_date from_date from_date from_date gender hire_date id id last_name title to_date to_date to_date to_date
+
+Denormalized Model (Combined Text):
+  -- -- CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT amount birth_date department_id department_id dept_name employee_birth_date employee_first_name employee_gender employee_hire_date employee_id employee_id employee_id employee_id employee_last_name first_name from_date from_date from_date from_date gender gender_name hire_date id id id last_name manager_birth_date manager_first_name manager_gender manager_hire_date manager_last_name salary_amount_at_date title title_description to_date to_date to_date to_date
+
+Structural Similarity Metrics:
+  BLEU Score:    0.6444
+  ROUGE-1:       0.7164
+  METEOR Score:  0.9142
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 30 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id character(4) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  id bigint NOT NULL DEFAULT nextval('employees.id_employee_seq'::regclass)
+
+Pair 2:
+  Relational:    dept_name character varying(40) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  dept_name character varying(40) COLLATE pg_catalog."default" NOT NULL
+
+Pair 3:
+  Relational:    CONSTRAINT idx_16979_primary PRIMARY KEY (id)
+  Denormalized:  CONSTRAINT idx_16988_primary PRIMARY KEY (id)
+
+Pair 4:
+  Relational:    employee_id bigint NOT NULL
+  Denormalized:  employee_id bigint NOT NULL
+
+Pair 5:
+  Relational:    department_id character(4) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  department_id character(4) COLLATE pg_catalog."default" NOT NULL
+
+Pair 6:
+  Relational:    from_date date NOT NULL
+  Denormalized:  from_date date NOT NULL
+
+Pair 7:
+  Relational:    to_date date NOT NULL
+  Denormalized:  to_date date NOT NULL
+
+Pair 8:
+  Relational:    CONSTRAINT idx_16982_primary PRIMARY KEY (employee_id, department_id)
+  Denormalized:  CONSTRAINT idx_16979_primary PRIMARY KEY (id)
+
+Pair 9:
+  Relational:    employee_id bigint NOT NULL
+  Denormalized:  employee_id bigint NOT NULL
+
+Pair 10:
+  Relational:    department_id character(4) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  department_id character(4) COLLATE pg_catalog."default" NOT NULL
+
+Pair 11:
+  Relational:    from_date date NOT NULL
+  Denormalized:  from_date date NOT NULL
+
+Pair 12:
+  Relational:    to_date date NOT NULL
+  Denormalized:  to_date date NOT NULL
+
+Pair 13:
+  Relational:    CONSTRAINT idx_16985_primary PRIMARY KEY (employee_id, department_id)
+  Denormalized:  CONSTRAINT idx_16970_primary PRIMARY KEY (id)
+
+Pair 14:
+  Relational:    id bigint NOT NULL DEFAULT nextval('employees.id_employee_seq'::regclass)
+  Denormalized:  id character(4) COLLATE pg_catalog."default" NOT NULL
+
+Pair 15:
+  Relational:    birth_date date NOT NULL
+  Denormalized:  birth_date date NOT NULL
+
+Pair 16:
+  Relational:    first_name character varying(14) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  first_name character varying(14) COLLATE pg_catalog."default" NOT NULL
+
+Pair 17:
+  Relational:    last_name character varying(16) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  last_name character varying(16) COLLATE pg_catalog."default" NOT NULL
+
+Pair 18:
+  Relational:    gender employees.employee_gender NOT NULL
+  Denormalized:  gender employees.employee_gender NOT NULL
+
+Pair 19:
+  Relational:    hire_date date NOT NULL
+  Denormalized:  hire_date date NOT NULL
+
+Pair 20:
+  Relational:    CONSTRAINT idx_16988_primary PRIMARY KEY (id)
+  Denormalized:  CONSTRAINT idx_16985_primary PRIMARY KEY (employee_id, department_id)
+
+Pair 21:
+  Relational:    employee_id bigint NOT NULL
+  Denormalized:  employee_id bigint NOT NULL
+
+Pair 22:
+  Relational:    amount bigint NOT NULL
+  Denormalized:  amount bigint NOT NULL
+
+Pair 23:
+  Relational:    from_date date NOT NULL
+  Denormalized:  from_date date NOT NULL
+
+Pair 24:
+  Relational:    to_date date NOT NULL
+  Denormalized:  to_date date NOT NULL
+
+Pair 25:
+  Relational:    CONSTRAINT idx_16991_primary PRIMARY KEY (employee_id, from_date)
+  Denormalized:  CONSTRAINT idx_16982_primary PRIMARY KEY (employee_id, department_id)
+
+Pair 26:
+  Relational:    employee_id bigint NOT NULL
+  Denormalized:  employee_id bigint NOT NULL
+
+Pair 27:
+  Relational:    title character varying(50) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  title character varying(50) COLLATE pg_catalog."default" NOT NULL
+
+Pair 28:
+  Relational:    from_date date NOT NULL
+  Denormalized:  from_date date NOT NULL
+
+Pair 29:
+  Relational:    to_date date
+  Denormalized:  to_date date
+
+Pair 30:
+  Relational:    CONSTRAINT idx_16994_primary PRIMARY KEY (employee_id, title, from_date)
+  Denormalized:  id character varying(10) COLLATE pg_catalog."default" NOT NULL
+
+
+================================================================================

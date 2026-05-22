@@ -1,0 +1,221 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 9
+  - Total Attributes: 53
+    * UF: 4 columns
+    * MUNICIPIO: 9 columns
+    * IDEB: 7 columns
+    * ENADE: 9 columns
+    * SAEB: 4 columns
+    * IES: 6 columns
+    * ESCOLA: 5 columns
+    * CURSO: 3 columns
+    * ANO: 6 columns
+
+Denormalized Model:
+  - Tables: 3
+  - Total Attributes: 35
+    * municipio_denorm: 12 columns
+    * instituicao_snapshot: 10 columns
+    * metricas_anuais: 13 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 0.66
+⚠ WARNING: Normalized model has MORE attributes (35 vs 53)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 51.43%
+
+⚠ Issues Found:
+  - Type mismatch: id (INT) -> -- (Aggregated)
+  - Type mismatch: rend_1 (REAL) -> rede (VARCHAR(100))
+  - Type mismatch: rend_2 (REAL) -> ano (INT)
+  - Type mismatch: rend_3 (REAL) -> id_uf (INT)
+  - Type mismatch: rend_4 (REAL) -> nome_uf (VARCHAR(100))
+  - Type mismatch: ind_rend (REAL) -> cod_inst (INT)
+  - Type mismatch: nota_ideb (REAL) -> nome_inst (VARCHAR(100))
+  - Type mismatch: id_enade (INT) -> id_metrica (SERIAL)
+  - Type mismatch: total_inscritos (INT) -> sum_total_inscritos (BIGINT)
+  - Type mismatch: total_concluintes (INT) -> sum_total_concluintes (BIGINT)
+  - Type mismatch: nota_padronizada_ce (REAL) -> nome_municipio (VARCHAR(100))
+  - Type mismatch: nota_bruta_fg (REAL) -> sigla_uf (VARCHAR(2))
+  - Type mismatch: nota_padronizada_fg (REAL) -> nome_municipio (VARCHAR(100))
+  - Type mismatch: nota_enade_faixa (REAL) -> updated_at (TIMESTAMP)
+  - Type mismatch: id_saeb (INT) -> tipo_inst (CHAR(5))
+  - Type mismatch: nota_mat (REAL) -> sigla_ies (VARCHAR(20))
+  - Type mismatch: nota_port (REAL) -> sigla_uf (VARCHAR(2))
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  ano cod_escola codigo_ies id id_IES id_ano id_curso id_curso id_enade id_enade id_escola id_ideb id_ideb id_ies id_municipio id_municipio id_municipio id_saeb id_saeb id_uf ind_rend media_enade media_ideb media_saeb nome nome_curso nome_escola nome_ies nome_municipio nota_bruta_ce nota_bruta_fg nota_enade_continua nota_enade_faixa nota_ideb nota_mat nota_padrao nota_padronizada_ce nota_padronizada_fg nota_port qtd_ESCOLAS qtd_IES qtd_habitantes rede rede rend_1 rend_2 rend_3 rend_4 sigla_ies sigla_uf total_concluintes total_inscritos total_participantes
+
+Denormalized Model (Combined Text):
+  -- ano avg_nota_enade avg_nota_saeb_mat avg_nota_saeb_port cod_inst id_inst id_metrica id_municipio id_municipio id_municipio id_uf id_uf media_enade media_ideb media_saeb nome_inst nome_municipio nome_municipio nome_municipio nome_uf nome_uf qtd_ESCOLAS qtd_IES qtd_habitantes rede sigla_ies sigla_uf sigla_uf sigla_uf sum_total_concluintes sum_total_inscritos tipo_inst total_participantes updated_at
+
+Structural Similarity Metrics:
+  BLEU Score:    0.2733
+  ROUGE-1:       0.5556
+  METEOR Score:  0.2744
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 35 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  -- Aggregated metrics
+    avg_nota_ideb REAL
+
+Pair 2:
+  Relational:    sigla_uf VARCHAR(2) UNIQUE NOT NULL
+  Denormalized:  sigla_uf VARCHAR(2)
+
+Pair 3:
+  Relational:    nome VARCHAR(100) NOT NULL
+  Denormalized:  nome_uf VARCHAR(100)
+
+Pair 4:
+  Relational:    qtd_habitantes INT CHECK(qtd_habitantes >= 0)
+  Denormalized:  qtd_habitantes INT
+
+Pair 5:
+  Relational:    id_municipio INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  id_municipio INT PRIMARY KEY
+
+Pair 6:
+  Relational:    id_uf INT NOT NULL REFERENCES UF (id) ON DELETE CASCADE
+  Denormalized:  id_uf INT
+
+Pair 7:
+  Relational:    nome_municipio VARCHAR(100) NOT NULL
+  Denormalized:  nome_municipio VARCHAR(100)
+
+Pair 8:
+  Relational:    qtd_IES INT CHECK (qtd_IES >= 0)
+  Denormalized:  qtd_IES INT
+
+Pair 9:
+  Relational:    qtd_ESCOLAS INT (qtd_ESCOLAS >= 0)
+  Denormalized:  qtd_ESCOLAS INT
+
+Pair 10:
+  Relational:    media_ideb REAL
+  Denormalized:  media_ideb REAL
+
+Pair 11:
+  Relational:    media_saeb REAL
+  Denormalized:  media_saeb REAL
+
+Pair 12:
+  Relational:    media_enade REAL
+  Denormalized:  media_enade REAL
+
+Pair 13:
+  Relational:    total_participantes INT CHECK (total_participantes >= 0)
+  Denormalized:  total_participantes INT
+
+Pair 14:
+  Relational:    id_ideb INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  id_inst INT PRIMARY KEY
+
+Pair 15:
+  Relational:    rend_1 REAL
+  Denormalized:  rede VARCHAR(100)
+
+Pair 16:
+  Relational:    rend_2 REAL
+  Denormalized:  ano INT NOT NULL
+
+Pair 17:
+  Relational:    rend_3 REAL
+  Denormalized:  id_uf INT
+
+Pair 18:
+  Relational:    rend_4 REAL
+  Denormalized:  nome_uf VARCHAR(100)
+
+Pair 19:
+  Relational:    ind_rend REAL
+  Denormalized:  cod_inst INT UNIQUE
+
+Pair 20:
+  Relational:    nota_ideb REAL
+  Denormalized:  nome_inst VARCHAR(100)
+
+Pair 21:
+  Relational:    id_enade INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  id_metrica SERIAL PRIMARY KEY
+
+Pair 22:
+  Relational:    total_inscritos INT CHECK (total_inscritos >= 0)
+  Denormalized:  sum_total_inscritos BIGINT
+
+Pair 23:
+  Relational:    total_concluintes INT CHECK (total_concluintes >= 0)
+  Denormalized:  sum_total_concluintes BIGINT
+
+Pair 24:
+  Relational:    nota_bruta_ce REAL
+  Denormalized:  avg_nota_enade REAL
+
+Pair 25:
+  Relational:    nota_padronizada_ce REAL
+  Denormalized:  nome_municipio VARCHAR(100)
+
+Pair 26:
+  Relational:    nota_bruta_fg REAL
+  Denormalized:  sigla_uf VARCHAR(2)
+
+Pair 27:
+  Relational:    nota_padronizada_fg REAL
+  Denormalized:  nome_municipio VARCHAR(100)
+
+Pair 28:
+  Relational:    nota_enade_continua REAL
+  Denormalized:  avg_nota_saeb_port REAL
+
+Pair 29:
+  Relational:    nota_enade_faixa REAL
+  Denormalized:  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+
+Pair 30:
+  Relational:    id_saeb INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  tipo_inst CHAR(5) CHECK (tipo_inst IN ('ESCOLA', 'IES'))
+
+Pair 31:
+  Relational:    nota_mat REAL
+  Denormalized:  sigla_ies VARCHAR(20)
+
+Pair 32:
+  Relational:    nota_port REAL
+  Denormalized:  sigla_uf VARCHAR(2)
+
+Pair 33:
+  Relational:    nota_padrao REAL
+  Denormalized:  avg_nota_saeb_mat REAL
+
+Pair 34:
+  Relational:    id_ies INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  id_municipio INT
+
+Pair 35:
+  Relational:    id_municipio INT NOT NULL REFERENCES MUNICIPIO(id_municipio) ON DELETE CASCADE
+  Denormalized:  id_municipio INT
+
+
+================================================================================

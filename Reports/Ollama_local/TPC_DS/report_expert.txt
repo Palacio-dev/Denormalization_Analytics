@@ -1,0 +1,258 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 9
+  - Total Attributes: 96
+    * s_purchase_lineitem: 8 columns
+    * s_purchase: 8 columns
+    * s_catalog_order: 8 columns
+    * s_web_order: 8 columns
+    * s_catalog_order_lineitem: 12 columns
+    * s_web_order_lineitem: 11 columns
+    * s_store_returns: 17 columns
+    * s_catalog_returns: 20 columns
+    * s_inventory: 4 columns
+
+Denormalized Model:
+  - Tables: 3
+  - Total Attributes: 36
+    * s_order_lineitem_flat: 19 columns
+    * s_return_summary_rollup: 10 columns
+    * s_inventory_snapshot: 7 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 0.38
+⚠ WARNING: Normalized model has MORE attributes (36 vs 96)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 17.14%
+
+⚠ Issues Found:
+  - Type mismatch: plin_line_number (integer) -> sale_price (numeric(7,2))
+  - Type mismatch: plin_sale_price (numeric(7,2)) -> store_id (char(16))
+  - Type mismatch: plin_comment (varchar(100)) -> item_id (char(16))
+  - Type mismatch: purc_purchase_id (integer) -> warehouse_id (char(16))
+  - Type mismatch: purc_store_id (char(16)) -> rollup_id (integer)
+  - Type mismatch: purc_customer_id (char(16)) -> return_date (date)
+  - Type mismatch: purc_purchase_date (char(10)) -> snapshot_date (date)
+  - Type mismatch: purc_purchase_time (integer) -> total_return_amt (numeric(7,2))
+  - Type mismatch: purc_register_id (integer) -> total_return_tax (numeric(7,2))
+  - Type mismatch: purc_comment (char(100)) -> -- (Primary)
+  - Type mismatch: cord_order_id (integer) -> total_return_fee (numeric(7,2))
+  - Type mismatch: cord_bill_customer_id (char(16)) -> -- (Generated:)
+  - Type mismatch: cord_ship_customer_id (char(16)) -> -- (Surrogate)
+  - Type mismatch: cord_order_date (char(10)) -> -- ('STORE')
+  - Type mismatch: cord_order_time (integer) -> 'WEB' (--)
+  - Type mismatch: cord_ship_mode_id (char(16)) -> -- (Nullable)
+  - Type mismatch: cord_call_center_id (char(16)) -> -- (Nullable)
+  - Type mismatch: cord_order_comments (varchar(100)) -> -- (Timestamps)
+  - Type mismatch: word_order_id (integer) -> -- (Extracted)
+  - Type mismatch: word_bill_customer_id (char(16)) -> -- (Extracted)
+  - Type mismatch: word_ship_customer_id (char(16)) -> -- (Derived)
+  - Type mismatch: word_order_date (char(10)) -> -- (quantity)
+  - Type mismatch: word_order_time (integer) -> -- (Constraints)
+  - Type mismatch: word_ship_mode_id (char(16)) -> -- (Sequential)
+  - Type mismatch: word_web_site_id (char(16)) -> -- (Aggregated)
+  - Type mismatch: word_order_comments (char(100)) -> -- (Partitioning)
+  - Type mismatch: clin_order_id (integer) -> -- (Constraints)
+  - Type mismatch: clin_line_number (integer) -> -- (Partitioning)
+  - Type mismatch: clin_item_id (char(16)) -> -- (Constraints)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  clin_catalog_number clin_catalog_page_number clin_coupon_amt clin_item_id clin_line_number clin_order_id clin_promotion_id clin_quantity clin_sales_price clin_ship_cost clin_ship_date clin_warehouse_id cord_bill_customer_id cord_call_center_id cord_order_comments cord_order_date cord_order_id cord_order_time cord_ship_customer_id cord_ship_mode_id cret_call_center_id cret_catalog_page_id cret_item_id cret_line_number cret_merchant_credit cret_order_id cret_reason_id cret_refund_customer_id cret_refunded_cash cret_return_amt cret_return_customer_id cret_return_date cret_return_fee cret_return_qty cret_return_ship_cost cret_return_tax cret_return_time cret_reversed_charge cret_shipmode_id cret_warehouse_id invn_date invn_item_id invn_qty_on_hand invn_warehouse_id plin_comment plin_coupon_amt plin_item_id plin_line_number plin_promotion_id plin_purchase_id plin_quantity plin_sale_price purc_clerk_id purc_comment purc_customer_id purc_purchase_date purc_purchase_id purc_purchase_time purc_register_id purc_store_id sret_customer_id sret_item_id sret_line_number sret_purchase_id sret_reason_id sret_refunded_cash sret_return_amt sret_return_date sret_return_fee sret_return_qty sret_return_ship_cost sret_return_tax sret_return_time sret_reversed_charge sret_store_credit sret_store_id sret_ticket_number wlin_coupon_amt wlin_item_id wlin_line_number wlin_order_id wlin_promotion_id wlin_quantity wlin_sales_price wlin_ship_cost wlin_ship_date wlin_warehouse_id wlin_web_page_id word_bill_customer_id word_order_comments word_order_date word_order_id word_order_time word_ship_customer_id word_ship_mode_id word_web_site_id
+
+Denormalized Model (Combined Text):
+  'WEB' -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- coupon_amt item_id item_id promotion_id qty_on_hand quantity return_date rollup_id sale_price snapshot_date snapshot_id store_id total_return_amt total_return_fee total_return_tax warehouse_id
+
+Structural Similarity Metrics:
+  BLEU Score:    0.0000
+  ROUGE-1:       0.1791
+  METEOR Score:  0.0000
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 35 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    plin_purchase_id            integer               not null
+  Denormalized:  snapshot_id               integer               not null
+
+Pair 2:
+  Relational:    plin_line_number            integer               not null
+  Denormalized:  sale_price                numeric(7,2)          not null
+
+Pair 3:
+  Relational:    plin_item_id                char(16)
+  Denormalized:  item_id                   char(16)              not null
+
+Pair 4:
+  Relational:    plin_promotion_id           char(16)
+  Denormalized:  promotion_id              char(16)
+
+Pair 5:
+  Relational:    plin_quantity               integer
+  Denormalized:  quantity                  integer                not null
+
+Pair 6:
+  Relational:    plin_sale_price             numeric(7,2)
+  Denormalized:  store_id                  char(16)
+
+Pair 7:
+  Relational:    plin_coupon_amt             numeric(7,2)
+  Denormalized:  coupon_amt                numeric(7,2)
+
+Pair 8:
+  Relational:    plin_comment                varchar(100)
+  Denormalized:  item_id                   char(16)              not null
+
+Pair 9:
+  Relational:    purc_purchase_id            integer               not null
+  Denormalized:  warehouse_id              char(16)              not null
+
+Pair 10:
+  Relational:    purc_store_id               char(16)
+  Denormalized:  rollup_id                 integer               not null
+
+Pair 11:
+  Relational:    purc_customer_id            char(16)
+  Denormalized:  return_date               date                   not null
+
+Pair 12:
+  Relational:    purc_purchase_date          char(10)
+  Denormalized:  snapshot_date             date                   not null
+
+Pair 13:
+  Relational:    purc_purchase_time          integer
+  Denormalized:  total_return_amt          numeric(7,2)           not null
+
+Pair 14:
+  Relational:    purc_register_id            integer
+  Denormalized:  total_return_tax          numeric(7,2)           not null
+
+Pair 15:
+  Relational:    purc_clerk_id               integer
+  Denormalized:  qty_on_hand               integer                not null
+
+Pair 16:
+  Relational:    purc_comment                char(100)
+  Denormalized:  -- Primary Key: Uniquely identifies an order line across all channels
+    order_line_pk             integer               not null
+
+Pair 17:
+  Relational:    cord_order_id               integer               not null
+  Denormalized:  total_return_fee          numeric(7,2)           not null
+
+Pair 18:
+  Relational:    cord_bill_customer_id       char(16)
+  Denormalized:  -- Generated: MAX(order_id, line_number) * 1000000 + line_number
+    
+    -- Order Identity
+    order_id                  integer               not null
+
+Pair 19:
+  Relational:    cord_ship_customer_id       char(16)
+  Denormalized:  -- Surrogate for order_id (purchase/catalog/web)
+    order_type                char(10)              not null
+
+Pair 20:
+  Relational:    cord_order_date             char(10)
+  Denormalized:  -- 'STORE'
+
+Pair 21:
+  Relational:    cord_order_time             integer
+  Denormalized:  'WEB'
+    
+    -- Customer & Channel Context (Flattened)
+    customer_id               char(16)              not null
+
+Pair 22:
+  Relational:    cord_ship_mode_id           char(16)
+  Denormalized:  -- Nullable for Catalog/Web
+    web_site_id               char(16)
+
+Pair 23:
+  Relational:    cord_call_center_id         char(16)
+  Denormalized:  -- Nullable for Store/Catalog
+    
+    -- Line Item Details (Pre-joined Dimensions)
+    item_id                   char(16)              not null
+
+Pair 24:
+  Relational:    cord_order_comments         varchar(100)
+  Denormalized:  -- Timestamps (Normalized for comparison)
+    order_date                date                   not null
+
+Pair 25:
+  Relational:    word_order_id               integer               not null
+  Denormalized:  -- Extracted from char(10)
+    order_time                integer                 not null
+
+Pair 26:
+  Relational:    word_bill_customer_id       char(16)
+  Denormalized:  -- Extracted from integer
+    ship_date                 date                   not null
+
+Pair 27:
+  Relational:    word_ship_customer_id       char(16)
+  Denormalized:  -- Derived Metrics (Computed once, stored once)
+    line_total                numeric(7,2)           not null
+
+Pair 28:
+  Relational:    word_order_date             char(10)
+  Denormalized:  -- quantity * sale_price
+    
+    -- Partitioning Key: Enables pruning by date range
+    order_date_partition      date                   not null
+
+Pair 29:
+  Relational:    word_order_time             integer
+  Denormalized:  -- Constraints
+    constraint pk_order_line_flat_pk primary key (order_line_pk)
+
+Pair 30:
+  Relational:    word_ship_mode_id           char(16)
+  Denormalized:  -- Sequential surrogate
+    store_id                  char(16)              not null
+
+Pair 31:
+  Relational:    word_web_site_id            char(16)
+  Denormalized:  -- Aggregated Metrics
+    total_return_qty          integer                not null
+
+Pair 32:
+  Relational:    word_order_comments         char(100)
+  Denormalized:  -- Partitioning Key: Critical for range scans
+    return_date_partition     date                   not null
+
+Pair 33:
+  Relational:    clin_order_id               integer               not null
+  Denormalized:  -- Constraints
+    constraint pk_rollup_pk primary key (rollup_id)
+
+Pair 34:
+  Relational:    clin_line_number            integer               not null
+  Denormalized:  -- Partitioning Key: Allows scanning specific days
+    snapshot_date_partition   date                   not null
+
+Pair 35:
+  Relational:    clin_item_id                char(16)
+  Denormalized:  -- Constraints
+    constraint pk_snapshot_pk primary key (snapshot_id)
+
+
+================================================================================

@@ -1,0 +1,108 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 3
+  - Total Attributes: 9
+    * entitlements: 8 columns
+    * users: 1 columns
+    * user_entitlements: 2 columns (junction table - excluded from analysis)
+
+  Note: 1 junction table(s) detected and excluded from analysis:
+    - user_entitlements
+
+Denormalized Model:
+  - Tables: 2
+  - Total Attributes: 12
+    * user_entitlements_wide: 6 columns
+    * user_usage_rollup: 6 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 1.33
+⚠ WARNING: Denormalized model has MORE attributes (9 vs 12)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 22.22%
+
+⚠ Issues Found:
+  - Type mismatch: id (INT) -> -- (Denormalized)
+  - Type mismatch: activeDate (DATE) -> updated_at (TIMESTAMP)
+  - Type mismatch: inactiveDate (DATE) -> feature_type (VARCHAR(4))
+  - Type mismatch: featureType (VARCHAR(4)) -> or (use)
+  - Type mismatch: packageType (VARCHAR(4)) -> -- (Denormalized)
+  - Type mismatch: activeFlag (INT) -> -- (Constraint:)
+  - Type mismatch: id (INT) -> -- (Derived)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  activeDate activeFlag featureType id id inactiveDate packageType useCount useLimit
+
+Denormalized Model (Combined Text):
+  -- -- -- -- entitlement_id feature_type or total_use_count total_use_limit updated_at user_id user_id
+
+Structural Similarity Metrics:
+  BLEU Score:    0.0000
+  ROUGE-1:       0.1538
+  METEOR Score:  0.0000
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 9 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id INT PRIMARY KEY
+  Denormalized:  -- Denormalized from entitlements.featureType
+    active_flag INT NOT NULL DEFAULT 1
+
+Pair 2:
+  Relational:    activeDate DATE
+  Denormalized:  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+
+Pair 3:
+  Relational:    inactiveDate DATE
+  Denormalized:  feature_type VARCHAR(4) NOT NULL
+
+Pair 4:
+  Relational:    useLimit INT
+  Denormalized:  user_id INT PRIMARY KEY
+
+Pair 5:
+  Relational:    useCount INT
+  Denormalized:  user_id INT PRIMARY KEY
+
+Pair 6:
+  Relational:    featureType VARCHAR(4)
+  Denormalized:  or use a decimal type
+    usage_ratio_pct DECIMAL(5,2) GENERATED ALWAYS AS (total_use_count * 100.0 / NULLIF(total_use_limit, 0)) STORED
+
+Pair 7:
+  Relational:    packageType VARCHAR(4)
+  Denormalized:  -- Denormalized from entitlements.activeFlag
+    -- Constraint: Ensure no duplicate feature types per user per entitlement
+    CONSTRAINT unique_user_feature UNIQUE (user_id, feature_type)
+
+Pair 8:
+  Relational:    activeFlag INT
+  Denormalized:  -- Constraint: Ensure valid foreign key reference (checked at insert time)
+    CONSTRAINT fk_entitlement_check CHECK (entitlement_id IN (SELECT id FROM entitlements))
+
+Pair 9:
+  Relational:    id INT PRIMARY KEY
+  Denormalized:  -- Derived column: The actual ratio is stored as an integer percentage or float
+    -- We store the difference to avoid float precision issues
+
+
+================================================================================

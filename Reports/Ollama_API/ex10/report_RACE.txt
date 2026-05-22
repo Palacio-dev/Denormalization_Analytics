@@ -1,0 +1,146 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 6
+  - Total Attributes: 27
+    * consumo_anual: 6 columns
+    * continente: 3 columns
+    * emissao_g_efeito_estufa: 5 columns
+    * fonte_energia: 3 columns
+    * paises: 5 columns
+    * populacao: 5 columns
+
+Denormalized Model:
+  - Tables: 1
+  - Total Attributes: 15
+    * pais_energia_analise: 15 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 0.56
+⚠ WARNING: Normalized model has MORE attributes (15 vs 27)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 0.00%
+
+⚠ Issues Found:
+  - Type mismatch: id_consumo (integer) -> id_continente (INTEGER)
+  - Type mismatch: id_paises (integer) -> nome_pais (VARCHAR(50))
+  - Type mismatch: ano (integer) -> -- (Primary)
+  - Type mismatch: porcentagem (integer) -> nome_continente (VARCHAR(50))
+  - Type mismatch: tipo_energia (integer) -> id_tipo_energia (INTEGER)
+  - Type mismatch: CONSTRAINT (consumo_anual_pkey) -> -- (Country)
+  - Type mismatch: id_continente (integer) -> fundacao_pais (INTEGER)
+  - Type mismatch: nome (character) -> -- (Time)
+  - Type mismatch: CONSTRAINT (continente_pkey) -> -- (Population)
+  - Type mismatch: id_emissao (integer) -> -- (Energy)
+  - Type mismatch: id_paises (integer) -> -- (Array)
+  - Type mismatch: ano (integer) -> -- (Derived)
+  - Type mismatch: quantidade_emitida (bigint) -> nome_tipo_energia (VARCHAR(50))
+  - Type mismatch: CONSTRAINT (emissao_g_efeito_estufa_pkey) -> -- (Calculated)
+  - Type mismatch: id_fonte_energia (integer) -> -- (If)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT ano ano ano continente fundacao id_consumo id_continente id_emissao id_fonte_energia id_paises id_paises id_paises id_paises id_pop nome nome nome porcentagem quantidade_emitida quantidade_hab tipo_energia
+
+Denormalized Model (Combined Text):
+  -- -- -- -- -- -- -- -- -- fundacao_pais id_continente id_tipo_energia nome_continente nome_pais nome_tipo_energia
+
+Structural Similarity Metrics:
+  BLEU Score:    0.0300
+  ROUGE-1:       0.4074
+  METEOR Score:  0.0194
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 15 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id_consumo integer NOT NULL
+  Denormalized:  id_continente INTEGER NOT NULL
+
+Pair 2:
+  Relational:    id_paises integer NOT NULL
+  Denormalized:  nome_pais VARCHAR(50) NOT NULL
+
+Pair 3:
+  Relational:    ano integer NOT NULL
+  Denormalized:  -- Primary identifiers
+    id_registro SERIAL NOT NULL
+
+Pair 4:
+  Relational:    porcentagem integer NOT NULL
+  Denormalized:  nome_continente VARCHAR(50) NOT NULL
+
+Pair 5:
+  Relational:    tipo_energia integer NOT NULL
+  Denormalized:  id_tipo_energia INTEGER
+
+Pair 6:
+  Relational:    CONSTRAINT consumo_anual_pkey PRIMARY KEY (id_consumo)
+  Denormalized:  -- Country information (redundant attributes from paises and continente)
+    id_pais INTEGER NOT NULL
+
+Pair 7:
+  Relational:    id_continente integer NOT NULL
+  Denormalized:  fundacao_pais INTEGER NOT NULL
+
+Pair 8:
+  Relational:    nome character varying(50) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  -- Time dimension
+    ano INTEGER NOT NULL
+
+Pair 9:
+  Relational:    CONSTRAINT continente_pkey PRIMARY KEY (id_continente)
+  Denormalized:  -- Population data (from populacao)
+    quantidade_habitantes INTEGER
+
+Pair 10:
+  Relational:    id_emissao integer NOT NULL
+  Denormalized:  -- Energy consumption data (from consumo_anual and fonte_energia)
+    consumo_energia_porcentagem INTEGER
+
+Pair 11:
+  Relational:    id_paises integer NOT NULL
+  Denormalized:  -- Array type maintained from original
+    
+    -- Emissions data (from emissao_g_efeito_estufa)
+    quantidade_emitida BIGINT
+
+Pair 12:
+  Relational:    ano integer NOT NULL
+  Denormalized:  -- Derived attributes for common calculations
+    emissao_per_capita NUMERIC(15,2)
+
+Pair 13:
+  Relational:    quantidade_emitida bigint NOT NULL
+  Denormalized:  nome_tipo_energia VARCHAR(50)[]
+
+Pair 14:
+  Relational:    CONSTRAINT emissao_g_efeito_estufa_pkey PRIMARY KEY (id_emissao)
+  Denormalized:  -- Calculated as quantidade_emitida / quantidade_habitantes
+    consumo_per_capita NUMERIC(15,2)
+
+Pair 15:
+  Relational:    id_fonte_energia integer NOT NULL
+  Denormalized:  -- If applicable units were provided
+    
+    -- Composite primary key for efficient querying
+    CONSTRAINT pais_energia_analise_pkey PRIMARY KEY (id_pais, ano, id_tipo_energia)
+
+
+================================================================================

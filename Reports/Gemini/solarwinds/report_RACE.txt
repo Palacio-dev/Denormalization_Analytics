@@ -1,0 +1,119 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 4
+  - Total Attributes: 14
+    * customers: 4 columns
+    * orders: 3 columns
+    * products: 3 columns
+    * order_details: 4 columns
+
+Denormalized Model:
+  - Tables: 1
+  - Total Attributes: 12
+    * analytical_sales_data: 12 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 0.86
+⚠ WARNING: Normalized model has MORE attributes (12 vs 14)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 16.67%
+
+⚠ Issues Found:
+  - Type mismatch: customer_id (SERIAL) -> customer_name (VARCHAR(100))
+  - Type mismatch: customer_email (VARCHAR(100)) -> customer_address (TEXT)
+  - Type mismatch: customer_address (TEXT) -> order_date (DATE)
+  - Type mismatch: order_id (SERIAL) -> -- (Order)
+  - Type mismatch: order_date (DATE) -> product_name (VARCHAR(100))
+  - Type mismatch: product_id (SERIAL) -> -- (Order)
+  - Type mismatch: product_name (VARCHAR(100)) -> total_amount (DECIMAL(12,2))
+  - Type mismatch: price (DECIMAL(10,2)) -> -- (Customer)
+  - Type mismatch: order_detail_id (SERIAL) -> -- (Product)
+  - Type mismatch: order_id (INT) -> -- (Metrics)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  customer_address customer_email customer_id customer_id customer_name order_date order_detail_id order_id order_id price product_id product_id product_name quantity
+
+Denormalized Model (Combined Text):
+  -- -- -- -- -- customer_address customer_email customer_name order_date product_name quantity total_amount
+
+Structural Similarity Metrics:
+  BLEU Score:    0.4232
+  ROUGE-1:       0.5500
+  METEOR Score:  0.4076
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 12 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    customer_id SERIAL PRIMARY KEY
+  Denormalized:  customer_name VARCHAR(100)
+
+Pair 2:
+  Relational:    customer_name VARCHAR(100)
+  Denormalized:  customer_email VARCHAR(100)
+
+Pair 3:
+  Relational:    customer_email VARCHAR(100)
+  Denormalized:  customer_address TEXT
+
+Pair 4:
+  Relational:    customer_address TEXT
+  Denormalized:  order_date DATE NOT NULL
+
+Pair 5:
+  Relational:    order_id SERIAL PRIMARY KEY
+  Denormalized:  -- Order Detail / Line Item Grain (Primary Key)
+    order_detail_id INT PRIMARY KEY
+
+Pair 6:
+  Relational:    customer_id INT REFERENCES customers(customer_id)
+  Denormalized:  quantity INT NOT NULL
+
+Pair 7:
+  Relational:    order_date DATE
+  Denormalized:  product_name VARCHAR(100)
+
+Pair 8:
+  Relational:    product_id SERIAL PRIMARY KEY
+  Denormalized:  -- Order Header Information (Redundant Attributes / Collapsed Relation)
+    order_id INT NOT NULL
+
+Pair 9:
+  Relational:    product_name VARCHAR(100)
+  Denormalized:  total_amount DECIMAL(12,2) NOT NULL -- Derived Attribute: (quantity * unit_price)
+
+Pair 10:
+  Relational:    price DECIMAL(10,2)
+  Denormalized:  -- Customer Information (Redundant Attributes / Collapsed Relation)
+    customer_id INT NOT NULL
+
+Pair 11:
+  Relational:    order_detail_id SERIAL PRIMARY KEY
+  Denormalized:  -- Product Information (Redundant Attributes / Collapsed Relation)
+    product_id INT NOT NULL
+
+Pair 12:
+  Relational:    order_id INT REFERENCES orders(order_id)
+  Denormalized:  -- Metrics & Derived Attributes
+    unit_price DECIMAL(10,2) NOT NULL
+
+
+================================================================================

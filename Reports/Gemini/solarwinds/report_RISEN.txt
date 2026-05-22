@@ -1,0 +1,110 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 4
+  - Total Attributes: 14
+    * customers: 4 columns
+    * orders: 3 columns
+    * products: 3 columns
+    * order_details: 4 columns
+
+Denormalized Model:
+  - Tables: 1
+  - Total Attributes: 12
+    * denormalized_sales: 12 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 0.86
+⚠ WARNING: Normalized model has MORE attributes (12 vs 14)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 50.00%
+
+⚠ Issues Found:
+  - Type mismatch: customer_id (SERIAL) -> customer_id (INT)
+  - Type mismatch: order_id (SERIAL) -> order_id (INT)
+  - Type mismatch: product_id (SERIAL) -> product_name (VARCHAR(100))
+  - Type mismatch: product_name (VARCHAR(100)) -> product_price (DECIMAL(10,2))
+  - Type mismatch: price (DECIMAL(10,2)) -> total_price (DECIMAL(12,2))
+  - Type mismatch: order_detail_id (SERIAL) -> order_detail_id (INT)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  customer_address customer_email customer_id customer_id customer_name order_date order_detail_id order_id order_id price product_id product_id product_name quantity
+
+Denormalized Model (Combined Text):
+  customer_address customer_email customer_id customer_name order_date order_detail_id order_id product_id product_name product_price quantity total_price
+
+Structural Similarity Metrics:
+  BLEU Score:    0.7054
+  ROUGE-1:       0.8627
+  METEOR Score:  0.6793
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 12 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    customer_id SERIAL PRIMARY KEY
+  Denormalized:  customer_id INT
+
+Pair 2:
+  Relational:    customer_name VARCHAR(100)
+  Denormalized:  customer_name VARCHAR(100)
+
+Pair 3:
+  Relational:    customer_email VARCHAR(100)
+  Denormalized:  customer_email VARCHAR(100)
+
+Pair 4:
+  Relational:    customer_address TEXT
+  Denormalized:  customer_address TEXT
+
+Pair 5:
+  Relational:    order_id SERIAL PRIMARY KEY
+  Denormalized:  order_id INT
+
+Pair 6:
+  Relational:    customer_id INT REFERENCES customers(customer_id)
+  Denormalized:  product_id INT
+
+Pair 7:
+  Relational:    order_date DATE
+  Denormalized:  order_date DATE
+
+Pair 8:
+  Relational:    product_id SERIAL PRIMARY KEY
+  Denormalized:  product_name VARCHAR(100)
+
+Pair 9:
+  Relational:    product_name VARCHAR(100)
+  Denormalized:  product_price DECIMAL(10,2)
+
+Pair 10:
+  Relational:    price DECIMAL(10,2)
+  Denormalized:  total_price DECIMAL(12,2)
+
+Pair 11:
+  Relational:    order_detail_id SERIAL PRIMARY KEY
+  Denormalized:  order_detail_id INT
+
+Pair 12:
+  Relational:    order_id INT REFERENCES orders(order_id)
+  Denormalized:  quantity INT
+
+
+================================================================================

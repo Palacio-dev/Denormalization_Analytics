@@ -1,0 +1,119 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 6
+  - Total Attributes: 27
+    * consumo_anual: 6 columns
+    * continente: 3 columns
+    * emissao_g_efeito_estufa: 5 columns
+    * fonte_energia: 3 columns
+    * paises: 5 columns
+    * populacao: 5 columns
+
+Denormalized Model:
+  - Tables: 2
+  - Total Attributes: 12
+    * fato_energia_emissao_populacao: 8 columns
+    * dim_pais_continente: 4 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 0.44
+⚠ WARNING: Normalized model has MORE attributes (12 vs 27)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 0.00%
+
+⚠ Issues Found:
+  - Type mismatch: id_consumo (integer) -> id_paises (INTEGER)
+  - Type mismatch: id_paises (integer) -> id_paises (INTEGER)
+  - Type mismatch: ano (integer) -> ano (INTEGER)
+  - Type mismatch: porcentagem (integer) -> nome_pais (VARCHAR(50))
+  - Type mismatch: tipo_energia (integer) -> nome_pais (VARCHAR(50))
+  - Type mismatch: CONSTRAINT (consumo_anual_pkey) -> updated_at (TIMESTAMP)
+  - Type mismatch: id_continente (integer) -> nome_continente (VARCHAR(50))
+  - Type mismatch: nome (character) -> updated_at (TIMESTAMP)
+  - Type mismatch: CONSTRAINT (continente_pkey) -> continente_nome (VARCHAR(50))
+  - Type mismatch: id_emissao (integer) -> total_populacao (INTEGER)
+  - Type mismatch: id_paises (integer) -> total_quantidade_emitida (BIGINT)
+  - Type mismatch: ano (integer) -> total_porcentagem_consumo (INTEGER)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT ano ano ano continente fundacao id_consumo id_continente id_emissao id_fonte_energia id_paises id_paises id_paises id_paises id_pop nome nome nome porcentagem quantidade_emitida quantidade_hab tipo_energia
+
+Denormalized Model (Combined Text):
+  ano continente_nome id_paises id_paises nome_continente nome_pais nome_pais total_populacao total_porcentagem_consumo total_quantidade_emitida updated_at updated_at
+
+Structural Similarity Metrics:
+  BLEU Score:    0.0716
+  ROUGE-1:       0.4308
+  METEOR Score:  0.1002
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 12 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id_consumo integer NOT NULL
+  Denormalized:  id_paises INTEGER NOT NULL
+
+Pair 2:
+  Relational:    id_paises integer NOT NULL
+  Denormalized:  id_paises INTEGER PRIMARY KEY
+
+Pair 3:
+  Relational:    ano integer NOT NULL
+  Denormalized:  ano INTEGER NOT NULL
+
+Pair 4:
+  Relational:    porcentagem integer NOT NULL
+  Denormalized:  nome_pais VARCHAR(50)
+
+Pair 5:
+  Relational:    tipo_energia integer NOT NULL
+  Denormalized:  nome_pais VARCHAR(50)
+
+Pair 6:
+  Relational:    CONSTRAINT consumo_anual_pkey PRIMARY KEY (id_consumo)
+  Denormalized:  updated_at TIMESTAMP DEFAULT NOW()
+
+Pair 7:
+  Relational:    id_continente integer NOT NULL
+  Denormalized:  nome_continente VARCHAR(50)
+
+Pair 8:
+  Relational:    nome character varying(50) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  updated_at TIMESTAMP DEFAULT NOW()
+
+Pair 9:
+  Relational:    CONSTRAINT continente_pkey PRIMARY KEY (id_continente)
+  Denormalized:  continente_nome VARCHAR(50)
+
+Pair 10:
+  Relational:    id_emissao integer NOT NULL
+  Denormalized:  total_populacao INTEGER
+
+Pair 11:
+  Relational:    id_paises integer NOT NULL
+  Denormalized:  total_quantidade_emitida BIGINT
+
+Pair 12:
+  Relational:    ano integer NOT NULL
+  Denormalized:  total_porcentagem_consumo INTEGER
+
+
+================================================================================

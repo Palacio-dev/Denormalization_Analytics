@@ -1,0 +1,334 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 8
+  - Total Attributes: 61
+    * NATION: 4 columns
+    * REGION: 3 columns
+    * PART: 9 columns
+    * SUPPLIER: 7 columns
+    * PARTSUPP: 5 columns
+    * CUSTOMER: 8 columns
+    * ORDERS: 9 columns
+    * LINEITEM: 16 columns
+
+Denormalized Model:
+  - Tables: 5
+  - Total Attributes: 86
+    * LINEITEM_ANALYTICAL: 53 columns
+    * PART_DIM: 9 columns
+    * SUPPLIER_DIM: 8 columns
+    * CUSTOMER_DIM: 9 columns
+    * DATE_DIM: 7 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 1.41
+⚠ WARNING: Denormalized model has MORE attributes (61 vs 86)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 57.38%
+
+⚠ Issues Found:
+  - Type mismatch: N_NAME (CHAR(25)) -> P_NAME (VARCHAR(55))
+  - Type mismatch: N_REGIONKEY (INTEGER) -> S_REGION_NAME (CHAR(25))
+  - Type mismatch: N_COMMENT (VARCHAR(152)) -> L_COMMENT (VARCHAR(44))
+  - Type mismatch: R_REGIONKEY (INTEGER) -> C_REGION_NAME (CHAR(25))
+  - Type mismatch: R_COMMENT (VARCHAR(152)) -> P_COMMENT (VARCHAR(23))
+  - Type mismatch: P_NAME (VARCHAR(55)) -> C_NAME (VARCHAR(25))
+  - Type mismatch: S_NAME (CHAR(25)) -> D_DATE (DATE)
+  - Type mismatch: S_NATIONKEY (INTEGER) -> S_NATION_NAME (CHAR(25))
+  - Type mismatch: PS_AVAILQTY (INTEGER) -> L_QUANTITY (DECIMAL(15,2))
+  - Type mismatch: PS_SUPPLYCOST (DECIMAL(15,2)) -> L_SHIPMODE (CHAR(10))
+  - Type mismatch: PS_COMMENT (VARCHAR(199)) -> S_COMMENT (VARCHAR(101))
+  - Type mismatch: C_CUSTKEY (INTEGER) -> C_PHONE (CHAR(15))
+  - Type mismatch: C_NAME (VARCHAR(25)) -> L_TAX (DECIMAL(15,2))
+  - Type mismatch: C_NATIONKEY (INTEGER) -> C_NATION_NAME (CHAR(25))
+  - Type mismatch: O_ORDERKEY (INTEGER) -> O_ORDERDATE (DATE)
+  - Type mismatch: O_CUSTKEY (INTEGER) -> O_CLERK (CHAR(15))
+  - Type mismatch: O_CLERK (CHAR(15)) -> O_COMMENT (VARCHAR(79))
+  - Type mismatch: O_COMMENT (VARCHAR(79)) -> C_COMMENT (VARCHAR(117))
+  - Type mismatch: L_ORDERKEY (INTEGER) -> S_ADDRESS (VARCHAR(40))
+  - Type mismatch: L_QUANTITY (DECIMAL(15,2)) -> P_BRAND (CHAR(10))
+  - Type mismatch: L_TAX (DECIMAL(15,2)) -> D_DAY (INTEGER)
+  - Type mismatch: L_LINESTATUS (CHAR(1)) -> L_COMMITDATE (DATE)
+  - Type mismatch: L_COMMITDATE (DATE) -> P_CONTAINER (CHAR(10))
+  - Type mismatch: L_RECEIPTDATE (DATE) -> P_RETAILPRICE (DECIMAL(15,2))
+  - Type mismatch: L_SHIPMODE (CHAR(10)) -> P_SIZE (INTEGER)
+  - Type mismatch: L_COMMENT (VARCHAR(44)) -> D_MONTH (INTEGER)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  C_ACCTBAL C_ADDRESS C_COMMENT C_CUSTKEY C_MKTSEGMENT C_NAME C_NATIONKEY C_PHONE L_COMMENT L_COMMITDATE L_DISCOUNT L_EXTENDEDPRICE L_LINENUMBER L_LINESTATUS L_ORDERKEY L_PARTKEY L_QUANTITY L_RECEIPTDATE L_RETURNFLAG L_SHIPDATE L_SHIPINSTRUCT L_SHIPMODE L_SUPPKEY L_TAX N_COMMENT N_NAME N_NATIONKEY N_REGIONKEY O_CLERK O_COMMENT O_CUSTKEY O_ORDERDATE O_ORDERKEY O_ORDERPRIORITY O_ORDERSTATUS O_SHIPPRIORITY O_TOTALPRICE PS_AVAILQTY PS_COMMENT PS_PARTKEY PS_SUPPKEY PS_SUPPLYCOST P_BRAND P_COMMENT P_CONTAINER P_MFGR P_NAME P_PARTKEY P_RETAILPRICE P_SIZE P_TYPE R_COMMENT R_NAME R_REGIONKEY S_ACCTBAL S_ADDRESS S_COMMENT S_NAME S_NATIONKEY S_PHONE S_SUPPKEY
+
+Denormalized Model (Combined Text):
+  -- -- -- -- -- -- -- -- C_ACCTBAL C_ACCTBAL C_ADDRESS C_ADDRESS C_COMMENT C_COMMENT C_CUSTKEY C_MKTSEGMENT C_MKTSEGMENT C_NAME C_NATION_COMMENT C_NATION_NAME C_PHONE C_PHONE C_REGION_COMMENT C_REGION_NAME C_REGION_NAME D_DATE D_DAY D_DAY_OF_WEEK D_IS_WEEKEND D_MONTH D_QUARTER D_YEAR L_COMMENT L_COMMITDATE L_DISCOUNT L_EXTENDEDPRICE L_FINAL_PRICE L_LINENUMBER L_LINESTATUS L_PARTKEY L_QUANTITY L_RECEIPTDATE L_RETURNFLAG L_SHIPDATE L_SHIPINSTRUCT L_SHIPMODE L_SHIP_DAYS L_SUPPKEY L_TAX O_CLERK O_COMMENT O_ORDERDATE O_ORDERPRIORITY O_SHIPPRIORITY O_TOTALPRICE P_BRAND P_BRAND P_COMMENT P_COMMENT P_CONTAINER P_CONTAINER P_MFGR P_MFGR P_NAME P_PARTKEY P_RETAILPRICE P_RETAILPRICE P_SIZE P_SIZE P_TYPE P_TYPE S_ACCTBAL S_ACCTBAL S_ADDRESS S_ADDRESS S_COMMENT S_COMMENT S_NAME S_NATION_COMMENT S_NATION_NAME S_PHONE S_PHONE S_REGION_COMMENT S_REGION_NAME S_REGION_NAME S_SUPPKEY
+
+Structural Similarity Metrics:
+  BLEU Score:    0.5000
+  ROUGE-1:       0.6416
+  METEOR Score:  0.6106
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 61 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    N_NATIONKEY  INTEGER NOT NULL
+  Denormalized:  L_PARTKEY     INTEGER NOT NULL
+
+Pair 2:
+  Relational:    N_NAME       CHAR(25) NOT NULL
+  Denormalized:  P_NAME        VARCHAR(55) NOT NULL
+
+Pair 3:
+  Relational:    N_REGIONKEY  INTEGER NOT NULL
+  Denormalized:  S_REGION_NAME CHAR(25) NOT NULL
+
+Pair 4:
+  Relational:    N_COMMENT    VARCHAR(152)
+  Denormalized:  L_COMMENT      VARCHAR(44) NOT NULL
+
+Pair 5:
+  Relational:    R_REGIONKEY  INTEGER NOT NULL
+  Denormalized:  C_REGION_NAME CHAR(25) NOT NULL
+
+Pair 6:
+  Relational:    R_NAME       CHAR(25) NOT NULL
+  Denormalized:  S_NAME        CHAR(25) NOT NULL
+
+Pair 7:
+  Relational:    R_COMMENT    VARCHAR(152)
+  Denormalized:  P_COMMENT     VARCHAR(23) NOT NULL
+
+Pair 8:
+  Relational:    P_PARTKEY     INTEGER NOT NULL
+  Denormalized:  P_PARTKEY     INTEGER NOT NULL PRIMARY KEY
+
+Pair 9:
+  Relational:    P_NAME        VARCHAR(55) NOT NULL
+  Denormalized:  C_NAME        VARCHAR(25) NOT NULL
+
+Pair 10:
+  Relational:    P_MFGR        CHAR(25) NOT NULL
+  Denormalized:  P_MFGR        CHAR(25) NOT NULL
+
+Pair 11:
+  Relational:    P_BRAND       CHAR(10) NOT NULL
+  Denormalized:  P_BRAND       CHAR(10) NOT NULL
+
+Pair 12:
+  Relational:    P_TYPE        VARCHAR(25) NOT NULL
+  Denormalized:  P_TYPE        VARCHAR(25) NOT NULL
+
+Pair 13:
+  Relational:    P_SIZE        INTEGER NOT NULL
+  Denormalized:  P_SIZE        INTEGER NOT NULL
+
+Pair 14:
+  Relational:    P_CONTAINER   CHAR(10) NOT NULL
+  Denormalized:  P_CONTAINER   CHAR(10) NOT NULL
+
+Pair 15:
+  Relational:    P_RETAILPRICE DECIMAL(15,2) NOT NULL
+  Denormalized:  P_RETAILPRICE DECIMAL(15,2) NOT NULL
+
+Pair 16:
+  Relational:    P_COMMENT     VARCHAR(23) NOT NULL
+  Denormalized:  P_COMMENT     VARCHAR(23) NOT NULL
+
+Pair 17:
+  Relational:    S_SUPPKEY     INTEGER NOT NULL
+  Denormalized:  S_SUPPKEY     INTEGER NOT NULL PRIMARY KEY
+
+Pair 18:
+  Relational:    S_NAME        CHAR(25) NOT NULL
+  Denormalized:  D_DATE        DATE NOT NULL PRIMARY KEY
+
+Pair 19:
+  Relational:    S_ADDRESS     VARCHAR(40) NOT NULL
+  Denormalized:  S_ADDRESS     VARCHAR(40) NOT NULL
+
+Pair 20:
+  Relational:    S_NATIONKEY   INTEGER NOT NULL
+  Denormalized:  S_NATION_NAME CHAR(25) NOT NULL
+
+Pair 21:
+  Relational:    S_PHONE       CHAR(15) NOT NULL
+  Denormalized:  S_PHONE       CHAR(15) NOT NULL
+
+Pair 22:
+  Relational:    S_ACCTBAL     DECIMAL(15,2) NOT NULL
+  Denormalized:  S_ACCTBAL     DECIMAL(15,2) NOT NULL
+
+Pair 23:
+  Relational:    S_COMMENT     VARCHAR(101) NOT NULL
+  Denormalized:  S_COMMENT     VARCHAR(101) NOT NULL
+
+Pair 24:
+  Relational:    PS_PARTKEY     INTEGER NOT NULL
+  Denormalized:  C_CUSTKEY     INTEGER NOT NULL PRIMARY KEY
+
+Pair 25:
+  Relational:    PS_SUPPKEY     INTEGER NOT NULL
+  Denormalized:  L_SUPPKEY     INTEGER NOT NULL
+
+Pair 26:
+  Relational:    PS_AVAILQTY    INTEGER NOT NULL
+  Denormalized:  L_QUANTITY    DECIMAL(15,2) NOT NULL
+
+Pair 27:
+  Relational:    PS_SUPPLYCOST  DECIMAL(15,2)  NOT NULL
+  Denormalized:  L_SHIPMODE     CHAR(10) NOT NULL
+
+Pair 28:
+  Relational:    PS_COMMENT     VARCHAR(199) NOT NULL
+  Denormalized:  S_COMMENT     VARCHAR(101) NOT NULL
+
+Pair 29:
+  Relational:    C_CUSTKEY     INTEGER NOT NULL
+  Denormalized:  C_PHONE       CHAR(15) NOT NULL
+
+Pair 30:
+  Relational:    C_NAME        VARCHAR(25) NOT NULL
+  Denormalized:  L_TAX         DECIMAL(15,2) NOT NULL
+
+Pair 31:
+  Relational:    C_ADDRESS     VARCHAR(40) NOT NULL
+  Denormalized:  C_ADDRESS     VARCHAR(40) NOT NULL
+
+Pair 32:
+  Relational:    C_NATIONKEY   INTEGER NOT NULL
+  Denormalized:  C_NATION_NAME CHAR(25) NOT NULL
+
+Pair 33:
+  Relational:    C_PHONE       CHAR(15) NOT NULL
+  Denormalized:  C_PHONE       CHAR(15) NOT NULL
+
+Pair 34:
+  Relational:    C_ACCTBAL     DECIMAL(15,2)   NOT NULL
+  Denormalized:  C_ACCTBAL     DECIMAL(15,2) NOT NULL
+
+Pair 35:
+  Relational:    C_MKTSEGMENT  CHAR(10) NOT NULL
+  Denormalized:  C_MKTSEGMENT  CHAR(10) NOT NULL
+
+Pair 36:
+  Relational:    C_COMMENT     VARCHAR(117) NOT NULL
+  Denormalized:  C_COMMENT     VARCHAR(117) NOT NULL
+
+Pair 37:
+  Relational:    O_ORDERKEY       INTEGER NOT NULL
+  Denormalized:  O_ORDERDATE      DATE NOT NULL
+
+Pair 38:
+  Relational:    O_CUSTKEY        INTEGER NOT NULL
+  Denormalized:  O_CLERK          CHAR(15) NOT NULL
+
+Pair 39:
+  Relational:    O_ORDERSTATUS    CHAR(1) NOT NULL
+  Denormalized:  L_LINESTATUS  CHAR(1) NOT NULL
+
+Pair 40:
+  Relational:    O_TOTALPRICE     DECIMAL(15,2) NOT NULL
+  Denormalized:  O_TOTALPRICE     DECIMAL(15,2) NOT NULL
+
+Pair 41:
+  Relational:    O_ORDERDATE      DATE NOT NULL
+  Denormalized:  L_SHIPDATE    DATE NOT NULL
+
+Pair 42:
+  Relational:    O_ORDERPRIORITY  CHAR(15) NOT NULL
+  Denormalized:  O_ORDERPRIORITY  CHAR(15) NOT NULL
+
+Pair 43:
+  Relational:    O_CLERK          CHAR(15) NOT NULL
+  Denormalized:  O_COMMENT        VARCHAR(79) NOT NULL
+
+Pair 44:
+  Relational:    O_SHIPPRIORITY   INTEGER NOT NULL
+  Denormalized:  O_SHIPPRIORITY   INTEGER NOT NULL
+
+Pair 45:
+  Relational:    O_COMMENT        VARCHAR(79) NOT NULL
+  Denormalized:  C_COMMENT     VARCHAR(117) NOT NULL
+
+Pair 46:
+  Relational:    L_ORDERKEY    INTEGER NOT NULL
+  Denormalized:  S_ADDRESS     VARCHAR(40) NOT NULL
+
+Pair 47:
+  Relational:    L_PARTKEY     INTEGER NOT NULL
+  Denormalized:  D_QUARTER     INTEGER NOT NULL
+
+Pair 48:
+  Relational:    L_SUPPKEY     INTEGER NOT NULL
+  Denormalized:  L_SHIP_DAYS        INTEGER GENERATED ALWAYS AS (EXTRACT(DAY FROM (L_RECEIPTDATE - L_COMMITDATE))) STORED
+
+Pair 49:
+  Relational:    L_LINENUMBER  INTEGER NOT NULL
+  Denormalized:  L_LINENUMBER  INTEGER NOT NULL
+
+Pair 50:
+  Relational:    L_QUANTITY    DECIMAL(15,2) NOT NULL
+  Denormalized:  P_BRAND       CHAR(10) NOT NULL
+
+Pair 51:
+  Relational:    L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  Denormalized:  L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+
+Pair 52:
+  Relational:    L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  Denormalized:  L_DISCOUNT    DECIMAL(15,2) NOT NULL
+
+Pair 53:
+  Relational:    L_TAX         DECIMAL(15,2) NOT NULL
+  Denormalized:  D_DAY         INTEGER NOT NULL
+
+Pair 54:
+  Relational:    L_RETURNFLAG  CHAR(1) NOT NULL
+  Denormalized:  L_RETURNFLAG  CHAR(1) NOT NULL
+
+Pair 55:
+  Relational:    L_LINESTATUS  CHAR(1) NOT NULL
+  Denormalized:  L_COMMITDATE  DATE NOT NULL
+
+Pair 56:
+  Relational:    L_SHIPDATE    DATE NOT NULL
+  Denormalized:  L_RECEIPTDATE DATE NOT NULL
+
+Pair 57:
+  Relational:    L_COMMITDATE  DATE NOT NULL
+  Denormalized:  P_CONTAINER   CHAR(10) NOT NULL
+
+Pair 58:
+  Relational:    L_RECEIPTDATE DATE NOT NULL
+  Denormalized:  P_RETAILPRICE DECIMAL(15,2) NOT NULL
+
+Pair 59:
+  Relational:    L_SHIPINSTRUCT CHAR(25) NOT NULL
+  Denormalized:  L_SHIPINSTRUCT CHAR(25) NOT NULL
+
+Pair 60:
+  Relational:    L_SHIPMODE     CHAR(10) NOT NULL
+  Denormalized:  P_SIZE        INTEGER NOT NULL
+
+Pair 61:
+  Relational:    L_COMMENT      VARCHAR(44) NOT NULL
+  Denormalized:  D_MONTH       INTEGER NOT NULL
+
+
+================================================================================

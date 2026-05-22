@@ -1,0 +1,173 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 6
+  - Total Attributes: 25
+    * Usina: 12 columns
+    * Proprietarios: 2 columns
+    * Municipios: 3 columns
+    * Estados: 1 columns
+    * Rios: 2 columns
+    * Localizacoes: 5 columns
+
+Denormalized Model:
+  - Tables: 4
+  - Total Attributes: 37
+    * DimLocalizacao: 8 columns
+    * DimProprietario: 2 columns
+    * DimRio: 2 columns
+    * FatoUsina: 25 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 1.48
+⚠ WARNING: Denormalized model has MORE attributes (25 vs 37)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 64.00%
+
+⚠ Issues Found:
+  - Type mismatch: id_proprietario (INTEGER) -> proprietario_nome (VARCHAR)
+  - Type mismatch: municipio (VARCHAR) -> municipio1_uf (CHAR(2))
+  - Type mismatch: uf (CHAR(2)) -> -- (Nullable)
+  - Type mismatch: id_municipio (SERIAL) -> id_rio (INTEGER)
+  - Type mismatch: uf (CHAR(2)) -> -- (Nullable)
+  - Type mismatch: rio (VARCHAR) -> -- (Denormalized)
+  - Type mismatch: id_rio (INTEGER) -> rio_nome (VARCHAR)
+  - Type mismatch: id_municipio1 (INTEGER) -> municipio1_uf (CHAR(2))
+  - Type mismatch: id_municipio2 (INTEGER) -> municipio2_uf (CHAR(2))
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  atualizacao estagio id id_localizacao id_localização id_municipio id_municipio1 id_municipio2 id_proprietario id_proprietario id_rio id_rio iniciop lat latitude long longitude municipio nome potfis potkw proprietario rio uf uf
+
+Denormalized Model (Combined Text):
+  -- -- -- -- atualizacao capacidade_media_estado_kw capacidade_total_estado_kw estado_nome estagio id id_localizacao id_localizacao id_proprietario id_rio id_rio iniciop lat latitude localizacao_latitude localizacao_longitude long longitude municipio1_nome municipio1_nome municipio1_uf municipio1_uf municipio2_nome municipio2_nome municipio2_uf nome potfis potkw proprietario_nome proprietario_nome qtde_usinas_municipio rio_nome rio_nome
+
+Structural Similarity Metrics:
+  BLEU Score:    0.4054
+  ROUGE-1:       0.5895
+  METEOR Score:  0.5542
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 25 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id SERIAL PRIMARY KEY
+  Denormalized:  id SERIAL PRIMARY KEY
+
+Pair 2:
+  Relational:    nome VARCHAR NOT NULL
+  Denormalized:  nome VARCHAR NOT NULL
+
+Pair 3:
+  Relational:    potkw FLOAT
+  Denormalized:  potkw FLOAT
+
+Pair 4:
+  Relational:    potfis FLOAT
+  Denormalized:  potfis FLOAT
+
+Pair 5:
+  Relational:    iniciop DATE
+  Denormalized:  iniciop DATE
+
+Pair 6:
+  Relational:    atualizacao DATE
+  Denormalized:  atualizacao DATE
+
+Pair 7:
+  Relational:    lat DOUBLE PRECISION
+  Denormalized:  lat DOUBLE PRECISION
+
+Pair 8:
+  Relational:    long DOUBLE PRECISION
+  Denormalized:  long DOUBLE PRECISION
+
+Pair 9:
+  Relational:    estagio VARCHAR
+  Denormalized:  estagio VARCHAR
+
+Pair 10:
+  Relational:    id_proprietario INTEGER NULL
+  Denormalized:  id_proprietario INTEGER PRIMARY KEY
+
+Pair 11:
+  Relational:    id_rio INTEGER NOT NULL
+  Denormalized:  id_rio INTEGER PRIMARY KEY
+
+Pair 12:
+  Relational:    id_localizacao INTEGER NOT NULL
+  Denormalized:  id_localizacao INTEGER PRIMARY KEY
+
+Pair 13:
+  Relational:    proprietario VARCHAR
+  Denormalized:  proprietario_nome VARCHAR NOT NULL
+
+Pair 14:
+  Relational:    id_proprietario INTEGER PRIMARY KEY NOT NULL
+  Denormalized:  proprietario_nome VARCHAR
+
+Pair 15:
+  Relational:    municipio VARCHAR NOT NULL
+  Denormalized:  municipio1_uf CHAR(2) NOT NULL
+
+Pair 16:
+  Relational:    uf CHAR(2) NOT NULL
+  Denormalized:  -- Nullable as in original
+    municipio2_uf CHAR(2)
+
+Pair 17:
+  Relational:    id_municipio SERIAL PRIMARY KEY
+  Denormalized:  id_rio INTEGER NOT NULL
+
+Pair 18:
+  Relational:    uf CHAR(2) PRIMARY KEY
+  Denormalized:  -- Nullable as in original
+    estado_nome CHAR(2) NOT NULL
+
+Pair 19:
+  Relational:    rio VARCHAR NOT NULL
+  Denormalized:  -- Denormalized foreign keys with descriptive names
+    id_proprietario INTEGER
+
+Pair 20:
+  Relational:    id_rio INTEGER PRIMARY KEY
+  Denormalized:  rio_nome VARCHAR NOT NULL
+
+Pair 21:
+  Relational:    id_localização INTEGER PRIMARY KEY
+  Denormalized:  id_localizacao INTEGER NOT NULL
+
+Pair 22:
+  Relational:    longitude DOUBLE PRECISION
+  Denormalized:  longitude DOUBLE PRECISION
+
+Pair 23:
+  Relational:    id_municipio1 INTEGER NOT NULL
+  Denormalized:  municipio1_uf CHAR(2) NOT NULL
+
+Pair 24:
+  Relational:    id_municipio2 INTEGER
+  Denormalized:  municipio2_uf CHAR(2)
+
+Pair 25:
+  Relational:    latitude DOUBLE PRECISION
+  Denormalized:  latitude DOUBLE PRECISION
+
+
+================================================================================

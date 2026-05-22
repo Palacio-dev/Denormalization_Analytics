@@ -1,0 +1,108 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 6
+  - Total Attributes: 27
+    * consumo_anual: 6 columns
+    * continente: 3 columns
+    * emissao_g_efeito_estufa: 5 columns
+    * fonte_energia: 3 columns
+    * paises: 5 columns
+    * populacao: 5 columns
+
+Denormalized Model:
+  - Tables: 1
+  - Total Attributes: 9
+    * analise_anual_emissoes_energia: 9 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 0.33
+⚠ WARNING: Normalized model has MORE attributes (9 vs 27)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 0.00%
+
+⚠ Issues Found:
+  - Type mismatch: id_consumo (integer) -> -- (Geographical)
+  - Type mismatch: id_paises (integer) -> nome_pais (character)
+  - Type mismatch: ano (integer) -> -- (Temporal)
+  - Type mismatch: porcentagem (integer) -> -- (Population)
+  - Type mismatch: tipo_energia (integer) -> emissao_gee_total (bigint)
+  - Type mismatch: CONSTRAINT (consumo_anual_pkey) -> -- (Derived)
+  - Type mismatch: id_continente (integer) -> -- (Energy)
+  - Type mismatch: nome (character) -> ano_fundacao_pais (integer)
+  - Type mismatch: CONSTRAINT (continente_pkey) -> consumo_energia_porcentagem (integer)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT ano ano ano continente fundacao id_consumo id_continente id_emissao id_fonte_energia id_paises id_paises id_paises id_paises id_pop nome nome nome porcentagem quantidade_emitida quantidade_hab tipo_energia
+
+Denormalized Model (Combined Text):
+  -- -- -- -- -- ano_fundacao_pais consumo_energia_porcentagem emissao_gee_total nome_pais
+
+Structural Similarity Metrics:
+  BLEU Score:    0.0000
+  ROUGE-1:       0.2745
+  METEOR Score:  0.0000
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 9 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id_consumo integer NOT NULL
+  Denormalized:  -- Geographical & Country Attributes (Collapsed from continente and paises)
+    nome_continente character varying(50)
+
+Pair 2:
+  Relational:    id_paises integer NOT NULL
+  Denormalized:  nome_pais character varying(50)
+
+Pair 3:
+  Relational:    ano integer NOT NULL
+  Denormalized:  -- Temporal Attribute
+    ano integer
+
+Pair 4:
+  Relational:    porcentagem integer NOT NULL
+  Denormalized:  -- Population & Emission Metrics (Collapsed from populacao and emissao_g_efeito_estufa)
+    quantidade_populacao integer
+
+Pair 5:
+  Relational:    tipo_energia integer NOT NULL
+  Denormalized:  emissao_gee_total bigint
+
+Pair 6:
+  Relational:    CONSTRAINT consumo_anual_pkey PRIMARY KEY (id_consumo)
+  Denormalized:  -- Derived Attribute (Precomputed to save CPU on BI aggregations)
+    emissao_gee_per_capita numeric(15, 4)
+
+Pair 7:
+  Relational:    id_continente integer NOT NULL
+  Denormalized:  -- Energy Consumption Metrics (Collapsed from consumo_anual and fonte_energia)
+    nome_fonte_energia character varying(50)
+
+Pair 8:
+  Relational:    nome character varying(50) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  ano_fundacao_pais integer
+
+Pair 9:
+  Relational:    CONSTRAINT continente_pkey PRIMARY KEY (id_continente)
+  Denormalized:  consumo_energia_porcentagem integer
+
+
+================================================================================

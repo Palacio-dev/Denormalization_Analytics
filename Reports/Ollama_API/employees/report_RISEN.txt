@@ -1,0 +1,173 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 6
+  - Total Attributes: 30
+    * department: 3 columns
+    * department_employee: 5 columns
+    * department_manager: 5 columns
+    * employee: 7 columns
+    * salary: 5 columns
+    * title: 5 columns
+
+Denormalized Model:
+  - Tables: 1
+  - Total Attributes: 23
+    * employee_analytical: 23 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 0.77
+⚠ WARNING: Normalized model has MORE attributes (23 vs 30)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 26.09%
+
+⚠ Issues Found:
+  - Type mismatch: id (character(4)) -> -- (Employee)
+  - Type mismatch: CONSTRAINT (idx_16979_primary) -> birth_date (date)
+  - Type mismatch: employee_id (bigint) -> gender (employees.employee_gender)
+  - Type mismatch: department_id (character(4)) -> department_to_date (date)
+  - Type mismatch: CONSTRAINT (idx_16982_primary) -> first_name (character)
+  - Type mismatch: employee_id (bigint) -> -- (Current)
+  - Type mismatch: department_id (character(4)) -> department_from_date (date)
+  - Type mismatch: to_date (date) -> -- (Current)
+  - Type mismatch: CONSTRAINT (idx_16985_primary) -> -- (Current)
+  - Type mismatch: id (bigint) -> -- (Manager)
+  - Type mismatch: first_name (character) -> manager_to_date (date)
+  - Type mismatch: last_name (character) -> -- (Derived)
+  - Type mismatch: gender (employees.employee_gender) -> is_active_manager (boolean)
+  - Type mismatch: CONSTRAINT (idx_16988_primary) -> manager_from_date (date)
+  - Type mismatch: employee_id (bigint) -> is_current_employee (boolean)
+  - Type mismatch: amount (bigint) -> managed_department_id (character(4))
+  - Type mismatch: from_date (date) -> current_department_name (character)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT amount birth_date department_id department_id dept_name employee_id employee_id employee_id employee_id first_name from_date from_date from_date from_date gender hire_date id id last_name title to_date to_date to_date to_date
+
+Denormalized Model (Combined Text):
+  -- -- -- -- -- -- birth_date current_department_name department_from_date department_to_date first_name gender hire_date is_active_manager is_current_employee last_name managed_department_id manager_from_date manager_to_date salary_from_date salary_to_date title_from_date title_to_date
+
+Structural Similarity Metrics:
+  BLEU Score:    0.1603
+  ROUGE-1:       0.6596
+  METEOR Score:  0.1270
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 23 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id character(4) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  -- Employee core attributes
+    employee_id bigint NOT NULL
+
+Pair 2:
+  Relational:    dept_name character varying(40) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  last_name character varying(16) COLLATE pg_catalog."default" NOT NULL
+
+Pair 3:
+  Relational:    CONSTRAINT idx_16979_primary PRIMARY KEY (id)
+  Denormalized:  birth_date date NOT NULL
+
+Pair 4:
+  Relational:    employee_id bigint NOT NULL
+  Denormalized:  gender employees.employee_gender NOT NULL
+
+Pair 5:
+  Relational:    department_id character(4) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  department_to_date date
+
+Pair 6:
+  Relational:    from_date date NOT NULL
+  Denormalized:  hire_date date NOT NULL
+
+Pair 7:
+  Relational:    to_date date NOT NULL
+  Denormalized:  title_to_date date
+
+Pair 8:
+  Relational:    CONSTRAINT idx_16982_primary PRIMARY KEY (employee_id, department_id)
+  Denormalized:  first_name character varying(14) COLLATE pg_catalog."default" NOT NULL
+
+Pair 9:
+  Relational:    employee_id bigint NOT NULL
+  Denormalized:  -- Current department info (denormalized from department_employee)
+    current_department_id character(4) COLLATE pg_catalog."default"
+
+Pair 10:
+  Relational:    department_id character(4) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  department_from_date date
+
+Pair 11:
+  Relational:    from_date date NOT NULL
+  Denormalized:  title_from_date date
+
+Pair 12:
+  Relational:    to_date date NOT NULL
+  Denormalized:  -- Current title info (denormalized from title)
+    current_title character varying(50) COLLATE pg_catalog."default"
+
+Pair 13:
+  Relational:    CONSTRAINT idx_16985_primary PRIMARY KEY (employee_id, department_id)
+  Denormalized:  -- Current salary info (denormalized from salary)
+    current_salary bigint
+
+Pair 14:
+  Relational:    id bigint NOT NULL DEFAULT nextval('employees.id_employee_seq'::regclass)
+  Denormalized:  -- Manager info (denormalized from department_manager)
+    is_manager boolean DEFAULT false
+
+Pair 15:
+  Relational:    birth_date date NOT NULL
+  Denormalized:  salary_to_date date
+
+Pair 16:
+  Relational:    first_name character varying(14) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  manager_to_date date
+
+Pair 17:
+  Relational:    last_name character varying(16) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  -- Derived attributes for analytical queries
+    years_employed integer GENERATED ALWAYS AS (date_part('year', age(CURRENT_DATE, hire_date))) STORED
+
+Pair 18:
+  Relational:    gender employees.employee_gender NOT NULL
+  Denormalized:  is_active_manager boolean GENERATED ALWAYS AS (is_manager AND manager_to_date >= CURRENT_DATE) STORED
+
+Pair 19:
+  Relational:    hire_date date NOT NULL
+  Denormalized:  salary_from_date date
+
+Pair 20:
+  Relational:    CONSTRAINT idx_16988_primary PRIMARY KEY (id)
+  Denormalized:  manager_from_date date
+
+Pair 21:
+  Relational:    employee_id bigint NOT NULL
+  Denormalized:  is_current_employee boolean GENERATED ALWAYS AS (department_to_date >= CURRENT_DATE) STORED
+
+Pair 22:
+  Relational:    amount bigint NOT NULL
+  Denormalized:  managed_department_id character(4) COLLATE pg_catalog."default"
+
+Pair 23:
+  Relational:    from_date date NOT NULL
+  Denormalized:  current_department_name character varying(40) COLLATE pg_catalog."default"
+
+
+================================================================================

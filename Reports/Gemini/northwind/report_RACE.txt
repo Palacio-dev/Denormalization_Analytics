@@ -1,0 +1,239 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 14
+  - Total Attributes: 106
+    * categories: 5 columns
+    * customer_customer_demo: 3 columns
+    * customer_demographics: 3 columns
+    * customers: 12 columns
+    * employee_territories: 3 columns
+    * employees: 19 columns
+    * order_details: 6 columns
+    * orders: 15 columns
+    * products: 11 columns
+    * region: 3 columns
+    * shippers: 4 columns
+    * suppliers: 13 columns
+    * territories: 4 columns
+    * us_states: 5 columns
+
+Denormalized Model:
+  - Tables: 1
+  - Total Attributes: 33
+    * denormalized_sales: 33 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 0.31
+⚠ WARNING: Normalized model has MORE attributes (33 vs 106)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 30.30%
+
+⚠ Issues Found:
+  - Type mismatch: category_id (smallint) -> category_name (character)
+  - Type mismatch: category_name (character) -> required_date (date)
+  - Type mismatch: description (text) -> discount (real)
+  - Type mismatch: picture (bytea) -> -- (1.)
+  - Type mismatch: CONSTRAINT (pk_categories) -> product_id (smallint)
+  - Type mismatch: CONSTRAINT (pk_customer_customer_demo) -> -- (2.)
+  - Type mismatch: CONSTRAINT (pk_customer_demographics) -> unit_price (real)
+  - Type mismatch: company_name (character) -> shipped_date (date)
+  - Type mismatch: address (character) -> -- (DERIVED:)
+  - Type mismatch: city (character) -> -- (DERIVED:)
+  - Type mismatch: postal_code (character) -> sales_amount (real)
+  - Type mismatch: country (character) -> -- (Derived)
+  - Type mismatch: phone (character) -> -- (4.)
+  - Type mismatch: fax (character) -> -- (Transformed)
+  - Type mismatch: CONSTRAINT (pk_customers) -> -- (DERIVED:)
+  - Type mismatch: employee_id (smallint) -> employee_full_name (character)
+  - Type mismatch: territory_id (character) -> is_discontinued (boolean)
+  - Type mismatch: CONSTRAINT (pk_employee_territories) -> -- (DERIVED:)
+  - Type mismatch: employee_id (smallint) -> -- (DERIVED:)
+  - Type mismatch: last_name (character) -> -- (7.)
+  - Type mismatch: first_name (character) -> -- (Constraints)
+  - Type mismatch: birth_date (date) -> customer_company_name (character)
+  - Type mismatch: hire_date (date) -> employee_primary_territory (character)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT address address address birth_date category_id category_id category_name city city city company_name company_name company_name contact_name contact_name contact_title contact_title country country country customer_desc customer_id customer_id customer_id customer_type_id customer_type_id description discontinued discount employee_id employee_id employee_id extension fax fax first_name freight hire_date home_phone homepage last_name notes order_date order_id order_id phone phone phone photo photo_path picture postal_code postal_code postal_code product_id product_id product_name quantity quantity_per_unit region region region region_description region_id region_id reorder_level reports_to required_date ship_address ship_city ship_country ship_name ship_postal_code ship_region ship_via shipped_date shipper_id state_abbr state_id state_name state_region supplier_id supplier_id territory_description territory_id territory_id title title_of_courtesy unit_price unit_price units_in_stock units_on_order
+
+Denormalized Model (Combined Text):
+  -- -- -- -- -- -- -- -- -- -- -- -- category_name customer_city customer_company_name customer_country customer_demographics customer_region discount employee_full_name employee_primary_territory is_discontinued order_status product_id required_date sales_amount ship_city ship_country ship_region shipped_date supplier_company_name supplier_country unit_price
+
+Structural Similarity Metrics:
+  BLEU Score:    0.0299
+  ROUGE-1:       0.3423
+  METEOR Score:  0.0592
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 33 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    category_id smallint NOT NULL
+  Denormalized:  category_name character varying(15) NOT NULL
+
+Pair 2:
+  Relational:    category_name character varying(15) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  required_date date
+
+Pair 3:
+  Relational:    description text COLLATE pg_catalog."default"
+  Denormalized:  discount real NOT NULL
+
+Pair 4:
+  Relational:    picture bytea
+  Denormalized:  -- 1. Base Identifiers (Grain: Order Line Item)
+    order_id smallint NOT NULL
+
+Pair 5:
+  Relational:    CONSTRAINT pk_categories PRIMARY KEY (category_id)
+  Denormalized:  product_id smallint NOT NULL
+
+Pair 6:
+  Relational:    customer_id character varying(5) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  customer_city character varying(15)
+
+Pair 7:
+  Relational:    customer_type_id character varying(5) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  customer_region character varying(15)
+
+Pair 8:
+  Relational:    CONSTRAINT pk_customer_customer_demo PRIMARY KEY (customer_id, customer_type_id)
+  Denormalized:  -- 2. Derived & Base Metrics (Adding Derived Attributes)
+    quantity smallint NOT NULL
+
+Pair 9:
+  Relational:    customer_type_id character varying(5) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  customer_country character varying(15)
+
+Pair 10:
+  Relational:    customer_desc text COLLATE pg_catalog."default"
+  Denormalized:  customer_demographics text
+
+Pair 11:
+  Relational:    CONSTRAINT pk_customer_demographics PRIMARY KEY (customer_type_id)
+  Denormalized:  unit_price real NOT NULL
+
+Pair 12:
+  Relational:    customer_id character varying(5) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  ship_city character varying(15)
+
+Pair 13:
+  Relational:    company_name character varying(40) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  shipped_date date
+
+Pair 14:
+  Relational:    contact_name character varying(30) COLLATE pg_catalog."default"
+  Denormalized:  ship_country character varying(15)
+
+Pair 15:
+  Relational:    contact_title character varying(30) COLLATE pg_catalog."default"
+  Denormalized:  order_status character varying(20)
+
+Pair 16:
+  Relational:    address character varying(60) COLLATE pg_catalog."default"
+  Denormalized:  -- DERIVED: quantity * unit_price * (1 - discount)
+    freight_apportioned real
+
+Pair 17:
+  Relational:    city character varying(15) COLLATE pg_catalog."default"
+  Denormalized:  -- DERIVED: freight divided by number of items in order
+
+    -- 3. Time & Order Attributes (Collapsed from Orders)
+    order_date date
+
+Pair 18:
+  Relational:    region character varying(15) COLLATE pg_catalog."default"
+  Denormalized:  ship_region character varying(15)
+
+Pair 19:
+  Relational:    postal_code character varying(10) COLLATE pg_catalog."default"
+  Denormalized:  sales_amount real NOT NULL
+
+Pair 20:
+  Relational:    country character varying(15) COLLATE pg_catalog."default"
+  Denormalized:  -- Derived based on shipped_date vs required_date
+    ship_name character varying(40)
+
+Pair 21:
+  Relational:    phone character varying(24) COLLATE pg_catalog."default"
+  Denormalized:  -- 4. Product Attributes (Collapsed from Products, Categories, Suppliers)
+    product_name character varying(40) NOT NULL
+
+Pair 22:
+  Relational:    fax character varying(24) COLLATE pg_catalog."default"
+  Denormalized:  -- Transformed from integer to boolean for BI tools
+
+    -- 5. Customer Attributes (Collapsed from Customers, Demographics)
+    customer_id character varying(5)
+
+Pair 23:
+  Relational:    CONSTRAINT pk_customers PRIMARY KEY (customer_id)
+  Denormalized:  -- DERIVED: Comma-separated list to resolve M:N relationship
+
+    -- 6. Employee Attributes (Collapsed from Employees, Territories, Region)
+    employee_id smallint
+
+Pair 24:
+  Relational:    employee_id smallint NOT NULL
+  Denormalized:  employee_full_name character varying(35)
+
+Pair 25:
+  Relational:    territory_id character varying(20) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  is_discontinued boolean
+
+Pair 26:
+  Relational:    CONSTRAINT pk_employee_territories PRIMARY KEY (employee_id, territory_id)
+  Denormalized:  -- DERIVED: first_name + ' ' + last_name
+    employee_title character varying(30)
+
+Pair 27:
+  Relational:    employee_id smallint NOT NULL
+  Denormalized:  -- DERIVED: Aggregated to prevent fan-out
+    employee_primary_region character varying(60)
+
+Pair 28:
+  Relational:    last_name character varying(20) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  -- 7. Shipper Attributes (Collapsed from Shippers)
+    shipper_company_name character varying(40)
+
+Pair 29:
+  Relational:    first_name character varying(10) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  -- Constraints
+    CONSTRAINT pk_denormalized_sales PRIMARY KEY (order_id, product_id)
+
+Pair 30:
+  Relational:    title character varying(30) COLLATE pg_catalog."default"
+  Denormalized:  supplier_country character varying(15)
+
+Pair 31:
+  Relational:    title_of_courtesy character varying(25) COLLATE pg_catalog."default"
+  Denormalized:  supplier_company_name character varying(40)
+
+Pair 32:
+  Relational:    birth_date date
+  Denormalized:  customer_company_name character varying(40)
+
+Pair 33:
+  Relational:    hire_date date
+  Denormalized:  employee_primary_territory character varying(60)
+
+
+================================================================================

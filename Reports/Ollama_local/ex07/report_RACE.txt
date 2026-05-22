@@ -1,0 +1,158 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 6
+  - Total Attributes: 25
+    * Usina: 12 columns
+    * Proprietarios: 2 columns
+    * Municipios: 3 columns
+    * Estados: 1 columns
+    * Rios: 2 columns
+    * Localizacoes: 5 columns
+
+Denormalized Model:
+  - Tables: 1
+  - Total Attributes: 19
+    * Usina_Denormalizada: 19 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 0.76
+⚠ WARNING: Normalized model has MORE attributes (19 vs 25)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 26.32%
+
+⚠ Issues Found:
+  - Type mismatch: id (SERIAL) -> -- (Redundant)
+  - Type mismatch: potfis (FLOAT) -> long (DOUBLE)
+  - Type mismatch: lat (DOUBLE) -> uf (VARCHAR)
+  - Type mismatch: long (DOUBLE) -> -- (Redundant)
+  - Type mismatch: id_proprietario (INTEGER) -> id_usina (SERIAL)
+  - Type mismatch: id_rio (INTEGER) -> nome_rio (VARCHAR)
+  - Type mismatch: id_localizacao (INTEGER) -> -- (Redundant)
+  - Type mismatch: proprietario (VARCHAR) -> the (redundant)
+  - Type mismatch: id_proprietario (INTEGER) -> -- (Redundant)
+  - Type mismatch: municipio (VARCHAR) -> -- (Core)
+  - Type mismatch: uf (CHAR(2)) -> -- (Optional:)
+  - Type mismatch: id_municipio (SERIAL) -> -- (but)
+  - Type mismatch: uf (CHAR(2)) -> -- (Can)
+  - Type mismatch: rio (VARCHAR) -> -- (Can)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  atualizacao estagio id id_localizacao id_localização id_municipio id_municipio1 id_municipio2 id_proprietario id_proprietario id_rio id_rio iniciop lat latitude long longitude municipio nome potfis potkw proprietario rio uf uf
+
+Denormalized Model (Combined Text):
+  -- -- -- -- -- -- -- -- -- atualizacao estagio id_usina iniciop long nome nome_rio potfis the uf
+
+Structural Similarity Metrics:
+  BLEU Score:    0.2687
+  ROUGE-1:       0.3830
+  METEOR Score:  0.1966
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 19 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id SERIAL PRIMARY KEY
+  Denormalized:  -- Redundant Attributes from Localizacoes (Moved directly to Usina)
+    lat DOUBLE PRECISION
+
+Pair 2:
+  Relational:    nome VARCHAR NOT NULL
+  Denormalized:  nome VARCHAR NOT NULL
+
+Pair 3:
+  Relational:    potkw FLOAT
+  Denormalized:  potfis FLOAT
+
+Pair 4:
+  Relational:    potfis FLOAT
+  Denormalized:  long DOUBLE PRECISION
+
+Pair 5:
+  Relational:    iniciop DATE
+  Denormalized:  iniciop DATE
+
+Pair 6:
+  Relational:    atualizacao DATE
+  Denormalized:  atualizacao DATE
+
+Pair 7:
+  Relational:    lat DOUBLE PRECISION
+  Denormalized:  uf VARCHAR NOT NULL
+
+Pair 8:
+  Relational:    long DOUBLE PRECISION
+  Denormalized:  -- Redundant attribute from Estados
+    nome_municipio VARCHAR NOT NULL
+
+Pair 9:
+  Relational:    estagio VARCHAR
+  Denormalized:  estagio VARCHAR
+
+Pair 10:
+  Relational:    id_proprietario INTEGER NULL
+  Denormalized:  id_usina SERIAL PRIMARY KEY
+
+Pair 11:
+  Relational:    id_rio INTEGER NOT NULL
+  Denormalized:  nome_rio VARCHAR
+
+Pair 12:
+  Relational:    id_localizacao INTEGER NOT NULL
+  Denormalized:  -- Redundant attribute from Municipios
+    nome_estado VARCHAR NOT NULL
+
+Pair 13:
+  Relational:    proprietario VARCHAR
+  Denormalized:  the redundant columns are sufficient.
+    -- id_proprietario INTEGER NULL
+
+Pair 14:
+  Relational:    id_proprietario INTEGER PRIMARY KEY NOT NULL
+  Denormalized:  -- Redundant attribute from Estados
+    
+    -- Redundant Attributes from Proprietarios and Rios (Moved directly to Usina)
+    nome_proprietario VARCHAR
+
+Pair 15:
+  Relational:    municipio VARCHAR NOT NULL
+  Denormalized:  -- Core Attributes from Usina
+    potkw FLOAT
+
+Pair 16:
+  Relational:    uf CHAR(2) NOT NULL
+  Denormalized:  -- Optional: Keep FKs if strict integrity is needed for future writes
+
+Pair 17:
+  Relational:    id_municipio SERIAL PRIMARY KEY
+  Denormalized:  -- but for analytics
+
+Pair 18:
+  Relational:    uf CHAR(2) PRIMARY KEY
+  Denormalized:  -- Can be dropped if name is sufficient
+    -- id_rio INTEGER NOT NULL
+
+Pair 19:
+  Relational:    rio VARCHAR NOT NULL
+  Denormalized:  -- Can be dropped if name is sufficient
+    -- id_localizacao INTEGER NOT NULL -- Can be dropped
+
+
+================================================================================

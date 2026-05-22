@@ -1,0 +1,155 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 9
+  - Total Attributes: 53
+    * UF: 4 columns
+    * MUNICIPIO: 9 columns
+    * IDEB: 7 columns
+    * ENADE: 9 columns
+    * SAEB: 4 columns
+    * IES: 6 columns
+    * ESCOLA: 5 columns
+    * CURSO: 3 columns
+    * ANO: 6 columns
+
+Denormalized Model:
+  - Tables: 1
+  - Total Attributes: 18
+    * DADOS_IES_ANO: 18 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 0.34
+⚠ WARNING: Normalized model has MORE attributes (18 vs 53)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 27.78%
+
+⚠ Issues Found:
+  - Type mismatch: id (INT) -> -- (Dimension:)
+  - Type mismatch: sigla_uf (VARCHAR(2)) -> id_ano (INT)
+  - Type mismatch: nome (VARCHAR(100)) -> -- (Dimension:)
+  - Type mismatch: id_municipio (INT) -> ind_rend (REAL)
+  - Type mismatch: id_uf (INT) -> but (can)
+  - Type mismatch: nome_municipio (VARCHAR(100)) -> nota_padrao (REAL)
+  - Type mismatch: qtd_IES (INT) -> nota_port (REAL)
+  - Type mismatch: qtd_ESCOLAS (INT) -> -- (Dimension:)
+  - Type mismatch: media_ideb (REAL) -> -- (Dimension:)
+  - Type mismatch: media_saeb (REAL) -> -- (Computed)
+  - Type mismatch: total_participantes (INT) -> nota_padronizada_ce (REAL)
+  - Type mismatch: id_ideb (INT) -> -- (Index)
+  - Type mismatch: rend_1 (REAL) -> -- (Index)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  ano cod_escola codigo_ies id id_IES id_ano id_curso id_curso id_enade id_enade id_escola id_ideb id_ideb id_ies id_municipio id_municipio id_municipio id_saeb id_saeb id_uf ind_rend media_enade media_ideb media_saeb nome nome_curso nome_escola nome_ies nome_municipio nota_bruta_ce nota_bruta_fg nota_enade_continua nota_enade_faixa nota_ideb nota_mat nota_padrao nota_padronizada_ce nota_padronizada_fg nota_port qtd_ESCOLAS qtd_IES qtd_habitantes rede rede rend_1 rend_2 rend_3 rend_4 sigla_ies sigla_uf total_concluintes total_inscritos total_participantes
+
+Denormalized Model (Combined Text):
+  -- -- -- -- -- -- -- but id_ano id_ies ind_rend nota_bruta_fg nota_enade_continua nota_enade_faixa nota_padrao nota_padronizada_ce nota_padronizada_fg nota_port
+
+Structural Similarity Metrics:
+  BLEU Score:    0.0795
+  ROUGE-1:       0.3759
+  METEOR Score:  0.1894
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 18 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  -- Dimension: Curso
+    nome_curso VARCHAR(100) NOT NULL
+
+Pair 2:
+  Relational:    sigla_uf VARCHAR(2) UNIQUE NOT NULL
+  Denormalized:  id_ano INT NOT NULL
+
+Pair 3:
+  Relational:    nome VARCHAR(100) NOT NULL
+  Denormalized:  -- Dimension: Saeb
+    nota_mat REAL
+
+Pair 4:
+  Relational:    qtd_habitantes INT CHECK(qtd_habitantes >= 0)
+  Denormalized:  id_ies INT NOT NULL
+
+Pair 5:
+  Relational:    id_municipio INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  ind_rend REAL
+
+Pair 6:
+  Relational:    id_uf INT NOT NULL REFERENCES UF (id) ON DELETE CASCADE
+  Denormalized:  but can be pre-summed if needed
+    -- We store the raw links here.
+    PRIMARY KEY (id_ies, id_ano)
+
+Pair 7:
+  Relational:    nome_municipio VARCHAR(100) NOT NULL
+  Denormalized:  nota_padrao REAL
+
+Pair 8:
+  Relational:    qtd_IES INT CHECK (qtd_IES >= 0)
+  Denormalized:  nota_port REAL
+
+Pair 9:
+  Relational:    qtd_ESCOLAS INT (qtd_ESCOLAS >= 0)
+  Denormalized:  -- Dimension: Enade
+    nota_bruta_ce REAL
+
+Pair 10:
+  Relational:    media_ideb REAL
+  Denormalized:  -- Dimension: Ideb
+    nota_ideb REAL
+
+Pair 11:
+  Relational:    media_saeb REAL
+  Denormalized:  -- Computed fields for common queries (optional, or rely on engine calc)
+    -- Total participants is derived from ANO table usually
+
+Pair 12:
+  Relational:    media_enade REAL
+  Denormalized:  nota_enade_faixa REAL
+
+Pair 13:
+  Relational:    total_participantes INT CHECK (total_participantes >= 0)
+  Denormalized:  nota_padronizada_ce REAL
+
+Pair 14:
+  Relational:    id_ideb INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  -- Index for common filtering (e.g., by year)
+    INDEX idx_ies_ano (id_ano)
+
+Pair 15:
+  Relational:    rend_1 REAL
+  Denormalized:  -- Index for lookups by school
+    INDEX idx_ies_id (id_ies)
+
+Pair 16:
+  Relational:    rend_2 REAL
+  Denormalized:  nota_bruta_fg REAL
+
+Pair 17:
+  Relational:    rend_3 REAL
+  Denormalized:  nota_padronizada_fg REAL
+
+Pair 18:
+  Relational:    rend_4 REAL
+  Denormalized:  nota_enade_continua REAL
+
+
+================================================================================

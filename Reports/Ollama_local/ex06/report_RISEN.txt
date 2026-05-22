@@ -1,0 +1,302 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 9
+  - Total Attributes: 53
+    * UF: 4 columns
+    * MUNICIPIO: 9 columns
+    * IDEB: 7 columns
+    * ENADE: 9 columns
+    * SAEB: 4 columns
+    * IES: 6 columns
+    * ESCOLA: 5 columns
+    * CURSO: 3 columns
+    * ANO: 6 columns
+
+Denormalized Model:
+  - Tables: 5
+  - Total Attributes: 61
+    * UF: 4 columns
+    * MUNICIPIO: 9 columns
+    * ESCOLA_DATA: 15 columns
+    * INDICADORES_AGRUPAMENTO: 26 columns
+    * CURSO_ANO: 7 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 1.15
+⚠ WARNING: Denormalized model has MORE attributes (53 vs 61)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 66.04%
+
+⚠ Issues Found:
+  - Type mismatch: rend_4 (REAL) -> rede (VARCHAR(100))
+  - Type mismatch: total_concluintes (INT) -> nota_port (REAL)
+  - Type mismatch: nota_mat (REAL) -> nome_ies (VARCHAR(100))
+  - Type mismatch: nota_padrao (REAL) -> nome_escola (VARCHAR(100))
+  - Type mismatch: nome_ies (VARCHAR(100)) -> sigla_ies (VARCHAR(20))
+  - Type mismatch: sigla_ies (VARCHAR(20)) -> codigo_ies (INT)
+  - Type mismatch: codigo_ies (INT) -> cod_escola (INTEGER)
+  - Type mismatch: rede (VARCHAR(100)) -> we (list)
+  - Type mismatch: nome_escola (VARCHAR(100)) -> id_escola_ano (INT)
+  - Type mismatch: cod_escola (INTEGER) -> id_uf (INT)
+  - Type mismatch: rede (VARCHAR(100)) -> ano (INT)
+  - Type mismatch: id_IES (INT) -> -- (Denormalized:)
+  - Type mismatch: nome_curso (VARCHAR(100)) -> id_curso_ano (INT)
+  - Type mismatch: id_curso (INT) -> but (we)
+  - Type mismatch: id_enade (INT) -> to (strictly)
+  - Type mismatch: id_saeb (INT) -> -- (but)
+  - Type mismatch: id_ideb (INT) -> -- (Denormalized:)
+  - Type mismatch: ano (INT) -> -- (Denormalized:)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  ano cod_escola codigo_ies id id_IES id_ano id_curso id_curso id_enade id_enade id_escola id_ideb id_ideb id_ies id_municipio id_municipio id_municipio id_saeb id_saeb id_uf ind_rend media_enade media_ideb media_saeb nome nome_curso nome_escola nome_ies nome_municipio nota_bruta_ce nota_bruta_fg nota_enade_continua nota_enade_faixa nota_ideb nota_mat nota_padrao nota_padronizada_ce nota_padronizada_fg nota_port qtd_ESCOLAS qtd_IES qtd_habitantes rede rede rend_1 rend_2 rend_3 rend_4 sigla_ies sigla_uf total_concluintes total_inscritos total_participantes
+
+Denormalized Model (Combined Text):
+  -- -- -- -- -- -- -- -- -- ano ano but cod_escola codigo_ies id id_curso id_curso_ano id_escola id_escola id_escola_ano id_ies id_ies id_ies id_municipio id_municipio id_municipio id_uf id_uf ind_rend media_enade media_enade_muni media_ideb media_saeb media_saeb_muni nome nome_escola nome_ies nome_municipio nota_bruta_ce nota_bruta_fg nota_enade_continua nota_enade_faixa nota_ideb nota_padrao nota_padronizada_ce nota_padronizada_fg nota_port qtd_ESCOLAS qtd_IES qtd_habitantes rede rend_2 rend_3 rend_4 sigla_ies sigla_uf to total_concluintes total_participantes total_participantes_muni we
+
+Structural Similarity Metrics:
+  BLEU Score:    0.6393
+  ROUGE-1:       0.8598
+  METEOR Score:  0.7239
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 53 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+
+Pair 2:
+  Relational:    sigla_uf VARCHAR(2) UNIQUE NOT NULL
+  Denormalized:  sigla_uf VARCHAR(2) UNIQUE NOT NULL
+
+Pair 3:
+  Relational:    nome VARCHAR(100) NOT NULL
+  Denormalized:  nome VARCHAR(100) NOT NULL
+
+Pair 4:
+  Relational:    qtd_habitantes INT CHECK(qtd_habitantes >= 0)
+  Denormalized:  qtd_habitantes INT CHECK(qtd_habitantes >= 0)
+
+Pair 5:
+  Relational:    id_municipio INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  id_municipio INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+
+Pair 6:
+  Relational:    id_uf INT NOT NULL REFERENCES UF (id) ON DELETE CASCADE
+  Denormalized:  id_uf INT NOT NULL REFERENCES UF (id) ON DELETE CASCADE
+
+Pair 7:
+  Relational:    nome_municipio VARCHAR(100) NOT NULL
+  Denormalized:  nome_municipio VARCHAR(100) NOT NULL
+
+Pair 8:
+  Relational:    qtd_IES INT CHECK (qtd_IES >= 0)
+  Denormalized:  qtd_IES INT CHECK (qtd_IES >= 0)
+
+Pair 9:
+  Relational:    qtd_ESCOLAS INT (qtd_ESCOLAS >= 0)
+  Denormalized:  qtd_ESCOLAS INT CHECK (qtd_ESCOLAS >= 0)
+
+Pair 10:
+  Relational:    media_ideb REAL
+  Denormalized:  media_ideb REAL
+
+Pair 11:
+  Relational:    media_saeb REAL
+  Denormalized:  media_saeb REAL
+
+Pair 12:
+  Relational:    media_enade REAL
+  Denormalized:  media_enade REAL
+
+Pair 13:
+  Relational:    total_participantes INT CHECK (total_participantes >= 0)
+  Denormalized:  total_participantes INT CHECK (total_participantes >= 0)
+
+Pair 14:
+  Relational:    id_ideb INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  id_ies INT NOT NULL
+
+Pair 15:
+  Relational:    rend_1 REAL
+  Denormalized:  rend_2 REAL
+
+Pair 16:
+  Relational:    rend_2 REAL
+  Denormalized:  rend_3 REAL
+
+Pair 17:
+  Relational:    rend_3 REAL
+  Denormalized:  rend_4 REAL
+
+Pair 18:
+  Relational:    rend_4 REAL
+  Denormalized:  rede VARCHAR(100) NOT NULL
+
+Pair 19:
+  Relational:    ind_rend REAL
+  Denormalized:  ind_rend REAL
+
+Pair 20:
+  Relational:    nota_ideb REAL
+  Denormalized:  nota_ideb REAL
+
+Pair 21:
+  Relational:    id_enade INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  id_escola INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+
+Pair 22:
+  Relational:    total_inscritos INT CHECK (total_inscritos >= 0)
+  Denormalized:  total_concluintes INT CHECK (total_concluintes >= 0)
+
+Pair 23:
+  Relational:    total_concluintes INT CHECK (total_concluintes >= 0)
+  Denormalized:  nota_port REAL
+
+Pair 24:
+  Relational:    nota_bruta_ce REAL
+  Denormalized:  nota_bruta_ce REAL
+
+Pair 25:
+  Relational:    nota_padronizada_ce REAL
+  Denormalized:  nota_padronizada_ce REAL
+
+Pair 26:
+  Relational:    nota_bruta_fg REAL
+  Denormalized:  nota_bruta_fg REAL
+
+Pair 27:
+  Relational:    nota_padronizada_fg REAL
+  Denormalized:  nota_padronizada_fg REAL
+
+Pair 28:
+  Relational:    nota_enade_continua REAL
+  Denormalized:  nota_enade_continua REAL
+
+Pair 29:
+  Relational:    nota_enade_faixa REAL
+  Denormalized:  nota_enade_faixa REAL
+
+Pair 30:
+  Relational:    id_saeb INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  id_ies INT NOT NULL
+
+Pair 31:
+  Relational:    nota_mat REAL
+  Denormalized:  nome_ies VARCHAR(100) NOT NULL
+
+Pair 32:
+  Relational:    nota_port REAL
+  Denormalized:  nota_padrao REAL
+
+Pair 33:
+  Relational:    nota_padrao REAL
+  Denormalized:  nome_escola VARCHAR(100) NOT NULL
+
+Pair 34:
+  Relational:    id_ies INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  id_ies INT NOT NULL
+
+Pair 35:
+  Relational:    id_municipio INT NOT NULL REFERENCES MUNICIPIO(id_municipio) ON DELETE CASCADE
+  Denormalized:  id_municipio INT NOT NULL
+
+Pair 36:
+  Relational:    nome_ies VARCHAR(100) NOT NULL
+  Denormalized:  sigla_ies VARCHAR(20)
+
+Pair 37:
+  Relational:    sigla_ies VARCHAR(20)
+  Denormalized:  codigo_ies INT UNIQUE NOT NULL
+
+Pair 38:
+  Relational:    codigo_ies INT UNIQUE NOT NULL
+  Denormalized:  cod_escola INTEGER UNIQUE NOT NULL
+
+Pair 39:
+  Relational:    rede VARCHAR(100) NOT NULL
+  Denormalized:  we list them here.
+    -- We do NOT add foreign keys to enforce referential integrity in the denormalized model (common practice)
+
+Pair 40:
+  Relational:    id_escola INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  id_escola INT NOT NULL
+
+Pair 41:
+  Relational:    id_municipio INT NOT NULL REFERENCES MUNICIPIO(id_municipio) ON DELETE CASCADE
+  Denormalized:  id_municipio INT NOT NULL
+
+Pair 42:
+  Relational:    nome_escola VARCHAR(100) NOT NULL
+  Denormalized:  id_escola_ano INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+
+Pair 43:
+  Relational:    cod_escola INTEGER UNIQUE NOT NULL
+  Denormalized:  id_uf INT NOT NULL
+
+Pair 44:
+  Relational:    rede VARCHAR(100) NOT NULL
+  Denormalized:  ano INT NOT NULL
+
+Pair 45:
+  Relational:    id_curso INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  id_curso INT NOT NULL
+
+Pair 46:
+  Relational:    id_IES INT NOT NULL REFERENCES IES(id_IES) ON DELETE CASCADE
+  Denormalized:  -- Denormalized: IES attributes (previously in IES table)
+    -- Added to ESCOLA_DATA to eliminate JOINs between ESCOLA and IES
+    -- Note: Keeping a unique constraint on (cod_escola, sigla_ies) is not strictly enforced here as 
+    -- we are denormalizing for read performance
+
+Pair 47:
+  Relational:    nome_curso VARCHAR(100) NOT NULL
+  Denormalized:  id_curso_ano INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+
+Pair 48:
+  Relational:    id_ano INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Denormalized:  ano INT NOT NULL
+
+Pair 49:
+  Relational:    id_curso INT NOT NULL REFERENCES curso(id_curso) ON DELETE CASCADE
+  Denormalized:  but we preserve the data integrity of the original schema.
+    -- However
+
+Pair 50:
+  Relational:    id_enade INT NOT NULL REFERENCES enade(id_enade) ON DELETE CASCADE
+  Denormalized:  to strictly follow "Each column name must appear EXACTLY ONCE"
+
+Pair 51:
+  Relational:    id_saeb INT NOT NULL REFERENCES saeb(id_saeb) ON DELETE CASCADE
+  Denormalized:  -- but we keep the ID columns for potential re-normalization.
+
+Pair 52:
+  Relational:    id_ideb INT NOT NULL REFERENCES ideb(id_ideb) ON DELETE CASCADE
+  Denormalized:  -- Denormalized: ANO attributes
+    ano INT NOT NULL
+
+Pair 53:
+  Relational:    ano INT NOT NULL
+  Denormalized:  -- Denormalized: IDEB attributes (previously in IDEB table)
+    rend_1 REAL
+
+
+================================================================================

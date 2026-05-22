@@ -1,0 +1,582 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 68
+  - Total Attributes: 525
+    * department: 5 columns
+    * employee: 16 columns
+    * employeedepartmenthistory: 7 columns
+    * employeepayhistory: 6 columns
+    * jobcandidate: 5 columns
+    * shift: 6 columns
+    * address: 10 columns
+    * addresstype: 5 columns
+    * businessentity: 4 columns
+    * businessentityaddress: 6 columns
+    * businessentitycontact: 6 columns
+    * contacttype: 4 columns
+    * countryregion: 4 columns
+    * emailaddress: 6 columns
+    * password: 6 columns
+    * person: 14 columns
+    * personphone: 5 columns
+    * phonenumbertype: 4 columns
+    * stateprovince: 9 columns
+    * billofmaterials: 10 columns
+    * culture: 4 columns
+    * document: 15 columns
+    * illustration: 4 columns
+    * location: 6 columns
+    * product: 26 columns
+    * productcategory: 5 columns
+    * productcosthistory: 6 columns
+    * productdescription: 5 columns
+    * productdocument: 4 columns
+    * productinventory: 8 columns
+    * productlistpricehistory: 6 columns
+    * productmodel: 7 columns
+    * productmodelillustration: 4 columns
+    * productmodelproductdescriptionculture: 5 columns
+    * productphoto: 7 columns
+    * productproductphoto: 5 columns
+    * productreview: 9 columns
+    * productsubcategory: 6 columns
+    * scrapreason: 4 columns
+    * transactionhistory: 10 columns
+    * transactionhistoryarchive: 10 columns
+    * unitmeasure: 4 columns
+    * workorder: 10 columns
+    * workorderrouting: 13 columns
+    * productvendor: 12 columns
+    * purchaseorderdetail: 10 columns
+    * purchaseorderheader: 13 columns
+    * shipmethod: 7 columns
+    * vendor: 9 columns
+    * countryregioncurrency: 4 columns
+    * creditcard: 7 columns
+    * currency: 4 columns
+    * currencyrate: 8 columns
+    * customer: 7 columns
+    * personcreditcard: 4 columns
+    * salesorderdetail: 11 columns
+    * salesorderheader: 26 columns
+    * salesorderheadersalesreason: 4 columns
+    * salesperson: 10 columns
+    * salespersonquotahistory: 6 columns
+    * salesreason: 5 columns
+    * salestaxrate: 8 columns
+    * salesterritory: 11 columns
+    * salesterritoryhistory: 7 columns
+    * shoppingcartitem: 7 columns
+    * specialoffer: 12 columns
+    * specialofferproduct: 5 columns
+    * store: 7 columns
+
+Denormalized Model:
+  - Tables: 5
+  - Total Attributes: 91
+    * employee_denormalized: 29 columns
+    * product_denormalized: 20 columns
+    * salesorder_denormalized: 33 columns
+    * sales_summary_monthly: 8 columns
+    * salesorder_denormalized_partitioned: 1 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+Completeness Ratio: 0.17
+⚠ WARNING: Normalized model has MORE attributes (91 vs 525)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+Data Type Preservation: 21.98%
+
+⚠ Issues Found:
+  - Type mismatch: name ("Name") -> name (character)
+  - Type mismatch: groupname ("Name") -> firstname (character)
+  - Type mismatch: CONSTRAINT ("PK_Department_DepartmentID") -> LIKE (sales.salesorder_denormalized)
+  - Type mismatch: salariedflag ("Flag") -> salariedflag (boolean)
+  - Type mismatch: currentflag ("Flag") -> currentflag (boolean)
+  - Type mismatch: CONSTRAINT ("PK_Employee_BusinessEntityID") -> -- (Employee)
+  - Type mismatch: departmentid (smallint) -> duedate (timestamp)
+  - Type mismatch: shiftid (smallint) -> suffix (character)
+  - Type mismatch: startdate (date) -> sellstartdate (timestamp)
+  - Type mismatch: enddate (date) -> sellenddate (timestamp)
+  - Type mismatch: modifieddate (timestamp) -> middlename (character)
+  - Type mismatch: CONSTRAINT ("PK_EmployeeDepartmentHistory_BusinessEntityID_StartDate_Departm") -> -- (Denormalized)
+  - Type mismatch: businessentityid (integer) -> billtocity (character)
+  - Type mismatch: rate (numeric) -> title (character)
+  - Type mismatch: CONSTRAINT ("PK_EmployeePayHistory_BusinessEntityID_RateChangeDate") -> -- (Denormalized)
+  - Type mismatch: jobcandidateid (serial) -> totaldue (numeric)
+  - Type mismatch: businessentityid (integer) -> linetotal (numeric)
+  - Type mismatch: resume (xml) -> size (character)
+  - Type mismatch: modifieddate (timestamp) -> shiptostate (character)
+  - Type mismatch: CONSTRAINT ("PK_JobCandidate_JobCandidateID") -> -- (Denormalized)
+  - Type mismatch: shiftid (serial) -> status (smallint)
+  - Type mismatch: name ("Name") -> lastname (character)
+  - Type mismatch: starttime (time) -> listprice (numeric)
+  - Type mismatch: endtime (time) -> style (character(2))
+  - Type mismatch: modifieddate (timestamp) -> billtostate (character)
+  - Type mismatch: CONSTRAINT ("PK_Shift_ShiftID") -> -- (Denormalized)
+  - Type mismatch: addressid (serial) -> class (character(2))
+  - Type mismatch: addressline1 (character) -> productline (character(2))
+  - Type mismatch: addressline2 (character) -> reorderpoint (smallint)
+  - Type mismatch: city (character) -> -- (Audit)
+  - Type mismatch: stateprovinceid (integer) -> unitprice (numeric)
+  - Type mismatch: postalcode (character) -> total_orders (integer)
+  - Type mismatch: spatiallocation (bytea) -> shiptocity (character)
+  - Type mismatch: rowguid (uuid) -> color (character)
+  - Type mismatch: modifieddate (timestamp) -> product_name (character)
+  - Type mismatch: CONSTRAINT ("PK_Address_AddressID") -> weight (numeric(8,)
+  - Type mismatch: addresstypeid (serial) -> freight (numeric)
+  - Type mismatch: name ("Name") -> -- (Denormalized)
+  - Type mismatch: rowguid (uuid) -> month (smallint)
+  - Type mismatch: modifieddate (timestamp) -> customer_name (character)
+  - Type mismatch: CONSTRAINT ("PK_AddressType_AddressTypeID") -> -- (Denormalized)
+  - Type mismatch: businessentityid (serial) -> total_quantity (integer)
+  - Type mismatch: rowguid (uuid) -> -- (Order)
+  - Type mismatch: modifieddate (timestamp) -> year (smallint)
+  - Type mismatch: CONSTRAINT ("PK_BusinessEntity_BusinessEntityID") -> -- (Customer)
+  - Type mismatch: addressid (integer) -> shiptoaddress (character)
+  - Type mismatch: addresstypeid (integer) -> total_sales (numeric)
+  - Type mismatch: rowguid (uuid) -> -- (Person)
+  - Type mismatch: modifieddate (timestamp) -> total_freight (numeric)
+  - Type mismatch: CONSTRAINT ("PK_BusinessEntityAddress_BusinessEntityID_AddressID_AddressType") -> -- (Full)
+  - Type mismatch: businessentityid (integer) -> onlineorderflag (boolean)
+  - Type mismatch: personid (integer) -> -- (Address)
+  - Type mismatch: contacttypeid (integer) -> productnumber (character)
+  - Type mismatch: rowguid (uuid) -> -- (Product)
+  - Type mismatch: modifieddate (timestamp) -> standardcost (numeric)
+  - Type mismatch: CONSTRAINT ("PK_BusinessEntityContact_BusinessEntityID_PersonID_ContactTypeI") -> -- (Order)
+  - Type mismatch: contacttypeid (serial) -> product_color (character)
+  - Type mismatch: name ("Name") -> -- (Computed:)
+  - Type mismatch: modifieddate (timestamp) -> product_number (character)
+  - Type mismatch: CONSTRAINT ("PK_ContactType_ContactTypeID") -> taxamt (numeric)
+  - Type mismatch: countryregioncode (character) -> unitpricediscount (numeric)
+  - Type mismatch: name ("Name") -> territory_name (character)
+  - Type mismatch: modifieddate (timestamp) -> product_category (character)
+  - Type mismatch: CONSTRAINT ("PK_CountryRegion_CountryRegionCode") -> territory_group (character)
+  - Type mismatch: businessentityid (integer) -> salesperson_name (character)
+  - Type mismatch: emailaddressid (serial) -> product_category (character)
+  - Type mismatch: emailaddress (character) -> daystomanufacture (integer)
+  - Type mismatch: rowguid (uuid) -> product_subcategory (character)
+  - Type mismatch: modifieddate (timestamp) -> department_startdate (date)
+  - Type mismatch: CONSTRAINT ("PK_EmailAddress_BusinessEntityID_EmailAddressID") -> productcategory_name (character)
+  - Type mismatch: businessentityid (integer) -> current_department_groupname (character)
+
+4. STRUCTURAL SIMILARITY ANALYSIS
+--------------------------------------------------------------------------------
+
+This section measures naming and structural alignment between models.
+Metrics are calculated on combined, alphabetically-sorted column names.
+
+Relational Model (Combined Text):
+  "group" "primary" CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT accountnumber accountnumber activeflag actualcost actualcost actualcost actualenddate actualresourcehrs actualstartdate additionalcontactinfo addressid addressid addressline1 addressline2 addresstypeid addresstypeid availability averageleadtime averagerate billofmaterialsid billtoaddressid bin birthdate bomlevel bonus businessentityid businessentityid businessentityid businessentityid businessentityid businessentityid businessentityid businessentityid businessentityid businessentityid businessentityid businessentityid businessentityid businessentityid businessentityid businessentityid businessentityid businessentityid cardnumber cardtype carriertrackingnumber catalogdescription category changenumber city class color comment comments commissionpct componentid contacttypeid contacttypeid costlastyear costrate costytd countryregioncode countryregioncode countryregioncode countryregioncode creditcardapprovalcode creditcardid creditcardid creditcardid creditrating cultureid cultureid currencycode currencycode currencyratedate currencyrateid currencyrateid currentflag customerid customerid datecreated daystomanufacture demographics demographics departmentid departmentid description description diagram discontinueddate discountpct document documentnode documentnode documentsummary duedate duedate duedate emailaddress emailaddress emailaddressid emailpromotion employeeid enddate enddate enddate enddate enddate enddate enddate endofdayrate endtime expmonth expyear fileextension filename finishedgoodsflag firstname folderflag freight freight fromcurrencycode gender groupname hiredate illustrationid illustrationid instructions isonlystateprovinceflag jobcandidateid jobtitle largephoto largephotofilename lastname lastreceiptcost lastreceiptdate listprice listprice locationid locationid locationid loginid makeflag maritalstatus maxorderqty maxqty middlename minorderqty minqty modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate modifieddate name name name name name name name name name name name name name name name name name name name name name name namestyle nationalidnumber onlineorderflag onorderqty operationsequence orderdate orderdate orderqty orderqty orderqty organizationnode owner passwordhash passwordsalt payfrequency perassemblyqty personid personid persontype phonenumber phonenumbertypeid phonenumbertypeid plannedcost postalcode preferredvendorstatus productassemblyid productcategoryid productcategoryid productdescriptionid productdescriptionid productid productid productid productid productid productid productid productid productid productid productid productid productid productid productid productid productline productmodelid productmodelid productmodelid productmodelid productnumber productphotoid productphotoid productreviewid productsubcategoryid productsubcategoryid purchaseorderdetailid purchaseorderid purchaseorderid purchaseordernumber purchasingwebserviceurl quantity quantity quantity quantity quotadate rate ratechangedate rating reasontype receivedqty referenceorderid referenceorderid referenceorderlineid referenceorderlineid rejectedqty reorderpoint resume reviewdate reviewername revision revisionnumber revisionnumber rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid rowguid safetystocklevel salariedflag saleslastyear saleslastyear salesorderdetailid salesorderid salesorderid salesorderid salespersonid salespersonid salesquota salesquota salesreasonid salesreasonid salestaxrateid salesytd salesytd scheduledenddate scheduledstartdate scrappedqty scrapreasonid scrapreasonid sellenddate sellstartdate shelf shiftid shiftid shipbase shipdate shipdate shipmethodid shipmethodid shipmethodid shiprate shiptoaddressid shoppingcartid shoppingcartitemid sickleavehours size sizeunitmeasurecode spatiallocation specialofferid specialofferid specialofferid standardcost standardcost standardprice startdate startdate startdate startdate startdate startdate startdate starttime stateprovincecode stateprovinceid stateprovinceid stateprovinceid status status status storeid style subtotal subtotal suffix taxamt taxamt taxrate taxtype territoryid territoryid territoryid territoryid territoryid territoryid thumbnailphoto thumbnailphotofilename title title tocurrencycode totaldue transactiondate transactiondate transactionid transactionid transactiontype transactiontype type unitmeasurecode unitmeasurecode unitmeasurecode unitprice unitprice unitpricediscount vacationhours vendorid weight weightunitmeasurecode workorderid workorderid
+
+Denormalized Model (Combined Text):
+  -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- LIKE billtocity billtostate birthdate businessentityid class color current_department_groupname currentflag customer_name daystomanufacture department_startdate duedate firstname freight gender hiredate jobtitle lastname linetotal listprice loginid maritalstatus middlename modifieddate modifieddate month name onlineorderflag organizationnode pay_frequency phonenumber product_category product_category product_color product_name product_number product_subcategory productcategory_name productid productline productnumber rate_changedate reorderpoint rowguid salariedflag salesorderdetailid salesorderid salesperson_name sellenddate sellstartdate shipdate shiptoaddress shiptocity shiptostate sickleavehours size standardcost status style suffix taxamt territory_group territory_name title total_freight total_orders total_quantity total_sales totaldue unitprice unitpricediscount vacationhours weight year
+
+Structural Similarity Metrics:
+  BLEU Score:    0.0044
+  ROUGE-1:       0.1903
+  METEOR Score:  0.0670
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 91 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    departmentid serial NOT NULL
+  Denormalized:  productid serial NOT NULL PRIMARY KEY
+
+Pair 2:
+  Relational:    name "Name" COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  name character varying(50) NOT NULL
+
+Pair 3:
+  Relational:    groupname "Name" COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  firstname character varying(50) NOT NULL
+
+Pair 4:
+  Relational:    modifieddate timestamp without time zone NOT NULL DEFAULT now()
+  Denormalized:  modifieddate timestamp without time zone NOT NULL DEFAULT now()
+
+Pair 5:
+  Relational:    CONSTRAINT "PK_Department_DepartmentID" PRIMARY KEY (departmentid)
+  Denormalized:  LIKE sales.salesorder_denormalized INCLUDING ALL
+) PARTITION BY RANGE (EXTRACT(YEAR FROM orderdate)
+
+Pair 6:
+  Relational:    businessentityid integer NOT NULL
+  Denormalized:  businessentityid integer NOT NULL PRIMARY KEY
+
+Pair 7:
+  Relational:    nationalidnumber character varying(15) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  phonenumber character varying(25)
+
+Pair 8:
+  Relational:    loginid character varying(256) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  loginid character varying(256) NOT NULL
+
+Pair 9:
+  Relational:    jobtitle character varying(50) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  jobtitle character varying(50) NOT NULL
+
+Pair 10:
+  Relational:    birthdate date NOT NULL
+  Denormalized:  birthdate date NOT NULL
+
+Pair 11:
+  Relational:    maritalstatus character(1) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  maritalstatus character(1) NOT NULL
+
+Pair 12:
+  Relational:    gender character(1) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  gender character(1) NOT NULL
+
+Pair 13:
+  Relational:    hiredate date NOT NULL
+  Denormalized:  hiredate date NOT NULL
+
+Pair 14:
+  Relational:    salariedflag "Flag" NOT NULL DEFAULT true
+  Denormalized:  salariedflag boolean NOT NULL DEFAULT true
+
+Pair 15:
+  Relational:    vacationhours smallint NOT NULL DEFAULT 0
+  Denormalized:  vacationhours smallint NOT NULL DEFAULT 0
+
+Pair 16:
+  Relational:    sickleavehours smallint NOT NULL DEFAULT 0
+  Denormalized:  sickleavehours smallint NOT NULL DEFAULT 0
+
+Pair 17:
+  Relational:    currentflag "Flag" NOT NULL DEFAULT true
+  Denormalized:  currentflag boolean NOT NULL DEFAULT true
+
+Pair 18:
+  Relational:    rowguid uuid NOT NULL DEFAULT uuid_generate_v1()
+  Denormalized:  rowguid uuid NOT NULL DEFAULT uuid_generate_v1()
+
+Pair 19:
+  Relational:    modifieddate timestamp without time zone NOT NULL DEFAULT now()
+  Denormalized:  modifieddate timestamp without time zone NOT NULL DEFAULT now()
+
+Pair 20:
+  Relational:    organizationnode character varying COLLATE pg_catalog."default" DEFAULT '/'::character varying
+  Denormalized:  organizationnode character varying DEFAULT '/'
+
+Pair 21:
+  Relational:    CONSTRAINT "PK_Employee_BusinessEntityID" PRIMARY KEY (businessentityid)
+  Denormalized:  -- Employee core data
+    nationalidnumber character varying(15) NOT NULL
+
+Pair 22:
+  Relational:    businessentityid integer NOT NULL
+  Denormalized:  salesorderid integer NOT NULL
+
+Pair 23:
+  Relational:    departmentid smallint NOT NULL
+  Denormalized:  duedate timestamp without time zone NOT NULL
+
+Pair 24:
+  Relational:    shiftid smallint NOT NULL
+  Denormalized:  suffix character varying(10)
+
+Pair 25:
+  Relational:    startdate date NOT NULL
+  Denormalized:  sellstartdate timestamp without time zone NOT NULL
+
+Pair 26:
+  Relational:    enddate date
+  Denormalized:  sellenddate timestamp without time zone
+
+Pair 27:
+  Relational:    modifieddate timestamp without time zone NOT NULL DEFAULT now()
+  Denormalized:  middlename character varying(50)
+
+Pair 28:
+  Relational:    CONSTRAINT "PK_EmployeeDepartmentHistory_BusinessEntityID_StartDate_Departm" PRIMARY KEY (businessentityid, startdate, departmentid, shiftid)
+  Denormalized:  -- Denormalized current department info
+    current_department_name character varying(50)
+
+Pair 29:
+  Relational:    businessentityid integer NOT NULL
+  Denormalized:  billtocity character varying(30)
+
+Pair 30:
+  Relational:    ratechangedate timestamp without time zone NOT NULL
+  Denormalized:  rate_changedate timestamp without time zone
+
+Pair 31:
+  Relational:    rate numeric NOT NULL
+  Denormalized:  title character varying(8)
+
+Pair 32:
+  Relational:    payfrequency smallint NOT NULL
+  Denormalized:  pay_frequency smallint
+
+Pair 33:
+  Relational:    modifieddate timestamp without time zone NOT NULL DEFAULT now()
+  Denormalized:  shipdate timestamp without time zone
+
+Pair 34:
+  Relational:    CONSTRAINT "PK_EmployeePayHistory_BusinessEntityID_RateChangeDate" PRIMARY KEY (businessentityid, ratechangedate)
+  Denormalized:  -- Denormalized current salary info
+    current_rate numeric
+
+Pair 35:
+  Relational:    jobcandidateid serial NOT NULL
+  Denormalized:  totaldue numeric
+
+Pair 36:
+  Relational:    businessentityid integer
+  Denormalized:  linetotal numeric
+
+Pair 37:
+  Relational:    resume xml
+  Denormalized:  size character varying(5)
+
+Pair 38:
+  Relational:    modifieddate timestamp without time zone NOT NULL DEFAULT now()
+  Denormalized:  shiptostate character varying(50)
+
+Pair 39:
+  Relational:    CONSTRAINT "PK_JobCandidate_JobCandidateID" PRIMARY KEY (jobcandidateid)
+  Denormalized:  -- Denormalized person info
+    persontype character(2) NOT NULL
+
+Pair 40:
+  Relational:    shiftid serial NOT NULL
+  Denormalized:  status smallint NOT NULL
+
+Pair 41:
+  Relational:    name "Name" COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  lastname character varying(50) NOT NULL
+
+Pair 42:
+  Relational:    starttime time without time zone NOT NULL
+  Denormalized:  listprice numeric NOT NULL
+
+Pair 43:
+  Relational:    endtime time without time zone NOT NULL
+  Denormalized:  style character(2)
+
+Pair 44:
+  Relational:    modifieddate timestamp without time zone NOT NULL DEFAULT now()
+  Denormalized:  billtostate character varying(50)
+
+Pair 45:
+  Relational:    CONSTRAINT "PK_Shift_ShiftID" PRIMARY KEY (shiftid)
+  Denormalized:  -- Denormalized contact info
+    emailaddress character varying(50)
+
+Pair 46:
+  Relational:    addressid serial NOT NULL
+  Denormalized:  class character(2)
+
+Pair 47:
+  Relational:    addressline1 character varying(60) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  productline character(2)
+
+Pair 48:
+  Relational:    addressline2 character varying(60) COLLATE pg_catalog."default"
+  Denormalized:  reorderpoint smallint NOT NULL
+
+Pair 49:
+  Relational:    city character varying(30) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  -- Audit
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1()
+
+Pair 50:
+  Relational:    stateprovinceid integer NOT NULL
+  Denormalized:  unitprice numeric NOT NULL
+
+Pair 51:
+  Relational:    postalcode character varying(15) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  total_orders integer NOT NULL DEFAULT 0
+
+Pair 52:
+  Relational:    spatiallocation bytea
+  Denormalized:  shiptocity character varying(30)
+
+Pair 53:
+  Relational:    rowguid uuid NOT NULL DEFAULT uuid_generate_v1()
+  Denormalized:  color character varying(15)
+
+Pair 54:
+  Relational:    modifieddate timestamp without time zone NOT NULL DEFAULT now()
+  Denormalized:  product_name character varying(50)
+
+Pair 55:
+  Relational:    CONSTRAINT "PK_Address_AddressID" PRIMARY KEY (addressid)
+  Denormalized:  weight numeric(8, 2)
+
+Pair 56:
+  Relational:    addresstypeid serial NOT NULL
+  Denormalized:  freight numeric NOT NULL DEFAULT 0.00
+
+Pair 57:
+  Relational:    name "Name" COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  -- Denormalized hierarchy
+    productsubcategory_name character varying(50)
+
+Pair 58:
+  Relational:    rowguid uuid NOT NULL DEFAULT uuid_generate_v1()
+  Denormalized:  month smallint NOT NULL
+
+Pair 59:
+  Relational:    modifieddate timestamp without time zone NOT NULL DEFAULT now()
+  Denormalized:  customer_name character varying(100)
+
+Pair 60:
+  Relational:    CONSTRAINT "PK_AddressType_AddressTypeID" PRIMARY KEY (addresstypeid)
+  Denormalized:  -- Denormalized metrics
+    safetystocklevel smallint NOT NULL
+
+Pair 61:
+  Relational:    businessentityid serial NOT NULL
+  Denormalized:  total_quantity integer NOT NULL DEFAULT 0
+
+Pair 62:
+  Relational:    rowguid uuid NOT NULL DEFAULT uuid_generate_v1()
+  Denormalized:  -- Order header info
+    orderdate timestamp without time zone NOT NULL
+
+Pair 63:
+  Relational:    modifieddate timestamp without time zone NOT NULL DEFAULT now()
+  Denormalized:  year smallint NOT NULL
+
+Pair 64:
+  Relational:    CONSTRAINT "PK_BusinessEntity_BusinessEntityID" PRIMARY KEY (businessentityid)
+  Denormalized:  -- Customer info (denormalized)
+    customerid integer NOT NULL
+
+Pair 65:
+  Relational:    businessentityid integer NOT NULL
+  Denormalized:  salesorderdetailid integer NOT NULL
+
+Pair 66:
+  Relational:    addressid integer NOT NULL
+  Denormalized:  shiptoaddress character varying(200)
+
+Pair 67:
+  Relational:    addresstypeid integer NOT NULL
+  Denormalized:  total_sales numeric NOT NULL DEFAULT 0.00
+
+Pair 68:
+  Relational:    rowguid uuid NOT NULL DEFAULT uuid_generate_v1()
+  Denormalized:  -- Person full name or Store name
+    
+    -- Sales person info
+    salespersonid integer
+
+Pair 69:
+  Relational:    modifieddate timestamp without time zone NOT NULL DEFAULT now()
+  Denormalized:  total_freight numeric NOT NULL DEFAULT 0.00
+
+Pair 70:
+  Relational:    CONSTRAINT "PK_BusinessEntityAddress_BusinessEntityID_AddressID_AddressType" PRIMARY KEY (businessentityid, addressid, addresstypeid)
+  Denormalized:  -- Full name
+    
+    -- Territory info
+    territory_name character varying(50)
+
+Pair 71:
+  Relational:    businessentityid integer NOT NULL
+  Denormalized:  onlineorderflag boolean NOT NULL
+
+Pair 72:
+  Relational:    personid integer NOT NULL
+  Denormalized:  -- Address info (denormalized)
+    billtoaddress character varying(200)
+
+Pair 73:
+  Relational:    contacttypeid integer NOT NULL
+  Denormalized:  productnumber character varying(25) NOT NULL
+
+Pair 74:
+  Relational:    rowguid uuid NOT NULL DEFAULT uuid_generate_v1()
+  Denormalized:  -- Product info (denormalized)
+    productid integer NOT NULL
+
+Pair 75:
+  Relational:    modifieddate timestamp without time zone NOT NULL DEFAULT now()
+  Denormalized:  standardcost numeric NOT NULL
+
+Pair 76:
+  Relational:    CONSTRAINT "PK_BusinessEntityContact_BusinessEntityID_PersonID_ContactTypeI" PRIMARY KEY (businessentityid, personid, contacttypeid)
+  Denormalized:  -- Order detail info
+    orderqty smallint NOT NULL
+
+Pair 77:
+  Relational:    contacttypeid serial NOT NULL
+  Denormalized:  product_color character varying(15)
+
+Pair 78:
+  Relational:    name "Name" COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  -- Computed: (unitprice * (1 - unitpricediscount)) * orderqty
+    
+    -- Financials
+    subtotal numeric NOT NULL DEFAULT 0.00
+
+Pair 79:
+  Relational:    modifieddate timestamp without time zone NOT NULL DEFAULT now()
+  Denormalized:  product_number character varying(25)
+
+Pair 80:
+  Relational:    CONSTRAINT "PK_ContactType_ContactTypeID" PRIMARY KEY (contacttypeid)
+  Denormalized:  taxamt numeric NOT NULL DEFAULT 0.00
+
+Pair 81:
+  Relational:    countryregioncode character varying(3) COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  unitpricediscount numeric NOT NULL DEFAULT 0.0
+
+Pair 82:
+  Relational:    name "Name" COLLATE pg_catalog."default" NOT NULL
+  Denormalized:  territory_name character varying(50)
+
+Pair 83:
+  Relational:    modifieddate timestamp without time zone NOT NULL DEFAULT now()
+  Denormalized:  product_category character varying(50)
+
+Pair 84:
+  Relational:    CONSTRAINT "PK_CountryRegion_CountryRegionCode" PRIMARY KEY (countryregioncode)
+  Denormalized:  territory_group character varying(50)
+
+Pair 85:
+  Relational:    businessentityid integer NOT NULL
+  Denormalized:  salesperson_name character varying(100)
+
+Pair 86:
+  Relational:    emailaddressid serial NOT NULL
+  Denormalized:  product_category character varying(50)
+
+Pair 87:
+  Relational:    emailaddress character varying(50) COLLATE pg_catalog."default"
+  Denormalized:  daystomanufacture integer NOT NULL
+
+Pair 88:
+  Relational:    rowguid uuid NOT NULL DEFAULT uuid_generate_v1()
+  Denormalized:  product_subcategory character varying(50)
+
+Pair 89:
+  Relational:    modifieddate timestamp without time zone NOT NULL DEFAULT now()
+  Denormalized:  department_startdate date
+
+Pair 90:
+  Relational:    CONSTRAINT "PK_EmailAddress_BusinessEntityID_EmailAddressID" PRIMARY KEY (businessentityid, emailaddressid)
+  Denormalized:  productcategory_name character varying(50)
+
+Pair 91:
+  Relational:    businessentityid integer NOT NULL
+  Denormalized:  current_department_groupname character varying(50)
+
+
+================================================================================
