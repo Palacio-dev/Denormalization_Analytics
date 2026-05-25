@@ -16,14 +16,14 @@ Relational Model:
 
 Denormalized Model:
   - Tables: 2
-  - Total Attributes: 15
-    * user_entitlements_wide: 10 columns
+  - Total Attributes: 14
+    * user_entitlements_wide: 9 columns
     * agg_feature_usage_daily: 5 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 1.67
-⚠ WARNING: Denormalized model has MORE attributes (9 vs 15)
+Completeness Ratio: 1.5556
+⚠ WARNING: Denormalized model has MORE attributes (9 vs 14)
   New information may have been added in the transition
 
 3. CORRECTNESS EVALUATION
@@ -32,7 +32,7 @@ Completeness Ratio: 1.67
 Data Type Preservation: 88.89%
 
 ⚠ Issues Found:
-  - Type mismatch: id (INT) -> -- (Primary)
+  - Type mismatch: id (INT) -> usage_date (DATE)
 
 4. STRUCTURAL SIMILARITY ANALYSIS
 --------------------------------------------------------------------------------
@@ -44,12 +44,12 @@ Relational Model (Combined Text):
   activeDate activeFlag featureType id id inactiveDate packageType useCount useLimit
 
 Denormalized Model (Combined Text):
-  -- activeDate activeFlag entitlement_id featureType featureType inactiveDate packageType packageType total_active_users total_uses usage_date useCount useLimit user_id
+  activeDate activeFlag entitlement_id featureType featureType inactiveDate packageType packageType total_active_users total_uses usage_date useCount useLimit user_id
 
 Structural Similarity Metrics:
-  BLEU Score:    0.4667
+  BLEU Score:    0.5000
   ROUGE-1:       0.6207
-  METEOR Score:  0.5963
+  METEOR Score:  0.6026
 
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
@@ -57,42 +57,40 @@ Structural Similarity Metrics:
 Identified 9 attribute pairs for type checking:
 
 Pair 1:
-  Relational:    id INT PRIMARY KEY
-  Denormalized:  -- Primary key ensures correctness and prevents duplicate entitlement IDs
-    PRIMARY KEY (user_id, entitlement_id)
-) PARTITION BY HASH (user_id
+  Relational:    id INT
+  Denormalized:  user_id INT
 
 Pair 2:
   Relational:    activeDate DATE
-  Denormalized:  activeDate DATE NOT NULL
+  Denormalized:  activeDate DATE
 
 Pair 3:
   Relational:    inactiveDate DATE
-  Denormalized:  inactiveDate DATE NOT NULL
+  Denormalized:  inactiveDate DATE
 
 Pair 4:
   Relational:    useLimit INT
-  Denormalized:  useLimit INT NOT NULL
+  Denormalized:  useLimit INT
 
 Pair 5:
   Relational:    useCount INT
-  Denormalized:  useCount INT NOT NULL DEFAULT 0
+  Denormalized:  useCount INT
 
 Pair 6:
   Relational:    featureType VARCHAR(4)
-  Denormalized:  featureType VARCHAR(4) NOT NULL
+  Denormalized:  featureType VARCHAR(4)
 
 Pair 7:
   Relational:    packageType VARCHAR(4)
-  Denormalized:  packageType VARCHAR(4) NOT NULL
+  Denormalized:  packageType VARCHAR(4)
 
 Pair 8:
   Relational:    activeFlag INT
-  Denormalized:  activeFlag INT NOT NULL DEFAULT 1
+  Denormalized:  activeFlag INT
 
 Pair 9:
-  Relational:    id INT PRIMARY KEY
-  Denormalized:  user_id INT NOT NULL
+  Relational:    id INT
+  Denormalized:  usage_date DATE
 
 
 ================================================================================

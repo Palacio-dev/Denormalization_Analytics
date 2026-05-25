@@ -6,62 +6,53 @@ SQL MODEL DENORMALIZATION EVALUATION REPORT
 --------------------------------------------------------------------------------
 Relational Model:
   - Tables: 8
-  - Total Attributes: 48
-    * aircrafts_data: 4 columns
-    * airports_data: 6 columns
-    * boarding_passes: 7 columns
-    * bookings: 4 columns
-    * flights: 12 columns
-    * seats: 4 columns
-    * ticket_flights: 5 columns
-    * tickets: 6 columns
+  - Total Attributes: 37
+    * aircrafts_data: 3 columns
+    * airports_data: 5 columns
+    * boarding_passes: 4 columns
+    * bookings: 3 columns
+    * flights: 10 columns
+    * seats: 3 columns
+    * ticket_flights: 4 columns
+    * tickets: 5 columns
 
 Denormalized Model:
   - Tables: 1
-  - Total Attributes: 32
-    * flight_details_denorm: 32 columns
+  - Total Attributes: 24
+    * flight_details_denorm: 24 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 0.67
-⚠ WARNING: Normalized model has MORE attributes (32 vs 48)
+Completeness Ratio: 0.6486
+⚠ WARNING: Normalized model has MORE attributes (24 vs 37)
   Some information may have been lost in the transition
 
 3. CORRECTNESS EVALUATION
 --------------------------------------------------------------------------------
 
-Data Type Preservation: 9.38%
+Data Type Preservation: 16.67%
 
 ⚠ Issues Found:
   - Type mismatch: aircraft_code (character(3)) -> aircraft_model (jsonb)
   - Type mismatch: model (jsonb) -> amount (numeric(10,)
-  - Type mismatch: range (integer) -> -- (Flight)
-  - Type mismatch: CONSTRAINT (aircrafts_pkey) -> CONSTRAINT (flight_details_denorm_pkey)
+  - Type mismatch: range (integer) -> status (character)
   - Type mismatch: airport_code (character(3)) -> arrival_city (jsonb)
   - Type mismatch: airport_name (jsonb) -> aircraft_range (integer)
-  - Type mismatch: city (jsonb) -> -- (Departure)
+  - Type mismatch: city (jsonb) -> seat_no (character)
   - Type mismatch: coordinates (point) -> book_date (timestamp)
   - Type mismatch: timezone (text) -> flight_no (character(6))
-  - Type mismatch: CONSTRAINT (airports_data_pkey) -> status (character)
-  - Type mismatch: ticket_no (character(13)) -> seat_no (character)
+  - Type mismatch: ticket_no (character(13)) -> book_ref (character(6))
   - Type mismatch: flight_id (integer) -> passenger_id (character)
-  - Type mismatch: seat_no (character) -> -- (Arrival)
-  - Type mismatch: CONSTRAINT (boarding_passes_pkey) -> -- (Aircraft)
-  - Type mismatch: CONSTRAINT (boarding_passes_flight_id_boarding_no_key) -> -- (Ticket)
-  - Type mismatch: CONSTRAINT (boarding_passes_flight_id_seat_no_key) -> book_ref (character(6))
-  - Type mismatch: book_ref (character(6)) -> -- (Fare)
-  - Type mismatch: book_date (timestamp) -> contact_data (jsonb)
-  - Type mismatch: total_amount (numeric(10,) -> actual_arrival (timestamp)
-  - Type mismatch: CONSTRAINT (bookings_pkey) -> -- (Booking)
+  - Type mismatch: seat_no (character) -> contact_data (jsonb)
+  - Type mismatch: book_ref (character(6)) -> actual_arrival (timestamp)
+  - Type mismatch: total_amount (numeric(10,) -> arrival_timezone (text)
   - Type mismatch: flight_id (serial) -> departure_city (jsonb)
   - Type mismatch: flight_no (character(6)) -> passenger_name (text)
   - Type mismatch: departure_airport (character(3)) -> departure_airport_name (jsonb)
   - Type mismatch: arrival_airport (character(3)) -> arrival_airport_name (jsonb)
-  - Type mismatch: status (character) -> actual_departure (timestamp)
-  - Type mismatch: aircraft_code (character(3)) -> arrival_timezone (text)
-  - Type mismatch: actual_departure (timestamp) -> departure_timezone (text)
-  - Type mismatch: actual_arrival (timestamp) -> arrival_coordinates (point)
-  - Type mismatch: CONSTRAINT (flights_pkey) -> departure_coordinates (point)
+  - Type mismatch: status (character) -> departure_timezone (text)
+  - Type mismatch: aircraft_code (character(3)) -> arrival_coordinates (point)
+  - Type mismatch: actual_departure (timestamp) -> departure_coordinates (point)
 
 4. STRUCTURAL SIMILARITY ANALYSIS
 --------------------------------------------------------------------------------
@@ -70,155 +61,116 @@ This section measures naming and structural alignment between models.
 Metrics are calculated on combined, alphabetically-sorted column names.
 
 Relational Model (Combined Text):
-  CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT actual_arrival actual_departure aircraft_code aircraft_code aircraft_code airport_code airport_name amount arrival_airport boarding_no book_date book_ref book_ref city contact_data coordinates departure_airport fare_conditions fare_conditions flight_id flight_id flight_id flight_no model passenger_id passenger_name range scheduled_arrival scheduled_departure seat_no seat_no status ticket_no ticket_no ticket_no timezone total_amount
+  actual_arrival actual_departure aircraft_code aircraft_code aircraft_code airport_code airport_name amount arrival_airport boarding_no book_date book_ref book_ref city contact_data coordinates departure_airport fare_conditions fare_conditions flight_id flight_id flight_id flight_no model passenger_id passenger_name range scheduled_arrival scheduled_departure seat_no seat_no status ticket_no ticket_no ticket_no timezone total_amount
 
 Denormalized Model (Combined Text):
-  -- -- -- -- -- -- -- CONSTRAINT actual_arrival actual_departure aircraft_model aircraft_range amount arrival_airport_name arrival_city arrival_coordinates arrival_timezone boarding_no book_date book_ref contact_data departure_airport_name departure_city departure_coordinates departure_timezone flight_no passenger_id passenger_name scheduled_arrival scheduled_departure seat_no status
+  actual_arrival actual_departure aircraft_model aircraft_range amount arrival_airport_name arrival_city arrival_coordinates arrival_timezone boarding_no book_date book_ref contact_data departure_airport_name departure_city departure_coordinates departure_timezone flight_no passenger_id passenger_name scheduled_arrival scheduled_departure seat_no status
 
 Structural Similarity Metrics:
-  BLEU Score:    0.2843
-  ROUGE-1:       0.6142
-  METEOR Score:  0.2884
+  BLEU Score:    0.3394
+  ROUGE-1:       0.6609
+  METEOR Score:  0.3401
 
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
 
-Identified 32 attribute pairs for type checking:
+Identified 24 attribute pairs for type checking:
 
 Pair 1:
-  Relational:    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  aircraft_model jsonb NOT NULL
+  Relational:    aircraft_code character(3)
+  Denormalized:  aircraft_model jsonb
 
 Pair 2:
-  Relational:    model jsonb NOT NULL
-  Denormalized:  amount numeric(10, 2) NOT NULL
+  Relational:    model jsonb
+  Denormalized:  amount numeric(10,
 
 Pair 3:
-  Relational:    range integer NOT NULL
-  Denormalized:  -- Flight information
-    flight_id integer NOT NULL
+  Relational:    range integer
+  Denormalized:  status character
 
 Pair 4:
-  Relational:    CONSTRAINT aircrafts_pkey PRIMARY KEY (aircraft_code)
-  Denormalized:  CONSTRAINT flight_details_denorm_pkey PRIMARY KEY (flight_id, ticket_no)
+  Relational:    airport_code character(3)
+  Denormalized:  arrival_city jsonb
 
 Pair 5:
-  Relational:    airport_code character(3) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  arrival_city jsonb NOT NULL
+  Relational:    airport_name jsonb
+  Denormalized:  aircraft_range integer
 
 Pair 6:
-  Relational:    airport_name jsonb NOT NULL
-  Denormalized:  aircraft_range integer NOT NULL
+  Relational:    city jsonb
+  Denormalized:  seat_no character
 
 Pair 7:
-  Relational:    city jsonb NOT NULL
-  Denormalized:  -- Departure airport information
-    departure_airport_code character(3) COLLATE pg_catalog."default" NOT NULL
+  Relational:    coordinates point
+  Denormalized:  book_date timestamp
 
 Pair 8:
-  Relational:    coordinates point NOT NULL
-  Denormalized:  book_date timestamp with time zone NOT NULL
+  Relational:    timezone text
+  Denormalized:  flight_no character(6)
 
 Pair 9:
-  Relational:    timezone text COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  flight_no character(6) COLLATE pg_catalog."default" NOT NULL
+  Relational:    ticket_no character(13)
+  Denormalized:  book_ref character(6)
 
 Pair 10:
-  Relational:    CONSTRAINT airports_data_pkey PRIMARY KEY (airport_code)
-  Denormalized:  status character varying(20) COLLATE pg_catalog."default" NOT NULL
+  Relational:    flight_id integer
+  Denormalized:  passenger_id character
 
 Pair 11:
-  Relational:    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  seat_no character varying(4) COLLATE pg_catalog."default"
-
-Pair 12:
-  Relational:    flight_id integer NOT NULL
-  Denormalized:  passenger_id character varying(20) COLLATE pg_catalog."default" NOT NULL
-
-Pair 13:
-  Relational:    boarding_no integer NOT NULL
+  Relational:    boarding_no integer
   Denormalized:  boarding_no integer
 
-Pair 14:
-  Relational:    seat_no character varying(4) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  -- Arrival airport information
-    arrival_airport_code character(3) COLLATE pg_catalog."default" NOT NULL
-
-Pair 15:
-  Relational:    CONSTRAINT boarding_passes_pkey PRIMARY KEY (ticket_no, flight_id)
-  Denormalized:  -- Aircraft information
-    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL
-
-Pair 16:
-  Relational:    CONSTRAINT boarding_passes_flight_id_boarding_no_key UNIQUE (flight_id, boarding_no)
-  Denormalized:  -- Ticket and booking information
-    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL
-
-Pair 17:
-  Relational:    CONSTRAINT boarding_passes_flight_id_seat_no_key UNIQUE (flight_id, seat_no)
-  Denormalized:  book_ref character(6) COLLATE pg_catalog."default" NOT NULL
-
-Pair 18:
-  Relational:    book_ref character(6) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  -- Fare and seat information
-    fare_conditions character varying(10) COLLATE pg_catalog."default" NOT NULL
-
-Pair 19:
-  Relational:    book_date timestamp with time zone NOT NULL
+Pair 12:
+  Relational:    seat_no character
   Denormalized:  contact_data jsonb
 
+Pair 13:
+  Relational:    book_ref character(6)
+  Denormalized:  actual_arrival timestamp
+
+Pair 14:
+  Relational:    book_date timestamp
+  Denormalized:  actual_departure timestamp
+
+Pair 15:
+  Relational:    total_amount numeric(10,
+  Denormalized:  arrival_timezone text
+
+Pair 16:
+  Relational:    flight_id serial
+  Denormalized:  departure_city jsonb
+
+Pair 17:
+  Relational:    flight_no character(6)
+  Denormalized:  passenger_name text
+
+Pair 18:
+  Relational:    scheduled_departure timestamp
+  Denormalized:  scheduled_departure timestamp
+
+Pair 19:
+  Relational:    scheduled_arrival timestamp
+  Denormalized:  scheduled_arrival timestamp
+
 Pair 20:
-  Relational:    total_amount numeric(10, 2) NOT NULL
-  Denormalized:  actual_arrival timestamp with time zone
+  Relational:    departure_airport character(3)
+  Denormalized:  departure_airport_name jsonb
 
 Pair 21:
-  Relational:    CONSTRAINT bookings_pkey PRIMARY KEY (book_ref)
-  Denormalized:  -- Booking total
-    total_amount numeric(10, 2) NOT NULL
+  Relational:    arrival_airport character(3)
+  Denormalized:  arrival_airport_name jsonb
 
 Pair 22:
-  Relational:    flight_id serial NOT NULL
-  Denormalized:  departure_city jsonb NOT NULL
+  Relational:    status character
+  Denormalized:  departure_timezone text
 
 Pair 23:
-  Relational:    flight_no character(6) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  passenger_name text COLLATE pg_catalog."default" NOT NULL
+  Relational:    aircraft_code character(3)
+  Denormalized:  arrival_coordinates point
 
 Pair 24:
-  Relational:    scheduled_departure timestamp with time zone NOT NULL
-  Denormalized:  scheduled_departure timestamp with time zone NOT NULL
-
-Pair 25:
-  Relational:    scheduled_arrival timestamp with time zone NOT NULL
-  Denormalized:  scheduled_arrival timestamp with time zone NOT NULL
-
-Pair 26:
-  Relational:    departure_airport character(3) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  departure_airport_name jsonb NOT NULL
-
-Pair 27:
-  Relational:    arrival_airport character(3) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  arrival_airport_name jsonb NOT NULL
-
-Pair 28:
-  Relational:    status character varying(20) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  actual_departure timestamp with time zone
-
-Pair 29:
-  Relational:    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  arrival_timezone text COLLATE pg_catalog."default" NOT NULL
-
-Pair 30:
-  Relational:    actual_departure timestamp with time zone
-  Denormalized:  departure_timezone text COLLATE pg_catalog."default" NOT NULL
-
-Pair 31:
-  Relational:    actual_arrival timestamp with time zone
-  Denormalized:  arrival_coordinates point NOT NULL
-
-Pair 32:
-  Relational:    CONSTRAINT flights_pkey PRIMARY KEY (flight_id)
-  Denormalized:  departure_coordinates point NOT NULL
+  Relational:    actual_departure timestamp
+  Denormalized:  departure_coordinates point
 
 
 ================================================================================

@@ -14,15 +14,15 @@ Relational Model:
 
 Denormalized Model:
   - Tables: 3
-  - Total Attributes: 26
-    * orders_fact_snapshot: 13 columns
-    * orders_daily_rollup: 7 columns
-    * customers_active_snapshot: 6 columns
+  - Total Attributes: 18
+    * orders_fact_snapshot: 7 columns
+    * orders_daily_rollup: 6 columns
+    * customers_active_snapshot: 5 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 1.86
-⚠ WARNING: Denormalized model has MORE attributes (14 vs 26)
+Completeness Ratio: 1.2857
+⚠ WARNING: Denormalized model has MORE attributes (14 vs 18)
   New information may have been added in the transition
 
 3. CORRECTNESS EVALUATION
@@ -35,8 +35,8 @@ Data Type Preservation: 57.14%
   - Type mismatch: order_id (SERIAL) -> order_id (INT)
   - Type mismatch: product_id (SERIAL) -> product_id (INT)
   - Type mismatch: order_detail_id (SERIAL) -> order_count (INT)
-  - Type mismatch: order_id (INT) -> -- (Customer)
-  - Type mismatch: quantity (INT) -> -- (Order)
+  - Type mismatch: product_id (INT) -> customer_name (VARCHAR(100))
+  - Type mismatch: quantity (INT) -> total_revenue (DECIMAL(15,2))
 
 4. STRUCTURAL SIMILARITY ANALYSIS
 --------------------------------------------------------------------------------
@@ -48,12 +48,12 @@ Relational Model (Combined Text):
   customer_address customer_email customer_id customer_id customer_name order_date order_detail_id order_id order_id price product_id product_id product_name quantity
 
 Denormalized Model (Combined Text):
-  -- -- -- -- -- -- -- -- avg_order_value customer_address customer_address customer_email customer_email customer_id customer_id customer_name customer_name last_order_date order_count order_id price product_id product_name quantity rollup_date total_revenue
+  avg_order_value customer_address customer_address customer_email customer_email customer_id customer_id customer_name customer_name last_order_date order_count order_id price product_id product_name quantity rollup_date total_revenue
 
 Structural Similarity Metrics:
-  BLEU Score:    0.3846
+  BLEU Score:    0.5556
   ROUGE-1:       0.6984
-  METEOR Score:  0.6168
+  METEOR Score:  0.6510
 
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
@@ -61,7 +61,7 @@ Structural Similarity Metrics:
 Identified 14 attribute pairs for type checking:
 
 Pair 1:
-  Relational:    customer_id SERIAL PRIMARY KEY
+  Relational:    customer_id SERIAL
   Denormalized:  customer_id INT
 
 Pair 2:
@@ -77,19 +77,19 @@ Pair 4:
   Denormalized:  customer_address TEXT
 
 Pair 5:
-  Relational:    order_id SERIAL PRIMARY KEY
-  Denormalized:  order_id INT PRIMARY KEY
+  Relational:    order_id SERIAL
+  Denormalized:  order_id INT
 
 Pair 6:
-  Relational:    customer_id INT REFERENCES customers(customer_id)
-  Denormalized:  customer_id INT PRIMARY KEY
+  Relational:    customer_id INT
+  Denormalized:  customer_id INT
 
 Pair 7:
   Relational:    order_date DATE
-  Denormalized:  rollup_date DATE PRIMARY KEY
+  Denormalized:  rollup_date DATE
 
 Pair 8:
-  Relational:    product_id SERIAL PRIMARY KEY
+  Relational:    product_id SERIAL
   Denormalized:  product_id INT
 
 Pair 9:
@@ -101,22 +101,20 @@ Pair 10:
   Denormalized:  price DECIMAL(10,2)
 
 Pair 11:
-  Relational:    order_detail_id SERIAL PRIMARY KEY
-  Denormalized:  order_count INT GENERATED ALWAYS AS (COUNT(DISTINCT order_id)) STORED
+  Relational:    order_detail_id SERIAL
+  Denormalized:  order_count INT
 
 Pair 12:
-  Relational:    order_id INT REFERENCES orders(order_id)
-  Denormalized:  -- Customer Denormalized Fields
-    customer_id INT NOT NULL
+  Relational:    order_id INT
+  Denormalized:  quantity INT
 
 Pair 13:
-  Relational:    product_id INT REFERENCES products(product_id)
-  Denormalized:  quantity INT NOT NULL
+  Relational:    product_id INT
+  Denormalized:  customer_name VARCHAR(100)
 
 Pair 14:
   Relational:    quantity INT
-  Denormalized:  -- Order Denormalized Fields
-    order_date DATE NOT NULL
+  Denormalized:  total_revenue DECIMAL(15,2)
 
 
 ================================================================================

@@ -6,49 +6,47 @@ SQL MODEL DENORMALIZATION EVALUATION REPORT
 --------------------------------------------------------------------------------
 Relational Model:
   - Tables: 14
-  - Total Attributes: 106
-    * categories: 5 columns
-    * customer_customer_demo: 3 columns
-    * customer_demographics: 3 columns
-    * customers: 12 columns
-    * employee_territories: 3 columns
-    * employees: 19 columns
-    * order_details: 6 columns
-    * orders: 15 columns
-    * products: 11 columns
-    * region: 3 columns
-    * shippers: 4 columns
-    * suppliers: 13 columns
-    * territories: 4 columns
-    * us_states: 5 columns
+  - Total Attributes: 92
+    * categories: 4 columns
+    * customer_customer_demo: 2 columns
+    * customer_demographics: 2 columns
+    * customers: 11 columns
+    * employee_territories: 2 columns
+    * employees: 18 columns
+    * order_details: 5 columns
+    * orders: 14 columns
+    * products: 10 columns
+    * region: 2 columns
+    * shippers: 3 columns
+    * suppliers: 12 columns
+    * territories: 3 columns
+    * us_states: 4 columns
 
 Denormalized Model:
   - Tables: 1
-  - Total Attributes: 12
-    * fact_sales: 12 columns
+  - Total Attributes: 10
+    * fact_sales: 10 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 0.11
-⚠ WARNING: Normalized model has MORE attributes (12 vs 106)
+Completeness Ratio: 0.1087
+⚠ WARNING: Normalized model has MORE attributes (10 vs 92)
   Some information may have been lost in the transition
 
 3. CORRECTNESS EVALUATION
 --------------------------------------------------------------------------------
 
-Data Type Preservation: 16.67%
+Data Type Preservation: 20.00%
 
 ⚠ Issues Found:
   - Type mismatch: category_name (character) -> order_date (date)
   - Type mismatch: description (text) -> discount (numeric(4,2))
   - Type mismatch: picture (bytea) -> product_id (smallint)
-  - Type mismatch: CONSTRAINT (pk_categories) -> CONSTRAINT (pk_fact_sales)
   - Type mismatch: customer_type_id (character) -> employee_id (smallint)
-  - Type mismatch: CONSTRAINT (pk_customer_customer_demo) -> quantity (smallint)
   - Type mismatch: customer_type_id (character) -> shipped_date (date)
   - Type mismatch: customer_desc (text) -> unit_price (numeric(10,2))
-  - Type mismatch: CONSTRAINT (pk_customer_demographics) -> -- (Pre-calculated:)
-  - Type mismatch: customer_id (character) -> net_revenue (numeric(12,2))
+  - Type mismatch: customer_id (character) -> quantity (smallint)
+  - Type mismatch: company_name (character) -> net_revenue (numeric(12,2))
 
 4. STRUCTURAL SIMILARITY ANALYSIS
 --------------------------------------------------------------------------------
@@ -57,69 +55,59 @@ This section measures naming and structural alignment between models.
 Metrics are calculated on combined, alphabetically-sorted column names.
 
 Relational Model (Combined Text):
-  CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT address address address birth_date category_id category_id category_name city city city company_name company_name company_name contact_name contact_name contact_title contact_title country country country customer_desc customer_id customer_id customer_id customer_type_id customer_type_id description discontinued discount employee_id employee_id employee_id extension fax fax first_name freight hire_date home_phone homepage last_name notes order_date order_id order_id phone phone phone photo photo_path picture postal_code postal_code postal_code product_id product_id product_name quantity quantity_per_unit region region region region_description region_id region_id reorder_level reports_to required_date ship_address ship_city ship_country ship_name ship_postal_code ship_region ship_via shipped_date shipper_id state_abbr state_id state_name state_region supplier_id supplier_id territory_description territory_id territory_id title title_of_courtesy unit_price unit_price units_in_stock units_on_order
+  address address address birth_date category_id category_id category_name city city city company_name company_name company_name contact_name contact_name contact_title contact_title country country country customer_desc customer_id customer_id customer_id customer_type_id customer_type_id description discontinued discount employee_id employee_id employee_id extension fax fax first_name freight hire_date home_phone homepage last_name notes order_date order_id order_id phone phone phone photo photo_path picture postal_code postal_code postal_code product_id product_id product_name quantity quantity_per_unit region region region region_description region_id region_id reorder_level reports_to required_date ship_address ship_city ship_country ship_name ship_postal_code ship_region ship_via shipped_date shipper_id state_abbr state_id state_name state_region supplier_id supplier_id territory_description territory_id territory_id title title_of_courtesy unit_price unit_price units_in_stock units_on_order
 
 Denormalized Model (Combined Text):
-  -- CONSTRAINT customer_id discount employee_id net_revenue order_date order_id product_id quantity shipped_date unit_price
+  customer_id discount employee_id net_revenue order_date order_id product_id quantity shipped_date unit_price
 
 Structural Similarity Metrics:
-  BLEU Score:    0.0003
-  ROUGE-1:       0.1735
-  METEOR Score:  0.0518
+  BLEU Score:    0.0002
+  ROUGE-1:       0.1768
+  METEOR Score:  0.0537
 
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
 
-Identified 12 attribute pairs for type checking:
+Identified 10 attribute pairs for type checking:
 
 Pair 1:
-  Relational:    category_id smallint NOT NULL
-  Denormalized:  order_id smallint NOT NULL
+  Relational:    category_id smallint
+  Denormalized:  order_id smallint
 
 Pair 2:
-  Relational:    category_name character varying(15) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  order_date date NOT NULL
+  Relational:    category_name character
+  Denormalized:  order_date date
 
 Pair 3:
-  Relational:    description text COLLATE pg_catalog."default"
+  Relational:    description text
   Denormalized:  discount numeric(4,2)
 
 Pair 4:
   Relational:    picture bytea
-  Denormalized:  product_id smallint NOT NULL
+  Denormalized:  product_id smallint
 
 Pair 5:
-  Relational:    CONSTRAINT pk_categories PRIMARY KEY (category_id)
-  Denormalized:  CONSTRAINT pk_fact_sales PRIMARY KEY (order_date, order_id, product_id)
-) PARTITION BY RANGE (order_date
+  Relational:    customer_id character
+  Denormalized:  customer_id character
 
 Pair 6:
-  Relational:    customer_id character varying(5) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  customer_id character varying(5)
-
-Pair 7:
-  Relational:    customer_type_id character varying(5) COLLATE pg_catalog."default" NOT NULL
+  Relational:    customer_type_id character
   Denormalized:  employee_id smallint
 
-Pair 8:
-  Relational:    CONSTRAINT pk_customer_customer_demo PRIMARY KEY (customer_id, customer_type_id)
-  Denormalized:  quantity smallint
-
-Pair 9:
-  Relational:    customer_type_id character varying(5) COLLATE pg_catalog."default" NOT NULL
+Pair 7:
+  Relational:    customer_type_id character
   Denormalized:  shipped_date date
 
-Pair 10:
-  Relational:    customer_desc text COLLATE pg_catalog."default"
+Pair 8:
+  Relational:    customer_desc text
   Denormalized:  unit_price numeric(10,2)
 
-Pair 11:
-  Relational:    CONSTRAINT pk_customer_demographics PRIMARY KEY (customer_type_id)
-  Denormalized:  -- Pre-calculated: qty * price * (1-discount)
-    ship_country character varying(15)
+Pair 9:
+  Relational:    customer_id character
+  Denormalized:  quantity smallint
 
-Pair 12:
-  Relational:    customer_id character varying(5) COLLATE pg_catalog."default" NOT NULL
+Pair 10:
+  Relational:    company_name character
   Denormalized:  net_revenue numeric(12,2)
 
 

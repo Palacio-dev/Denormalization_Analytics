@@ -19,15 +19,15 @@ Relational Model:
 
 Denormalized Model:
   - Tables: 3
-  - Total Attributes: 37
-    * denorm_store_sales: 20 columns
-    * denorm_inventory_snapshot: 5 columns
-    * rollup_daily_channel_sales: 12 columns
+  - Total Attributes: 27
+    * denorm_store_sales: 14 columns
+    * denorm_inventory_snapshot: 3 columns
+    * rollup_daily_channel_sales: 10 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 0.39
-⚠ WARNING: Normalized model has MORE attributes (37 vs 96)
+Completeness Ratio: 0.2812
+⚠ WARNING: Normalized model has MORE attributes (27 vs 96)
   Some information may have been lost in the transition
 
 3. CORRECTNESS EVALUATION
@@ -60,18 +60,8 @@ Data Type Preservation: 0.00%
   - Type mismatch: cord_ship_mode_id (char(16)) -> channel (VARCHAR(10))
   - Type mismatch: cord_call_center_id (char(16)) -> total_return_amt (NUMERIC(15,2))
   - Type mismatch: cord_order_comments (varchar(100)) -> total_net_sales (NUMERIC(15,2))
-  - Type mismatch: word_order_id (integer) -> -- (Primary)
+  - Type mismatch: word_order_id (integer) -> 'WEB' (store_or_site_id)
   - Type mismatch: word_bill_customer_id (char(16)) -> total_return_quantity (BIGINT)
-  - Type mismatch: word_ship_customer_id (char(16)) -> -- (Header)
-  - Type mismatch: word_order_date (char(10)) -> -- (Converted)
-  - Type mismatch: word_order_time (integer) -> -- (Line)
-  - Type mismatch: word_ship_mode_id (char(16)) -> -- (Derived:)
-  - Type mismatch: word_web_site_id (char(16)) -> -- (Constraints)
-  - Type mismatch: word_order_comments (char(100)) -> -- (Converted)
-  - Type mismatch: clin_order_id (integer) -> CONSTRAINT (pk_denorm_inventory)
-  - Type mismatch: clin_line_number (integer) -> -- ('STORE')
-  - Type mismatch: clin_item_id (char(16)) -> 'WEB' (store_or_site_id)
-  - Type mismatch: clin_promotion_id (char(16)) -> -- (Derived:)
 
 4. STRUCTURAL SIMILARITY ANALYSIS
 --------------------------------------------------------------------------------
@@ -83,180 +73,121 @@ Relational Model (Combined Text):
   clin_catalog_number clin_catalog_page_number clin_coupon_amt clin_item_id clin_line_number clin_order_id clin_promotion_id clin_quantity clin_sales_price clin_ship_cost clin_ship_date clin_warehouse_id cord_bill_customer_id cord_call_center_id cord_order_comments cord_order_date cord_order_id cord_order_time cord_ship_customer_id cord_ship_mode_id cret_call_center_id cret_catalog_page_id cret_item_id cret_line_number cret_merchant_credit cret_order_id cret_reason_id cret_refund_customer_id cret_refunded_cash cret_return_amt cret_return_customer_id cret_return_date cret_return_fee cret_return_qty cret_return_ship_cost cret_return_tax cret_return_time cret_reversed_charge cret_shipmode_id cret_warehouse_id invn_date invn_item_id invn_qty_on_hand invn_warehouse_id plin_comment plin_coupon_amt plin_item_id plin_line_number plin_promotion_id plin_purchase_id plin_quantity plin_sale_price purc_clerk_id purc_comment purc_customer_id purc_purchase_date purc_purchase_id purc_purchase_time purc_register_id purc_store_id sret_customer_id sret_item_id sret_line_number sret_purchase_id sret_reason_id sret_refunded_cash sret_return_amt sret_return_date sret_return_fee sret_return_qty sret_return_ship_cost sret_return_tax sret_return_time sret_reversed_charge sret_store_credit sret_store_id sret_ticket_number wlin_coupon_amt wlin_item_id wlin_line_number wlin_order_id wlin_promotion_id wlin_quantity wlin_sales_price wlin_ship_cost wlin_ship_date wlin_warehouse_id wlin_web_page_id word_bill_customer_id word_order_comments word_order_date word_order_id word_order_time word_ship_customer_id word_ship_mode_id word_web_site_id
 
 Denormalized Model (Combined Text):
-  'WEB' -- -- -- -- -- -- -- -- -- CONSTRAINT channel clerk_id coupon_amt customer_id gross_sales_amt invn_date item_id item_id line_number promotion_id purchase_date qty_on_hand quantity register_id return_amt return_date return_qty return_reason_id sale_price sales_date total_gross_sales total_net_sales total_quantity_sold total_return_amt total_return_quantity
+  'WEB' channel clerk_id coupon_amt customer_id gross_sales_amt invn_date item_id item_id line_number promotion_id purchase_date qty_on_hand quantity register_id return_amt return_date return_qty return_reason_id sale_price sales_date total_gross_sales total_net_sales total_quantity_sold total_return_amt total_return_quantity
 
 Structural Similarity Metrics:
-  BLEU Score:    0.0052
-  ROUGE-1:       0.2521
-  METEOR Score:  0.0055
+  BLEU Score:    0.0026
+  ROUGE-1:       0.2528
+  METEOR Score:  0.0056
 
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
 
-Identified 36 attribute pairs for type checking:
+Identified 26 attribute pairs for type checking:
 
 Pair 1:
-  Relational:    plin_purchase_id            integer               not null
-  Denormalized:  purchase_date           DATE NOT NULL
+  Relational:    plin_purchase_id integer
+  Denormalized:  purchase_date DATE
 
 Pair 2:
-  Relational:    plin_line_number            integer               not null
-  Denormalized:  line_number             INT NOT NULL
+  Relational:    plin_line_number integer
+  Denormalized:  line_number INT
 
 Pair 3:
-  Relational:    plin_item_id                char(16)
-  Denormalized:  item_id                 CHAR(16) NOT NULL
+  Relational:    plin_item_id char(16)
+  Denormalized:  item_id CHAR(16)
 
 Pair 4:
-  Relational:    plin_promotion_id           char(16)
-  Denormalized:  promotion_id            CHAR(16)
+  Relational:    plin_promotion_id char(16)
+  Denormalized:  promotion_id CHAR(16)
 
 Pair 5:
-  Relational:    plin_quantity               integer
-  Denormalized:  quantity                INT
+  Relational:    plin_quantity integer
+  Denormalized:  quantity INT
 
 Pair 6:
-  Relational:    plin_sale_price             numeric(7,2)
-  Denormalized:  sale_price              NUMERIC(7,2)
+  Relational:    plin_sale_price numeric(7,2)
+  Denormalized:  sale_price NUMERIC(7,2)
 
 Pair 7:
-  Relational:    plin_coupon_amt             numeric(7,2)
-  Denormalized:  coupon_amt              NUMERIC(7,2)
+  Relational:    plin_coupon_amt numeric(7,2)
+  Denormalized:  coupon_amt NUMERIC(7,2)
 
 Pair 8:
-  Relational:    plin_comment                varchar(100)
-  Denormalized:  invn_date               DATE NOT NULL
+  Relational:    plin_comment varchar(100)
+  Denormalized:  invn_date DATE
 
 Pair 9:
-  Relational:    purc_purchase_id            integer               not null
-  Denormalized:  return_reason_id        CHAR(16)
+  Relational:    purc_purchase_id integer
+  Denormalized:  return_reason_id CHAR(16)
 
 Pair 10:
-  Relational:    purc_store_id               char(16)
-  Denormalized:  customer_id             CHAR(16)
+  Relational:    purc_store_id char(16)
+  Denormalized:  customer_id CHAR(16)
 
 Pair 11:
-  Relational:    purc_customer_id            char(16)
-  Denormalized:  register_id             INT
+  Relational:    purc_customer_id char(16)
+  Denormalized:  register_id INT
 
 Pair 12:
-  Relational:    purc_purchase_date          char(10)
-  Denormalized:  return_date             DATE
+  Relational:    purc_purchase_date char(10)
+  Denormalized:  return_date DATE
 
 Pair 13:
-  Relational:    purc_purchase_time          integer
-  Denormalized:  return_amt              NUMERIC(7,2)
+  Relational:    purc_purchase_time integer
+  Denormalized:  return_amt NUMERIC(7,2)
 
 Pair 14:
-  Relational:    purc_register_id            integer
-  Denormalized:  item_id                 CHAR(16)
+  Relational:    purc_register_id integer
+  Denormalized:  item_id CHAR(16)
 
 Pair 15:
-  Relational:    purc_clerk_id               integer
-  Denormalized:  clerk_id                INT
+  Relational:    purc_clerk_id integer
+  Denormalized:  clerk_id INT
 
 Pair 16:
-  Relational:    purc_comment                char(100)
-  Denormalized:  qty_on_hand             INT
+  Relational:    purc_comment char(100)
+  Denormalized:  qty_on_hand INT
 
 Pair 17:
-  Relational:    cord_order_id               integer               not null
-  Denormalized:  gross_sales_amt         NUMERIC(10,2)
+  Relational:    cord_order_id integer
+  Denormalized:  gross_sales_amt NUMERIC(10,2)
 
 Pair 18:
-  Relational:    cord_bill_customer_id       char(16)
-  Denormalized:  total_quantity_sold     BIGINT
+  Relational:    cord_bill_customer_id char(16)
+  Denormalized:  total_quantity_sold BIGINT
 
 Pair 19:
-  Relational:    cord_ship_customer_id       char(16)
-  Denormalized:  sales_date              DATE NOT NULL
+  Relational:    cord_ship_customer_id char(16)
+  Denormalized:  sales_date DATE
 
 Pair 20:
-  Relational:    cord_order_date             char(10)
-  Denormalized:  return_qty              INT
+  Relational:    cord_order_date char(10)
+  Denormalized:  return_qty INT
 
 Pair 21:
-  Relational:    cord_order_time             integer
-  Denormalized:  total_gross_sales       NUMERIC(15,2)
+  Relational:    cord_order_time integer
+  Denormalized:  total_gross_sales NUMERIC(15,2)
 
 Pair 22:
-  Relational:    cord_ship_mode_id           char(16)
-  Denormalized:  channel                 VARCHAR(10) NOT NULL
+  Relational:    cord_ship_mode_id char(16)
+  Denormalized:  channel VARCHAR(10)
 
 Pair 23:
-  Relational:    cord_call_center_id         char(16)
-  Denormalized:  total_return_amt        NUMERIC(15,2)
+  Relational:    cord_call_center_id char(16)
+  Denormalized:  total_return_amt NUMERIC(15,2)
 
 Pair 24:
-  Relational:    cord_order_comments         varchar(100)
-  Denormalized:  total_net_sales         NUMERIC(15,2)
+  Relational:    cord_order_comments varchar(100)
+  Denormalized:  total_net_sales NUMERIC(15,2)
 
 Pair 25:
-  Relational:    word_order_id               integer               not null
-  Denormalized:  -- Primary Keys
-    purchase_id             BIGINT NOT NULL
+  Relational:    word_order_id integer
+  Denormalized:  'WEB' store_or_site_id
 
 Pair 26:
-  Relational:    word_bill_customer_id       char(16)
-  Denormalized:  total_return_quantity   BIGINT
-
-Pair 27:
-  Relational:    word_ship_customer_id       char(16)
-  Denormalized:  -- Header Dimensions (from s_purchase)
-    store_id                CHAR(16)
-
-Pair 28:
-  Relational:    word_order_date             char(10)
-  Denormalized:  -- Converted from CHAR(10)
-    purchase_time           INT
-
-Pair 29:
-  Relational:    word_order_time             integer
-  Denormalized:  -- Line Item Facts (from s_purchase_lineitem)
-    item_id                 CHAR(16)
-
-Pair 30:
-  Relational:    word_ship_mode_id           char(16)
-  Denormalized:  -- Derived: quantity * sale_price
-    
-    -- Return Facts (from s_store_returns)
-    -- Nullable: NULL means the item was not returned
-    is_returned             BOOLEAN DEFAULT FALSE
-
-Pair 31:
-  Relational:    word_web_site_id            char(16)
-  Denormalized:  -- Constraints
-    CONSTRAINT pk_denorm_store_sales PRIMARY KEY (purchase_date, purchase_id, line_number)
-)
-PARTITION BY RANGE (purchase_date
-
-Pair 32:
-  Relational:    word_order_comments         char(100)
-  Denormalized:  -- Converted from CHAR(10)
-    warehouse_id            CHAR(16) NOT NULL
-
-Pair 33:
-  Relational:    clin_order_id               integer               not null
-  Denormalized:  CONSTRAINT pk_denorm_inventory PRIMARY KEY (invn_date, warehouse_id, item_id)
-)
-PARTITION BY RANGE (invn_date
-
-Pair 34:
-  Relational:    clin_line_number            integer               not null
-  Denormalized:  -- 'STORE'
-
-Pair 35:
-  Relational:    clin_item_id                char(16)
-  Denormalized:  'WEB'
-    store_or_site_id        CHAR(16)
-
-Pair 36:
-  Relational:    clin_promotion_id           char(16)
-  Denormalized:  -- Derived: gross - returns
-    
-    CONSTRAINT pk_rollup_daily PRIMARY KEY (sales_date, channel, store_or_site_id, item_id)
-)
-PARTITION BY RANGE (sales_date
+  Relational:    word_bill_customer_id char(16)
+  Denormalized:  total_return_quantity BIGINT
 
 
 ================================================================================

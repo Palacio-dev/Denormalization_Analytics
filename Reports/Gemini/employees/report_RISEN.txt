@@ -6,52 +6,45 @@ SQL MODEL DENORMALIZATION EVALUATION REPORT
 --------------------------------------------------------------------------------
 Relational Model:
   - Tables: 6
-  - Total Attributes: 30
-    * department: 3 columns
-    * department_employee: 5 columns
-    * department_manager: 5 columns
-    * employee: 7 columns
-    * salary: 5 columns
-    * title: 5 columns
+  - Total Attributes: 24
+    * department: 2 columns
+    * department_employee: 4 columns
+    * department_manager: 4 columns
+    * employee: 6 columns
+    * salary: 4 columns
+    * title: 4 columns
 
 Denormalized Model:
   - Tables: 3
-  - Total Attributes: 33
-    * employee_current_profile: 13 columns
-    * department_analytics: 9 columns
-    * employee_history_fact: 11 columns
+  - Total Attributes: 30
+    * employee_current_profile: 12 columns
+    * department_analytics: 8 columns
+    * employee_history_fact: 10 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 1.10
-⚠ WARNING: Denormalized model has MORE attributes (30 vs 33)
+Completeness Ratio: 1.2500
+⚠ WARNING: Denormalized model has MORE attributes (24 vs 30)
   New information may have been added in the transition
 
 3. CORRECTNESS EVALUATION
 --------------------------------------------------------------------------------
 
-Data Type Preservation: 36.67%
+Data Type Preservation: 50.00%
 
 ⚠ Issues Found:
-  - Type mismatch: id (character(4)) -> -- (Derived)
-  - Type mismatch: CONSTRAINT (idx_16979_primary) -> CONSTRAINT (pk_department_analytics)
-  - Type mismatch: CONSTRAINT (idx_16982_primary) -> CONSTRAINT (pk_employee_history_fact)
+  - Type mismatch: id (character(4)) -> title (character)
   - Type mismatch: from_date (date) -> first_name (character)
-  - Type mismatch: to_date (date) -> title (character)
-  - Type mismatch: CONSTRAINT (idx_16985_primary) -> gender (employees.employee_gender)
+  - Type mismatch: to_date (date) -> gender (employees.employee_gender)
   - Type mismatch: id (bigint) -> history_id (bigserial)
   - Type mismatch: birth_date (date) -> is_manager (boolean)
   - Type mismatch: first_name (character) -> is_manager (boolean)
   - Type mismatch: gender (employees.employee_gender) -> tenure_years (numeric(5,2))
   - Type mismatch: hire_date (date) -> current_title (character)
-  - Type mismatch: CONSTRAINT (idx_16988_primary) -> min_salary (bigint)
-  - Type mismatch: from_date (date) -> department_name (character)
+  - Type mismatch: from_date (date) -> max_salary (bigint)
   - Type mismatch: to_date (date) -> is_current (boolean)
-  - Type mismatch: CONSTRAINT (idx_16991_primary) -> current_salary (bigint)
-  - Type mismatch: employee_id (bigint) -> average_salary (numeric(15,)
-  - Type mismatch: title (character) -> effective_to_date (date)
-  - Type mismatch: to_date (date) -> total_salary_expense (bigint)
-  - Type mismatch: CONSTRAINT (idx_16994_primary) -> current_department_id (character(4))
+  - Type mismatch: employee_id (bigint) -> department_name (character)
+  - Type mismatch: title (character) -> current_salary (bigint)
 
 4. STRUCTURAL SIMILARITY ANALYSIS
 --------------------------------------------------------------------------------
@@ -60,141 +53,116 @@ This section measures naming and structural alignment between models.
 Metrics are calculated on combined, alphabetically-sorted column names.
 
 Relational Model (Combined Text):
-  CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT amount birth_date department_id department_id dept_name employee_id employee_id employee_id employee_id first_name from_date from_date from_date from_date gender hire_date id id last_name title to_date to_date to_date to_date
+  amount birth_date department_id department_id dept_name employee_id employee_id employee_id employee_id first_name from_date from_date from_date from_date gender hire_date id id last_name title to_date to_date to_date to_date
 
 Denormalized Model (Combined Text):
-  -- CONSTRAINT CONSTRAINT average_salary birth_date current_department_id current_department_name current_manager_employee_id current_salary current_title department_id department_id department_name department_name effective_from_date effective_to_date employee_id employee_id first_name gender hire_date history_id is_current is_manager is_manager last_name max_salary min_salary salary_amount tenure_years title total_active_employees total_salary_expense
+  average_salary birth_date current_department_id current_department_name current_manager_employee_id current_salary current_title department_id department_id department_name department_name effective_from_date effective_to_date employee_id employee_id first_name gender hire_date history_id is_current is_manager is_manager last_name max_salary min_salary salary_amount tenure_years title total_active_employees total_salary_expense
 
 Structural Similarity Metrics:
-  BLEU Score:    0.3636
-  ROUGE-1:       0.5299
-  METEOR Score:  0.3567
+  BLEU Score:    0.3333
+  ROUGE-1:       0.5321
+  METEOR Score:  0.3626
 
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
 
-Identified 30 attribute pairs for type checking:
+Identified 24 attribute pairs for type checking:
 
 Pair 1:
-  Relational:    id character(4) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  -- Derived attribute
-    CONSTRAINT pk_employee_current_profile PRIMARY KEY (employee_id)
+  Relational:    id character(4)
+  Denormalized:  title character
 
 Pair 2:
-  Relational:    dept_name character varying(40) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  last_name character varying(16) COLLATE pg_catalog."default" NOT NULL
+  Relational:    dept_name character
+  Denormalized:  last_name character
 
 Pair 3:
-  Relational:    CONSTRAINT idx_16979_primary PRIMARY KEY (id)
-  Denormalized:  CONSTRAINT pk_department_analytics PRIMARY KEY (department_id)
+  Relational:    employee_id bigint
+  Denormalized:  employee_id bigint
 
 Pair 4:
-  Relational:    employee_id bigint NOT NULL
-  Denormalized:  employee_id bigint NOT NULL
+  Relational:    department_id character(4)
+  Denormalized:  department_id character(4)
 
 Pair 5:
-  Relational:    department_id character(4) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  department_id character(4) COLLATE pg_catalog."default" NOT NULL
+  Relational:    from_date date
+  Denormalized:  birth_date date
 
 Pair 6:
-  Relational:    from_date date NOT NULL
-  Denormalized:  birth_date date NOT NULL
+  Relational:    to_date date
+  Denormalized:  hire_date date
 
 Pair 7:
-  Relational:    to_date date NOT NULL
-  Denormalized:  hire_date date NOT NULL
+  Relational:    employee_id bigint
+  Denormalized:  employee_id bigint
 
 Pair 8:
-  Relational:    CONSTRAINT idx_16982_primary PRIMARY KEY (employee_id, department_id)
-  Denormalized:  CONSTRAINT pk_employee_history_fact PRIMARY KEY (history_id)
+  Relational:    department_id character(4)
+  Denormalized:  department_id character(4)
 
 Pair 9:
-  Relational:    employee_id bigint NOT NULL
-  Denormalized:  employee_id bigint NOT NULL
+  Relational:    from_date date
+  Denormalized:  first_name character
 
 Pair 10:
-  Relational:    department_id character(4) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  department_id character(4) COLLATE pg_catalog."default"
+  Relational:    to_date date
+  Denormalized:  gender employees.employee_gender
 
 Pair 11:
-  Relational:    from_date date NOT NULL
-  Denormalized:  first_name character varying(14) COLLATE pg_catalog."default" NOT NULL
+  Relational:    id bigint
+  Denormalized:  history_id bigserial
 
 Pair 12:
-  Relational:    to_date date NOT NULL
-  Denormalized:  title character varying(50) COLLATE pg_catalog."default"
+  Relational:    birth_date date
+  Denormalized:  is_manager boolean
 
 Pair 13:
-  Relational:    CONSTRAINT idx_16985_primary PRIMARY KEY (employee_id, department_id)
-  Denormalized:  gender employees.employee_gender NOT NULL
+  Relational:    first_name character
+  Denormalized:  is_manager boolean
 
 Pair 14:
-  Relational:    id bigint NOT NULL DEFAULT nextval('employees.id_employee_seq'::regclass)
-  Denormalized:  history_id bigserial NOT NULL
+  Relational:    last_name character
+  Denormalized:  department_name character
 
 Pair 15:
-  Relational:    birth_date date NOT NULL
-  Denormalized:  is_manager boolean DEFAULT false
-
-Pair 16:
-  Relational:    first_name character varying(14) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  is_manager boolean DEFAULT false
-
-Pair 17:
-  Relational:    last_name character varying(16) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  department_name character varying(40) COLLATE pg_catalog."default" NOT NULL
-
-Pair 18:
-  Relational:    gender employees.employee_gender NOT NULL
+  Relational:    gender employees.employee_gender
   Denormalized:  tenure_years numeric(5,2)
 
-Pair 19:
-  Relational:    hire_date date NOT NULL
-  Denormalized:  current_title character varying(50) COLLATE pg_catalog."default"
+Pair 16:
+  Relational:    hire_date date
+  Denormalized:  current_title character
 
-Pair 20:
-  Relational:    CONSTRAINT idx_16988_primary PRIMARY KEY (id)
-  Denormalized:  min_salary bigint NOT NULL DEFAULT 0
+Pair 17:
+  Relational:    employee_id bigint
+  Denormalized:  min_salary bigint
 
-Pair 21:
-  Relational:    employee_id bigint NOT NULL
-  Denormalized:  max_salary bigint NOT NULL DEFAULT 0
-
-Pair 22:
-  Relational:    amount bigint NOT NULL
+Pair 18:
+  Relational:    amount bigint
   Denormalized:  salary_amount bigint
 
-Pair 23:
-  Relational:    from_date date NOT NULL
-  Denormalized:  department_name character varying(40) COLLATE pg_catalog."default"
+Pair 19:
+  Relational:    from_date date
+  Denormalized:  max_salary bigint
 
-Pair 24:
-  Relational:    to_date date NOT NULL
-  Denormalized:  is_current boolean DEFAULT false
+Pair 20:
+  Relational:    to_date date
+  Denormalized:  is_current boolean
 
-Pair 25:
-  Relational:    CONSTRAINT idx_16991_primary PRIMARY KEY (employee_id, from_date)
+Pair 21:
+  Relational:    employee_id bigint
+  Denormalized:  department_name character
+
+Pair 22:
+  Relational:    title character
   Denormalized:  current_salary bigint
 
-Pair 26:
-  Relational:    employee_id bigint NOT NULL
-  Denormalized:  average_salary numeric(15, 2) NOT NULL DEFAULT 0.00
+Pair 23:
+  Relational:    from_date date
+  Denormalized:  effective_from_date date
 
-Pair 27:
-  Relational:    title character varying(50) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  effective_to_date date NOT NULL
-
-Pair 28:
-  Relational:    from_date date NOT NULL
-  Denormalized:  effective_from_date date NOT NULL
-
-Pair 29:
+Pair 24:
   Relational:    to_date date
-  Denormalized:  total_salary_expense bigint NOT NULL DEFAULT 0
-
-Pair 30:
-  Relational:    CONSTRAINT idx_16994_primary PRIMARY KEY (employee_id, title, from_date)
-  Denormalized:  current_department_id character(4) COLLATE pg_catalog."default"
+  Denormalized:  effective_to_date date
 
 
 ================================================================================

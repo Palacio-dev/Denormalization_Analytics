@@ -16,29 +16,27 @@ Relational Model:
 
 Denormalized Model:
   - Tables: 2
-  - Total Attributes: 12
-    * user_entitlements_wide: 6 columns
-    * user_usage_rollup: 6 columns
+  - Total Attributes: 8
+    * user_entitlements_wide: 3 columns
+    * user_usage_rollup: 5 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 1.33
-⚠ WARNING: Denormalized model has MORE attributes (9 vs 12)
-  New information may have been added in the transition
+Completeness Ratio: 0.8889
+⚠ WARNING: Normalized model has MORE attributes (8 vs 9)
+  Some information may have been lost in the transition
 
 3. CORRECTNESS EVALUATION
 --------------------------------------------------------------------------------
 
-Data Type Preservation: 22.22%
+Data Type Preservation: 37.50%
 
 ⚠ Issues Found:
-  - Type mismatch: id (INT) -> -- (Denormalized)
+  - Type mismatch: id (INT) -> or (use)
   - Type mismatch: activeDate (DATE) -> updated_at (TIMESTAMP)
   - Type mismatch: inactiveDate (DATE) -> feature_type (VARCHAR(4))
-  - Type mismatch: featureType (VARCHAR(4)) -> or (use)
-  - Type mismatch: packageType (VARCHAR(4)) -> -- (Denormalized)
-  - Type mismatch: activeFlag (INT) -> -- (Constraint:)
-  - Type mismatch: id (INT) -> -- (Derived)
+  - Type mismatch: featureType (VARCHAR(4)) -> entitlement_id (INT)
+  - Type mismatch: packageType (VARCHAR(4)) -> total_use_count (INT)
 
 4. STRUCTURAL SIMILARITY ANALYSIS
 --------------------------------------------------------------------------------
@@ -50,7 +48,7 @@ Relational Model (Combined Text):
   activeDate activeFlag featureType id id inactiveDate packageType useCount useLimit
 
 Denormalized Model (Combined Text):
-  -- -- -- -- entitlement_id feature_type or total_use_count total_use_limit updated_at user_id user_id
+  entitlement_id feature_type or total_use_count total_use_limit updated_at user_id user_id
 
 Structural Similarity Metrics:
   BLEU Score:    0.0000
@@ -60,49 +58,39 @@ Structural Similarity Metrics:
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
 
-Identified 9 attribute pairs for type checking:
+Identified 8 attribute pairs for type checking:
 
 Pair 1:
-  Relational:    id INT PRIMARY KEY
-  Denormalized:  -- Denormalized from entitlements.featureType
-    active_flag INT NOT NULL DEFAULT 1
+  Relational:    id INT
+  Denormalized:  or use
 
 Pair 2:
   Relational:    activeDate DATE
-  Denormalized:  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  Denormalized:  updated_at TIMESTAMP
 
 Pair 3:
   Relational:    inactiveDate DATE
-  Denormalized:  feature_type VARCHAR(4) NOT NULL
+  Denormalized:  feature_type VARCHAR(4)
 
 Pair 4:
   Relational:    useLimit INT
-  Denormalized:  user_id INT PRIMARY KEY
+  Denormalized:  user_id INT
 
 Pair 5:
   Relational:    useCount INT
-  Denormalized:  user_id INT PRIMARY KEY
+  Denormalized:  user_id INT
 
 Pair 6:
   Relational:    featureType VARCHAR(4)
-  Denormalized:  or use a decimal type
-    usage_ratio_pct DECIMAL(5,2) GENERATED ALWAYS AS (total_use_count * 100.0 / NULLIF(total_use_limit, 0)) STORED
+  Denormalized:  entitlement_id INT
 
 Pair 7:
   Relational:    packageType VARCHAR(4)
-  Denormalized:  -- Denormalized from entitlements.activeFlag
-    -- Constraint: Ensure no duplicate feature types per user per entitlement
-    CONSTRAINT unique_user_feature UNIQUE (user_id, feature_type)
+  Denormalized:  total_use_count INT
 
 Pair 8:
   Relational:    activeFlag INT
-  Denormalized:  -- Constraint: Ensure valid foreign key reference (checked at insert time)
-    CONSTRAINT fk_entitlement_check CHECK (entitlement_id IN (SELECT id FROM entitlements))
-
-Pair 9:
-  Relational:    id INT PRIMARY KEY
-  Denormalized:  -- Derived column: The actual ratio is stored as an integer percentage or float
-    -- We store the difference to avoid float precision issues
+  Denormalized:  total_use_limit INT
 
 
 ================================================================================

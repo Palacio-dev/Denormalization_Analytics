@@ -16,25 +16,24 @@ Relational Model:
 
 Denormalized Model:
   - Tables: 1
-  - Total Attributes: 13
-    * denormalized_user_entitlements: 13 columns
+  - Total Attributes: 7
+    * denormalized_user_entitlements: 7 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 1.44
-⚠ WARNING: Denormalized model has MORE attributes (9 vs 13)
-  New information may have been added in the transition
+Completeness Ratio: 0.7778
+⚠ WARNING: Normalized model has MORE attributes (7 vs 9)
+  Some information may have been lost in the transition
 
 3. CORRECTNESS EVALUATION
 --------------------------------------------------------------------------------
 
-Data Type Preservation: 55.56%
+Data Type Preservation: 57.14%
 
 ⚠ Issues Found:
-  - Type mismatch: id (INT) -> -- (Primary)
-  - Type mismatch: packageType (VARCHAR(4)) -> active_flag (INT)
-  - Type mismatch: activeFlag (INT) -> -- (Redundant)
-  - Type mismatch: id (INT) -> -- (Composite)
+  - Type mismatch: useCount (INT) -> feature_type (VARCHAR(4))
+  - Type mismatch: featureType (VARCHAR(4)) -> active_flag (INT)
+  - Type mismatch: packageType (VARCHAR(4)) -> entitlement_id (INT)
 
 4. STRUCTURAL SIMILARITY ANALYSIS
 --------------------------------------------------------------------------------
@@ -46,7 +45,7 @@ Relational Model (Combined Text):
   activeDate activeFlag featureType id id inactiveDate packageType useCount useLimit
 
 Denormalized Model (Combined Text):
-  -- -- -- -- -- -- active_date active_flag entitlement_id feature_type inactive_date use_count use_limit
+  active_date active_flag entitlement_id feature_type inactive_date use_count use_limit
 
 Structural Similarity Metrics:
   BLEU Score:    0.0000
@@ -56,12 +55,11 @@ Structural Similarity Metrics:
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
 
-Identified 9 attribute pairs for type checking:
+Identified 7 attribute pairs for type checking:
 
 Pair 1:
-  Relational:    id INT PRIMARY KEY
-  Denormalized:  -- Primary Key
-    user_id INT NOT NULL
+  Relational:    id INT
+  Denormalized:  use_limit INT
 
 Pair 2:
   Relational:    activeDate DATE
@@ -73,30 +71,19 @@ Pair 3:
 
 Pair 4:
   Relational:    useLimit INT
-  Denormalized:  use_limit INT
+  Denormalized:  use_count INT
 
 Pair 5:
   Relational:    useCount INT
-  Denormalized:  use_count INT
+  Denormalized:  feature_type VARCHAR(4)
 
 Pair 6:
   Relational:    featureType VARCHAR(4)
-  Denormalized:  feature_type VARCHAR(4)
+  Denormalized:  active_flag INT
 
 Pair 7:
   Relational:    packageType VARCHAR(4)
-  Denormalized:  active_flag INT
-
-Pair 8:
-  Relational:    activeFlag INT
-  Denormalized:  -- Redundant Attributes from 'entitlements' (Collapsing Relations)
-    -- These are duplicated to eliminate the need for JOINs in analytical queries
-    package_type VARCHAR(4)
-
-Pair 9:
-  Relational:    id INT PRIMARY KEY
-  Denormalized:  -- Composite Primary Key to maintain referential integrity logic (optional for denorm, but good practice)
-    CONSTRAINT pk_user_entitlements PRIMARY KEY (user_id, entitlement_id)
+  Denormalized:  entitlement_id INT
 
 
 ================================================================================

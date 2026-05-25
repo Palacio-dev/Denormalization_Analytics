@@ -19,42 +19,39 @@ Relational Model:
 
 Denormalized Model:
   - Tables: 4
-  - Total Attributes: 42
+  - Total Attributes: 38
     * dim_localidade: 6 columns
     * dim_curso_ies: 8 columns
     * dim_escola: 5 columns
-    * fact_avaliacao: 23 columns
+    * fact_avaliacao: 19 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 0.79
-⚠ WARNING: Normalized model has MORE attributes (42 vs 53)
+Completeness Ratio: 0.7170
+⚠ WARNING: Normalized model has MORE attributes (38 vs 53)
   Some information may have been lost in the transition
 
 3. CORRECTNESS EVALUATION
 --------------------------------------------------------------------------------
 
-Data Type Preservation: 57.14%
+Data Type Preservation: 60.53%
 
 ⚠ Issues Found:
-  - Type mismatch: id (INT) -> -- (Degenerate)
+  - Type mismatch: qtd_IES (INT) -> rede (VARCHAR(100))
   - Type mismatch: media_ideb (REAL) -> sigla_ies (VARCHAR(20))
   - Type mismatch: media_saeb (REAL) -> codigo_ies (INT)
   - Type mismatch: media_enade (REAL) -> rede (VARCHAR(100))
   - Type mismatch: total_participantes (INT) -> nome_ies (VARCHAR(100))
-  - Type mismatch: id_ideb (INT) -> rede (VARCHAR(100))
   - Type mismatch: rend_1 (REAL) -> rede (VARCHAR(100))
   - Type mismatch: rend_2 (REAL) -> ano (INT)
   - Type mismatch: nota_ideb (REAL) -> nome_curso (VARCHAR(100))
   - Type mismatch: total_inscritos (INT) -> nome_escola (VARCHAR(100))
+  - Type mismatch: id_saeb (INT) -> ideb_nota (REAL)
   - Type mismatch: nota_mat (REAL) -> sigla_uf (VARCHAR(2))
-  - Type mismatch: id_ies (INT) -> -- (ENADE)
-  - Type mismatch: nome_ies (VARCHAR(100)) -> cod_escola (INTEGER)
-  - Type mismatch: sigla_ies (VARCHAR(20)) -> ideb_nota (REAL)
-  - Type mismatch: codigo_ies (INT) -> -- (SAEB)
-  - Type mismatch: rede (VARCHAR(100)) -> -- (IDEB)
-  - Type mismatch: id_municipio (INT) -> id_avaliacao (BIGINT)
-  - Type mismatch: nome_escola (VARCHAR(100)) -> ideb_ind_rend (REAL)
+  - Type mismatch: id_ies (INT) -> cod_escola (INTEGER)
+  - Type mismatch: nome_ies (VARCHAR(100)) -> id_municipio (INT)
+  - Type mismatch: sigla_ies (VARCHAR(20)) -> id_avaliacao (BIGINT)
+  - Type mismatch: codigo_ies (INT) -> ideb_ind_rend (REAL)
 
 4. STRUCTURAL SIMILARITY ANALYSIS
 --------------------------------------------------------------------------------
@@ -66,54 +63,53 @@ Relational Model (Combined Text):
   ano cod_escola codigo_ies id id_IES id_ano id_curso id_curso id_enade id_enade id_escola id_ideb id_ideb id_ies id_municipio id_municipio id_municipio id_saeb id_saeb id_uf ind_rend media_enade media_ideb media_saeb nome nome_curso nome_escola nome_ies nome_municipio nota_bruta_ce nota_bruta_fg nota_enade_continua nota_enade_faixa nota_ideb nota_mat nota_padrao nota_padronizada_ce nota_padronizada_fg nota_port qtd_ESCOLAS qtd_IES qtd_habitantes rede rede rend_1 rend_2 rend_3 rend_4 sigla_ies sigla_uf total_concluintes total_inscritos total_participantes
 
 Denormalized Model (Combined Text):
-  -- -- -- -- ano cod_escola codigo_ies enade_nota_bruta_ce enade_nota_bruta_fg enade_nota_continua enade_nota_faixa enade_nota_padronizada_ce enade_nota_padronizada_fg enade_total_concluintes id_avaliacao id_curso id_curso id_escola id_ies id_municipio id_municipio id_municipio id_uf ideb_ind_rend ideb_nota ideb_rend_2 ideb_rend_3 ideb_rend_4 nome_curso nome_escola nome_ies nome_municipio nome_uf qtd_habitantes_uf rede rede rede saeb_nota_padrao saeb_nota_port sigla_ies sigla_uf sigla_uf
+  ano cod_escola codigo_ies enade_nota_bruta_ce enade_nota_bruta_fg enade_nota_continua enade_nota_faixa enade_nota_padronizada_ce enade_nota_padronizada_fg enade_total_concluintes id_avaliacao id_curso id_curso id_escola id_ies id_municipio id_municipio id_municipio id_uf ideb_ind_rend ideb_nota ideb_rend_2 ideb_rend_3 ideb_rend_4 nome_curso nome_escola nome_ies nome_municipio nome_uf qtd_habitantes_uf rede rede rede saeb_nota_padrao saeb_nota_port sigla_ies sigla_uf sigla_uf
 
 Structural Similarity Metrics:
-  BLEU Score:    0.3481
+  BLEU Score:    0.3369
   ROUGE-1:       0.8223
-  METEOR Score:  0.3466
+  METEOR Score:  0.3493
 
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
 
-Identified 42 attribute pairs for type checking:
+Identified 38 attribute pairs for type checking:
 
 Pair 1:
-  Relational:    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
-  Denormalized:  -- Degenerate Dimensions (Redundant data to eliminate joins on heavy reads)
-    id_municipio INT NOT NULL
+  Relational:    id INT
+  Denormalized:  id_uf INT
 
 Pair 2:
-  Relational:    sigla_uf VARCHAR(2) UNIQUE NOT NULL
-  Denormalized:  sigla_uf VARCHAR(2) NOT NULL
+  Relational:    sigla_uf VARCHAR(2)
+  Denormalized:  sigla_uf VARCHAR(2)
 
 Pair 3:
-  Relational:    nome VARCHAR(100) NOT NULL
-  Denormalized:  nome_uf VARCHAR(100) NOT NULL
+  Relational:    nome VARCHAR(100)
+  Denormalized:  nome_uf VARCHAR(100)
 
 Pair 4:
-  Relational:    qtd_habitantes INT CHECK(qtd_habitantes >= 0)
-  Denormalized:  qtd_habitantes_uf INT CHECK(qtd_habitantes_uf >= 0)
+  Relational:    qtd_habitantes INT
+  Denormalized:  qtd_habitantes_uf INT
 
 Pair 5:
-  Relational:    id_municipio INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
-  Denormalized:  id_municipio INT PRIMARY KEY
+  Relational:    id_municipio INT
+  Denormalized:  id_municipio INT
 
 Pair 6:
-  Relational:    id_uf INT NOT NULL REFERENCES UF (id) ON DELETE CASCADE
-  Denormalized:  id_uf INT NOT NULL
+  Relational:    id_uf INT
+  Denormalized:  id_ies INT
 
 Pair 7:
-  Relational:    nome_municipio VARCHAR(100) NOT NULL
-  Denormalized:  nome_municipio VARCHAR(100) NOT NULL
+  Relational:    nome_municipio VARCHAR(100)
+  Denormalized:  nome_municipio VARCHAR(100)
 
 Pair 8:
-  Relational:    qtd_IES INT CHECK (qtd_IES >= 0)
-  Denormalized:  id_ies INT NOT NULL
+  Relational:    qtd_IES INT
+  Denormalized:  rede VARCHAR(100)
 
 Pair 9:
-  Relational:    qtd_ESCOLAS INT (qtd_ESCOLAS >= 0)
-  Denormalized:  id_curso INT PRIMARY KEY
+  Relational:    qtd_ESCOLAS INT
+  Denormalized:  id_curso INT
 
 Pair 10:
   Relational:    media_ideb REAL
@@ -121,27 +117,27 @@ Pair 10:
 
 Pair 11:
   Relational:    media_saeb REAL
-  Denormalized:  codigo_ies INT NOT NULL
+  Denormalized:  codigo_ies INT
 
 Pair 12:
   Relational:    media_enade REAL
-  Denormalized:  rede VARCHAR(100) NOT NULL
+  Denormalized:  rede VARCHAR(100)
 
 Pair 13:
-  Relational:    total_participantes INT CHECK (total_participantes >= 0)
-  Denormalized:  nome_ies VARCHAR(100) NOT NULL
+  Relational:    total_participantes INT
+  Denormalized:  nome_ies VARCHAR(100)
 
 Pair 14:
-  Relational:    id_ideb INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
-  Denormalized:  rede VARCHAR(100) NOT NULL
+  Relational:    id_ideb INT
+  Denormalized:  id_curso INT
 
 Pair 15:
   Relational:    rend_1 REAL
-  Denormalized:  rede VARCHAR(100) NOT NULL
+  Denormalized:  rede VARCHAR(100)
 
 Pair 16:
   Relational:    rend_2 REAL
-  Denormalized:  ano INT NOT NULL
+  Denormalized:  ano INT
 
 Pair 17:
   Relational:    rend_3 REAL
@@ -157,19 +153,19 @@ Pair 19:
 
 Pair 20:
   Relational:    nota_ideb REAL
-  Denormalized:  nome_curso VARCHAR(100) NOT NULL
+  Denormalized:  nome_curso VARCHAR(100)
 
 Pair 21:
-  Relational:    id_enade INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
-  Denormalized:  id_escola INT PRIMARY KEY
+  Relational:    id_enade INT
+  Denormalized:  id_escola INT
 
 Pair 22:
-  Relational:    total_inscritos INT CHECK (total_inscritos >= 0)
-  Denormalized:  nome_escola VARCHAR(100) NOT NULL
+  Relational:    total_inscritos INT
+  Denormalized:  nome_escola VARCHAR(100)
 
 Pair 23:
-  Relational:    total_concluintes INT CHECK (total_concluintes >= 0)
-  Denormalized:  enade_total_concluintes INT CHECK (enade_total_concluintes >= 0)
+  Relational:    total_concluintes INT
+  Denormalized:  enade_total_concluintes INT
 
 Pair 24:
   Relational:    nota_bruta_ce REAL
@@ -196,12 +192,12 @@ Pair 29:
   Denormalized:  enade_nota_faixa REAL
 
 Pair 30:
-  Relational:    id_saeb INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
-  Denormalized:  id_curso INT NOT NULL REFERENCES dim_curso_ies(id_curso)
+  Relational:    id_saeb INT
+  Denormalized:  ideb_nota REAL
 
 Pair 31:
   Relational:    nota_mat REAL
-  Denormalized:  sigla_uf VARCHAR(2) NOT NULL
+  Denormalized:  sigla_uf VARCHAR(2)
 
 Pair 32:
   Relational:    nota_port REAL
@@ -212,42 +208,23 @@ Pair 33:
   Denormalized:  saeb_nota_padrao REAL
 
 Pair 34:
-  Relational:    id_ies INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
-  Denormalized:  -- ENADE Metrics
-    enade_total_inscritos INT CHECK (enade_total_inscritos >= 0)
+  Relational:    id_ies INT
+  Denormalized:  cod_escola INTEGER
 
 Pair 35:
-  Relational:    id_municipio INT NOT NULL REFERENCES MUNICIPIO(id_municipio) ON DELETE CASCADE
-  Denormalized:  id_municipio INT NOT NULL REFERENCES dim_localidade(id_municipio)
+  Relational:    id_municipio INT
+  Denormalized:  id_municipio INT
 
 Pair 36:
-  Relational:    nome_ies VARCHAR(100) NOT NULL
-  Denormalized:  cod_escola INTEGER UNIQUE NOT NULL
+  Relational:    nome_ies VARCHAR(100)
+  Denormalized:  id_municipio INT
 
 Pair 37:
   Relational:    sigla_ies VARCHAR(20)
-  Denormalized:  ideb_nota REAL
+  Denormalized:  id_avaliacao BIGINT
 
 Pair 38:
-  Relational:    codigo_ies INT UNIQUE NOT NULL
-  Denormalized:  -- SAEB Metrics
-    saeb_nota_mat REAL
-
-Pair 39:
-  Relational:    rede VARCHAR(100) NOT NULL
-  Denormalized:  -- IDEB Metrics
-    ideb_rend_1 REAL
-
-Pair 40:
-  Relational:    id_escola INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
-  Denormalized:  id_municipio INT NOT NULL REFERENCES dim_localidade(id_municipio)
-
-Pair 41:
-  Relational:    id_municipio INT NOT NULL REFERENCES MUNICIPIO(id_municipio) ON DELETE CASCADE
-  Denormalized:  id_avaliacao BIGINT GENERATED ALWAYS AS IDENTITY
-
-Pair 42:
-  Relational:    nome_escola VARCHAR(100) NOT NULL
+  Relational:    codigo_ies INT
   Denormalized:  ideb_ind_rend REAL
 
 

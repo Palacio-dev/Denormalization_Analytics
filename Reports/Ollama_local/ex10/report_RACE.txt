@@ -6,50 +6,41 @@ SQL MODEL DENORMALIZATION EVALUATION REPORT
 --------------------------------------------------------------------------------
 Relational Model:
   - Tables: 6
-  - Total Attributes: 27
-    * consumo_anual: 6 columns
-    * continente: 3 columns
-    * emissao_g_efeito_estufa: 5 columns
-    * fonte_energia: 3 columns
-    * paises: 5 columns
-    * populacao: 5 columns
+  - Total Attributes: 21
+    * consumo_anual: 5 columns
+    * continente: 2 columns
+    * emissao_g_efeito_estufa: 4 columns
+    * fonte_energia: 2 columns
+    * paises: 4 columns
+    * populacao: 4 columns
 
 Denormalized Model:
   - Tables: 5
-  - Total Attributes: 31
-    * dim_paises: 4 columns
-    * dim_continente: 3 columns
-    * dim_fonte_energia: 3 columns
-    * fatos_consumo_emissao: 13 columns
-    * fatos_populacao: 8 columns
+  - Total Attributes: 18
+    * dim_paises: 3 columns
+    * dim_continente: 2 columns
+    * dim_fonte_energia: 2 columns
+    * fatos_consumo_emissao: 6 columns
+    * fatos_populacao: 5 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 1.15
-⚠ WARNING: Denormalized model has MORE attributes (27 vs 31)
-  New information may have been added in the transition
+Completeness Ratio: 0.8571
+⚠ WARNING: Normalized model has MORE attributes (18 vs 21)
+  Some information may have been lost in the transition
 
 3. CORRECTNESS EVALUATION
 --------------------------------------------------------------------------------
 
-Data Type Preservation: 44.44%
+Data Type Preservation: 66.67%
 
 ⚠ Issues Found:
   - Type mismatch: porcentagem (integer) -> nome (character)
-  - Type mismatch: CONSTRAINT (consumo_anual_pkey) -> CONSTRAINT (dim_paises_pkey)
-  - Type mismatch: CONSTRAINT (continente_pkey) -> CONSTRAINT (dim_continente_pkey)
-  - Type mismatch: CONSTRAINT (emissao_g_efeito_estufa_pkey) -> CONSTRAINT (dim_fonte_energia_pkey)
-  - Type mismatch: CONSTRAINT (fonte_energia_pkey) -> CONSTRAINT (uq_fato_pais_ano_uniq)
   - Type mismatch: id_paises (integer) -> this (might)
   - Type mismatch: nome (character) -> we (store)
-  - Type mismatch: fundacao (integer) -> -- (Primary)
+  - Type mismatch: fundacao (integer) -> we (store)
   - Type mismatch: continente (integer) -> we (store)
-  - Type mismatch: CONSTRAINT (paises_pkey) -> CONSTRAINT (fatos_populacao_pkey)
-  - Type mismatch: id_pop (integer) -> -- (Technique)
-  - Type mismatch: id_paises (integer) -> we (store)
-  - Type mismatch: ano (integer) -> -- (Technique)
-  - Type mismatch: quantidade_hab (integer) -> we (store)
-  - Type mismatch: CONSTRAINT (populacao_pkey) -> -- (Technique)
+  - Type mismatch: id_pop (integer) -> we (store)
 
 4. STRUCTURAL SIMILARITY ANALYSIS
 --------------------------------------------------------------------------------
@@ -58,137 +49,92 @@ This section measures naming and structural alignment between models.
 Metrics are calculated on combined, alphabetically-sorted column names.
 
 Relational Model (Combined Text):
-  CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT ano ano ano continente fundacao id_consumo id_continente id_emissao id_fonte_energia id_paises id_paises id_paises id_paises id_pop nome nome nome porcentagem quantidade_emitida quantidade_hab tipo_energia
+  ano ano ano continente fundacao id_consumo id_continente id_emissao id_fonte_energia id_paises id_paises id_paises id_paises id_pop nome nome nome porcentagem quantidade_emitida quantidade_hab tipo_energia
 
 Denormalized Model (Combined Text):
-  -- -- -- -- -- -- -- -- CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT ano ano fundacao id_continente id_fato id_fato id_fonte_energia id_paises id_paises nome nome nome quantidade_emitida this we we we we
+  ano ano fundacao id_continente id_fato id_fato id_fonte_energia id_paises id_paises nome nome nome quantidade_emitida this we we we we
 
 Structural Similarity Metrics:
-  BLEU Score:    0.5161
-  ROUGE-1:       0.6761
-  METEOR Score:  0.5474
+  BLEU Score:    0.5173
+  ROUGE-1:       0.6333
+  METEOR Score:  0.4629
 
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
 
-Identified 27 attribute pairs for type checking:
+Identified 18 attribute pairs for type checking:
 
 Pair 1:
-  Relational:    id_consumo integer NOT NULL
-  Denormalized:  id_paises integer NOT NULL
+  Relational:    id_consumo integer
+  Denormalized:  id_paises integer
 
 Pair 2:
-  Relational:    id_paises integer NOT NULL
-  Denormalized:  id_paises integer NOT NULL
+  Relational:    id_paises integer
+  Denormalized:  id_paises integer
 
 Pair 3:
-  Relational:    ano integer NOT NULL
-  Denormalized:  ano integer NOT NULL
+  Relational:    ano integer
+  Denormalized:  ano integer
 
 Pair 4:
-  Relational:    porcentagem integer NOT NULL
-  Denormalized:  nome character varying(50) COLLATE pg_catalog."default" NOT NULL
+  Relational:    porcentagem integer
+  Denormalized:  nome character
 
 Pair 5:
-  Relational:    tipo_energia integer NOT NULL
-  Denormalized:  id_fonte_energia integer NOT NULL
+  Relational:    tipo_energia integer
+  Denormalized:  id_fonte_energia integer
 
 Pair 6:
-  Relational:    CONSTRAINT consumo_anual_pkey PRIMARY KEY (id_consumo)
-  Denormalized:  CONSTRAINT dim_paises_pkey PRIMARY KEY (id_paises)
+  Relational:    id_continente integer
+  Denormalized:  id_continente integer
 
 Pair 7:
-  Relational:    id_continente integer NOT NULL
-  Denormalized:  id_continente integer NOT NULL
+  Relational:    nome character
+  Denormalized:  nome character
 
 Pair 8:
-  Relational:    nome character varying(50) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  nome character varying(50) COLLATE pg_catalog."default" NOT NULL
+  Relational:    id_emissao integer
+  Denormalized:  id_fato integer
 
 Pair 9:
-  Relational:    CONSTRAINT continente_pkey PRIMARY KEY (id_continente)
-  Denormalized:  CONSTRAINT dim_continente_pkey PRIMARY KEY (id_continente)
+  Relational:    id_paises integer
+  Denormalized:  id_fato integer
 
 Pair 10:
-  Relational:    id_emissao integer NOT NULL
-  Denormalized:  id_fato integer NOT NULL GENERATED ALWAYS AS (id_consumo) STORED
+  Relational:    ano integer
+  Denormalized:  ano integer
 
 Pair 11:
-  Relational:    id_paises integer NOT NULL
-  Denormalized:  id_fato integer NOT NULL GENERATED ALWAYS AS (id_pop) STORED
+  Relational:    quantidade_emitida bigint
+  Denormalized:  quantidade_emitida bigint
 
 Pair 12:
-  Relational:    ano integer NOT NULL
-  Denormalized:  ano integer NOT NULL
+  Relational:    id_fonte_energia integer
+  Denormalized:  fundacao integer
 
 Pair 13:
-  Relational:    quantidade_emitida bigint NOT NULL
-  Denormalized:  quantidade_emitida bigint NOT NULL
+  Relational:    nome character
+  Denormalized:  nome character
 
 Pair 14:
-  Relational:    CONSTRAINT emissao_g_efeito_estufa_pkey PRIMARY KEY (id_emissao)
-  Denormalized:  CONSTRAINT dim_fonte_energia_pkey PRIMARY KEY (id_fonte_energia)
+  Relational:    id_paises integer
+  Denormalized:  this might
 
 Pair 15:
-  Relational:    id_fonte_energia integer NOT NULL
-  Denormalized:  fundacao integer NOT NULL
+  Relational:    nome character
+  Denormalized:  we store
 
 Pair 16:
-  Relational:    nome character varying(50)[] COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  nome character varying(50) COLLATE pg_catalog."default" NOT NULL
+  Relational:    fundacao integer
+  Denormalized:  we store
 
 Pair 17:
-  Relational:    CONSTRAINT fonte_energia_pkey PRIMARY KEY (id_fonte_energia)
-  Denormalized:  CONSTRAINT uq_fato_pais_ano_uniq UNIQUE (id_paises, ano) -- Ensures one record per country per year (aggregated if needed)
+  Relational:    continente integer
+  Denormalized:  we store
 
 Pair 18:
-  Relational:    id_paises integer NOT NULL
-  Denormalized:  this might need to be an aggregate column
-    -- or handled via window functions. For now
-
-Pair 19:
-  Relational:    nome character varying(50) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  we store the name here.
-    nome_pais character varying(50) COLLATE pg_catalog."default" NOT NULL
-
-Pair 20:
-  Relational:    fundacao integer NOT NULL
-  Denormalized:  -- Primary Key surrogate
-    id_paises integer NOT NULL
-
-Pair 21:
-  Relational:    continente integer NOT NULL
-  Denormalized:  we store the name here.
-    nome_continente character varying(50) COLLATE pg_catalog."default" NOT NULL
-
-Pair 22:
-  Relational:    CONSTRAINT paises_pkey PRIMARY KEY (id_paises)
-  Denormalized:  CONSTRAINT fatos_populacao_pkey PRIMARY KEY (id_fato)
-
-Pair 23:
-  Relational:    id_pop integer NOT NULL
-  Denormalized:  -- Technique 1: Redundant Attributes (Denormalized)
-    -- Instead of joining to dim_paises
-
-Pair 24:
-  Relational:    id_paises integer NOT NULL
-  Denormalized:  we store the name here.
-    nome_fonte_energia character varying(50) COLLATE pg_catalog."default" NOT NULL
-
-Pair 25:
-  Relational:    ano integer NOT NULL
-  Denormalized:  -- Technique 1: Redundant Attributes (Denormalized)
-    -- Instead of joining to dim_continente
-
-Pair 26:
-  Relational:    quantidade_hab integer NOT NULL
-  Denormalized:  we store the raw quantity.
-    quantidade_hab integer NOT NULL
-
-Pair 27:
-  Relational:    CONSTRAINT populacao_pkey PRIMARY KEY (id_pop)
-  Denormalized:  -- Technique 1: Redundant Attributes (Denormalized)
-    -- Instead of joining to dim_fonte_energia
+  Relational:    id_pop integer
+  Denormalized:  we store
 
 
 ================================================================================

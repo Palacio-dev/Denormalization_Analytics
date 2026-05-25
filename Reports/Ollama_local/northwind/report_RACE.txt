@@ -6,88 +6,67 @@ SQL MODEL DENORMALIZATION EVALUATION REPORT
 --------------------------------------------------------------------------------
 Relational Model:
   - Tables: 14
-  - Total Attributes: 106
-    * categories: 5 columns
-    * customer_customer_demo: 3 columns
-    * customer_demographics: 3 columns
-    * customers: 12 columns
-    * employee_territories: 3 columns
-    * employees: 19 columns
-    * order_details: 6 columns
-    * orders: 15 columns
-    * products: 11 columns
-    * region: 3 columns
-    * shippers: 4 columns
-    * suppliers: 13 columns
-    * territories: 4 columns
-    * us_states: 5 columns
+  - Total Attributes: 92
+    * categories: 4 columns
+    * customer_customer_demo: 2 columns
+    * customer_demographics: 2 columns
+    * customers: 11 columns
+    * employee_territories: 2 columns
+    * employees: 18 columns
+    * order_details: 5 columns
+    * orders: 14 columns
+    * products: 10 columns
+    * region: 2 columns
+    * shippers: 3 columns
+    * suppliers: 12 columns
+    * territories: 3 columns
+    * us_states: 4 columns
 
 Denormalized Model:
   - Tables: 8
-  - Total Attributes: 98
-    * customer_entity: 14 columns
-    * product_entity: 14 columns
-    * order_fact: 23 columns
-    * region_entity: 5 columns
-    * employee_entity: 20 columns
-    * shipper_entity: 4 columns
-    * category_entity: 5 columns
-    * supplier_entity: 13 columns
+  - Total Attributes: 78
+    * customer_entity: 12 columns
+    * product_entity: 11 columns
+    * order_fact: 15 columns
+    * region_entity: 3 columns
+    * employee_entity: 18 columns
+    * shipper_entity: 3 columns
+    * category_entity: 4 columns
+    * supplier_entity: 12 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 0.92
-⚠ WARNING: Normalized model has MORE attributes (98 vs 106)
+Completeness Ratio: 0.8478
+⚠ WARNING: Normalized model has MORE attributes (78 vs 92)
   Some information may have been lost in the transition
 
 3. CORRECTNESS EVALUATION
 --------------------------------------------------------------------------------
 
-Data Type Preservation: 57.14%
+Data Type Preservation: 73.08%
 
 ⚠ Issues Found:
-  - Type mismatch: CONSTRAINT (pk_categories) -> CONSTRAINT (pk_shipper_entity)
-  - Type mismatch: CONSTRAINT (pk_customer_customer_demo) -> CONSTRAINT (pk_category_entity)
   - Type mismatch: customer_type_id (character) -> category_id (smallint)
   - Type mismatch: customer_desc (text) -> postal_code (character)
-  - Type mismatch: CONSTRAINT (pk_customer_demographics) -> CONSTRAINT (pk_supplier_entity)
   - Type mismatch: customer_id (character) -> supplier_id (smallint)
-  - Type mismatch: CONSTRAINT (pk_customers) -> -- (Redundant)
-  - Type mismatch: CONSTRAINT (pk_employee_territories) -> -- (Redundant)
   - Type mismatch: photo_path (character) -> homepage (text)
-  - Type mismatch: CONSTRAINT (pk_employees) -> product_id (smallint)
-  - Type mismatch: product_id (smallint) -> product_name (character)
   - Type mismatch: quantity (smallint) -> city (character)
   - Type mismatch: discount (real) -> country (character)
-  - Type mismatch: CONSTRAINT (pk_order_details) -> -- (Kept)
   - Type mismatch: order_id (smallint) -> order_date (date)
   - Type mismatch: customer_id (character) -> shipper_id (smallint)
   - Type mismatch: order_date (date) -> reorder_level (smallint)
   - Type mismatch: freight (real) -> region (character)
-  - Type mismatch: CONSTRAINT (pk_orders) -> but (category_name)
-  - Type mismatch: product_id (smallint) -> territory_id (character)
-  - Type mismatch: supplier_id (smallint) -> phone (character)
-  - Type mismatch: category_id (smallint) -> company_name (character)
+  - Type mismatch: product_id (smallint) -> product_name (character)
+  - Type mismatch: supplier_id (smallint) -> territory_id (character)
+  - Type mismatch: category_id (smallint) -> but (category_name)
   - Type mismatch: unit_price (real) -> units_in_stock (smallint)
   - Type mismatch: units_on_order (smallint) -> discontinued (integer)
   - Type mismatch: reorder_level (smallint) -> total_revenue (real)
   - Type mismatch: discontinued (integer) -> phone (character)
-  - Type mismatch: CONSTRAINT (pk_products) -> -- (Redundant)
-  - Type mismatch: region_id (smallint) -> -- (Redundant)
-  - Type mismatch: CONSTRAINT (pk_region) -> -- (Redundant)
-  - Type mismatch: shipper_id (smallint) -> -- (Redundant)
-  - Type mismatch: phone (character) -> -- (Redundant)
-  - Type mismatch: CONSTRAINT (pk_shippers) -> -- (Redundant)
-  - Type mismatch: supplier_id (smallint) -> -- (Redundant)
+  - Type mismatch: region_id (smallint) -> phone (character)
+  - Type mismatch: shipper_id (smallint) -> company_name (character)
+  - Type mismatch: supplier_id (smallint) -> supplier_company_name (character)
   - Type mismatch: contact_title (character) -> total_discount (real)
-  - Type mismatch: address (character) -> -- (Redundant)
-  - Type mismatch: city (character) -> -- (Redundant)
-  - Type mismatch: region (character) -> -- (Calculated)
-  - Type mismatch: country (character) -> -- (Redundant)
-  - Type mismatch: phone (character) -> -- (Redundant)
-  - Type mismatch: fax (character) -> -- (Redundant)
-  - Type mismatch: homepage (text) -> -- (Redundant)
-  - Type mismatch: CONSTRAINT (pk_suppliers) -> employee_last_name (character)
 
 4. STRUCTURAL SIMILARITY ANALYSIS
 --------------------------------------------------------------------------------
@@ -96,431 +75,332 @@ This section measures naming and structural alignment between models.
 Metrics are calculated on combined, alphabetically-sorted column names.
 
 Relational Model (Combined Text):
-  CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT address address address birth_date category_id category_id category_name city city city company_name company_name company_name contact_name contact_name contact_title contact_title country country country customer_desc customer_id customer_id customer_id customer_type_id customer_type_id description discontinued discount employee_id employee_id employee_id extension fax fax first_name freight hire_date home_phone homepage last_name notes order_date order_id order_id phone phone phone photo photo_path picture postal_code postal_code postal_code product_id product_id product_name quantity quantity_per_unit region region region region_description region_id region_id reorder_level reports_to required_date ship_address ship_city ship_country ship_name ship_postal_code ship_region ship_via shipped_date shipper_id state_abbr state_id state_name state_region supplier_id supplier_id territory_description territory_id territory_id title title_of_courtesy unit_price unit_price units_in_stock units_on_order
+  address address address birth_date category_id category_id category_name city city city company_name company_name company_name contact_name contact_name contact_title contact_title country country country customer_desc customer_id customer_id customer_id customer_type_id customer_type_id description discontinued discount employee_id employee_id employee_id extension fax fax first_name freight hire_date home_phone homepage last_name notes order_date order_id order_id phone phone phone photo photo_path picture postal_code postal_code postal_code product_id product_id product_name quantity quantity_per_unit region region region region_description region_id region_id reorder_level reports_to required_date ship_address ship_city ship_country ship_name ship_postal_code ship_region ship_via shipped_date shipper_id state_abbr state_id state_name state_region supplier_id supplier_id territory_description territory_id territory_id title title_of_courtesy unit_price unit_price units_in_stock units_on_order
 
 Denormalized Model (Combined Text):
-  -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- CONSTRAINT CONSTRAINT CONSTRAINT address address address birth_date but category_id category_id category_name city city city company_name company_name company_name contact_name contact_name contact_title contact_title country country country customer_id customer_type_id description discontinued employee_id employee_id employee_last_name extension fax fax first_name hire_date home_phone homepage last_name notes order_date order_id phone phone phone photo picture postal_code postal_code postal_code product_id product_name quantity_per_unit region region region region_description region_id reorder_level reports_to required_date ship_city ship_country ship_name ship_postal_code ship_region ship_via shipped_date shipper_company_name shipper_id supplier_company_name supplier_id territory_id territory_id title title_of_courtesy total_discount total_revenue unit_price units_in_stock units_on_order
+  address address address birth_date but category_id category_id category_name city city city company_name company_name company_name contact_name contact_name contact_title contact_title country country country customer_id customer_type_id description discontinued employee_id employee_id employee_last_name extension fax fax first_name hire_date home_phone homepage last_name notes order_date order_id phone phone phone photo picture postal_code postal_code postal_code product_id product_name quantity_per_unit region region region region_description region_id reorder_level reports_to required_date ship_city ship_country ship_name ship_postal_code ship_region ship_via shipped_date shipper_company_name shipper_id supplier_company_name supplier_id territory_id territory_id title title_of_courtesy total_discount total_revenue unit_price units_in_stock units_on_order
 
 Structural Similarity Metrics:
-  BLEU Score:    0.7053
-  ROUGE-1:       0.8276
-  METEOR Score:  0.7088
+  BLEU Score:    0.7714
+  ROUGE-1:       0.8543
+  METEOR Score:  0.7895
 
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
 
-Identified 98 attribute pairs for type checking:
+Identified 78 attribute pairs for type checking:
 
 Pair 1:
-  Relational:    category_id smallint NOT NULL
+  Relational:    category_id smallint
   Denormalized:  category_id smallint
 
 Pair 2:
-  Relational:    category_name character varying(15) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  category_name character varying(15) COLLATE pg_catalog."default" NOT NULL
+  Relational:    category_name character
+  Denormalized:  category_name character
 
 Pair 3:
-  Relational:    description text COLLATE pg_catalog."default"
-  Denormalized:  description text COLLATE pg_catalog."default"
+  Relational:    description text
+  Denormalized:  description text
 
 Pair 4:
   Relational:    picture bytea
   Denormalized:  picture bytea
 
 Pair 5:
-  Relational:    CONSTRAINT pk_categories PRIMARY KEY (category_id)
-  Denormalized:  CONSTRAINT pk_shipper_entity PRIMARY KEY (shipper_id)
+  Relational:    customer_id character
+  Denormalized:  customer_id character
 
 Pair 6:
-  Relational:    customer_id character varying(5) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  customer_id character varying(5) COLLATE pg_catalog."default" NOT NULL
+  Relational:    customer_type_id character
+  Denormalized:  customer_type_id character
 
 Pair 7:
-  Relational:    customer_type_id character varying(5) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  customer_type_id character varying(5) COLLATE pg_catalog."default"
+  Relational:    customer_type_id character
+  Denormalized:  category_id smallint
 
 Pair 8:
-  Relational:    CONSTRAINT pk_customer_customer_demo PRIMARY KEY (customer_id, customer_type_id)
-  Denormalized:  CONSTRAINT pk_category_entity PRIMARY KEY (category_id)
+  Relational:    customer_desc text
+  Denormalized:  postal_code character
 
 Pair 9:
-  Relational:    customer_type_id character varying(5) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  category_id smallint NOT NULL
+  Relational:    customer_id character
+  Denormalized:  supplier_id smallint
 
 Pair 10:
-  Relational:    customer_desc text COLLATE pg_catalog."default"
-  Denormalized:  postal_code character varying(10) COLLATE pg_catalog."default"
+  Relational:    company_name character
+  Denormalized:  company_name character
 
 Pair 11:
-  Relational:    CONSTRAINT pk_customer_demographics PRIMARY KEY (customer_type_id)
-  Denormalized:  CONSTRAINT pk_supplier_entity PRIMARY KEY (supplier_id)
+  Relational:    contact_name character
+  Denormalized:  contact_name character
 
 Pair 12:
-  Relational:    customer_id character varying(5) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  supplier_id smallint NOT NULL
+  Relational:    contact_title character
+  Denormalized:  contact_title character
 
 Pair 13:
-  Relational:    company_name character varying(40) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  company_name character varying(40) COLLATE pg_catalog."default" NOT NULL
+  Relational:    address character
+  Denormalized:  address character
 
 Pair 14:
-  Relational:    contact_name character varying(30) COLLATE pg_catalog."default"
-  Denormalized:  contact_name character varying(30) COLLATE pg_catalog."default"
+  Relational:    city character
+  Denormalized:  city character
 
 Pair 15:
-  Relational:    contact_title character varying(30) COLLATE pg_catalog."default"
-  Denormalized:  contact_title character varying(30) COLLATE pg_catalog."default"
+  Relational:    region character
+  Denormalized:  region character
 
 Pair 16:
-  Relational:    address character varying(60) COLLATE pg_catalog."default"
-  Denormalized:  address character varying(60) COLLATE pg_catalog."default"
+  Relational:    postal_code character
+  Denormalized:  postal_code character
 
 Pair 17:
-  Relational:    city character varying(15) COLLATE pg_catalog."default"
-  Denormalized:  city character varying(15) COLLATE pg_catalog."default"
+  Relational:    country character
+  Denormalized:  country character
 
 Pair 18:
-  Relational:    region character varying(15) COLLATE pg_catalog."default"
-  Denormalized:  region character varying(15) COLLATE pg_catalog."default"
+  Relational:    phone character
+  Denormalized:  phone character
 
 Pair 19:
-  Relational:    postal_code character varying(10) COLLATE pg_catalog."default"
-  Denormalized:  postal_code character varying(10) COLLATE pg_catalog."default"
+  Relational:    fax character
+  Denormalized:  fax character
 
 Pair 20:
-  Relational:    country character varying(15) COLLATE pg_catalog."default"
-  Denormalized:  country character varying(15) COLLATE pg_catalog."default"
-
-Pair 21:
-  Relational:    phone character varying(24) COLLATE pg_catalog."default"
-  Denormalized:  phone character varying(24) COLLATE pg_catalog."default"
-
-Pair 22:
-  Relational:    fax character varying(24) COLLATE pg_catalog."default"
-  Denormalized:  fax character varying(24) COLLATE pg_catalog."default"
-
-Pair 23:
-  Relational:    CONSTRAINT pk_customers PRIMARY KEY (customer_id)
-  Denormalized:  -- Redundant
-    customer_desc text COLLATE pg_catalog."default"
-
-Pair 24:
-  Relational:    employee_id smallint NOT NULL
+  Relational:    employee_id smallint
   Denormalized:  employee_id smallint
 
+Pair 21:
+  Relational:    territory_id character
+  Denormalized:  territory_id character
+
+Pair 22:
+  Relational:    employee_id smallint
+  Denormalized:  employee_id smallint
+
+Pair 23:
+  Relational:    last_name character
+  Denormalized:  last_name character
+
+Pair 24:
+  Relational:    first_name character
+  Denormalized:  first_name character
+
 Pair 25:
-  Relational:    territory_id character varying(20) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  territory_id character varying(20) COLLATE pg_catalog."default"
+  Relational:    title character
+  Denormalized:  title character
 
 Pair 26:
-  Relational:    CONSTRAINT pk_employee_territories PRIMARY KEY (employee_id, territory_id)
-  Denormalized:  -- Redundant
-    CONSTRAINT pk_customer_entity PRIMARY KEY (customer_id)
+  Relational:    title_of_courtesy character
+  Denormalized:  title_of_courtesy character
 
 Pair 27:
-  Relational:    employee_id smallint NOT NULL
-  Denormalized:  employee_id smallint NOT NULL
-
-Pair 28:
-  Relational:    last_name character varying(20) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  last_name character varying(20) COLLATE pg_catalog."default" NOT NULL
-
-Pair 29:
-  Relational:    first_name character varying(10) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  first_name character varying(10) COLLATE pg_catalog."default" NOT NULL
-
-Pair 30:
-  Relational:    title character varying(30) COLLATE pg_catalog."default"
-  Denormalized:  title character varying(30) COLLATE pg_catalog."default"
-
-Pair 31:
-  Relational:    title_of_courtesy character varying(25) COLLATE pg_catalog."default"
-  Denormalized:  title_of_courtesy character varying(25) COLLATE pg_catalog."default"
-
-Pair 32:
   Relational:    birth_date date
   Denormalized:  birth_date date
 
-Pair 33:
+Pair 28:
   Relational:    hire_date date
   Denormalized:  hire_date date
 
+Pair 29:
+  Relational:    address character
+  Denormalized:  address character
+
+Pair 30:
+  Relational:    city character
+  Denormalized:  city character
+
+Pair 31:
+  Relational:    region character
+  Denormalized:  region character
+
+Pair 32:
+  Relational:    postal_code character
+  Denormalized:  postal_code character
+
+Pair 33:
+  Relational:    country character
+  Denormalized:  country character
+
 Pair 34:
-  Relational:    address character varying(60) COLLATE pg_catalog."default"
-  Denormalized:  address character varying(60) COLLATE pg_catalog."default"
+  Relational:    home_phone character
+  Denormalized:  home_phone character
 
 Pair 35:
-  Relational:    city character varying(15) COLLATE pg_catalog."default"
-  Denormalized:  city character varying(15) COLLATE pg_catalog."default"
+  Relational:    extension character
+  Denormalized:  extension character
 
 Pair 36:
-  Relational:    region character varying(15) COLLATE pg_catalog."default"
-  Denormalized:  region character varying(15) COLLATE pg_catalog."default"
-
-Pair 37:
-  Relational:    postal_code character varying(10) COLLATE pg_catalog."default"
-  Denormalized:  postal_code character varying(10) COLLATE pg_catalog."default"
-
-Pair 38:
-  Relational:    country character varying(15) COLLATE pg_catalog."default"
-  Denormalized:  country character varying(15) COLLATE pg_catalog."default"
-
-Pair 39:
-  Relational:    home_phone character varying(24) COLLATE pg_catalog."default"
-  Denormalized:  home_phone character varying(24) COLLATE pg_catalog."default"
-
-Pair 40:
-  Relational:    extension character varying(4) COLLATE pg_catalog."default"
-  Denormalized:  extension character varying(4) COLLATE pg_catalog."default"
-
-Pair 41:
   Relational:    photo bytea
   Denormalized:  photo bytea
 
-Pair 42:
-  Relational:    notes text COLLATE pg_catalog."default"
-  Denormalized:  notes text COLLATE pg_catalog."default"
+Pair 37:
+  Relational:    notes text
+  Denormalized:  notes text
 
-Pair 43:
+Pair 38:
   Relational:    reports_to smallint
   Denormalized:  reports_to smallint
 
-Pair 44:
-  Relational:    photo_path character varying(255) COLLATE pg_catalog."default"
-  Denormalized:  homepage text COLLATE pg_catalog."default"
+Pair 39:
+  Relational:    photo_path character
+  Denormalized:  homepage text
 
-Pair 45:
-  Relational:    CONSTRAINT pk_employees PRIMARY KEY (employee_id)
-  Denormalized:  product_id smallint NOT NULL
+Pair 40:
+  Relational:    order_id smallint
+  Denormalized:  order_id smallint
 
-Pair 46:
-  Relational:    order_id smallint NOT NULL
-  Denormalized:  order_id smallint NOT NULL
+Pair 41:
+  Relational:    product_id smallint
+  Denormalized:  product_id smallint
 
-Pair 47:
-  Relational:    product_id smallint NOT NULL
-  Denormalized:  product_name character varying(40) COLLATE pg_catalog."default" NOT NULL
-
-Pair 48:
-  Relational:    unit_price real NOT NULL
+Pair 42:
+  Relational:    unit_price real
   Denormalized:  unit_price real
 
-Pair 49:
-  Relational:    quantity smallint NOT NULL
-  Denormalized:  city character varying(15) COLLATE pg_catalog."default"
+Pair 43:
+  Relational:    quantity smallint
+  Denormalized:  city character
 
-Pair 50:
-  Relational:    discount real NOT NULL
-  Denormalized:  country character varying(15) COLLATE pg_catalog."default"
+Pair 44:
+  Relational:    discount real
+  Denormalized:  country character
 
-Pair 51:
-  Relational:    CONSTRAINT pk_order_details PRIMARY KEY (order_id, product_id)
-  Denormalized:  -- Kept for potential lookups
-
-Pair 52:
-  Relational:    order_id smallint NOT NULL
+Pair 45:
+  Relational:    order_id smallint
   Denormalized:  order_date date
 
-Pair 53:
-  Relational:    customer_id character varying(5) COLLATE pg_catalog."default"
-  Denormalized:  shipper_id smallint NOT NULL
+Pair 46:
+  Relational:    customer_id character
+  Denormalized:  shipper_id smallint
 
-Pair 54:
+Pair 47:
   Relational:    employee_id smallint
-  Denormalized:  region_id smallint NOT NULL
+  Denormalized:  region_id smallint
 
-Pair 55:
+Pair 48:
   Relational:    order_date date
   Denormalized:  reorder_level smallint
 
-Pair 56:
+Pair 49:
   Relational:    required_date date
   Denormalized:  required_date date
 
-Pair 57:
+Pair 50:
   Relational:    shipped_date date
   Denormalized:  shipped_date date
 
-Pair 58:
+Pair 51:
   Relational:    ship_via smallint
   Denormalized:  ship_via smallint
 
-Pair 59:
+Pair 52:
   Relational:    freight real
-  Denormalized:  region character varying(15) COLLATE pg_catalog."default"
+  Denormalized:  region character
+
+Pair 53:
+  Relational:    ship_name character
+  Denormalized:  ship_name character
+
+Pair 54:
+  Relational:    ship_address character
+  Denormalized:  address character
+
+Pair 55:
+  Relational:    ship_city character
+  Denormalized:  ship_city character
+
+Pair 56:
+  Relational:    ship_region character
+  Denormalized:  ship_region character
+
+Pair 57:
+  Relational:    ship_postal_code character
+  Denormalized:  ship_postal_code character
+
+Pair 58:
+  Relational:    ship_country character
+  Denormalized:  ship_country character
+
+Pair 59:
+  Relational:    product_id smallint
+  Denormalized:  product_name character
 
 Pair 60:
-  Relational:    ship_name character varying(40) COLLATE pg_catalog."default"
-  Denormalized:  ship_name character varying(40) COLLATE pg_catalog."default"
+  Relational:    product_name character
+  Denormalized:  contact_name character
 
 Pair 61:
-  Relational:    ship_address character varying(60) COLLATE pg_catalog."default"
-  Denormalized:  address character varying(60) COLLATE pg_catalog."default"
+  Relational:    supplier_id smallint
+  Denormalized:  territory_id character
 
 Pair 62:
-  Relational:    ship_city character varying(15) COLLATE pg_catalog."default"
-  Denormalized:  ship_city character varying(15) COLLATE pg_catalog."default"
+  Relational:    category_id smallint
+  Denormalized:  but category_name
 
 Pair 63:
-  Relational:    ship_region character varying(15) COLLATE pg_catalog."default"
-  Denormalized:  ship_region character varying(15) COLLATE pg_catalog."default"
+  Relational:    quantity_per_unit character
+  Denormalized:  quantity_per_unit character
 
 Pair 64:
-  Relational:    ship_postal_code character varying(10) COLLATE pg_catalog."default"
-  Denormalized:  ship_postal_code character varying(10) COLLATE pg_catalog."default"
-
-Pair 65:
-  Relational:    ship_country character varying(15) COLLATE pg_catalog."default"
-  Denormalized:  ship_country character varying(15) COLLATE pg_catalog."default"
-
-Pair 66:
-  Relational:    CONSTRAINT pk_orders PRIMARY KEY (order_id)
-  Denormalized:  but category_name is redundant below
-    category_name character varying(15) COLLATE pg_catalog."default"
-
-Pair 67:
-  Relational:    product_id smallint NOT NULL
-  Denormalized:  territory_id character varying(20) COLLATE pg_catalog."default"
-
-Pair 68:
-  Relational:    product_name character varying(40) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  contact_name character varying(30) COLLATE pg_catalog."default"
-
-Pair 69:
-  Relational:    supplier_id smallint
-  Denormalized:  phone character varying(24) COLLATE pg_catalog."default"
-
-Pair 70:
-  Relational:    category_id smallint
-  Denormalized:  company_name character varying(40) COLLATE pg_catalog."default" NOT NULL
-
-Pair 71:
-  Relational:    quantity_per_unit character varying(20) COLLATE pg_catalog."default"
-  Denormalized:  quantity_per_unit character varying(20) COLLATE pg_catalog."default"
-
-Pair 72:
   Relational:    unit_price real
   Denormalized:  units_in_stock smallint
 
-Pair 73:
+Pair 65:
   Relational:    units_in_stock smallint
   Denormalized:  units_on_order smallint
 
-Pair 74:
+Pair 66:
   Relational:    units_on_order smallint
-  Denormalized:  discontinued integer NOT NULL
+  Denormalized:  discontinued integer
 
-Pair 75:
+Pair 67:
   Relational:    reorder_level smallint
   Denormalized:  total_revenue real
 
+Pair 68:
+  Relational:    discontinued integer
+  Denormalized:  phone character
+
+Pair 69:
+  Relational:    region_id smallint
+  Denormalized:  phone character
+
+Pair 70:
+  Relational:    region_description character
+  Denormalized:  region_description character
+
+Pair 71:
+  Relational:    shipper_id smallint
+  Denormalized:  company_name character
+
+Pair 72:
+  Relational:    company_name character
+  Denormalized:  company_name character
+
+Pair 73:
+  Relational:    phone character
+  Denormalized:  fax character
+
+Pair 74:
+  Relational:    supplier_id smallint
+  Denormalized:  supplier_company_name character
+
+Pair 75:
+  Relational:    company_name character
+  Denormalized:  shipper_company_name character
+
 Pair 76:
-  Relational:    discontinued integer NOT NULL
-  Denormalized:  phone character varying(24) COLLATE pg_catalog."default"
+  Relational:    contact_name character
+  Denormalized:  contact_title character
 
 Pair 77:
-  Relational:    CONSTRAINT pk_products PRIMARY KEY (product_id)
-  Denormalized:  -- Redundant
-    supplier_id smallint
-
-Pair 78:
-  Relational:    region_id smallint NOT NULL
-  Denormalized:  -- Redundant
-    CONSTRAINT pk_product_entity PRIMARY KEY (product_id)
-
-Pair 79:
-  Relational:    region_description character varying(60) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  region_description character varying(60) COLLATE pg_catalog."default" NOT NULL
-
-Pair 80:
-  Relational:    CONSTRAINT pk_region PRIMARY KEY (region_id)
-  Denormalized:  -- Redundant
-    ship_address character varying(60) COLLATE pg_catalog."default"
-
-Pair 81:
-  Relational:    shipper_id smallint NOT NULL
-  Denormalized:  -- Redundant
-    employee_first_name character varying(10) COLLATE pg_catalog."default"
-
-Pair 82:
-  Relational:    company_name character varying(40) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  company_name character varying(40) COLLATE pg_catalog."default" NOT NULL
-
-Pair 83:
-  Relational:    phone character varying(24) COLLATE pg_catalog."default"
-  Denormalized:  -- Redundant
-    employee_title character varying(30) COLLATE pg_catalog."default"
-
-Pair 84:
-  Relational:    CONSTRAINT pk_shippers PRIMARY KEY (shipper_id)
-  Denormalized:  -- Redundant
-    employee_home_phone character varying(24) COLLATE pg_catalog."default"
-
-Pair 85:
-  Relational:    supplier_id smallint NOT NULL
-  Denormalized:  -- Redundant
-    shipper_id smallint
-
-Pair 86:
-  Relational:    company_name character varying(40) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  shipper_company_name character varying(40) COLLATE pg_catalog."default"
-
-Pair 87:
-  Relational:    contact_name character varying(30) COLLATE pg_catalog."default"
-  Denormalized:  contact_title character varying(30) COLLATE pg_catalog."default"
-
-Pair 88:
-  Relational:    contact_title character varying(30) COLLATE pg_catalog."default"
+  Relational:    contact_title character
   Denormalized:  total_discount real
 
-Pair 89:
-  Relational:    address character varying(60) COLLATE pg_catalog."default"
-  Denormalized:  -- Redundant
-    shipper_phone character varying(24) COLLATE pg_catalog."default"
-
-Pair 90:
-  Relational:    city character varying(15) COLLATE pg_catalog."default"
-  Denormalized:  -- Redundant
-    
-    -- Derived Attributes (Pre-calculated)
-    total_quantity smallint
-
-Pair 91:
-  Relational:    region character varying(15) COLLATE pg_catalog."default"
-  Denormalized:  -- Calculated as sum(unit_price * quantity * (1 - discount))
-    CONSTRAINT pk_order_fact PRIMARY KEY (order_id)
-
-Pair 92:
-  Relational:    postal_code character varying(10) COLLATE pg_catalog."default"
-  Denormalized:  fax character varying(24) COLLATE pg_catalog."default"
-
-Pair 93:
-  Relational:    country character varying(15) COLLATE pg_catalog."default"
-  Denormalized:  -- Redundant link
-    territory_description character varying(60) COLLATE pg_catalog."default"
-
-Pair 94:
-  Relational:    phone character varying(24) COLLATE pg_catalog."default"
-  Denormalized:  -- Redundant
-    CONSTRAINT pk_region_entity PRIMARY KEY (region_id)
-
-Pair 95:
-  Relational:    fax character varying(24) COLLATE pg_catalog."default"
-  Denormalized:  -- Redundant link
-    territory_description character varying(60) COLLATE pg_catalog."default"
-
-Pair 96:
-  Relational:    homepage text COLLATE pg_catalog."default"
-  Denormalized:  -- Redundant
-    CONSTRAINT pk_employee_entity PRIMARY KEY (employee_id)
-
-Pair 97:
-  Relational:    CONSTRAINT pk_suppliers PRIMARY KEY (supplier_id)
-  Denormalized:  employee_last_name character varying(20) COLLATE pg_catalog."default"
-
-Pair 98:
-  Relational:    territory_id character varying(20) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  supplier_company_name character varying(40) COLLATE pg_catalog."default"
+Pair 78:
+  Relational:    address character
+  Denormalized:  employee_last_name character
 
 
 ================================================================================

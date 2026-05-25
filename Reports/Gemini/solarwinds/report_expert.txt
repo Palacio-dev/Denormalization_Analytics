@@ -14,20 +14,20 @@ Relational Model:
 
 Denormalized Model:
   - Tables: 2
-  - Total Attributes: 21
-    * read_customer_order_history: 14 columns
-    * read_daily_product_sales: 7 columns
+  - Total Attributes: 12
+    * read_customer_order_history: 7 columns
+    * read_daily_product_sales: 5 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 1.50
-⚠ WARNING: Denormalized model has MORE attributes (14 vs 21)
-  New information may have been added in the transition
+Completeness Ratio: 0.8571
+⚠ WARNING: Normalized model has MORE attributes (12 vs 14)
+  Some information may have been lost in the transition
 
 3. CORRECTNESS EVALUATION
 --------------------------------------------------------------------------------
 
-Data Type Preservation: 7.14%
+Data Type Preservation: 8.33%
 
 ⚠ Issues Found:
   - Type mismatch: customer_id (SERIAL) -> customer_id (INT)
@@ -38,11 +38,9 @@ Data Type Preservation: 7.14%
   - Type mismatch: order_date (DATE) -> product_name (VARCHAR(100))
   - Type mismatch: product_id (SERIAL) -> product_name (VARCHAR(100))
   - Type mismatch: product_name (VARCHAR(100)) -> line_total (DECIMAL(12,2))
-  - Type mismatch: price (DECIMAL(10,2)) -> -- (Surrogate)
-  - Type mismatch: order_detail_id (SERIAL) -> total_revenue (DECIMAL(15,2))
-  - Type mismatch: order_id (INT) -> -- (Source)
-  - Type mismatch: product_id (INT) -> -- (Denormalized)
-  - Type mismatch: quantity (INT) -> -- (Snapshot)
+  - Type mismatch: price (DECIMAL(10,2)) -> total_revenue (DECIMAL(15,2))
+  - Type mismatch: order_detail_id (SERIAL) -> last_updated_at (TIMESTAMPTZ)
+  - Type mismatch: order_id (INT) -> unit_price_at_purchase (DECIMAL(10,2))
 
 4. STRUCTURAL SIMILARITY ANALYSIS
 --------------------------------------------------------------------------------
@@ -54,77 +52,65 @@ Relational Model (Combined Text):
   customer_address customer_email customer_id customer_id customer_name order_date order_detail_id order_id order_id price product_id product_id product_name quantity
 
 Denormalized Model (Combined Text):
-  -- -- -- -- -- -- -- CONSTRAINT CONSTRAINT customer_id last_updated_at line_total order_date order_date order_id product_id product_id product_name product_name total_revenue unit_price_at_purchase
+  customer_id last_updated_at line_total order_date order_date order_id product_id product_id product_name product_name total_revenue unit_price_at_purchase
 
 Structural Similarity Metrics:
-  BLEU Score:    0.2857
-  ROUGE-1:       0.5357
-  METEOR Score:  0.2901
+  BLEU Score:    0.4232
+  ROUGE-1:       0.5556
+  METEOR Score:  0.3090
 
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
 
-Identified 14 attribute pairs for type checking:
+Identified 12 attribute pairs for type checking:
 
 Pair 1:
-  Relational:    customer_id SERIAL PRIMARY KEY
-  Denormalized:  customer_id INT NOT NULL
+  Relational:    customer_id SERIAL
+  Denormalized:  customer_id INT
 
 Pair 2:
   Relational:    customer_name VARCHAR(100)
-  Denormalized:  order_date DATE NOT NULL
+  Denormalized:  order_date DATE
 
 Pair 3:
   Relational:    customer_email VARCHAR(100)
-  Denormalized:  order_id INT NOT NULL
+  Denormalized:  order_id INT
 
 Pair 4:
   Relational:    customer_address TEXT
-  Denormalized:  order_date DATE NOT NULL
+  Denormalized:  order_date DATE
 
 Pair 5:
-  Relational:    order_id SERIAL PRIMARY KEY
-  Denormalized:  product_id INT NOT NULL
+  Relational:    order_id SERIAL
+  Denormalized:  product_id INT
 
 Pair 6:
-  Relational:    customer_id INT REFERENCES customers(customer_id)
-  Denormalized:  product_id INT NOT NULL
+  Relational:    customer_id INT
+  Denormalized:  product_id INT
 
 Pair 7:
   Relational:    order_date DATE
   Denormalized:  product_name VARCHAR(100)
 
 Pair 8:
-  Relational:    product_id SERIAL PRIMARY KEY
+  Relational:    product_id SERIAL
   Denormalized:  product_name VARCHAR(100)
 
 Pair 9:
   Relational:    product_name VARCHAR(100)
-  Denormalized:  line_total DECIMAL(12,2) GENERATED ALWAYS AS (quantity * unit_price_at_purchase) STORED
+  Denormalized:  line_total DECIMAL(12,2)
 
 Pair 10:
   Relational:    price DECIMAL(10,2)
-  Denormalized:  -- Surrogate PK for the read model
-    read_id BIGSERIAL
+  Denormalized:  total_revenue DECIMAL(15,2)
 
 Pair 11:
-  Relational:    order_detail_id SERIAL PRIMARY KEY
-  Denormalized:  total_revenue DECIMAL(15,2) NOT NULL DEFAULT 0.00
+  Relational:    order_detail_id SERIAL
+  Denormalized:  last_updated_at TIMESTAMPTZ
 
 Pair 12:
-  Relational:    order_id INT REFERENCES orders(order_id)
-  Denormalized:  -- Source IDs for lineage and updates
-    order_detail_id INT NOT NULL
-
-Pair 13:
-  Relational:    product_id INT REFERENCES products(product_id)
-  Denormalized:  -- Denormalized Attributes
-    customer_name VARCHAR(100)
-
-Pair 14:
-  Relational:    quantity INT
-  Denormalized:  -- Snapshot Metrics (Fixes the historical price bug)
-    quantity INT NOT NULL
+  Relational:    order_id INT
+  Denormalized:  unit_price_at_purchase DECIMAL(10,2)
 
 
 ================================================================================

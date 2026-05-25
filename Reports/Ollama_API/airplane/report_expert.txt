@@ -6,15 +6,15 @@ SQL MODEL DENORMALIZATION EVALUATION REPORT
 --------------------------------------------------------------------------------
 Relational Model:
   - Tables: 8
-  - Total Attributes: 48
-    * aircrafts_data: 4 columns
-    * airports_data: 6 columns
-    * boarding_passes: 7 columns
-    * bookings: 4 columns
-    * flights: 12 columns
-    * seats: 4 columns
-    * ticket_flights: 5 columns
-    * tickets: 6 columns
+  - Total Attributes: 37
+    * aircrafts_data: 3 columns
+    * airports_data: 5 columns
+    * boarding_passes: 4 columns
+    * bookings: 3 columns
+    * flights: 10 columns
+    * seats: 3 columns
+    * ticket_flights: 4 columns
+    * tickets: 5 columns
 
 Denormalized Model:
   - Tables: 4
@@ -26,58 +26,51 @@ Denormalized Model:
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 0.92
-⚠ WARNING: Normalized model has MORE attributes (44 vs 48)
-  Some information may have been lost in the transition
+Completeness Ratio: 1.1892
+⚠ WARNING: Denormalized model has MORE attributes (37 vs 44)
+  New information may have been added in the transition
 
 3. CORRECTNESS EVALUATION
 --------------------------------------------------------------------------------
 
-Data Type Preservation: 4.55%
+Data Type Preservation: 5.41%
 
 ⚠ Issues Found:
   - Type mismatch: aircraft_code (character(3)) -> aircraft_code (char(3))
   - Type mismatch: model (jsonb) -> amount (numeric(10,2))
   - Type mismatch: range (integer) -> status (varchar(20))
-  - Type mismatch: CONSTRAINT (aircrafts_pkey) -> INDEX (idx_flight_details_scheduled_departure)
   - Type mismatch: airport_code (character(3)) -> aircraft_model (jsonb)
   - Type mismatch: airport_name (jsonb) -> aircraft_range (integer)
-  - Type mismatch: city (jsonb) -> INDEX (idx_flight_details_departure_airport)
+  - Type mismatch: city (jsonb) -> INDEX (idx_flight_details_scheduled_departure)
   - Type mismatch: coordinates (point) -> boarding_no (integer)
   - Type mismatch: timezone (text) -> ticket_no (char(13))
-  - Type mismatch: CONSTRAINT (airports_data_pkey) -> INDEX (idx_flight_details_arrival_airport)
   - Type mismatch: ticket_no (character(13)) -> flight_no (character(6))
   - Type mismatch: boarding_no (integer) -> seat_no (varchar(4))
   - Type mismatch: seat_no (character) -> status (varchar(20))
-  - Type mismatch: CONSTRAINT (boarding_passes_pkey) -> INDEX (idx_flight_details_status)
-  - Type mismatch: CONSTRAINT (boarding_passes_flight_id_boarding_no_key) -> INDEX (idx_current_flight_status_status)
-  - Type mismatch: CONSTRAINT (boarding_passes_flight_id_seat_no_key) -> INDEX (idx_passenger_itineraries_flight_id)
-  - Type mismatch: book_ref (character(6)) -> INDEX (idx_passenger_itineraries_passenger_name)
+  - Type mismatch: book_ref (character(6)) -> INDEX (idx_flight_details_departure_airport)
   - Type mismatch: book_date (timestamp) -> summary_date (date)
   - Type mismatch: total_amount (numeric(10,) -> total_revenue (numeric(12,2))
-  - Type mismatch: CONSTRAINT (bookings_pkey) -> INDEX (idx_passenger_itineraries_departure_date)
   - Type mismatch: flight_id (serial) -> flight_id (integer)
   - Type mismatch: scheduled_departure (timestamp) -> scheduled_departure (timestamptz)
   - Type mismatch: scheduled_arrival (timestamp) -> scheduled_arrival (timestamptz)
   - Type mismatch: departure_airport (character(3)) -> departure_airport (char(3))
   - Type mismatch: arrival_airport (character(3)) -> arrival_airport (char(3))
-  - Type mismatch: status (character) -> updated_at (timestamptz)
+  - Type mismatch: status (character) -> INDEX (idx_flight_details_arrival_airport)
   - Type mismatch: aircraft_code (character(3)) -> arrival_city (jsonb)
   - Type mismatch: actual_departure (timestamp) -> actual_departure (timestamptz)
   - Type mismatch: actual_arrival (timestamp) -> actual_arrival (timestamptz)
-  - Type mismatch: CONSTRAINT (flights_pkey) -> flight_id (integer)
-  - Type mismatch: CONSTRAINT (flights_flight_no_scheduled_departure_key) -> flight_no (char(6))
-  - Type mismatch: aircraft_code (character(3)) -> departure_city (jsonb)
-  - Type mismatch: seat_no (character) -> last_updated (timestamptz)
+  - Type mismatch: aircraft_code (character(3)) -> flight_id (integer)
+  - Type mismatch: seat_no (character) -> flight_no (char(6))
   - Type mismatch: fare_conditions (character) -> fare_conditions (varchar(10))
-  - Type mismatch: CONSTRAINT (seats_pkey) -> total_tickets (integer)
-  - Type mismatch: ticket_no (character(13)) -> passenger_name (text)
-  - Type mismatch: flight_id (integer) -> arrival_airport_code (char(3))
-  - Type mismatch: fare_conditions (character) -> scheduled_arrival (timestamptz)
-  - Type mismatch: amount (numeric(10,) -> arrival_airport_name (jsonb)
-  - Type mismatch: CONSTRAINT (ticket_flights_pkey) -> scheduled_departure (timestamptz)
-  - Type mismatch: ticket_no (character(13)) -> departure_airport_code (char(3))
-  - Type mismatch: book_ref (character(6)) -> departure_airport_name (jsonb)
+  - Type mismatch: ticket_no (character(13)) -> updated_at (timestamptz)
+  - Type mismatch: flight_id (integer) -> INDEX (idx_flight_details_status)
+  - Type mismatch: fare_conditions (character) -> last_updated (timestamptz)
+  - Type mismatch: amount (numeric(10,) -> INDEX (idx_current_flight_status_status)
+  - Type mismatch: ticket_no (character(13)) -> total_tickets (integer)
+  - Type mismatch: book_ref (character(6)) -> INDEX (idx_passenger_itineraries_flight_id)
+  - Type mismatch: passenger_id (character) -> passenger_name (text)
+  - Type mismatch: passenger_name (text) -> departure_city (jsonb)
+  - Type mismatch: contact_data (jsonb) -> INDEX (idx_passenger_itineraries_passenger_name)
 
 4. STRUCTURAL SIMILARITY ANALYSIS
 --------------------------------------------------------------------------------
@@ -86,196 +79,168 @@ This section measures naming and structural alignment between models.
 Metrics are calculated on combined, alphabetically-sorted column names.
 
 Relational Model (Combined Text):
-  CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT actual_arrival actual_departure aircraft_code aircraft_code aircraft_code airport_code airport_name amount arrival_airport boarding_no book_date book_ref book_ref city contact_data coordinates departure_airport fare_conditions fare_conditions flight_id flight_id flight_id flight_no model passenger_id passenger_name range scheduled_arrival scheduled_departure seat_no seat_no status ticket_no ticket_no ticket_no timezone total_amount
+  actual_arrival actual_departure aircraft_code aircraft_code aircraft_code airport_code airport_name amount arrival_airport boarding_no book_date book_ref book_ref city contact_data coordinates departure_airport fare_conditions fare_conditions flight_id flight_id flight_id flight_no model passenger_id passenger_name range scheduled_arrival scheduled_departure seat_no seat_no status ticket_no ticket_no ticket_no timezone total_amount
 
 Denormalized Model (Combined Text):
   INDEX INDEX INDEX INDEX INDEX INDEX INDEX INDEX actual_arrival actual_departure aircraft_code aircraft_model aircraft_range amount arrival_airport arrival_airport_code arrival_airport_name arrival_city boarding_no departure_airport departure_airport_code departure_airport_name departure_city fare_conditions flight_id flight_id flight_id flight_no flight_no flight_no last_updated passenger_name scheduled_arrival scheduled_arrival scheduled_departure scheduled_departure seat_no status status summary_date ticket_no total_revenue total_tickets updated_at
 
 Structural Similarity Metrics:
-  BLEU Score:    0.3735
-  ROUGE-1:       0.6164
-  METEOR Score:  0.3069
+  BLEU Score:    0.4091
+  ROUGE-1:       0.6622
+  METEOR Score:  0.3875
 
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
 
-Identified 44 attribute pairs for type checking:
+Identified 37 attribute pairs for type checking:
 
 Pair 1:
-  Relational:    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  aircraft_code char(3) NOT NULL
+  Relational:    aircraft_code character(3)
+  Denormalized:  aircraft_code char(3)
 
 Pair 2:
-  Relational:    model jsonb NOT NULL
+  Relational:    model jsonb
   Denormalized:  amount numeric(10,2)
 
 Pair 3:
-  Relational:    range integer NOT NULL
-  Denormalized:  status varchar(20) NOT NULL
+  Relational:    range integer
+  Denormalized:  status varchar(20)
 
 Pair 4:
-  Relational:    CONSTRAINT aircrafts_pkey PRIMARY KEY (aircraft_code)
-  Denormalized:  INDEX idx_flight_details_scheduled_departure (scheduled_departure)
+  Relational:    airport_code character(3)
+  Denormalized:  aircraft_model jsonb
 
 Pair 5:
-  Relational:    airport_code character(3) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  aircraft_model jsonb NOT NULL
+  Relational:    airport_name jsonb
+  Denormalized:  aircraft_range integer
 
 Pair 6:
-  Relational:    airport_name jsonb NOT NULL
-  Denormalized:  aircraft_range integer NOT NULL
+  Relational:    city jsonb
+  Denormalized:  INDEX idx_flight_details_scheduled_departure
 
 Pair 7:
-  Relational:    city jsonb NOT NULL
-  Denormalized:  INDEX idx_flight_details_departure_airport (departure_airport_code)
-
-Pair 8:
-  Relational:    coordinates point NOT NULL
+  Relational:    coordinates point
   Denormalized:  boarding_no integer
 
+Pair 8:
+  Relational:    timezone text
+  Denormalized:  ticket_no char(13)
+
 Pair 9:
-  Relational:    timezone text COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  ticket_no char(13) NOT NULL
+  Relational:    ticket_no character(13)
+  Denormalized:  flight_no character(6)
 
 Pair 10:
-  Relational:    CONSTRAINT airports_data_pkey PRIMARY KEY (airport_code)
-  Denormalized:  INDEX idx_flight_details_arrival_airport (arrival_airport_code)
+  Relational:    flight_id integer
+  Denormalized:  flight_id integer
 
 Pair 11:
-  Relational:    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  flight_no character(6) NOT NULL
-
-Pair 12:
-  Relational:    flight_id integer NOT NULL
-  Denormalized:  flight_id integer NOT NULL PRIMARY KEY
-
-Pair 13:
-  Relational:    boarding_no integer NOT NULL
+  Relational:    boarding_no integer
   Denormalized:  seat_no varchar(4)
 
+Pair 12:
+  Relational:    seat_no character
+  Denormalized:  status varchar(20)
+
+Pair 13:
+  Relational:    book_ref character(6)
+  Denormalized:  INDEX idx_flight_details_departure_airport
+
 Pair 14:
-  Relational:    seat_no character varying(4) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  status varchar(20) NOT NULL
+  Relational:    book_date timestamp
+  Denormalized:  summary_date date
 
 Pair 15:
-  Relational:    CONSTRAINT boarding_passes_pkey PRIMARY KEY (ticket_no, flight_id)
-  Denormalized:  INDEX idx_flight_details_status (status)
+  Relational:    total_amount numeric(10,
+  Denormalized:  total_revenue numeric(12,2)
 
 Pair 16:
-  Relational:    CONSTRAINT boarding_passes_flight_id_boarding_no_key UNIQUE (flight_id, boarding_no)
-  Denormalized:  INDEX idx_current_flight_status_status (status)
+  Relational:    flight_id serial
+  Denormalized:  flight_id integer
 
 Pair 17:
-  Relational:    CONSTRAINT boarding_passes_flight_id_seat_no_key UNIQUE (flight_id, seat_no)
-  Denormalized:  INDEX idx_passenger_itineraries_flight_id (flight_id)
+  Relational:    flight_no character(6)
+  Denormalized:  flight_no character(6)
 
 Pair 18:
-  Relational:    book_ref character(6) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  INDEX idx_passenger_itineraries_passenger_name (passenger_name)
+  Relational:    scheduled_departure timestamp
+  Denormalized:  scheduled_departure timestamptz
 
 Pair 19:
-  Relational:    book_date timestamp with time zone NOT NULL
-  Denormalized:  summary_date date NOT NULL PRIMARY KEY
+  Relational:    scheduled_arrival timestamp
+  Denormalized:  scheduled_arrival timestamptz
 
 Pair 20:
-  Relational:    total_amount numeric(10, 2) NOT NULL
-  Denormalized:  total_revenue numeric(12,2) NOT NULL DEFAULT 0
+  Relational:    departure_airport character(3)
+  Denormalized:  departure_airport char(3)
 
 Pair 21:
-  Relational:    CONSTRAINT bookings_pkey PRIMARY KEY (book_ref)
-  Denormalized:  INDEX idx_passenger_itineraries_departure_date (scheduled_departure)
+  Relational:    arrival_airport character(3)
+  Denormalized:  arrival_airport char(3)
 
 Pair 22:
-  Relational:    flight_id serial NOT NULL
-  Denormalized:  flight_id integer NOT NULL PRIMARY KEY
+  Relational:    status character
+  Denormalized:  INDEX idx_flight_details_arrival_airport
 
 Pair 23:
-  Relational:    flight_no character(6) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  flight_no character(6) NOT NULL
+  Relational:    aircraft_code character(3)
+  Denormalized:  arrival_city jsonb
 
 Pair 24:
-  Relational:    scheduled_departure timestamp with time zone NOT NULL
-  Denormalized:  scheduled_departure timestamptz NOT NULL
-
-Pair 25:
-  Relational:    scheduled_arrival timestamp with time zone NOT NULL
-  Denormalized:  scheduled_arrival timestamptz NOT NULL
-
-Pair 26:
-  Relational:    departure_airport character(3) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  departure_airport char(3) NOT NULL
-
-Pair 27:
-  Relational:    arrival_airport character(3) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  arrival_airport char(3) NOT NULL
-
-Pair 28:
-  Relational:    status character varying(20) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  updated_at timestamptz NOT NULL DEFAULT NOW()
-
-Pair 29:
-  Relational:    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  arrival_city jsonb NOT NULL
-
-Pair 30:
-  Relational:    actual_departure timestamp with time zone
+  Relational:    actual_departure timestamp
   Denormalized:  actual_departure timestamptz
 
-Pair 31:
-  Relational:    actual_arrival timestamp with time zone
+Pair 25:
+  Relational:    actual_arrival timestamp
   Denormalized:  actual_arrival timestamptz
 
-Pair 32:
-  Relational:    CONSTRAINT flights_pkey PRIMARY KEY (flight_id)
-  Denormalized:  flight_id integer NOT NULL
+Pair 26:
+  Relational:    aircraft_code character(3)
+  Denormalized:  flight_id integer
 
-Pair 33:
-  Relational:    CONSTRAINT flights_flight_no_scheduled_departure_key UNIQUE (flight_no, scheduled_departure)
-  Denormalized:  flight_no char(6) NOT NULL
+Pair 27:
+  Relational:    seat_no character
+  Denormalized:  flight_no char(6)
 
-Pair 34:
-  Relational:    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  departure_city jsonb NOT NULL
-
-Pair 35:
-  Relational:    seat_no character varying(4) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  last_updated timestamptz NOT NULL DEFAULT NOW()
-
-Pair 36:
-  Relational:    fare_conditions character varying(10) COLLATE pg_catalog."default" NOT NULL
+Pair 28:
+  Relational:    fare_conditions character
   Denormalized:  fare_conditions varchar(10)
 
+Pair 29:
+  Relational:    ticket_no character(13)
+  Denormalized:  updated_at timestamptz
+
+Pair 30:
+  Relational:    flight_id integer
+  Denormalized:  INDEX idx_flight_details_status
+
+Pair 31:
+  Relational:    fare_conditions character
+  Denormalized:  last_updated timestamptz
+
+Pair 32:
+  Relational:    amount numeric(10,
+  Denormalized:  INDEX idx_current_flight_status_status
+
+Pair 33:
+  Relational:    ticket_no character(13)
+  Denormalized:  total_tickets integer
+
+Pair 34:
+  Relational:    book_ref character(6)
+  Denormalized:  INDEX idx_passenger_itineraries_flight_id
+
+Pair 35:
+  Relational:    passenger_id character
+  Denormalized:  passenger_name text
+
+Pair 36:
+  Relational:    passenger_name text
+  Denormalized:  departure_city jsonb
+
 Pair 37:
-  Relational:    CONSTRAINT seats_pkey PRIMARY KEY (aircraft_code, seat_no)
-  Denormalized:  total_tickets integer NOT NULL DEFAULT 0
-
-Pair 38:
-  Relational:    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  passenger_name text NOT NULL
-
-Pair 39:
-  Relational:    flight_id integer NOT NULL
-  Denormalized:  arrival_airport_code char(3) NOT NULL
-
-Pair 40:
-  Relational:    fare_conditions character varying(10) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  scheduled_arrival timestamptz NOT NULL
-
-Pair 41:
-  Relational:    amount numeric(10, 2) NOT NULL
-  Denormalized:  arrival_airport_name jsonb NOT NULL
-
-Pair 42:
-  Relational:    CONSTRAINT ticket_flights_pkey PRIMARY KEY (ticket_no, flight_id)
-  Denormalized:  scheduled_departure timestamptz NOT NULL
-
-Pair 43:
-  Relational:    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  departure_airport_code char(3) NOT NULL
-
-Pair 44:
-  Relational:    book_ref character(6) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  departure_airport_name jsonb NOT NULL
+  Relational:    contact_data jsonb
+  Denormalized:  INDEX idx_passenger_itineraries_passenger_name
 
 
 ================================================================================

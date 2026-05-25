@@ -14,15 +14,15 @@ Relational Model:
 
 Denormalized Model:
   - Tables: 3
-  - Total Attributes: 27
-    * fact_order_details: 14 columns
-    * fact_products: 8 columns
-    * fact_customers: 5 columns
+  - Total Attributes: 17
+    * fact_order_details: 6 columns
+    * fact_products: 7 columns
+    * fact_customers: 4 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 1.93
-⚠ WARNING: Denormalized model has MORE attributes (14 vs 27)
+Completeness Ratio: 1.2143
+⚠ WARNING: Denormalized model has MORE attributes (14 vs 17)
   New information may have been added in the transition
 
 3. CORRECTNESS EVALUATION
@@ -52,12 +52,12 @@ Relational Model (Combined Text):
   customer_address customer_email customer_id customer_id customer_name order_date order_detail_id order_id order_id price product_id product_id product_name quantity
 
 Denormalized Model (Combined Text):
-  -- -- -- -- -- -- -- -- -- -- CREATE CREATE I but customer_address customer_email customer_email customer_id customer_name order_date product_id product_name product_name product_price product_price this we
+  CREATE CREATE I but customer_address customer_email customer_email customer_id customer_name order_date product_id product_name product_name product_price product_price this we
 
 Structural Similarity Metrics:
-  BLEU Score:    0.2593
+  BLEU Score:    0.4118
   ROUGE-1:       0.6182
-  METEOR Score:  0.3741
+  METEOR Score:  0.4003
 
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
@@ -65,8 +65,8 @@ Structural Similarity Metrics:
 Identified 14 attribute pairs for type checking:
 
 Pair 1:
-  Relational:    customer_id SERIAL PRIMARY KEY
-  Denormalized:  customer_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Relational:    customer_id SERIAL
+  Denormalized:  customer_id BIGINT
 
 Pair 2:
   Relational:    customer_name VARCHAR(100)
@@ -81,11 +81,11 @@ Pair 4:
   Denormalized:  customer_address TEXT
 
 Pair 5:
-  Relational:    order_id SERIAL PRIMARY KEY
+  Relational:    order_id SERIAL
   Denormalized:  order_date DATE
 
 Pair 6:
-  Relational:    customer_id INT REFERENCES customers(customer_id)
+  Relational:    customer_id INT
   Denormalized:  customer_email VARCHAR(100)
 
 Pair 7:
@@ -93,8 +93,8 @@ Pair 7:
   Denormalized:  product_name VARCHAR(100)
 
 Pair 8:
-  Relational:    product_id SERIAL PRIMARY KEY
-  Denormalized:  product_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+  Relational:    product_id SERIAL
+  Denormalized:  product_id BIGINT
 
 Pair 9:
   Relational:    product_name VARCHAR(100)
@@ -102,27 +102,23 @@ Pair 9:
 
 Pair 10:
   Relational:    price DECIMAL(10,2)
-  Denormalized:  this would be a separate materialized view.
-    -- Here
+  Denormalized:  this would
 
 Pair 11:
-  Relational:    order_detail_id SERIAL PRIMARY KEY
-  Denormalized:  product_price DECIMAL(10, 2)
+  Relational:    order_detail_id SERIAL
+  Denormalized:  product_price DECIMAL(10,
 
 Pair 12:
-  Relational:    order_id INT REFERENCES orders(order_id)
-  Denormalized:  we store it as a column for immediate read access if queried without orders.
-    -- WARNING: This is technically a 'denormalized' aggregate which can become stale.
-    -- For a Senior DE
+  Relational:    order_id INT
+  Denormalized:  we store
 
 Pair 13:
-  Relational:    product_id INT REFERENCES products(product_id)
-  Denormalized:  product_price DECIMAL(10, 2)
+  Relational:    product_id INT
+  Denormalized:  product_price DECIMAL(10,
 
 Pair 14:
   Relational:    quantity INT
-  Denormalized:  but sticking to the provided schema:
-    -- We assume product_name and price are sufficient.
+  Denormalized:  but sticking
 
 
 ================================================================================

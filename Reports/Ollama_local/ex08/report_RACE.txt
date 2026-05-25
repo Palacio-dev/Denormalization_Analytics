@@ -6,71 +6,60 @@ SQL MODEL DENORMALIZATION EVALUATION REPORT
 --------------------------------------------------------------------------------
 Relational Model:
   - Tables: 10
-  - Total Attributes: 90
-    * aluno_ifb: 8 columns
-    * curso_ifb: 10 columns
-    * desempenho_enem: 9 columns
-    * escola: 7 columns
-    * indicadores_escolares: 10 columns
-    * localizacao: 4 columns
-    * matricula_ifb: 12 columns
-    * participacao_enem: 8 columns
-    * remuneracao: 9 columns
-    * vinculo_empregaticio: 13 columns
+  - Total Attributes: 80
+    * aluno_ifb: 7 columns
+    * curso_ifb: 9 columns
+    * desempenho_enem: 8 columns
+    * escola: 6 columns
+    * indicadores_escolares: 9 columns
+    * localizacao: 3 columns
+    * matricula_ifb: 11 columns
+    * participacao_enem: 7 columns
+    * remuneracao: 8 columns
+    * vinculo_empregaticio: 12 columns
 
 Denormalized Model:
   - Tables: 3
-  - Total Attributes: 73
-    * fato_matricula_completa: 44 columns
-    * fato_desempenho_escola: 23 columns
-    * fato_vinculo_escola: 6 columns
+  - Total Attributes: 58
+    * fato_matricula_completa: 37 columns
+    * fato_desempenho_escola: 18 columns
+    * fato_vinculo_escola: 3 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 0.81
-⚠ WARNING: Normalized model has MORE attributes (73 vs 90)
+Completeness Ratio: 0.7250
+⚠ WARNING: Normalized model has MORE attributes (58 vs 80)
   Some information may have been lost in the transition
 
 3. CORRECTNESS EVALUATION
 --------------------------------------------------------------------------------
 
-Data Type Preservation: 53.42%
+Data Type Preservation: 60.34%
 
 ⚠ Issues Found:
   - Type mismatch: id_aluno (serial) -> nu_ano (integer)
-  - Type mismatch: CONSTRAINT (aluno_ifb_pkey) -> CONSTRAINT (fato_matricula_completa_pkey)
-  - Type mismatch: CONSTRAINT (curso_ifb_pkey) -> CONSTRAINT (fato_desempenho_escola_pkey)
   - Type mismatch: id_desempenho (serial) -> tempo_emprego (integer)
   - Type mismatch: nu_ano (integer) -> ano (character)
   - Type mismatch: nu_media_red (numeric(6,) -> id_matricula (serial)
-  - Type mismatch: CONSTRAINT (desempenho_enem_pkey) -> CONSTRAINT (fato_vinculo_escola_pkey)
-  - Type mismatch: inse (character) -> -- (Student)
-  - Type mismatch: id_loc (integer) -> -- (Course)
-  - Type mismatch: CONSTRAINT (escola_pkey) -> -- (School)
+  - Type mismatch: id_loc (integer) -> periodo (character)
   - Type mismatch: id_indicadores (serial) -> municipio (character)
   - Type mismatch: nu_ano (integer) -> uf (character)
-  - Type mismatch: CONSTRAINT (indicadores_escolares_pkey) -> -- (Matricula)
-  - Type mismatch: id_loc (serial) -> periodo (character)
-  - Type mismatch: CONSTRAINT (localizacao_pkey) -> -- (Employment)
+  - Type mismatch: id_loc (serial) -> municipio (character)
+  - Type mismatch: uf (character) -> taxa_vinculo (boolean)
+  - Type mismatch: municipio (character) -> nu_participantes (integer)
   - Type mismatch: id_matricula (serial) -> situacao_matricula (character)
   - Type mismatch: co_ciclo_matricula (character) -> vl_remun_media_sm (numeric(10,)
-  - Type mismatch: periodo (character) -> -- (Employment)
-  - Type mismatch: situacao_matricula (character) -> taxa_vinculo (boolean)
-  - Type mismatch: tipo_cota (character) -> qtd_hora_contr (integer)
-  - Type mismatch: ano (character) -> -- (School)
-  - Type mismatch: id_aluno (integer) -> -- (Indicadores)
-  - Type mismatch: co_curso (character) -> -- (Desempenho)
-  - Type mismatch: CONSTRAINT (matricula_ifb_pkey) -> -- (Participacao)
-  - Type mismatch: id_participacao (serial) -> nu_participantes (integer)
-  - Type mismatch: nu_ano (integer) -> -- (Employment)
-  - Type mismatch: nu_matriculas (integer) -> nu_taxa_participacao (numeric(5,)
-  - Type mismatch: nu_participantes (integer) -> vl_salario_contratual (numeric(10,)
-  - Type mismatch: nu_taxa_participacao (numeric(5,) -> data_admissao_declarada (date)
+  - Type mismatch: periodo (character) -> qtd_hora_contr (integer)
+  - Type mismatch: ano (character) -> vl_remun_dezembro_sm (numeric(10,)
+  - Type mismatch: id_aluno (integer) -> vl_remun_dezembro_nom (numeric(10,)
+  - Type mismatch: co_curso (character) -> indicador_vinculo_ativo (boolean)
+  - Type mismatch: unidade_ensino (character) -> nu_taxa_participacao (numeric(5,)
   - Type mismatch: co_escola_educacenso (character) -> tp_localizacao_escola (smallint)
-  - Type mismatch: CONSTRAINT (participacao_enem_pkey) -> -- (Sample)
-  - Type mismatch: id_remuneracao (serial) -> vl_remun_dezembro_nom (numeric(10,)
-  - Type mismatch: vl_remun_dezembro_nom (numeric(10,) -> tipo_vinculo_empregaticio (character)
-  - Type mismatch: vl_remun_dezembro_sm (numeric(10,) -> indicador_vinculo_ativo (boolean)
+  - Type mismatch: id_participacao (serial) -> nu_participantes_nec_esp (integer)
+  - Type mismatch: nu_ano (integer) -> vl_salario_contratual (numeric(10,)
+  - Type mismatch: nu_matriculas (integer) -> data_admissao_declarada (date)
+  - Type mismatch: nu_participantes_nec_esp (integer) -> vl_ultima_remuneracao_ano (numeric(10,)
+  - Type mismatch: nu_participantes (integer) -> tipo_vinculo_empregaticio (character)
 
 4. STRUCTURAL SIMILARITY ANALYSIS
 --------------------------------------------------------------------------------
@@ -79,24 +68,24 @@ This section measures naming and structural alignment between models.
 Metrics are calculated on combined, alphabetically-sorted column names.
 
 Relational Model (Combined Text):
-  CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT CONSTRAINT ano ano_rais atestado_baixarenda carga_horaria co_ciclo_matricula co_curso co_curso co_escola_educacenso co_escola_educacenso co_escola_educacenso co_escola_educacenso co_escola_educacenso co_tipo_curso co_tipo_nivel data_admissao_declarada data_nascimento ds_eixo_tecnologico ds_tipo_nivel id_aluno id_aluno id_aluno id_desempenho id_indicadores id_loc id_loc id_loc id_matricula id_participacao id_remuneracao id_remuneracao id_vinculo idade indicador_vinculo_ativo inse mes_desligamento modalidade_ensino motivo_desligamento municipio nacionalidade no_curso no_escola_educacenso nu_ano nu_ano nu_ano nu_matriculas nu_media_ch nu_media_cn nu_media_lp nu_media_mt nu_media_red nu_participantes nu_participantes_nec_esp nu_taxa_abandono nu_taxa_aprovacao nu_taxa_participacao nu_taxa_permanencia nu_taxa_reprovacao pc_formacao_docente periodo portador_deficiencia porte_escola qtd_hora_contr raca razao_social sexo situacao_matricula tempo_emprego tipo_cota tipo_curso tipo_vinculo_empregaticio tp_dependencia_adm_escola tp_localizacao_escola uf unidade_ensino vl_remun_dezembro_nom vl_remun_dezembro_sm vl_remun_media_nom vl_remun_media_sm vl_salario_contratual vl_ultima_remuneracao_ano
+  ano ano_rais atestado_baixarenda carga_horaria co_ciclo_matricula co_curso co_curso co_escola_educacenso co_escola_educacenso co_escola_educacenso co_escola_educacenso co_escola_educacenso co_tipo_curso co_tipo_nivel data_admissao_declarada data_nascimento ds_eixo_tecnologico ds_tipo_nivel id_aluno id_aluno id_aluno id_desempenho id_indicadores id_loc id_loc id_loc id_matricula id_participacao id_remuneracao id_remuneracao id_vinculo idade indicador_vinculo_ativo inse mes_desligamento modalidade_ensino motivo_desligamento municipio nacionalidade no_curso no_escola_educacenso nu_ano nu_ano nu_ano nu_matriculas nu_media_ch nu_media_cn nu_media_lp nu_media_mt nu_media_red nu_participantes nu_participantes_nec_esp nu_taxa_abandono nu_taxa_aprovacao nu_taxa_participacao nu_taxa_permanencia nu_taxa_reprovacao pc_formacao_docente periodo portador_deficiencia porte_escola qtd_hora_contr raca razao_social sexo situacao_matricula tempo_emprego tipo_cota tipo_curso tipo_vinculo_empregaticio tp_dependencia_adm_escola tp_localizacao_escola uf unidade_ensino vl_remun_dezembro_nom vl_remun_dezembro_sm vl_remun_media_nom vl_remun_media_sm vl_salario_contratual vl_ultima_remuneracao_ano
 
 Denormalized Model (Combined Text):
-  -- -- -- -- -- -- -- -- -- -- -- -- CONSTRAINT CONSTRAINT CONSTRAINT ano atestado_baixarenda carga_horaria co_tipo_curso co_tipo_nivel data_admissao_declarada data_nascimento ds_eixo_tecnologico ds_tipo_nivel id_escola_educacenso id_escola_educacenso id_matricula idade indicador_vinculo_ativo mes_desligamento modalidade_ensino motivo_desligamento municipio municipio nacionalidade no_curso no_escola_educacenso no_escola_educacenso nu_ano nu_media_ch nu_media_lp nu_media_mt nu_media_red nu_participantes nu_participantes_nec_esp nu_taxa_abandono nu_taxa_aprovacao nu_taxa_participacao nu_taxa_permanencia nu_taxa_reprovacao pc_formacao_docente periodo portador_deficiencia porte_escola qtd_hora_contr raca sexo situacao_matricula taxa_vinculo tempo_emprego tipo_cota tipo_curso tipo_vinculo_empregaticio tp_dependencia_adm_escola tp_localizacao_escola tp_localizacao_escola uf uf vl_remun_dezembro_nom vl_remun_dezembro_sm vl_remun_media_sm vl_salario_contratual vl_ultima_remuneracao_ano
+  ano atestado_baixarenda carga_horaria co_tipo_curso co_tipo_nivel data_admissao_declarada data_nascimento ds_eixo_tecnologico ds_tipo_nivel id_escola_educacenso id_escola_educacenso id_matricula idade indicador_vinculo_ativo mes_desligamento modalidade_ensino motivo_desligamento municipio municipio nacionalidade no_curso no_escola_educacenso no_escola_educacenso nu_ano nu_media_ch nu_media_lp nu_media_mt nu_media_red nu_participantes nu_participantes_nec_esp nu_taxa_abandono nu_taxa_aprovacao nu_taxa_participacao nu_taxa_permanencia nu_taxa_reprovacao pc_formacao_docente periodo portador_deficiencia porte_escola qtd_hora_contr raca sexo situacao_matricula taxa_vinculo tempo_emprego tipo_cota tipo_curso tipo_vinculo_empregaticio tp_dependencia_adm_escola tp_localizacao_escola tp_localizacao_escola uf uf vl_remun_dezembro_nom vl_remun_dezembro_sm vl_remun_media_sm vl_salario_contratual vl_ultima_remuneracao_ano
 
 Structural Similarity Metrics:
-  BLEU Score:    0.5860
-  ROUGE-1:       0.8023
-  METEOR Score:  0.6020
+  BLEU Score:    0.6017
+  ROUGE-1:       0.8155
+  METEOR Score:  0.6434
 
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
 
-Identified 73 attribute pairs for type checking:
+Identified 58 attribute pairs for type checking:
 
 Pair 1:
-  Relational:    id_aluno serial NOT NULL
-  Denormalized:  nu_ano integer NOT NULL
+  Relational:    id_aluno serial
+  Denormalized:  nu_ano integer
 
 Pair 2:
   Relational:    data_nascimento date
@@ -107,296 +96,224 @@ Pair 3:
   Denormalized:  idade integer
 
 Pair 4:
-  Relational:    sexo character(1) COLLATE pg_catalog."default"
+  Relational:    sexo character(1)
   Denormalized:  sexo character(1)
 
 Pair 5:
-  Relational:    nacionalidade character varying(50) COLLATE pg_catalog."default"
-  Denormalized:  nacionalidade character varying(50)
+  Relational:    nacionalidade character
+  Denormalized:  nacionalidade character
 
 Pair 6:
-  Relational:    raca character varying(50) COLLATE pg_catalog."default"
-  Denormalized:  raca character varying(50)
+  Relational:    raca character
+  Denormalized:  raca character
 
 Pair 7:
   Relational:    portador_deficiencia boolean
   Denormalized:  portador_deficiencia boolean
 
 Pair 8:
-  Relational:    CONSTRAINT aluno_ifb_pkey PRIMARY KEY (id_aluno)
-  Denormalized:  CONSTRAINT fato_matricula_completa_pkey PRIMARY KEY (id_matricula)
+  Relational:    co_curso character
+  Denormalized:  no_curso character
 
 Pair 9:
-  Relational:    co_curso character varying(50) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  no_curso character varying(200) NOT NULL
+  Relational:    no_curso character
+  Denormalized:  tipo_curso character
 
 Pair 10:
-  Relational:    no_curso character varying(200) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  tipo_curso character varying(100)
+  Relational:    co_tipo_curso character
+  Denormalized:  co_tipo_curso character
 
 Pair 11:
-  Relational:    co_tipo_curso character varying(10) COLLATE pg_catalog."default"
-  Denormalized:  co_tipo_curso character varying(10)
+  Relational:    tipo_curso character
+  Denormalized:  tipo_cota character
 
 Pair 12:
-  Relational:    tipo_curso character varying(100) COLLATE pg_catalog."default"
-  Denormalized:  tipo_cota character varying(50)
+  Relational:    co_tipo_nivel character
+  Denormalized:  co_tipo_nivel character
 
 Pair 13:
-  Relational:    co_tipo_nivel character varying(10) COLLATE pg_catalog."default"
-  Denormalized:  co_tipo_nivel character varying(10)
+  Relational:    ds_tipo_nivel character
+  Denormalized:  ds_tipo_nivel character
 
 Pair 14:
-  Relational:    ds_tipo_nivel character varying(100) COLLATE pg_catalog."default"
-  Denormalized:  ds_tipo_nivel character varying(100)
+  Relational:    ds_eixo_tecnologico character
+  Denormalized:  ds_eixo_tecnologico character
 
 Pair 15:
-  Relational:    ds_eixo_tecnologico character varying(200) COLLATE pg_catalog."default"
-  Denormalized:  ds_eixo_tecnologico character varying(200)
+  Relational:    modalidade_ensino character
+  Denormalized:  modalidade_ensino character
 
 Pair 16:
-  Relational:    modalidade_ensino character varying(100) COLLATE pg_catalog."default"
-  Denormalized:  modalidade_ensino character varying(100)
-
-Pair 17:
   Relational:    carga_horaria integer
   Denormalized:  carga_horaria integer
 
-Pair 18:
-  Relational:    CONSTRAINT curso_ifb_pkey PRIMARY KEY (co_curso)
-  Denormalized:  CONSTRAINT fato_desempenho_escola_pkey PRIMARY KEY (id_escola_educacenso, nu_ano)
-
-Pair 19:
-  Relational:    id_desempenho serial NOT NULL
+Pair 17:
+  Relational:    id_desempenho serial
   Denormalized:  tempo_emprego integer
 
+Pair 18:
+  Relational:    nu_ano integer
+  Denormalized:  ano character
+
+Pair 19:
+  Relational:    nu_media_cn numeric(6,
+  Denormalized:  nu_media_ch numeric(6,
+
 Pair 20:
-  Relational:    nu_ano integer NOT NULL
-  Denormalized:  ano character varying(20)
+  Relational:    nu_media_ch numeric(6,
+  Denormalized:  nu_media_lp numeric(6,
 
 Pair 21:
-  Relational:    nu_media_cn numeric(6, 2)
-  Denormalized:  nu_media_ch numeric(6, 2)
+  Relational:    nu_media_lp numeric(6,
+  Denormalized:  nu_media_mt numeric(6,
 
 Pair 22:
-  Relational:    nu_media_ch numeric(6, 2)
-  Denormalized:  nu_media_lp numeric(6, 2)
+  Relational:    nu_media_mt numeric(6,
+  Denormalized:  nu_media_red numeric(6,
 
 Pair 23:
-  Relational:    nu_media_lp numeric(6, 2)
-  Denormalized:  nu_media_mt numeric(6, 2)
+  Relational:    nu_media_red numeric(6,
+  Denormalized:  id_matricula serial
 
 Pair 24:
-  Relational:    nu_media_mt numeric(6, 2)
-  Denormalized:  nu_media_red numeric(6, 2)
+  Relational:    co_escola_educacenso character
+  Denormalized:  no_escola_educacenso character
 
 Pair 25:
-  Relational:    nu_media_red numeric(6, 2)
-  Denormalized:  id_matricula serial NOT NULL
+  Relational:    co_escola_educacenso character
+  Denormalized:  no_escola_educacenso character
 
 Pair 26:
-  Relational:    co_escola_educacenso character varying(20) COLLATE pg_catalog."default"
-  Denormalized:  no_escola_educacenso character varying(200) NOT NULL
+  Relational:    no_escola_educacenso character
+  Denormalized:  id_escola_educacenso character
 
 Pair 27:
-  Relational:    CONSTRAINT desempenho_enem_pkey PRIMARY KEY (id_desempenho)
-  Denormalized:  CONSTRAINT fato_vinculo_escola_pkey PRIMARY KEY (id_escola_educacenso, nu_ano)
-
-Pair 28:
-  Relational:    co_escola_educacenso character varying(50) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  no_escola_educacenso character varying(200) NOT NULL
-
-Pair 29:
-  Relational:    no_escola_educacenso character varying(200) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  id_escola_educacenso character varying(20) NOT NULL
-
-Pair 30:
   Relational:    tp_dependencia_adm_escola smallint
   Denormalized:  tp_dependencia_adm_escola smallint
 
-Pair 31:
+Pair 28:
   Relational:    tp_localizacao_escola smallint
   Denormalized:  tp_localizacao_escola smallint
 
+Pair 29:
+  Relational:    inse character
+  Denormalized:  uf character
+
+Pair 30:
+  Relational:    id_loc integer
+  Denormalized:  periodo character
+
+Pair 31:
+  Relational:    id_indicadores serial
+  Denormalized:  municipio character
+
 Pair 32:
-  Relational:    inse character varying(10) COLLATE pg_catalog."default"
-  Denormalized:  -- Student Attributes (Redundant)
-    id_aluno integer NOT NULL
+  Relational:    nu_ano integer
+  Denormalized:  uf character
 
 Pair 33:
-  Relational:    id_loc integer
-  Denormalized:  -- Course Attributes (Redundant)
-    co_curso character varying(50) NOT NULL
+  Relational:    nu_taxa_permanencia numeric(6,
+  Denormalized:  nu_taxa_permanencia numeric(6,
 
 Pair 34:
-  Relational:    CONSTRAINT escola_pkey PRIMARY KEY (co_escola_educacenso)
-  Denormalized:  -- School & Location Attributes (Redundant)
-    co_escola_educacenso character varying(20) NOT NULL
+  Relational:    nu_taxa_aprovacao numeric(5,
+  Denormalized:  nu_taxa_aprovacao numeric(5,
 
 Pair 35:
-  Relational:    id_indicadores serial NOT NULL
-  Denormalized:  municipio character varying(100)
+  Relational:    nu_taxa_reprovacao numeric(5,
+  Denormalized:  nu_taxa_reprovacao numeric(5,
 
 Pair 36:
-  Relational:    nu_ano integer NOT NULL
-  Denormalized:  uf character varying(2)
+  Relational:    nu_taxa_abandono numeric(5,
+  Denormalized:  nu_taxa_abandono numeric(5,
 
 Pair 37:
-  Relational:    nu_taxa_permanencia numeric(6, 2)
-  Denormalized:  nu_taxa_permanencia numeric(6, 2)
+  Relational:    co_escola_educacenso character
+  Denormalized:  id_escola_educacenso character
 
 Pair 38:
-  Relational:    nu_taxa_aprovacao numeric(5, 2)
-  Denormalized:  nu_taxa_aprovacao numeric(5, 2)
+  Relational:    porte_escola character
+  Denormalized:  porte_escola character
 
 Pair 39:
-  Relational:    nu_taxa_reprovacao numeric(5, 2)
-  Denormalized:  nu_taxa_reprovacao numeric(5, 2)
+  Relational:    pc_formacao_docente numeric(5,
+  Denormalized:  pc_formacao_docente numeric(5,
 
 Pair 40:
-  Relational:    nu_taxa_abandono numeric(5, 2)
-  Denormalized:  nu_taxa_abandono numeric(5, 2)
+  Relational:    id_loc serial
+  Denormalized:  municipio character
 
 Pair 41:
-  Relational:    co_escola_educacenso character varying(20) COLLATE pg_catalog."default"
-  Denormalized:  id_escola_educacenso character varying(20) NOT NULL
-
-Pair 42:
-  Relational:    porte_escola character varying(50) COLLATE pg_catalog."default"
-  Denormalized:  porte_escola character varying(50)
-
-Pair 43:
-  Relational:    pc_formacao_docente numeric(5, 2)
-  Denormalized:  pc_formacao_docente numeric(5, 2)
-
-Pair 44:
-  Relational:    CONSTRAINT indicadores_escolares_pkey PRIMARY KEY (id_indicadores)
-  Denormalized:  -- Matricula Specifics
-    co_ciclo_matricula character varying(50)
-
-Pair 45:
-  Relational:    id_loc serial NOT NULL
-  Denormalized:  periodo character varying(30)
-
-Pair 46:
-  Relational:    uf character varying(2) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  uf character varying(2)
-
-Pair 47:
-  Relational:    municipio character varying(100) COLLATE pg_catalog."default" NOT NULL
-  Denormalized:  municipio character varying(100)
-
-Pair 48:
-  Relational:    CONSTRAINT localizacao_pkey PRIMARY KEY (id_loc)
-  Denormalized:  -- Employment Attributes (Redundant - Merging vinculo_empregaticio)
-    razao_social character varying(200)
-
-Pair 49:
-  Relational:    id_matricula serial NOT NULL
-  Denormalized:  situacao_matricula character varying(50)
-
-Pair 50:
-  Relational:    co_ciclo_matricula character varying(50) COLLATE pg_catalog."default"
-  Denormalized:  vl_remun_media_sm numeric(10, 2)
-
-Pair 51:
-  Relational:    periodo character varying(30) COLLATE pg_catalog."default"
-  Denormalized:  -- Employment & Salary Attributes (Redundant - Merging remuneracao)
-    vl_remun_media_nom numeric(10, 2)
-
-Pair 52:
-  Relational:    situacao_matricula character varying(50) COLLATE pg_catalog."default"
+  Relational:    uf character
   Denormalized:  taxa_vinculo boolean
 
-Pair 53:
-  Relational:    tipo_cota character varying(50) COLLATE pg_catalog."default"
-  Denormalized:  qtd_hora_contr integer
-
-Pair 54:
-  Relational:    atestado_baixarenda character varying(20) COLLATE pg_catalog."default"
-  Denormalized:  atestado_baixarenda character varying(20)
-
-Pair 55:
-  Relational:    ano character varying(20) COLLATE pg_catalog."default"
-  Denormalized:  -- School Context (Redundant)
-    tp_dependencia_adm_escola smallint
-
-Pair 56:
-  Relational:    id_aluno integer
-  Denormalized:  -- Indicadores Escolares (Redundant Aggregates)
-    nu_ano integer NOT NULL
-
-Pair 57:
-  Relational:    co_curso character varying(50) COLLATE pg_catalog."default"
-  Denormalized:  -- Desempenho ENEM (Redundant Aggregates)
-    nu_media_cn numeric(6, 2)
-
-Pair 58:
-  Relational:    unidade_ensino character varying(100) COLLATE pg_catalog."default"
-  Denormalized:  mes_desligamento character varying(20)
-
-Pair 59:
-  Relational:    co_escola_educacenso character varying(20) COLLATE pg_catalog."default"
-  Denormalized:  motivo_desligamento character varying(200)
-
-Pair 60:
-  Relational:    CONSTRAINT matricula_ifb_pkey PRIMARY KEY (id_matricula)
-  Denormalized:  -- Participacao ENEM (Redundant Aggregates)
-    nu_matriculas integer
-
-Pair 61:
-  Relational:    id_participacao serial NOT NULL
+Pair 42:
+  Relational:    municipio character
   Denormalized:  nu_participantes integer
 
-Pair 62:
-  Relational:    nu_ano integer NOT NULL
-  Denormalized:  -- Employment Metrics (Redundant Aggregates)
-    qtd_alunos_vinculados integer
+Pair 43:
+  Relational:    id_matricula serial
+  Denormalized:  situacao_matricula character
 
-Pair 63:
-  Relational:    nu_matriculas integer
-  Denormalized:  nu_taxa_participacao numeric(5, 2)
+Pair 44:
+  Relational:    co_ciclo_matricula character
+  Denormalized:  vl_remun_media_sm numeric(10,
 
-Pair 64:
-  Relational:    nu_participantes_nec_esp integer
-  Denormalized:  nu_participantes_nec_esp integer
+Pair 45:
+  Relational:    periodo character
+  Denormalized:  qtd_hora_contr integer
 
-Pair 65:
-  Relational:    nu_participantes integer
-  Denormalized:  vl_salario_contratual numeric(10, 2)
+Pair 46:
+  Relational:    situacao_matricula character
+  Denormalized:  atestado_baixarenda character
 
-Pair 66:
-  Relational:    nu_taxa_participacao numeric(5, 2)
-  Denormalized:  data_admissao_declarada date
+Pair 47:
+  Relational:    tipo_cota character
+  Denormalized:  motivo_desligamento character
 
-Pair 67:
-  Relational:    co_escola_educacenso character varying(20) COLLATE pg_catalog."default"
+Pair 48:
+  Relational:    atestado_baixarenda character
+  Denormalized:  mes_desligamento character
+
+Pair 49:
+  Relational:    ano character
+  Denormalized:  vl_remun_dezembro_sm numeric(10,
+
+Pair 50:
+  Relational:    id_aluno integer
+  Denormalized:  vl_remun_dezembro_nom numeric(10,
+
+Pair 51:
+  Relational:    co_curso character
+  Denormalized:  indicador_vinculo_ativo boolean
+
+Pair 52:
+  Relational:    unidade_ensino character
+  Denormalized:  nu_taxa_participacao numeric(5,
+
+Pair 53:
+  Relational:    co_escola_educacenso character
   Denormalized:  tp_localizacao_escola smallint
 
-Pair 68:
-  Relational:    CONSTRAINT participacao_enem_pkey PRIMARY KEY (id_participacao)
-  Denormalized:  -- Sample or Average Salary per School (Derived Attribute)
-    vl_remun_media_escola numeric(10, 2)
+Pair 54:
+  Relational:    id_participacao serial
+  Denormalized:  nu_participantes_nec_esp integer
 
-Pair 69:
-  Relational:    id_remuneracao serial NOT NULL
-  Denormalized:  vl_remun_dezembro_nom numeric(10, 2)
+Pair 55:
+  Relational:    nu_ano integer
+  Denormalized:  vl_salario_contratual numeric(10,
 
-Pair 70:
-  Relational:    vl_remun_media_nom numeric(10, 2)
-  Denormalized:  vl_remun_dezembro_sm numeric(10, 2)
+Pair 56:
+  Relational:    nu_matriculas integer
+  Denormalized:  data_admissao_declarada date
 
-Pair 71:
-  Relational:    vl_remun_media_sm numeric(10, 2)
-  Denormalized:  vl_ultima_remuneracao_ano numeric(10, 2)
+Pair 57:
+  Relational:    nu_participantes_nec_esp integer
+  Denormalized:  vl_ultima_remuneracao_ano numeric(10,
 
-Pair 72:
-  Relational:    vl_remun_dezembro_nom numeric(10, 2)
-  Denormalized:  tipo_vinculo_empregaticio character varying(200)
-
-Pair 73:
-  Relational:    vl_remun_dezembro_sm numeric(10, 2)
-  Denormalized:  indicador_vinculo_ativo boolean
+Pair 58:
+  Relational:    nu_participantes integer
+  Denormalized:  tipo_vinculo_empregaticio character
 
 
 ================================================================================
