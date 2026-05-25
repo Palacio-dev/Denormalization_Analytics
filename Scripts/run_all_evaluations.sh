@@ -1,5 +1,4 @@
 #!/bin/bash
-
 #################################################################################
 # Script: run_all_evaluations.sh
 # Description: Runs evaluate_denormalization.py for all denormalized models
@@ -19,110 +18,154 @@ REPORTS_DIR="$PROJECT_ROOT/Reports"
 TOTAL=0
 SUCCESS=0
 FAILED=0
+SKIPPED=0
 
 echo "================================================================================"
 echo "Running Denormalization Evaluations"
 echo "================================================================================"
-echo "Experiment Schemes: $EXPERIMENT_DIR"
-echo "Results Directory: $RESULTS_DIR"
-echo "Reports Directory: $REPORTS_DIR"
-echo "Report Structure: Reports/{Provider}/{Database}/"
+echo "Script Dir:        $SCRIPT_DIR"
+echo "Project Root:      $PROJECT_ROOT"
+echo "Experiment Dir:    $EXPERIMENT_DIR"
+echo "Results Dir:       $RESULTS_DIR"
+echo "Reports Dir:       $REPORTS_DIR"
+echo "Report Structure:  Reports/{Provider}/{Database}/report_{prompt}.txt"
+echo "================================================================================"
 echo ""
 
-# Function to run evaluation for a single result file
+# ── Validate that the evaluator script exists ────────────────────────────────
+EVALUATOR="$SCRIPT_DIR/evaluate_denormalization.py"
+if [ ! -f "$EVALUATOR" ]; then
+    echo "✗ FATAL: evaluate_denormalization.py not found at: $EVALUATOR"
+    exit 1
+fi
+
+# ── Helper: extract prompt tag from filename ──────────────────────────────────
+# Expected filename format: experiment_<TIMESTAMP>_<anything>_<PROMPT>.txt
+# The PROMPT is the last underscore-delimited segment before .txt.
+# We use the folder's db_name (which already handles multi-word DB names like
+# adv_works, TPC_DS) so we do NOT try to re-parse the DB name from the filename.
+extract_prompt() {
+    local filename
+    filename="$(basename "$1" .txt)"   # strip directory and .txt
+
+    # Last field after the final underscore
+    local prompt
+    prompt="${filename##*_}"
+
+    # Guard: if extraction produced an empty string or the whole filename
+    # (no underscore found), fall back to "unknown"
+    if [ -z "$prompt" ] || [ "$prompt" = "$filename" ]; then
+        echo "unknown"
+    else
+        echo "$prompt"
+    fi
+}
+
+# ── Core evaluation function ──────────────────────────────────────────────────
 run_evaluation() {
     local result_file="$1"
     local provider="$2"
     local db_name="$3"
-    
-    # Find corresponding experiment scheme
+
+    ((TOTAL++))
+
+    # Find the corresponding relational schema
     local experiment_file="$EXPERIMENT_DIR/${db_name}.txt"
-    
     if [ ! -f "$experiment_file" ]; then
-        echo "⚠ WARNING: Experiment scheme not found for '$db_name': $experiment_file"
+        echo "  ⚠ WARNING: Relational schema not found: $experiment_file"
+        echo "             Skipping $(basename "$result_file")"
+        ((SKIPPED++))
+        echo ""
         return 1
     fi
-    
-    # Extract prompt type from filename
-    # Format: experiment_TIMESTAMP_PROVIDER_DATABASE_PROMPT.txt
-    local filename=$(basename "$result_file" .txt)
-    local prompt=$(echo "$filename" | rev | cut -d'_' -f1 | rev)
-    
-    # Create directory structure: Reports/{Provider}/{Database_Name}/
+
+    # Extract the prompt engineering technique from the filename
+    local prompt
+    prompt="$(extract_prompt "$result_file")"
+
+    # Build output directory and report path
     local report_dir="$REPORTS_DIR/$provider/$db_name"
     mkdir -p "$report_dir"
-    
-    # Create report filename with prompt type
-    local report_name="report_${prompt}.txt"
-    local report_file="$report_dir/$report_name"
-    
-    echo "Processing: $(basename "$result_file")"
-    echo "  Provider: $provider"
-    echo "  Database: $db_name"
+
+    local report_file="$report_dir/report_${prompt}.txt"
+
+    echo "  File:     $(basename "$result_file")"
+    echo "  Schema:   $(basename "$experiment_file")"
     echo "  Prompt:   $prompt"
-    echo "  Report:   $provider/$db_name/$report_name"
-    
-    # Run evaluation
-    if python "$SCRIPT_DIR/evaluate_denormalization.py" \
-        "$experiment_file" \
-        "$result_file" \
-        -o "$report_file"; then
+    echo "  Report:   Reports/$provider/$db_name/report_${prompt}.txt"
+
+    # Run the Python evaluator
+    if python "$EVALUATOR" \
+            "$experiment_file" \
+            "$result_file" \
+            -o "$report_file"; then
         echo "  ✓ SUCCESS"
         ((SUCCESS++))
     else
-        echo "  ✗ FAILED"
+        echo "  ✗ FAILED (evaluate_denormalization.py returned non-zero)"
         ((FAILED++))
     fi
-    
-    ((TOTAL++))
+
     echo ""
 }
 
-# Process each result directory
+# ── Main loop: iterate Providers → Databases → Result files ──────────────────
 for provider in "Gemini" "Ollama_API" "Ollama_local"; do
+
     PROVIDER_DIR="$RESULTS_DIR/$provider"
-    
+
     if [ ! -d "$PROVIDER_DIR" ]; then
-        echo "ℹ Directory not found: $PROVIDER_DIR (skipping)"
+        echo "ℹ  Provider directory not found, skipping: $PROVIDER_DIR"
+        echo ""
         continue
     fi
-    
-    echo "Processing $provider Results..."
-    echo "--------"
-    
-    # Iterate through database folders: Results/{Provider}/{Database}/
-    for db_dir in "$PROVIDER_DIR"/*; do
-        # Skip if not a directory
-        if [ ! -d "$db_dir" ]; then
+
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "Provider: $provider"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+
+    # Iterate through each database sub-folder
+    for db_dir in "$PROVIDER_DIR"/*/; do
+
+        [ -d "$db_dir" ] || continue          # skip stray non-directories
+
+        db_name="$(basename "$db_dir")"
+
+        echo "  ── Database: $db_name"
+
+        # Collect .txt files; handle the case where none exist
+        shopt -s nullglob
+        result_files=("$db_dir"*.txt)
+        shopt -u nullglob
+
+        if [ ${#result_files[@]} -eq 0 ]; then
+            echo "  ⚠ No .txt result files found in $db_dir"
+            echo ""
             continue
         fi
-        
-        db_name=$(basename "$db_dir")
-        
-        # Iterate through all result files in the database folder
-        for result_file in "$db_dir"/*.txt; do
-            # Skip if no files found
-            if [ ! -f "$result_file" ]; then
-                continue
-            fi
-            
-            # Run evaluation
+
+        for result_file in "${result_files[@]}"; do
+            [ -f "$result_file" ] || continue
             run_evaluation "$result_file" "$provider" "$db_name"
         done
+
     done
+
 done
 
-# Print summary
+# ── Summary ───────────────────────────────────────────────────────────────────
 echo "================================================================================"
 echo "SUMMARY"
 echo "================================================================================"
-echo "Total Evaluations: $TOTAL"
-echo "Successful:        $SUCCESS"
-echo "Failed:            $FAILED"
+printf "  Total processed : %d\n"  "$TOTAL"
+printf "  ✓ Successful    : %d\n"  "$SUCCESS"
+printf "  ✗ Failed        : %d\n"  "$FAILED"
+printf "  ⚠ Skipped       : %d\n"  "$SKIPPED"
 echo "================================================================================"
 
-# Exit with appropriate code
-if [ $FAILED -gt 0 ]; then
+# Exit non-zero only when actual evaluation calls failed (not skipped)
+if [ "$FAILED" -gt 0 ]; then
     exit 1
 else
     exit 0

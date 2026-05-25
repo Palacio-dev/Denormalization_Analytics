@@ -74,14 +74,20 @@ class SQLParser:
                 line = line.strip()
                 if not line:
                     continue
-                    
-                # Check if it's a constraint (PRIMARY KEY, FOREIGN KEY)
-                if line.upper().startswith('PRIMARY KEY') or \
-                   line.upper().startswith('FOREIGN KEY'):
+                if line.startswith('--'):
+                    continue  # Skip comments
+                
+                line_upper = line.upper()
+                if (line_upper.startswith('PRIMARY KEY') or
+                    line_upper.startswith('FOREIGN KEY') or
+                    line_upper.startswith('CONSTRAINT') or   # ← ADD THIS
+                    line_upper.startswith('UNIQUE') or        # ← good to have too
+                    line_upper.startswith('CHECK')):          # ← good to have too
                     constraints.append(line)
                 else:
                     # It's a column definition
                     columns.append(line)
+                
             
             tables[table_name] = {
                 'columns': columns,
@@ -216,13 +222,13 @@ class ModelComparator:
         return denorm_count / rel_count
     
     
-    def pair_identifiers(self) -> List[Tuple[str, str]]:
+    def pair_identifiers(self) -> List[Tuple[Dict, Dict]]:
         """
         Pair equivalent identifiers between relational and denormalized models.
         Uses the following matching strategy:
         - Best Levenshtein distance (for remaining unpaired attributes)
         
-        Returns list of (relational_attr, denormalized_attr) tuples
+        Returns list of (relational_attr_dict, denormalized_attr_dict) tuples
         """
         pairs = []
         
@@ -280,7 +286,7 @@ class ModelComparator:
             
             rel_info = rel_columns_list[best_i]
             denorm_info = denorm_columns_list[best_j]
-            pairs.append((rel_info['full_def'], denorm_info['full_def']))
+            pairs.append((rel_info, denorm_info))
             rel_paired[best_i] = True
             denorm_paired[best_j] = True
 
@@ -361,10 +367,7 @@ class ModelComparator:
         
         pairs = self.pair_identifiers()
         
-        for rel_def, denorm_def in pairs:
-            rel_info = SQLParser.extract_column_info(rel_def)
-            denorm_info = SQLParser.extract_column_info(denorm_def)
-            
+        for rel_info, denorm_info in pairs:
             if not rel_info or not denorm_info:
                 continue
             
@@ -489,7 +492,7 @@ class ModelComparator:
         report_lines.append("\n2. COMPLETENESS ANALYSIS")
         report_lines.append("-" * 80)
         completeness = self.calculate_completeness()
-        report_lines.append(f"Completeness Ratio: {completeness:.2f}")
+        report_lines.append(f"Completeness Ratio: {completeness:.4f}")
         if completeness == 1.0:
             report_lines.append("✓ IDEAL: No information was added or lost")
         elif completeness > 1.0:
@@ -539,10 +542,10 @@ class ModelComparator:
         pairs = self.pair_identifiers()
         report_lines.append(f"\nIdentified {len(pairs)} attribute pairs for type checking:\n")
         
-        for i, (rel_attr, denorm_attr) in enumerate(pairs, 1):
+        for i, (rel_info, denorm_info) in enumerate(pairs, 1):
             report_lines.append(f"Pair {i}:")
-            report_lines.append(f"  Relational:    {rel_attr}")
-            report_lines.append(f"  Denormalized:  {denorm_attr}")
+            report_lines.append(f"  Relational:    {rel_info['name']} {rel_info['type']}")
+            report_lines.append(f"  Denormalized:  {denorm_info['name']} {denorm_info['type']}")
             report_lines.append("")
         
         report_lines.append("\n" + "=" * 80 + "\n")
