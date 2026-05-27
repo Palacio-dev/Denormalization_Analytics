@@ -136,6 +136,9 @@ def save_result(model_name: str, prompt_name: str, schema_name: str,
     filename = f"experiment_{timestamp}_{model_name}_{schema_clean}_{prompt_clean}.txt"
     filepath = config.results_dir / get_formatted_model_name(model_name) / schema_clean / filename
     
+    # Create directories if they don't exist
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    
     # Save result
     try:
         with open(filepath, 'w', encoding='utf-8') as f:
