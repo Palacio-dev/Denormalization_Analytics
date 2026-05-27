@@ -99,6 +99,17 @@ def inject_schema(prompt_content: str, schema_content: str) -> str:
     """
     return prompt_content.replace("{SCHEMA_CONTENT}", schema_content)
 
+def get_formatted_model_name(model_key: str) -> str:
+    """Convert model key to formatted name for directory structure."""
+
+    if model_key == "gemini":
+        return "Gemini"
+    elif model_key == "ollama_api":
+        return "Ollama_API"
+    elif model_key == "ollama_local":
+        return "Ollama_local"
+    
+    raise ValueError(f"Unknown model key: {model_key}")
 
 def save_result(model_name: str, prompt_name: str, schema_name: str, 
                 output_text: str, config: ExperimentConfig) -> str:
@@ -121,9 +132,9 @@ def save_result(model_name: str, prompt_name: str, schema_name: str,
     # Clean up names (remove .txt extensions if present)
     prompt_clean = prompt_name.replace(".txt", "")
     schema_clean = schema_name.replace(".txt", "")
-    
+
     filename = f"experiment_{timestamp}_{model_name}_{schema_clean}_{prompt_clean}.txt"
-    filepath = config.results_dir / filename
+    filepath = config.results_dir / get_formatted_model_name(model_name) / schema_clean / filename
     
     # Save result
     try:
