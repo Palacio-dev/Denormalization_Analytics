@@ -12,6 +12,8 @@ from nltk.translate.meteor_score import meteor_score
 from rouge_score import rouge_scorer
 from typing import Dict, List, Tuple
 import argparse
+import numpy as np
+from scipy.optimize import linear_sum_assignment
 
 
 class SQLParser:
@@ -60,6 +62,7 @@ class SQLParser:
             schema = match[0]
             table_name = match[1] or match[2] or match[3]
             table_body = match[4]
+            table_body = table_body.strip().rstrip(')')
             columns = []
             constraints = []
             
@@ -128,23 +131,27 @@ class SQLParser:
         Extract column name, data type, and constraints from column definition
         Returns: {name: str, type: str, constraints: [str]}
         """
+        column_def = column_def.strip()
         parts = column_def.split()
         if len(parts) < 2:
             return None
         
         name = parts[0]
         data_type = parts[1]
-        
-        # Handle types with size like VARCHAR(4)
-        if '(' in data_type and ')' in data_type:
-            type_match = re.match(r'(\w+)\((\d+)\)', data_type)
-            if type_match:
-                data_type = f"{type_match.group(1)}({type_match.group(2)})"
-        
-        # Extract constraints (PRIMARY KEY, NOT NULL, etc.)
         constraints = []
         if len(parts) > 2:
             constraints = parts[2:]
+        rest = ' '.join(parts[1:])
+        
+        type_match = re.match(r'(\w+(?:\(\s*\d+\s*(?:,\s*\d+\s*)?\))?)', rest)
+        
+        if type_match:
+            data_type = type_match.group(1)
+            data_type = re.sub(r'\(\s*(\d+)\s*,\s*(\d+)\s*\)', r'(\1, \2)', data_type)
+            data_type = re.sub(r'\(\s*(\d+)\s*\)', r'(\1)', data_type)
+        else:
+            data_type = rest.split()[0]  # Fallback to first word after name
+
         
         return {
             'name': name,
@@ -256,15 +263,6 @@ class ModelComparator:
         
         Returns list of (relational_attr_dict, denormalized_attr_dict) tuples
         """
-        pairs = []
-        
-        # Extract column information (excluding junction tables)
-        # Use list to preserve all columns (even with duplicate names from different tables)
-        # Esse loop percorre o dicionário de tabelas relacionais, que é do tipo, chave : NOME DA TABELA, valor :
-        # DICIONÁRIO COM INFORMAÇÕES DA TABELA, depois percorre as colunas da tabela extraindo as informações de 
-        # cada coluna e colocando em uma lista
-        # As informações da colunas estão em formato de dicionário com nome, tipo, constraints, etc. Ou seja, 
-        # rel_columns_list é uma lista de dicionários com todas as coluna do modelo.
         rel_columns_list = []
         for table_name, table_info in self.relational_tables.items():
             # Skip junction tables in the relational model
@@ -286,51 +284,21 @@ class ModelComparator:
                     col_info['table'] = table_name
                     denorm_columns_list.append(col_info)
         
-        # Track which columns have been paired (by index)
-        rel_paired = [False] * len(rel_columns_list)
-        denorm_paired = [False] * len(denorm_columns_list)
-        
-        # Find the pair with the best Levenshtein distance
+        # Build cost matrix: rows = relational columns, cols = denormalized columns
+        cost_matrix = np.zeros((len(rel_columns_list), len(denorm_columns_list)))
         for i, rel_info in enumerate(rel_columns_list):
-            best_score = float('inf')
-            best_i = i
-            best_j = -1
-            if rel_paired[i]:
-                continue
             for j, denorm_info in enumerate(denorm_columns_list):
-                if denorm_paired[j]:
-                    continue
-                score = Levenshtein.distance(rel_info['name'], denorm_info['name'])
-                if score < best_score:
-                    best_score = score
-                    best_j = j
-        
-            # Add the best pair to results (only if a match was found)
-            if best_j == -1:
-                # No unpaired denormalized column found for this relational column
-                continue
-            
-            rel_info = rel_columns_list[best_i]
-            denorm_info = denorm_columns_list[best_j]
-            pairs.append((rel_info, denorm_info))
-            rel_paired[best_i] = True
-            denorm_paired[best_j] = True
+                cost_matrix[i][j] = Levenshtein.distance(
+                    rel_info['name'], denorm_info['name']
+                )
 
-        # Validation: Ensure we have the expected number of pairs
-        rel_count = len(rel_columns_list)
-        denorm_count = len(denorm_columns_list)
-        expected_pairs = min(rel_count, denorm_count)
-        
-        if len(pairs) < expected_pairs:
-            # This shouldn't happen if all stages work correctly, but log if it does
-            unpaired_rel = [rel_columns_list[i]['name'] for i in range(len(rel_columns_list)) if not rel_paired[i]]
-            unpaired_denorm = [denorm_columns_list[j]['name'] for j in range(len(denorm_columns_list)) if not denorm_paired[j]]
-            print(f"\n Expected {expected_pairs} pairs but found {len(pairs)}")
-            if unpaired_rel:
-                print(f"  Unpaired relational attributes: {', '.join(unpaired_rel)}")
-            if unpaired_denorm:
-                print(f"  Unpaired denormalized attributes: {', '.join(unpaired_denorm)}")
-        
+        # Hungarian algorithm finds the globally optimal assignment
+        row_indices, col_indices = linear_sum_assignment(cost_matrix)
+
+        pairs = []
+        for i, j in zip(row_indices, col_indices):
+            pairs.append((rel_columns_list[i], denorm_columns_list[j]))
+
         return pairs
     
     # def tokenize_sql(self, sql_string: str) -> List[str]:
