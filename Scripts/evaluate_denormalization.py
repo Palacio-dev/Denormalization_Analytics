@@ -18,6 +18,18 @@ class SQLParser:
     """Parser for SQL CREATE TABLE statements"""
     
     @staticmethod
+    def remove_sql_comments(text: str) -> str:
+        """
+        Remove SQL comments (both -- and /* */ style) from text.
+        Handles inline comments and full-line comments.
+        """
+        # Remove -- style comments (from -- to end of line)
+        text = re.sub(r'--.*?$', '', text, flags=re.MULTILINE)
+        # Remove /* */ style comments
+        text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
+        return text
+    
+    @staticmethod
     def parse_file(filepath: str) -> Dict[str, Dict]:
         """
         Parse SQL file and extract table definitions
@@ -25,6 +37,9 @@ class SQLParser:
         """
         with open(filepath, 'r') as f:
             content = f.read()
+        
+        # Remove all SQL comments from content first
+        content = SQLParser.remove_sql_comments(content)
         
         tables = {}
         # Find all CREATE TABLE statements
@@ -77,6 +92,14 @@ class SQLParser:
                 if line.startswith('--'):
                     continue  # Skip comments
                 
+                # Skip lines that are just closing parenthesis or other noise
+                if line in (')', ');', '(', '()', ','):
+                    continue
+                
+                # Skip lines that start with closing paren
+                if line.startswith(')'):
+                    continue
+                
                 line_upper = line.upper()
                 if (line_upper.startswith('PRIMARY KEY') or
                     line_upper.startswith('FOREIGN KEY') or
@@ -86,7 +109,10 @@ class SQLParser:
                     constraints.append(line)
                 else:
                     # It's a column definition
-                    columns.append(line)
+                    # Additional validation: a column definition should have at least a name and type
+                    # Skip if it looks like a fragment or noise
+                    if len(line.split()) >= 2:
+                        columns.append(line)
                 
             
             tables[table_name] = {
