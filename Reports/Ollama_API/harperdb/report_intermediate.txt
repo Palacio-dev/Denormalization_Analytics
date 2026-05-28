@@ -6,32 +6,30 @@ SQL MODEL DENORMALIZATION EVALUATION REPORT
 --------------------------------------------------------------------------------
 Relational Model:
   - Tables: 3
-  - Total Attributes: 9
+  - Total Attributes: 11
     * entitlements: 8 columns
     * users: 1 columns
-    * user_entitlements: 2 columns (junction table - excluded from analysis)
-
-  Note: 1 junction table(s) detected and excluded from analysis:
-    - user_entitlements
+    * user_entitlements: 2 columns
 
 Denormalized Model:
   - Tables: 2
-  - Total Attributes: 56
-    * user_entitlement_details: 48 columns
-    * feature_package_catalog: 8 columns
+  - Total Attributes: 57
+    * user_entitlement_details: 51 columns
+    * feature_package_catalog: 6 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 6.2222
-⚠ WARNING: Denormalized model has MORE attributes (9 vs 56)
+Completeness Ratio: 5.1818
+⚠ WARNING: Denormalized model has MORE attributes (11 vs 57)
   New information may have been added in the transition
 
 3. CORRECTNESS EVALUATION
 --------------------------------------------------------------------------------
 
-Data Type Preservation: 88.89%
+Data Type Preservation: 81.82%
 
 ⚠ Issues Found:
+  - Type mismatch: id (INT) -> INDEX (idx_user_active_package)
   - Type mismatch: id (INT) -> INDEX (idx_user_active_features)
 
 4. STRUCTURAL SIMILARITY ANALYSIS
@@ -41,24 +39,24 @@ This section measures naming and structural alignment between models.
 Metrics are calculated on combined, alphabetically-sorted column names.
 
 Relational Model (Combined Text):
-  activeDate activeFlag featureType id id inactiveDate packageType useCount useLimit
+  activeDate activeFlag entitlement_id featureType id id inactiveDate packageType useCount useLimit user_id
 
 Denormalized Model (Combined Text):
-  INDEX INDEX INDEX INDEX INDEX INDEX INDEX INDEX INDEX INDEX INDEX INDEX INDEX INDEX INDEX PARTITION PARTITION PARTITION activeDate activeDate activeFlag active_date active_days_remaining avg_use_count default_use_limit description entitlement_id entitlement_id entitlement_id expires_soon_flag featureType featureType featureType featureType inactiveDate inactiveDate is_premium max_use_limit packageType packageType packageType packageType packageType summary_granularity total_usage_count updated_at useCount useCount useCount useLimit useLimit useLimit use_percentage user_id
+  INDEX INDEX INDEX INDEX INDEX INDEX INDEX INDEX INDEX INDEX INDEX INDEX INDEX INDEX INDEX PARTITION PARTITION PARTITION activeDate activeDate activeFlag active_date active_days_remaining avg_use_count created_at default_use_limit description entitlement_id entitlement_id entitlement_id expires_soon_flag featureType featureType featureType featureType inactiveDate inactiveDate is_premium max_use_limit packageType packageType packageType packageType packageType summary_granularity total_active_users total_usage_count updated_at useCount useCount useCount useLimit useLimit useLimit use_percentage user_id user_status
 
 Structural Similarity Metrics:
-  BLEU Score:    0.1296
-  ROUGE-1:       0.2143
-  METEOR Score:  0.3553
+  BLEU Score:    0.1579
+  ROUGE-1:       0.2737
+  METEOR Score:  0.3743
 
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
 
-Identified 9 attribute pairs for type checking:
+Identified 11 attribute pairs for type checking:
 
 Pair 1:
   Relational:    id INT
-  Denormalized:  user_id INT
+  Denormalized:  INDEX idx_user_active_package
 
 Pair 2:
   Relational:    activeDate DATE
@@ -91,6 +89,14 @@ Pair 8:
 Pair 9:
   Relational:    id INT
   Denormalized:  INDEX idx_user_active_features
+
+Pair 10:
+  Relational:    user_id INT
+  Denormalized:  user_id INT
+
+Pair 11:
+  Relational:    entitlement_id INT
+  Denormalized:  entitlement_id INT
 
 
 ================================================================================

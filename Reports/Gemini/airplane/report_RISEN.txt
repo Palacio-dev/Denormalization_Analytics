@@ -18,48 +18,35 @@ Relational Model:
 
 Denormalized Model:
   - Tables: 3
-  - Total Attributes: 37
-    * denorm_ticket_flights: 20 columns
-    * denorm_flights_summary: 11 columns
-    * denorm_aircraft_seats_summary: 6 columns
+  - Total Attributes: 52
+    * denorm_ticket_flights: 26 columns
+    * denorm_flights_summary: 19 columns
+    * denorm_aircraft_seats_summary: 7 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 1.0000
-✓ IDEAL: No information was added or lost
+Completeness Ratio: 1.4054
+⚠ WARNING: Denormalized model has MORE attributes (37 vs 52)
+  New information may have been added in the transition
 
 3. CORRECTNESS EVALUATION
 --------------------------------------------------------------------------------
 
-Data Type Preservation: 29.73%
+Data Type Preservation: 67.57%
 
 ⚠ Issues Found:
-  - Type mismatch: airport_code (character(3)) -> aircraft_model (jsonb)
   - Type mismatch: airport_name (jsonb) -> aircraft_range (integer)
-  - Type mismatch: city (jsonb) -> amount (numeric(10,)
-  - Type mismatch: coordinates (point) -> book_date (timestamp)
-  - Type mismatch: timezone (text) -> seat_no (character)
-  - Type mismatch: ticket_no (character(13)) -> flight_no (character(6))
-  - Type mismatch: seat_no (character) -> book_ref (character(6))
-  - Type mismatch: book_ref (character(6)) -> flight_id (integer)
-  - Type mismatch: book_date (timestamp) -> contact_data (jsonb)
-  - Type mismatch: flight_id (serial) -> flight_status (character)
-  - Type mismatch: flight_no (character(6)) -> arrival_city (jsonb)
-  - Type mismatch: departure_airport (character(3)) -> departure_airport_name (jsonb)
-  - Type mismatch: status (character) -> economy_seats (integer)
+  - Type mismatch: coordinates (point) -> comfort_seats (integer)
+  - Type mismatch: timezone (text) -> total_seats (integer)
+  - Type mismatch: total_amount (numeric(10, 2)) -> total_revenue (numeric(15, 2))
+  - Type mismatch: flight_id (serial) -> flight_id (integer)
   - Type mismatch: aircraft_code (character(3)) -> aircraft_model (jsonb)
-  - Type mismatch: aircraft_code (character(3)) -> arrival_city (jsonb)
-  - Type mismatch: seat_no (character) -> passenger_name (text)
-  - Type mismatch: fare_conditions (character) -> departure_city (jsonb)
-  - Type mismatch: ticket_no (character(13)) -> comfort_seats (integer)
-  - Type mismatch: flight_id (integer) -> departure_city (jsonb)
-  - Type mismatch: fare_conditions (character) -> actual_arrival (timestamp)
-  - Type mismatch: amount (numeric(10,) -> business_seats (integer)
-  - Type mismatch: ticket_no (character(13)) -> actual_departure (timestamp)
-  - Type mismatch: book_ref (character(6)) -> scheduled_arrival (timestamp)
-  - Type mismatch: passenger_id (character) -> departure_delay_mins (integer)
-  - Type mismatch: passenger_name (text) -> arrival_airport_name (jsonb)
-  - Type mismatch: contact_data (jsonb) -> arrival_airport_code (character(3))
+  - Type mismatch: seat_no (character) -> flight_no (character(6))
+  - Type mismatch: ticket_no (character(13)) -> tickets_sold (integer)
+  - Type mismatch: flight_id (integer) -> flight_status (character)
+  - Type mismatch: fare_conditions (character) -> arrival_city (jsonb)
+  - Type mismatch: ticket_no (character(13)) -> aircraft_model (jsonb)
+  - Type mismatch: book_ref (character(6)) -> economy_seats (integer)
 
 4. STRUCTURAL SIMILARITY ANALYSIS
 --------------------------------------------------------------------------------
@@ -71,12 +58,12 @@ Relational Model (Combined Text):
   actual_arrival actual_departure aircraft_code aircraft_code aircraft_code airport_code airport_name amount arrival_airport boarding_no book_date book_ref book_ref city contact_data coordinates departure_airport fare_conditions fare_conditions flight_id flight_id flight_id flight_no model passenger_id passenger_name range scheduled_arrival scheduled_departure seat_no seat_no status ticket_no ticket_no ticket_no timezone total_amount
 
 Denormalized Model (Combined Text):
-  actual_arrival actual_arrival actual_departure actual_departure aircraft_code aircraft_model aircraft_model aircraft_range amount arrival_airport_code arrival_airport_code arrival_airport_name arrival_city arrival_city boarding_no book_date book_ref booking_total_amount business_seats comfort_seats contact_data departure_airport_name departure_city departure_city departure_delay_mins economy_seats flight_id flight_id flight_no flight_status model passenger_name range scheduled_arrival scheduled_arrival scheduled_departure seat_no
+  actual_arrival actual_arrival actual_departure actual_departure aircraft_code aircraft_code aircraft_code aircraft_model aircraft_model aircraft_range amount arrival_airport_code arrival_airport_code arrival_airport_name arrival_city arrival_city arrival_delay_mins boarding_no book_date book_ref booking_total_amount business_seats comfort_seats contact_data departure_airport_code departure_airport_code departure_airport_name departure_city departure_city departure_delay_mins economy_seats fare_conditions flight_id flight_id flight_no flight_no flight_status model passenger_id passenger_name passengers_boarded range scheduled_arrival scheduled_arrival scheduled_departure scheduled_departure seat_no status ticket_no tickets_sold total_revenue total_seats
 
 Structural Similarity Metrics:
-  BLEU Score:    0.4595
-  ROUGE-1:       0.6806
-  METEOR Score:  0.3787
+  BLEU Score:    0.4423
+  ROUGE-1:       0.6591
+  METEOR Score:  0.5145
 
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
@@ -97,7 +84,7 @@ Pair 3:
 
 Pair 4:
   Relational:    airport_code character(3)
-  Denormalized:  aircraft_model jsonb
+  Denormalized:  aircraft_code character(3)
 
 Pair 5:
   Relational:    airport_name jsonb
@@ -105,19 +92,19 @@ Pair 5:
 
 Pair 6:
   Relational:    city jsonb
-  Denormalized:  amount numeric(10,
+  Denormalized:  arrival_city jsonb
 
 Pair 7:
   Relational:    coordinates point
-  Denormalized:  book_date timestamp
+  Denormalized:  comfort_seats integer
 
 Pair 8:
   Relational:    timezone text
-  Denormalized:  seat_no character
+  Denormalized:  total_seats integer
 
 Pair 9:
   Relational:    ticket_no character(13)
-  Denormalized:  flight_no character(6)
+  Denormalized:  ticket_no character(13)
 
 Pair 10:
   Relational:    flight_id integer
@@ -129,27 +116,27 @@ Pair 11:
 
 Pair 12:
   Relational:    seat_no character
-  Denormalized:  book_ref character(6)
+  Denormalized:  seat_no character
 
 Pair 13:
   Relational:    book_ref character(6)
-  Denormalized:  flight_id integer
+  Denormalized:  book_ref character(6)
 
 Pair 14:
   Relational:    book_date timestamp
-  Denormalized:  contact_data jsonb
+  Denormalized:  book_date timestamp
 
 Pair 15:
-  Relational:    total_amount numeric(10,
-  Denormalized:  booking_total_amount numeric(10,
+  Relational:    total_amount numeric(10, 2)
+  Denormalized:  total_revenue numeric(15, 2)
 
 Pair 16:
   Relational:    flight_id serial
-  Denormalized:  flight_status character
+  Denormalized:  flight_id integer
 
 Pair 17:
   Relational:    flight_no character(6)
-  Denormalized:  arrival_city jsonb
+  Denormalized:  flight_no character(6)
 
 Pair 18:
   Relational:    scheduled_departure timestamp
@@ -161,7 +148,7 @@ Pair 19:
 
 Pair 20:
   Relational:    departure_airport character(3)
-  Denormalized:  departure_airport_name jsonb
+  Denormalized:  departure_airport_code character(3)
 
 Pair 21:
   Relational:    arrival_airport character(3)
@@ -169,11 +156,11 @@ Pair 21:
 
 Pair 22:
   Relational:    status character
-  Denormalized:  economy_seats integer
+  Denormalized:  status character
 
 Pair 23:
   Relational:    aircraft_code character(3)
-  Denormalized:  aircraft_model jsonb
+  Denormalized:  aircraft_code character(3)
 
 Pair 24:
   Relational:    actual_departure timestamp
@@ -185,51 +172,51 @@ Pair 25:
 
 Pair 26:
   Relational:    aircraft_code character(3)
-  Denormalized:  arrival_city jsonb
+  Denormalized:  aircraft_model jsonb
 
 Pair 27:
   Relational:    seat_no character
-  Denormalized:  passenger_name text
+  Denormalized:  flight_no character(6)
 
 Pair 28:
   Relational:    fare_conditions character
-  Denormalized:  departure_city jsonb
+  Denormalized:  fare_conditions character
 
 Pair 29:
   Relational:    ticket_no character(13)
-  Denormalized:  comfort_seats integer
+  Denormalized:  tickets_sold integer
 
 Pair 30:
   Relational:    flight_id integer
-  Denormalized:  departure_city jsonb
+  Denormalized:  flight_status character
 
 Pair 31:
   Relational:    fare_conditions character
-  Denormalized:  actual_arrival timestamp
+  Denormalized:  arrival_city jsonb
 
 Pair 32:
-  Relational:    amount numeric(10,
-  Denormalized:  business_seats integer
+  Relational:    amount numeric(10, 2)
+  Denormalized:  amount numeric(10, 2)
 
 Pair 33:
   Relational:    ticket_no character(13)
-  Denormalized:  actual_departure timestamp
+  Denormalized:  aircraft_model jsonb
 
 Pair 34:
   Relational:    book_ref character(6)
-  Denormalized:  scheduled_arrival timestamp
+  Denormalized:  economy_seats integer
 
 Pair 35:
   Relational:    passenger_id character
-  Denormalized:  departure_delay_mins integer
+  Denormalized:  passenger_id character
 
 Pair 36:
   Relational:    passenger_name text
-  Denormalized:  arrival_airport_name jsonb
+  Denormalized:  passenger_name text
 
 Pair 37:
   Relational:    contact_data jsonb
-  Denormalized:  arrival_airport_code character(3)
+  Denormalized:  contact_data jsonb
 
 
 ================================================================================

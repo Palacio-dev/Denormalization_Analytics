@@ -6,32 +6,29 @@ SQL MODEL DENORMALIZATION EVALUATION REPORT
 --------------------------------------------------------------------------------
 Relational Model:
   - Tables: 3
-  - Total Attributes: 9
+  - Total Attributes: 11
     * entitlements: 8 columns
     * users: 1 columns
-    * user_entitlements: 2 columns (junction table - excluded from analysis)
-
-  Note: 1 junction table(s) detected and excluded from analysis:
-    - user_entitlements
+    * user_entitlements: 2 columns
 
 Denormalized Model:
   - Tables: 1
-  - Total Attributes: 14
-    * read_user_entitlements: 14 columns
+  - Total Attributes: 11
+    * read_user_entitlements: 11 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 1.5556
-⚠ WARNING: Denormalized model has MORE attributes (9 vs 14)
-  New information may have been added in the transition
+Completeness Ratio: 1.0000
+✓ IDEAL: No information was added or lost
 
 3. CORRECTNESS EVALUATION
 --------------------------------------------------------------------------------
 
-Data Type Preservation: 88.89%
+Data Type Preservation: 81.82%
 
 ⚠ Issues Found:
-  - Type mismatch: activeFlag (INT) -> Postgres (CLUSTER))
+  - Type mismatch: id (INT) -> featureType) (WHERE)
+  - Type mismatch: id (INT) -> is_valid_access (BOOLEAN)
 
 4. STRUCTURAL SIMILARITY ANALYSIS
 --------------------------------------------------------------------------------
@@ -40,24 +37,24 @@ This section measures naming and structural alignment between models.
 Metrics are calculated on combined, alphabetically-sorted column names.
 
 Relational Model (Combined Text):
-  activeDate activeFlag featureType id id inactiveDate packageType useCount useLimit
+  activeDate activeFlag entitlement_id featureType id id inactiveDate packageType useCount useLimit user_id
 
 Denormalized Model (Combined Text):
-  Postgres activeDate entitlement_id featureType featureType) inactiveDate packageType useCount useLimit user_id
+  activeDate activeFlag entitlement_id featureType featureType) inactiveDate is_valid_access packageType useCount useLimit user_id
 
 Structural Similarity Metrics:
-  BLEU Score:    0.6000
-  ROUGE-1:       0.7619
-  METEOR Score:  0.6114
+  BLEU Score:    0.8182
+  ROUGE-1:       0.7857
+  METEOR Score:  0.7752
 
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
 
-Identified 9 attribute pairs for type checking:
+Identified 11 attribute pairs for type checking:
 
 Pair 1:
   Relational:    id INT
-  Denormalized:  user_id INT
+  Denormalized:  featureType) WHERE
 
 Pair 2:
   Relational:    activeDate DATE
@@ -85,10 +82,18 @@ Pair 7:
 
 Pair 8:
   Relational:    activeFlag INT
-  Denormalized:  Postgres CLUSTER)
+  Denormalized:  activeFlag INT
 
 Pair 9:
   Relational:    id INT
+  Denormalized:  is_valid_access BOOLEAN
+
+Pair 10:
+  Relational:    user_id INT
+  Denormalized:  user_id INT
+
+Pair 11:
+  Relational:    entitlement_id INT
   Denormalized:  entitlement_id INT
 
 

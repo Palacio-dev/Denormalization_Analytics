@@ -6,34 +6,29 @@ SQL MODEL DENORMALIZATION EVALUATION REPORT
 --------------------------------------------------------------------------------
 Relational Model:
   - Tables: 3
-  - Total Attributes: 9
+  - Total Attributes: 11
     * entitlements: 8 columns
     * users: 1 columns
-    * user_entitlements: 2 columns (junction table - excluded from analysis)
-
-  Note: 1 junction table(s) detected and excluded from analysis:
-    - user_entitlements
+    * user_entitlements: 2 columns
 
 Denormalized Model:
   - Tables: 1
-  - Total Attributes: 7
-    * denormalized_user_entitlements: 7 columns
+  - Total Attributes: 11
+    * denormalized_user_entitlements: 11 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 0.7778
-⚠ WARNING: Normalized model has MORE attributes (7 vs 9)
-  Some information may have been lost in the transition
+Completeness Ratio: 1.0000
+✓ IDEAL: No information was added or lost
 
 3. CORRECTNESS EVALUATION
 --------------------------------------------------------------------------------
 
-Data Type Preservation: 57.14%
+Data Type Preservation: 81.82%
 
 ⚠ Issues Found:
-  - Type mismatch: useCount (INT) -> feature_type (VARCHAR(4))
-  - Type mismatch: featureType (VARCHAR(4)) -> active_flag (INT)
-  - Type mismatch: packageType (VARCHAR(4)) -> entitlement_id (INT)
+  - Type mismatch: id (INT) -> INDEX (idx_package_type)
+  - Type mismatch: id (INT) -> INDEX (idx_active_flag)
 
 4. STRUCTURAL SIMILARITY ANALYSIS
 --------------------------------------------------------------------------------
@@ -42,24 +37,24 @@ This section measures naming and structural alignment between models.
 Metrics are calculated on combined, alphabetically-sorted column names.
 
 Relational Model (Combined Text):
-  activeDate activeFlag featureType id id inactiveDate packageType useCount useLimit
+  activeDate activeFlag entitlement_id featureType id id inactiveDate packageType useCount useLimit user_id
 
 Denormalized Model (Combined Text):
-  active_date active_flag entitlement_id feature_type inactive_date use_count use_limit
+  INDEX INDEX active_date active_flag entitlement_id feature_type inactive_date package_type use_count use_limit user_id
 
 Structural Similarity Metrics:
-  BLEU Score:    0.0000
-  ROUGE-1:       0.0870
-  METEOR Score:  0.0000
+  BLEU Score:    0.1818
+  ROUGE-1:       0.2424
+  METEOR Score:  0.0909
 
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
 
-Identified 7 attribute pairs for type checking:
+Identified 11 attribute pairs for type checking:
 
 Pair 1:
   Relational:    id INT
-  Denormalized:  use_limit INT
+  Denormalized:  INDEX idx_package_type
 
 Pair 2:
   Relational:    activeDate DATE
@@ -71,18 +66,34 @@ Pair 3:
 
 Pair 4:
   Relational:    useLimit INT
-  Denormalized:  use_count INT
+  Denormalized:  use_limit INT
 
 Pair 5:
   Relational:    useCount INT
-  Denormalized:  feature_type VARCHAR(4)
+  Denormalized:  use_count INT
 
 Pair 6:
   Relational:    featureType VARCHAR(4)
-  Denormalized:  active_flag INT
+  Denormalized:  feature_type VARCHAR(4)
 
 Pair 7:
   Relational:    packageType VARCHAR(4)
+  Denormalized:  package_type VARCHAR(4)
+
+Pair 8:
+  Relational:    activeFlag INT
+  Denormalized:  active_flag INT
+
+Pair 9:
+  Relational:    id INT
+  Denormalized:  INDEX idx_active_flag
+
+Pair 10:
+  Relational:    user_id INT
+  Denormalized:  user_id INT
+
+Pair 11:
+  Relational:    entitlement_id INT
   Denormalized:  entitlement_id INT
 
 

@@ -6,34 +6,32 @@ SQL MODEL DENORMALIZATION EVALUATION REPORT
 --------------------------------------------------------------------------------
 Relational Model:
   - Tables: 4
-  - Total Attributes: 14
+  - Total Attributes: 13
     * customers: 4 columns
     * orders: 3 columns
-    * products: 3 columns
+    * products: 2 columns
     * order_details: 4 columns
 
 Denormalized Model:
   - Tables: 1
-  - Total Attributes: 11
-    * denormalized_orders: 11 columns
+  - Total Attributes: 10
+    * denormalized_orders: 10 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 0.7857
-⚠ WARNING: Normalized model has MORE attributes (11 vs 14)
+Completeness Ratio: 0.7692
+⚠ WARNING: Normalized model has MORE attributes (10 vs 13)
   Some information may have been lost in the transition
 
 3. CORRECTNESS EVALUATION
 --------------------------------------------------------------------------------
 
-Data Type Preservation: 54.55%
+Data Type Preservation: 70.00%
 
 ⚠ Issues Found:
   - Type mismatch: customer_id (SERIAL) -> customer_id (INT)
-  - Type mismatch: product_id (SERIAL) -> product_name (VARCHAR(100))
-  - Type mismatch: product_name (VARCHAR(100)) -> price (DECIMAL(10,2))
-  - Type mismatch: price (DECIMAL(10,2)) -> quantity (INT)
-  - Type mismatch: order_detail_id (SERIAL) -> line_total (DECIMAL(10,2))
+  - Type mismatch: product_id (SERIAL) -> product_id (INT)
+  - Type mismatch: order_id (INT) -> price (DECIMAL(10, 2))
 
 4. STRUCTURAL SIMILARITY ANALYSIS
 --------------------------------------------------------------------------------
@@ -42,20 +40,20 @@ This section measures naming and structural alignment between models.
 Metrics are calculated on combined, alphabetically-sorted column names.
 
 Relational Model (Combined Text):
-  customer_address customer_email customer_id customer_id customer_name order_date order_detail_id order_id order_id price product_id product_id product_name quantity
+  customer_address customer_email customer_id customer_id customer_name order_date order_detail_id order_id order_id product_id product_id product_name quantity
 
 Denormalized Model (Combined Text):
-  customer_address customer_email customer_id customer_name line_total order_date order_id price product_id product_name quantity
+  customer_address customer_email customer_id customer_name order_date order_id price product_id product_name quantity
 
 Structural Similarity Metrics:
-  BLEU Score:    0.6921
-  ROUGE-1:       0.7660
-  METEOR Score:  0.6843
+  BLEU Score:    0.6667
+  ROUGE-1:       0.7727
+  METEOR Score:  0.6776
 
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
 
-Identified 11 attribute pairs for type checking:
+Identified 10 attribute pairs for type checking:
 
 Pair 1:
   Relational:    customer_id SERIAL
@@ -78,28 +76,24 @@ Pair 5:
   Denormalized:  order_id SERIAL
 
 Pair 6:
-  Relational:    customer_id INT
-  Denormalized:  product_id INT
-
-Pair 7:
   Relational:    order_date DATE
   Denormalized:  order_date DATE
 
-Pair 8:
+Pair 7:
   Relational:    product_id SERIAL
+  Denormalized:  product_id INT
+
+Pair 8:
+  Relational:    product_name VARCHAR(100)
   Denormalized:  product_name VARCHAR(100)
 
 Pair 9:
-  Relational:    product_name VARCHAR(100)
-  Denormalized:  price DECIMAL(10,2)
+  Relational:    order_id INT
+  Denormalized:  price DECIMAL(10, 2)
 
 Pair 10:
-  Relational:    price DECIMAL(10,2)
+  Relational:    quantity INT
   Denormalized:  quantity INT
-
-Pair 11:
-  Relational:    order_detail_id SERIAL
-  Denormalized:  line_total DECIMAL(10,2)
 
 
 ================================================================================

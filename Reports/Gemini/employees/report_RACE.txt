@@ -16,33 +16,31 @@ Relational Model:
 
 Denormalized Model:
   - Tables: 2
-  - Total Attributes: 17
-    * employee_record_history: 8 columns
-    * department_yearly_summary: 9 columns
+  - Total Attributes: 27
+    * employee_record_history: 16 columns
+    * department_yearly_summary: 11 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 0.7083
-⚠ WARNING: Normalized model has MORE attributes (17 vs 24)
-  Some information may have been lost in the transition
+Completeness Ratio: 1.1250
+⚠ WARNING: Denormalized model has MORE attributes (24 vs 27)
+  New information may have been added in the transition
 
 3. CORRECTNESS EVALUATION
 --------------------------------------------------------------------------------
 
-Data Type Preservation: 35.29%
+Data Type Preservation: 62.50%
 
 ⚠ Issues Found:
-  - Type mismatch: id (character(4)) -> gender (employees.employee_gender)
-  - Type mismatch: employee_id (bigint) -> department_id (character(4))
-  - Type mismatch: department_id (character(4)) -> department_name (character)
-  - Type mismatch: department_id (character(4)) -> department_name (character)
-  - Type mismatch: from_date (date) -> first_name (character)
-  - Type mismatch: to_date (date) -> avg_salary (numeric(15,)
-  - Type mismatch: first_name (character) -> total_managers (integer)
-  - Type mismatch: last_name (character) -> salary_amount (bigint)
-  - Type mismatch: gender (employees.employee_gender) -> total_male_employees (integer)
-  - Type mismatch: hire_date (date) -> total_salary_expense (bigint)
-  - Type mismatch: employee_id (bigint) -> total_female_employees (integer)
+  - Type mismatch: id (character(4)) -> is_current (boolean)
+  - Type mismatch: from_date (date) -> is_manager (boolean)
+  - Type mismatch: to_date (date) -> total_managers (integer)
+  - Type mismatch: employee_id (bigint) -> total_employees (integer)
+  - Type mismatch: from_date (date) -> report_year (integer)
+  - Type mismatch: to_date (date) -> tenure_days (integer)
+  - Type mismatch: employee_id (bigint) -> age_at_period (integer)
+  - Type mismatch: from_date (date) -> department_name (character)
+  - Type mismatch: to_date (date) -> avg_salary (numeric(15, 2))
 
 4. STRUCTURAL SIMILARITY ANALYSIS
 --------------------------------------------------------------------------------
@@ -54,85 +52,113 @@ Relational Model (Combined Text):
   amount birth_date department_id department_id dept_name employee_id employee_id employee_id employee_id first_name from_date from_date from_date from_date gender hire_date id id last_name title to_date to_date to_date to_date
 
 Denormalized Model (Combined Text):
-  avg_salary birth_date department_id department_name department_name effective_to_date first_name gender hire_date last_name max_salary min_salary salary_amount total_female_employees total_male_employees total_managers total_salary_expense
+  age_at_period avg_salary birth_date department_id department_id department_name department_name effective_from_date effective_to_date employee_id first_name gender hire_date is_current is_manager last_name max_salary min_salary report_year salary_amount tenure_days title total_employees total_female_employees total_male_employees total_managers total_salary_expense
 
 Structural Similarity Metrics:
-  BLEU Score:    0.2338
-  ROUGE-1:       0.4500
-  METEOR Score:  0.1830
+  BLEU Score:    0.3333
+  ROUGE-1:       0.4950
+  METEOR Score:  0.3386
 
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
 
-Identified 17 attribute pairs for type checking:
+Identified 24 attribute pairs for type checking:
 
 Pair 1:
   Relational:    id character(4)
-  Denormalized:  gender employees.employee_gender
+  Denormalized:  is_current boolean
 
 Pair 2:
   Relational:    dept_name character
-  Denormalized:  last_name character
+  Denormalized:  department_name character
 
 Pair 3:
   Relational:    employee_id bigint
-  Denormalized:  department_id character(4)
+  Denormalized:  employee_id bigint
 
 Pair 4:
   Relational:    department_id character(4)
-  Denormalized:  department_name character
+  Denormalized:  department_id character(4)
 
 Pair 5:
   Relational:    from_date date
-  Denormalized:  birth_date date
+  Denormalized:  is_manager boolean
 
 Pair 6:
   Relational:    to_date date
-  Denormalized:  hire_date date
+  Denormalized:  total_managers integer
 
 Pair 7:
   Relational:    employee_id bigint
-  Denormalized:  min_salary bigint
+  Denormalized:  total_employees integer
 
 Pair 8:
   Relational:    department_id character(4)
-  Denormalized:  department_name character
+  Denormalized:  department_id character(4)
 
 Pair 9:
   Relational:    from_date date
-  Denormalized:  first_name character
+  Denormalized:  report_year integer
 
 Pair 10:
   Relational:    to_date date
-  Denormalized:  avg_salary numeric(15,
+  Denormalized:  tenure_days integer
 
 Pair 11:
   Relational:    id bigint
-  Denormalized:  max_salary bigint
+  Denormalized:  min_salary bigint
 
 Pair 12:
   Relational:    birth_date date
-  Denormalized:  effective_to_date date
+  Denormalized:  birth_date date
 
 Pair 13:
   Relational:    first_name character
-  Denormalized:  total_managers integer
+  Denormalized:  first_name character
 
 Pair 14:
   Relational:    last_name character
-  Denormalized:  salary_amount bigint
+  Denormalized:  last_name character
 
 Pair 15:
-  Relational:    gender employees.employee_gender
-  Denormalized:  total_male_employees integer
+  Relational:    gender employees
+  Denormalized:  gender employees
 
 Pair 16:
   Relational:    hire_date date
-  Denormalized:  total_salary_expense bigint
+  Denormalized:  hire_date date
 
 Pair 17:
   Relational:    employee_id bigint
-  Denormalized:  total_female_employees integer
+  Denormalized:  age_at_period integer
+
+Pair 18:
+  Relational:    amount bigint
+  Denormalized:  salary_amount bigint
+
+Pair 19:
+  Relational:    from_date date
+  Denormalized:  department_name character
+
+Pair 20:
+  Relational:    to_date date
+  Denormalized:  avg_salary numeric(15, 2)
+
+Pair 21:
+  Relational:    employee_id bigint
+  Denormalized:  max_salary bigint
+
+Pair 22:
+  Relational:    title character
+  Denormalized:  title character
+
+Pair 23:
+  Relational:    from_date date
+  Denormalized:  effective_from_date date
+
+Pair 24:
+  Relational:    to_date date
+  Denormalized:  effective_to_date date
 
 
 ================================================================================

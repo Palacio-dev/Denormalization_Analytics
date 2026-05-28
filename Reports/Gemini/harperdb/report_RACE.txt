@@ -6,32 +6,29 @@ SQL MODEL DENORMALIZATION EVALUATION REPORT
 --------------------------------------------------------------------------------
 Relational Model:
   - Tables: 3
-  - Total Attributes: 9
+  - Total Attributes: 11
     * entitlements: 8 columns
     * users: 1 columns
-    * user_entitlements: 2 columns (junction table - excluded from analysis)
-
-  Note: 1 junction table(s) detected and excluded from analysis:
-    - user_entitlements
+    * user_entitlements: 2 columns
 
 Denormalized Model:
   - Tables: 1
-  - Total Attributes: 8
-    * denormalized_user_entitlements: 8 columns
+  - Total Attributes: 12
+    * denormalized_user_entitlements: 12 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 0.8889
-⚠ WARNING: Normalized model has MORE attributes (8 vs 9)
-  Some information may have been lost in the transition
+Completeness Ratio: 1.0909
+⚠ WARNING: Denormalized model has MORE attributes (11 vs 12)
+  New information may have been added in the transition
 
 3. CORRECTNESS EVALUATION
 --------------------------------------------------------------------------------
 
-Data Type Preservation: 87.50%
+Data Type Preservation: 90.91%
 
 ⚠ Issues Found:
-  - Type mismatch: inactiveDate (DATE) -> activeFlag (INT)
+  - Type mismatch: id (INT) -> isExpired (BOOLEAN)
 
 4. STRUCTURAL SIMILARITY ANALYSIS
 --------------------------------------------------------------------------------
@@ -40,32 +37,32 @@ This section measures naming and structural alignment between models.
 Metrics are calculated on combined, alphabetically-sorted column names.
 
 Relational Model (Combined Text):
-  activeDate activeFlag featureType id id inactiveDate packageType useCount useLimit
+  activeDate activeFlag entitlement_id featureType id id inactiveDate packageType useCount useLimit user_id
 
 Denormalized Model (Combined Text):
-  activeFlag entitlement_id featureType inactiveDate packageType useCount useLimit user_id
+  activeDate activeFlag entitlement_id featureType inactiveDate isExpired isLimitReached packageType remainingUses useCount useLimit user_id
 
 Structural Similarity Metrics:
-  BLEU Score:    0.6619
-  ROUGE-1:       0.8421
-  METEOR Score:  0.6320
+  BLEU Score:    0.7500
+  ROUGE-1:       0.8148
+  METEOR Score:  0.7752
 
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
 
-Identified 8 attribute pairs for type checking:
+Identified 11 attribute pairs for type checking:
 
 Pair 1:
   Relational:    id INT
-  Denormalized:  user_id INT
+  Denormalized:  remainingUses INT
 
 Pair 2:
   Relational:    activeDate DATE
-  Denormalized:  inactiveDate DATE
+  Denormalized:  activeDate DATE
 
 Pair 3:
   Relational:    inactiveDate DATE
-  Denormalized:  activeFlag INT
+  Denormalized:  inactiveDate DATE
 
 Pair 4:
   Relational:    useLimit INT
@@ -85,6 +82,18 @@ Pair 7:
 
 Pair 8:
   Relational:    activeFlag INT
+  Denormalized:  activeFlag INT
+
+Pair 9:
+  Relational:    id INT
+  Denormalized:  isExpired BOOLEAN
+
+Pair 10:
+  Relational:    user_id INT
+  Denormalized:  user_id INT
+
+Pair 11:
+  Relational:    entitlement_id INT
   Denormalized:  entitlement_id INT
 
 

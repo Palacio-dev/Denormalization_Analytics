@@ -6,37 +6,35 @@ SQL MODEL DENORMALIZATION EVALUATION REPORT
 --------------------------------------------------------------------------------
 Relational Model:
   - Tables: 4
-  - Total Attributes: 14
+  - Total Attributes: 13
     * customers: 4 columns
     * orders: 3 columns
-    * products: 3 columns
+    * products: 2 columns
     * order_details: 4 columns
 
 Denormalized Model:
   - Tables: 3
-  - Total Attributes: 18
-    * orders_fact_snapshot: 7 columns
-    * orders_daily_rollup: 6 columns
-    * customers_active_snapshot: 5 columns
+  - Total Attributes: 25
+    * orders_fact_snapshot: 12 columns
+    * orders_daily_rollup: 7 columns
+    * customers_active_snapshot: 6 columns
 
 2. COMPLETENESS ANALYSIS
 --------------------------------------------------------------------------------
-Completeness Ratio: 1.2857
-⚠ WARNING: Denormalized model has MORE attributes (14 vs 18)
+Completeness Ratio: 1.9231
+⚠ WARNING: Denormalized model has MORE attributes (13 vs 25)
   New information may have been added in the transition
 
 3. CORRECTNESS EVALUATION
 --------------------------------------------------------------------------------
 
-Data Type Preservation: 57.14%
+Data Type Preservation: 69.23%
 
 ⚠ Issues Found:
   - Type mismatch: customer_id (SERIAL) -> customer_id (INT)
   - Type mismatch: order_id (SERIAL) -> order_id (INT)
   - Type mismatch: product_id (SERIAL) -> product_id (INT)
   - Type mismatch: order_detail_id (SERIAL) -> order_count (INT)
-  - Type mismatch: product_id (INT) -> customer_name (VARCHAR(100))
-  - Type mismatch: quantity (INT) -> total_revenue (DECIMAL(15,2))
 
 4. STRUCTURAL SIMILARITY ANALYSIS
 --------------------------------------------------------------------------------
@@ -45,20 +43,20 @@ This section measures naming and structural alignment between models.
 Metrics are calculated on combined, alphabetically-sorted column names.
 
 Relational Model (Combined Text):
-  customer_address customer_email customer_id customer_id customer_name order_date order_detail_id order_id order_id price product_id product_id product_name quantity
+  customer_address customer_email customer_id customer_id customer_name order_date order_detail_id order_id order_id product_id product_id product_name quantity
 
 Denormalized Model (Combined Text):
-  avg_order_value customer_address customer_address customer_email customer_email customer_id customer_id customer_name customer_name last_order_date order_count order_id price product_id product_name quantity rollup_date total_revenue
+  avg_order_value customer_address customer_address customer_email customer_email customer_id customer_id customer_id customer_name customer_name idx_order_snapshot_filter is_active last_order_date order_count order_date order_id price product_id product_id product_name quantity rollup_date total_amount total_quantity total_revenue
 
 Structural Similarity Metrics:
-  BLEU Score:    0.5556
-  ROUGE-1:       0.6984
-  METEOR Score:  0.6510
+  BLEU Score:    0.4400
+  ROUGE-1:       0.6154
+  METEOR Score:  0.6748
 
 5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
 --------------------------------------------------------------------------------
 
-Identified 14 attribute pairs for type checking:
+Identified 13 attribute pairs for type checking:
 
 Pair 1:
   Relational:    customer_id SERIAL
@@ -86,7 +84,7 @@ Pair 6:
 
 Pair 7:
   Relational:    order_date DATE
-  Denormalized:  rollup_date DATE
+  Denormalized:  order_date DATE
 
 Pair 8:
   Relational:    product_id SERIAL
@@ -97,24 +95,20 @@ Pair 9:
   Denormalized:  product_name VARCHAR(100)
 
 Pair 10:
-  Relational:    price DECIMAL(10,2)
-  Denormalized:  price DECIMAL(10,2)
-
-Pair 11:
   Relational:    order_detail_id SERIAL
   Denormalized:  order_count INT
 
-Pair 12:
+Pair 11:
   Relational:    order_id INT
-  Denormalized:  quantity INT
+  Denormalized:  customer_id INT
+
+Pair 12:
+  Relational:    product_id INT
+  Denormalized:  product_id INT
 
 Pair 13:
-  Relational:    product_id INT
-  Denormalized:  customer_name VARCHAR(100)
-
-Pair 14:
   Relational:    quantity INT
-  Denormalized:  total_revenue DECIMAL(15,2)
+  Denormalized:  quantity INT
 
 
 ================================================================================
