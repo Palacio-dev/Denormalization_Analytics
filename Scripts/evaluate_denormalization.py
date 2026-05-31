@@ -44,25 +44,12 @@ class SQLParser:
         content = SQLParser.remove_sql_comments(content)
         
         tables = {}
-        # Find all CREATE TABLE statements
-        # Updated pattern to handle:
-        # - CREATE TABLE IF NOT EXISTS
-        # - Schema-qualified names (e.g., public."Album")
-        # - Quoted identifiers (e.g., "TableName")
-        # Pattern: CREATE TABLE [IF NOT EXISTS] [schema.]table_name (...)
-        table_pattern = r'CREATE TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:\w+\.)?(?:"[^"]+"|\'[^\']+\'|\w+)\s*\((.*?)\);'
-        matches = re.findall(table_pattern, content, re.DOTALL | re.IGNORECASE)
-        
-        # Also match table names separately with adjusted pattern
         table_pattern_with_name = r'CREATE TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:(\w+)\.)?(?:"([^"]+)"|\'([^\']+)\'|(\w+))\s*\((.*?)\);'
         matches_with_names = re.findall(table_pattern_with_name, content, re.DOTALL | re.IGNORECASE)
         
         for match in matches_with_names:
-            # match is (schema, quoted_name1, quoted_name2, unquoted_name, table_body)
-            schema = match[0]
             table_name = match[1] or match[2] or match[3]
-            table_body = match[4]
-            table_body = table_body.strip().rstrip(')')
+            table_body = match[4].strip()
             columns = []
             constraints = []
             
@@ -89,26 +76,15 @@ class SQLParser:
                     current_line.append(char)
             
             for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-                if line.startswith('--'):
-                    continue  # Skip comments
-                
                 # Skip lines that are just closing parenthesis or other noise
-                if line in (')', ');', '(', '()', ','):
+                if line in (')', ');', '(', '()', ',') or line.startswith(')'):
                     continue
-                
-                # Skip lines that start with closing paren
-                if line.startswith(')'):
-                    continue
-                
                 line_upper = line.upper()
                 if (line_upper.startswith('PRIMARY KEY') or
                     line_upper.startswith('FOREIGN KEY') or
-                    line_upper.startswith('CONSTRAINT') or   # ← ADD THIS
-                    line_upper.startswith('UNIQUE') or        # ← good to have too
-                    line_upper.startswith('CHECK')):          # ← good to have too
+                    line_upper.startswith('CONSTRAINT') or   
+                    line_upper.startswith('UNIQUE') or        
+                    line_upper.startswith('CHECK')):          
                     constraints.append(line)
                 else:
                     # It's a column definition
@@ -149,13 +125,18 @@ class SQLParser:
             data_type = type_match.group(1)
             data_type = re.sub(r'\(\s*(\d+)\s*,\s*(\d+)\s*\)', r'(\1, \2)', data_type)
             data_type = re.sub(r'\(\s*(\d+)\s*\)', r'(\1)', data_type)
+
+            raw_type = type_match.group(1)
+            true_constraints_str = rest.replace(raw_type, '', 1).strip()
+            constraints = true_constraints_str.split() if true_constraints_str else []
         else:
             data_type = rest.split()[0]  # Fallback to first word after name
+            constraints = rest.split()[1:] 
 
         
         return {
             'name': name,
-            'type': data_type,
+            'type': data_type.upper(),
             'constraints': constraints,
             'full_def': column_def
         }
@@ -189,13 +170,16 @@ class SQLParser:
         
         # Additional check: if ALL columns are referenced in FOREIGN KEYs
         # Extract column names from FOREIGN KEY constraints
+        # Better extraction logic
         fk_columns = set()
         for constraint in constraints:
             if 'FOREIGN KEY' in constraint.upper():
-                # Pattern: FOREIGN KEY (column_name) REFERENCES ...
-                fk_match = re.search(r'FOREIGN KEY\s*\((\w+)\)', constraint, re.IGNORECASE)
+                # Capture everything inside the parentheses
+                fk_match = re.search(r'FOREIGN KEY\s*\((.*?)\)', constraint, re.IGNORECASE)
                 if fk_match:
-                    fk_columns.add(fk_match.group(1))
+                    # Split by comma and strip spaces to handle composite keys!
+                    cols = [c.strip() for c in fk_match.group(1).split(',')]
+                    fk_columns.update(cols)
         
         # Get actual column names
         column_names = set()
@@ -255,13 +239,16 @@ class ModelComparator:
         return denorm_count / rel_count
     
     
-    def pair_identifiers(self) -> List[Tuple[Dict, Dict]]:
+    def pair_identifiers(self) -> Tuple[List[Tuple[Dict, Dict]], float]:
         """
         Pair equivalent identifiers between relational and denormalized models.
         Uses the following matching strategy:
         - Best Levenshtein distance (for remaining unpaired attributes)
-        
-        Returns list of (relational_attr_dict, denormalized_attr_dict) tuples
+    
+        Returns:
+        A tuple containing:
+        - List of (relational_attr_dict, denormalized_attr_dict) tuples
+        - The average Levenshtein distance of the matched pairs (float)
         """
         rel_columns_list = []
         for table_name, table_info in self.relational_tables.items():
@@ -294,19 +281,23 @@ class ModelComparator:
 
         # Hungarian algorithm finds the globally optimal assignment
         row_indices, col_indices = linear_sum_assignment(cost_matrix)
-
         pairs = []
+        total_distance = 0.0  # 2. Initialize a running total for the distance
+
         for i, j in zip(row_indices, col_indices):
             pairs.append((rel_columns_list[i], denorm_columns_list[j]))
+            
+            # 3. Add the optimal pair's distance to our total
+            total_distance += cost_matrix[i][j]
 
-        return pairs
+        # 4. Calculate the average safely (avoiding division by zero)
+        num_pairs = len(pairs)
+        average_distance = (total_distance / num_pairs) if num_pairs > 0 else 0.0
+
+        # 5. Return both the pairs list and the calculated average
+        return pairs, average_distance
     
-    # def tokenize_sql(self, sql_string: str) -> List[str]:
-    #     """Tokenize SQL string for metric calculation"""
-    #     # Remove extra spaces and split
-    #     tokens = re.findall(r'\w+|\(|\)', sql_string)
-    #     return tokens
-    
+
     def calculate_bleu(self, reference: str, candidate: str, weights=(1.0,)) -> float:
         """Calculate BLEU score"""
         ref_tokens = reference.split()
@@ -359,7 +350,7 @@ class ModelComparator:
             'issues': []
         }
         
-        pairs = self.pair_identifiers()
+        pairs, avg_levenshtein = self.pair_identifiers()
         
         for rel_info, denorm_info in pairs:
             if not rel_info or not denorm_info:
@@ -386,6 +377,7 @@ class ModelComparator:
         else:
             results['type_preservation_rate'] = 0.0
         
+        results['average_levenshtein'] = avg_levenshtein
         return results
     
     def build_combined_attribute_text(self, tables: Dict, exclude_junction_tables: bool = True) -> str:
@@ -486,7 +478,7 @@ class ModelComparator:
         report_lines.append("\n2. COMPLETENESS ANALYSIS")
         report_lines.append("-" * 80)
         completeness = self.calculate_completeness()
-        report_lines.append(f"Completeness Ratio: {completeness:.4f}")
+        report_lines.append(f"Completeness Ratio: {completeness:.2f}")
         if completeness == 1.0:
             report_lines.append("✓ IDEAL: No information was added or lost")
         elif completeness > 1.0:
@@ -502,6 +494,7 @@ class ModelComparator:
         correctness = self.evaluate_correctness()
         
         report_lines.append(f"\nData Type Preservation: {correctness['type_preservation_rate']:.2%}")
+        report_lines.append(f"Average Levenshtein Distance of Matched Pairs: {correctness['average_levenshtein']:.2f}")
         
         if correctness['issues']:
             report_lines.append("\n⚠ Issues Found:")
@@ -525,15 +518,15 @@ class ModelComparator:
         report_lines.append(f"  {structural_metrics['denormalized_text']}\n")
         
         report_lines.append("Structural Similarity Metrics:")
-        report_lines.append(f"  BLEU Score:    {structural_metrics['bleu']:.4f}")
-        report_lines.append(f"  ROUGE-1:       {structural_metrics['rouge1']:.4f}")
-        report_lines.append(f"  METEOR Score:  {structural_metrics['meteor']:.4f}")
+        report_lines.append(f"  BLEU Score:    {structural_metrics['bleu']:.2f}")
+        report_lines.append(f"  ROUGE-1:       {structural_metrics['rouge1']:.2f}")
+        report_lines.append(f"  METEOR Score:  {structural_metrics['meteor']:.2f}")
         
         # 5. Attribute Pairing for Type Validation
         report_lines.append("\n5. ATTRIBUTE PAIRING FOR TYPE VALIDATION")
         report_lines.append("-" * 80)
         
-        pairs = self.pair_identifiers()
+        pairs, avg_levenshtein = self.pair_identifiers()
         report_lines.append(f"\nIdentified {len(pairs)} attribute pairs for type checking:\n")
         
         for i, (rel_info, denorm_info) in enumerate(pairs, 1):
