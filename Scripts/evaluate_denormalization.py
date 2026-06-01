@@ -454,19 +454,19 @@ class ModelComparator:
         report_lines.append(f"  - Tables: {len(self.relational_tables)}")
         report_lines.append(f"  - Total Attributes: {len(self.relational_attrs)}")
         
-        # Identify junction tables
-        junction_tables = []
-        for table_name, table_info in self.relational_tables.items():
-            is_junction = SQLParser.is_junction_table(table_info)
-            marker = " (junction table - excluded from analysis)" if is_junction else ""
-            report_lines.append(f"    * {table_name}: {len(table_info['columns'])} columns{marker}")
-            if is_junction:
-                junction_tables.append(table_name)
+        # # Identify junction tables
+        # junction_tables = []
+        # for table_name, table_info in self.relational_tables.items():
+        #     is_junction = SQLParser.is_junction_table(table_info)
+        #     marker = " (junction table - excluded from analysis)" if is_junction else ""
+        #     report_lines.append(f"    * {table_name}: {len(table_info['columns'])} columns{marker}")
+        #     if is_junction:
+        #         junction_tables.append(table_name)
         
-        if junction_tables:
-            report_lines.append(f"\n  Note: {len(junction_tables)} junction table(s) detected and excluded from analysis:")
-            for jt in junction_tables:
-                report_lines.append(f"    - {jt}")
+        # if junction_tables:
+        #     report_lines.append(f"\n  Note: {len(junction_tables)} junction table(s) detected and excluded from analysis:")
+        #     for jt in junction_tables:
+        #         report_lines.append(f"    - {jt}")
         
         report_lines.append(f"\nDenormalized Model:")
         report_lines.append(f"  - Tables: {len(self.denormalized_tables)}")
@@ -478,7 +478,6 @@ class ModelComparator:
         report_lines.append("\n2. COMPLETENESS ANALYSIS")
         report_lines.append("-" * 80)
         completeness = self.calculate_completeness()
-        report_lines.append(f"Completeness Ratio: {completeness:.2f}")
         if completeness == 1.0:
             report_lines.append("✓ IDEAL: No information was added or lost")
         elif completeness > 1.0:
@@ -492,35 +491,32 @@ class ModelComparator:
         report_lines.append("\n3. CORRECTNESS EVALUATION")
         report_lines.append("-" * 80)
         correctness = self.evaluate_correctness()
-        
-        report_lines.append(f"\nData Type Preservation: {correctness['type_preservation_rate']:.2%}")
-        report_lines.append(f"Average Levenshtein Distance of Matched Pairs: {correctness['average_levenshtein']:.2f}")
-        
+        structural_metrics = self.calculate_structural_metrics()
+
         if correctness['issues']:
             report_lines.append("\n⚠ Issues Found:")
             for issue in correctness['issues']:
                 report_lines.append(f"  - {issue}")
         else:
             report_lines.append("\n✓ No type mismatches found")
-        
-        # 4. Structural Similarity Analysis
-        report_lines.append("\n4. STRUCTURAL SIMILARITY ANALYSIS")
+
         report_lines.append("-" * 80)
-        report_lines.append("\nThis section measures naming and structural alignment between models.")
-        report_lines.append("Metrics are calculated on combined, alphabetically-sorted column names.\n")
         
-        structural_metrics = self.calculate_structural_metrics()
+        report_lines.append(f"Completeness Ratio:        {completeness:.2f}")
+        report_lines.append(f"\nData Type Preservation:  {correctness['type_preservation_rate']:.2f}")
+        report_lines.append(f"Avg Levenshtein Distance : {correctness['average_levenshtein']:.2f}")
+        report_lines.append(f"  BLEU Score:              {structural_metrics['bleu']:.2f}")
+        report_lines.append(f"  ROUGE-1:                 {structural_metrics['rouge1']:.2f}")
+        report_lines.append(f"  METEOR Score:            {structural_metrics['meteor']:.2f}")
         
+
+        report_lines.append("-" * 80)
+
         report_lines.append("Relational Model (Combined Text):")
         report_lines.append(f"  {structural_metrics['relational_text']}\n")
         
         report_lines.append("Denormalized Model (Combined Text):")
         report_lines.append(f"  {structural_metrics['denormalized_text']}\n")
-        
-        report_lines.append("Structural Similarity Metrics:")
-        report_lines.append(f"  BLEU Score:    {structural_metrics['bleu']:.2f}")
-        report_lines.append(f"  ROUGE-1:       {structural_metrics['rouge1']:.2f}")
-        report_lines.append(f"  METEOR Score:  {structural_metrics['meteor']:.2f}")
         
         # 5. Attribute Pairing for Type Validation
         report_lines.append("\n5. ATTRIBUTE PAIRING FOR TYPE VALIDATION")
