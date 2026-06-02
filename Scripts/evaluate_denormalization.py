@@ -52,6 +52,7 @@ class SQLParser:
             table_body = match[4].strip()
             columns = []
             constraints = []
+            fk_columns = []
             
             # Split by commas, but respect parentheses
             # This handles cases like: PRIMARY KEY (col1, col2)
@@ -86,20 +87,61 @@ class SQLParser:
                     line_upper.startswith('UNIQUE') or        
                     line_upper.startswith('CHECK')):          
                     constraints.append(line)
+                    if 'FOREIGN KEY' in line_upper:
+                        fk_match = re.search(r'FOREIGN KEY\s*\((.*?)\)', line, re.IGNORECASE)
+                        if fk_match:
+                            cols = [c.strip().strip('"\'') for c in fk_match.group(1).split(',')]
+                            fk_columns.extend(cols)
                 else:
                     # It's a column definition
                     # Additional validation: a column definition should have at least a name and type
                     # Skip if it looks like a fragment or noise
                     if len(line.split()) >= 2:
                         columns.append(line)
+                    
+                        if ' REFERENCES ' in line_upper:
+                            # The column name is ALWAYS the very first word on this line
+                            inline_fk_name = line.split()[0]
+                            
+                            # Clean it up (remove quotes if they used "id_uf")
+                            inline_fk_name = inline_fk_name.strip('"\'')
+                            
+                            # Add it to our blacklist!
+                            fk_columns.append(inline_fk_name)
                 
             
             tables[table_name] = {
                 'columns': columns,
-                'constraints': constraints
+                'constraints': constraints,
+                'fk_blacklist': list(set(fk_columns))  # Unique list of columns involved in foreign keys
             }
         
-        return tables
+        # --- END OF CREATE TABLE LOOP ---
+        
+        # Now that all tables are created, sweep for external ALTER TABLE Foreign Keys
+        alter_pattern = r'ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:(?:\w+)\.)?(?:"([^"]+)"|\'([^\']+)\'|(\w+))[^;]+?FOREIGN\s+KEY\s*\((.*?)\)'
+        alter_matches = re.findall(alter_pattern, content, re.IGNORECASE | re.DOTALL)
+        
+        for match in alter_matches:
+            # The regex returns a tuple of 4 groups. 
+            # match[0] = double-quoted name, match[1] = single-quoted name, match[2] = unquoted name
+            # match[3] = The foreign key column(s)
+            
+            table_name = match[0] or match[1] or match[2]
+            fk_str = match[3]
+            
+            # Check if this table actually exists in our parsed dictionary
+            if table_name in tables:
+                # Split by commas and clean up quotes/spaces to handle composite keys
+                cols = [c.strip().strip('"\'') for c in fk_str.split(',')]
+                
+                # Add the new columns to the existing blacklist
+                tables[table_name]['fk_blacklist'].extend(cols)
+                
+                # Remove duplicates just to keep the list clean
+                tables[table_name]['fk_blacklist'] = list(set(tables[table_name]['fk_blacklist']))
+
+        return tables # <-- This is the final return statement of parse_file
     
     @staticmethod
     def extract_column_info(column_def: str) -> Dict:
@@ -195,22 +237,27 @@ class SQLParser:
         return False
     
     @staticmethod
-    def get_all_attributes(tables: Dict, exclude_junction_tables: bool = True) -> List[str]:
+    def get_all_attributes(tables: Dict, exclude_junction_tables: bool = True, exclude_foreign_keys: bool = True) -> List[str]:
         """
         Get all column definitions from all tables
         
         Args:
             tables: Dictionary of tables
             exclude_junction_tables: If True, skip many-to-many junction tables
+            exclude_foreign_keys: If True, skip foreign key columns based on the fk_blacklist identified during parsing
         """
         attributes = []
         for table_name, table_info in tables.items():
             # Skip junction tables if requested
             if exclude_junction_tables and SQLParser.is_junction_table(table_info):
                 continue
-            
+            blacklist = table_info.get('fk_blacklist', [])
             for column in table_info['columns']:
-                attributes.append(column)
+                col_info = SQLParser.extract_column_info(column)
+                if col_info:
+                    if exclude_foreign_keys and col_info['name'] in blacklist:
+                        continue
+                    attributes.append(column)
         return attributes
 
 
@@ -239,7 +286,7 @@ class ModelComparator:
         return denorm_count / rel_count
     
     
-    def pair_identifiers(self) -> Tuple[List[Tuple[Dict, Dict]], float]:
+    def pair_identifiers(self, exclude_foreign_keys: bool = True) -> Tuple[List[Tuple[Dict, Dict]], float]:
         """
         Pair equivalent identifiers between relational and denormalized models.
         Uses the following matching strategy:
@@ -256,18 +303,28 @@ class ModelComparator:
             if SQLParser.is_junction_table(table_info):
                 continue
                 
+            # 1. Fetch the blacklist for this specific relational table
+            blacklist = table_info.get('fk_blacklist', []) if exclude_foreign_keys else []
+                
             for col_def in table_info['columns']:
                 col_info = SQLParser.extract_column_info(col_def)
                 if col_info:
+                    # 2. Block the Foreign Keys from entering the matching pool!
+                    if col_info['name'] in blacklist:
+                        continue
+                        
                     # Add table context to avoid name collisions
                     col_info['table'] = table_name
                     rel_columns_list.append(col_info)
         
         denorm_columns_list = []
         for table_name, table_info in self.denormalized_tables.items():
+            blacklist = table_info.get('fk_blacklist', []) if exclude_foreign_keys else []
             for col_def in table_info['columns']:
                 col_info = SQLParser.extract_column_info(col_def)
                 if col_info:
+                    if col_info['name'] in blacklist:
+                        continue
                     col_info['table'] = table_name
                     denorm_columns_list.append(col_info)
         
@@ -453,6 +510,8 @@ class ModelComparator:
         report_lines.append(f"Relational Model:")
         report_lines.append(f"  - Tables: {len(self.relational_tables)}")
         report_lines.append(f"  - Total Attributes: {len(self.relational_attrs)}")
+        for table_name, table_info in self.relational_tables.items():
+            report_lines.append(f"    * {table_name}: {len(table_info['columns'])} columns")
         
         # # Identify junction tables
         # junction_tables = []
@@ -503,11 +562,11 @@ class ModelComparator:
         report_lines.append("-" * 80)
         
         report_lines.append(f"Completeness Ratio:        {completeness:.2f}")
-        report_lines.append(f"\nData Type Preservation:  {correctness['type_preservation_rate']:.2f}")
-        report_lines.append(f"Avg Levenshtein Distance : {correctness['average_levenshtein']:.2f}")
-        report_lines.append(f"  BLEU Score:              {structural_metrics['bleu']:.2f}")
-        report_lines.append(f"  ROUGE-1:                 {structural_metrics['rouge1']:.2f}")
-        report_lines.append(f"  METEOR Score:            {structural_metrics['meteor']:.2f}")
+        report_lines.append(f"Data Type Preservation:    {correctness['type_preservation_rate']:.2f}")
+        report_lines.append(f"Avg Levenshtein Distance:  {correctness['average_levenshtein']:.2f}")
+        report_lines.append(f"BLEU Score:                {structural_metrics['bleu']:.2f}")
+        report_lines.append(f"ROUGE-1:                   {structural_metrics['rouge1']:.2f}")
+        report_lines.append(f"METEOR Score:              {structural_metrics['meteor']:.2f}")
         
 
         report_lines.append("-" * 80)
