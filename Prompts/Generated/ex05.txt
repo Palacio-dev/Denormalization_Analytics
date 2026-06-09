@@ -1,100 +1,120 @@
-Beginner Prompt (Guided + Educational)
-You are a database design assistant. I have a relational database in a normalized physical model, and I want to denormalize it to improve read performance and produce a new denormalized physical schema.
+------------------------------------------
+BEGGINER:
+You are a data modeling assistant. I have a relational database designed for transaction processing, and I want to create a denormalized physical schema for analytics and reporting.
 
-First, ask me for any missing essentials (DBMS/dialect, current tables/DDL, top 5 slow read queries, row counts, update frequency,
-latency goal).
-Briefly explain (in simple terms) what denormalization is and the common techniques 
-(redundant columns, pre-joined tables, summary tables, materialized views).
-Using the inputs I provide, identify which joins/aggregations are most expensive and propose 2–4 denormalization changes that reduce them.
-Create a new physical schema for the denormalized design:
-Provide SQL DDL (tables, primary keys, indexes, constraints).
-Use clear naming and document the purpose of each denormalized table/column.
-Provide a “How to keep it correct” plan: how redundant data stays in sync (triggers vs scheduled jobs vs CDC), and what trade-offs we accept (write cost, storage, anomaly risk).
-End with a checklist I can follow to validate correctness and performance (sample validation queries, explain plans to compare).
-Output format:
+Your task:
 
-Assumptions
-Current read patterns (as you infer from queries)
-Proposed denormalizations (with pros/cons)
-New denormalized schema (SQL)
-Sync/maintenance strategy
-Validation checklist
+Review the source tables, columns, primary keys, and foreign keys.
+Explain which tables should be combined and why.
+Design a denormalized physical schema that improves read performance for analytics.
+Keep the model simple and easy to understand.
+Preserve the important business meaning of the data.
+Propose a new schema that is suitable for dashboards, aggregations, and reporting.
+Identify the main fact-like data and the descriptive data.
+Suggest useful indexes only if they clearly help analytics queries.
+Provide the output in a clear step-by-step format.
+Please include:
 
+A short explanation of the denormalization approach
+The proposed target tables
+The relationships or joins that were removed or flattened
+Any assumptions you made
+A brief example of how the new schema supports analytics queries
 
-INTERMEDIÁRIO
+Input available:
 
-Act as a performance-focused database engineer. Goal: denormalize an existing normalized physical model to improve read performance, and deliver a complete denormalized physical schema.
-
-Inputs I will provide:
-
-SQL dialect (e.g., Postgres/MySQL/SQL Server/Oracle)
-Current DDL for relevant tables (or an ERD)
-Representative read queries (top N by latency/volume), plus indexes
-Approx row counts/cardinalities and update rates
-Tasks:
-
-Analyze the workload: identify join hotspots, fan-out risks, and expensive GROUP BY / window patterns.
-Propose a denormalized design that targets those queries (not “generic denorm”):
-Pre-joined “wide” tables where appropriate
-Summary/aggregate tables (with grain explicitly stated)
-Optional materialized views (if supported)
-Carefully chosen redundant attributes (only those that remove frequent joins)
-Produce a new physical schema:
-SQL DDL for all new denormalized tables/views
-Index strategy (including composite/covering indexes aligned to filters/sorts)
-Partitioning/clustering suggestions if relevant to read patterns
-Provide a mapping from normalized → denormalized:
-Source-of-truth tables
-Transformation logic (SQL ETL statements or pseudocode)
-Incremental update strategy (batch, triggers, CDC), with frequency/SLA
-Provide a migration/rollout plan:
-Backfill steps
-Dual-write or sync approach
-Cutover + rollback plan
-Explicitly list risks (write amplification, consistency, storage) and mitigations.
-Output format (Markdown):
-
-Workload analysis
-Denormalization proposals (each tied to specific queries)
-New schema DDL
-Refresh/sync design
-Migration plan
-Risks & mitigations
+Source relational schema
+Table definitions
+Sample queries if needed
+Goal:
+Create a version of the database optimized for analytics, not for transaction updates.
 
 
-EXPERT
+INTERMEDIATE:
+You are a database architect specializing in analytics modeling. I need to transform an existing normalized relational 
+schema into a denormalized physical schema optimized for read-heavy analytical workloads.
 
-Expert Prompt (Multiple Design Options + Quantified Trade-offs)
-You are an expert database architect optimizing physical design for read-heavy workloads. Deliver a denormalized physical schema that measurably improves read performance while keeping correctness under defined consistency rules.
+Context:
 
-I will provide (and you must request anything missing):
+- The source system is a normalized OLTP database.
+- The target system is an analytics-oriented physical model.
+- The goal is improved query performance, simpler joins, and easier reporting.
 
-DBMS + version, deployment constraints
-Normalized physical schema DDL + existing indexes
-Query workload: QPS per query shape, p95/p99 latency targets, concurrency
-Data volumes, growth rate, cardinalities, skew, hot partitions
-Write patterns and acceptable consistency model (strong vs eventual, max staleness)
-Storage budget and operational constraints (maintenance windows, ETL tooling)
-Your responsibilities:
+Your task:
 
-Produce 2–3 alternative denormalization architectures, such as:
-Wide-row denormalized tables optimized for primary read paths
-Star-like read schema with selective redundancy + aggregate tables
-Materialized views / indexed views / query rewrite (if supported)
-For each alternative, quantify trade-offs and expected impact:
-Which joins are eliminated, which indexes become effective
-Write amplification, refresh cost, and failure modes
-Choose a recommended option and produce the full denormalized physical schema:
-DDL, indexes, partitioning, clustering, compression/fillfactor settings where applicable
-Constraints strategy (enforced vs informational) and how integrity is validated
-Provide refresh design with operational rigor:
-Backfill strategy, incremental maintenance, idempotency, watermarking
-Monitoring/alerts, reconciliation queries, and data-quality checks
-Provide a cutover plan for zero/low downtime, including rollback and verification gates.
-Output requirements:
+- Analyze the current schema and identify the core business processes represented.
+- Determine the best denormalization strategy for analytics.
+- Design a new physical schema, preferably following dimensional modeling principles when appropriate.
+- Consolidate tables where it reduces join complexity without losing analytical meaning.
+- Define the grain of each target table.
+- Identify fact data, dimensions, and any degenerate attributes.
+- Recommend surrogate keys if useful.
+- Specify indexing, partitioning, or clustering strategies that support analytical access patterns.
+- Call out any data redundancies introduced by denormalization and explain why they are acceptable.
+- Highlight trade-offs between read performance, storage cost, and maintenance complexity.
 
-No hand-wavy statements; list assumptions and the evidence from workload/DDL.
-All tables must specify grain, keys, and update mechanism.
-Provide final DDL in the specified dialect and include sample EXPLAIN-oriented index alignment notes.
-If you want, paste your current schema DDL + 3–10 slowest read queries, and I can tailor one of these prompts further to your database/dialect.
+Deliverables:
+
+- A short assessment of the current model
+- A denormalized target schema
+- Table-by-table transformation logic
+- Key design decisions and assumptions
+- Suggested physical optimizations for analytics
+- Example analytical queries that the new schema supports efficiently
+
+Important:
+The result should be suitable for a data warehouse or analytics mart.
+Prioritize query speed and usability for reporting over normalization.
+
+
+------------------------------------------
+------------------------------------------
+
+EXPERT:
+You are a senior data architect and physical database designer. I need you to redesign a normalized relational OLTP 
+schema into a denormalized analytics-ready physical model.
+
+Objective:
+Create a new physical schema that serves as the base layer for analytics. The design must optimize read performance, 
+reduce join cost, and support common analytical workloads such as aggregation, slicing, filtering, trending, and reporting.
+
+What you must do:
+
+- Reverse-engineer the source schema and infer business processes, entities, and relationships.
+- Define the analytical grain explicitly for each target table.
+- Choose an appropriate denormalization pattern:
+    - star schema
+    - snowflake with partial denormalization
+    - wide analytical table
+    - hybrid model
+- Justify the chosen pattern based on workload and query shapes.
+- Model conformed dimensions where relevant.
+- Flatten or pre-join descriptive attributes that are repeatedly used in analytics.
+- Preserve historical analysis requirements if the source data contains slowly changing attributes.
+- Address measures, additive/semi-additive/non-additive behavior, and aggregation safety.
+- Propose surrogate keys, natural key retention, and any bridge tables if many-to-many relationships exist.
+- Recommend partitioning, indexing, clustering, materialized views, or other physical optimizations appropriate for the target DBMS.
+- Identify potential data quality risks introduced by denormalization.
+- Provide migration mapping from source tables to target structures.
+- Explain what should be materialized now versus computed at query time.
+
+Required output:
+
+- Executive summary of the modeling choice
+- Detailed target physical schema
+- Table definitions at the conceptual/physical level
+- Source-to-target transformation rules
+- Grain, measures, dimensions, and key strategy
+- Performance considerations
+- Assumptions and risks
+- Example analytics use cases and how the schema supports them
+
+Constraints:
+
+- Optimize for a version of the base intended for analytics, not OLTP.
+- Favor scan efficiency and fewer joins over normalization.
+- Make the design explicit enough to be implemented in a warehouse or lakehouse relational layer.
+
+
+
 

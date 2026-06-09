@@ -1,126 +1,94 @@
-Beginner prompt (high guidance, lots of questions)
+------------------------------------------
+BEGGINER:
+You are a database design assistant. I have a normalized relational database used as the operational base system, and I want to create a new physical schema optimized for analytics and faster reads.
 
-You are a senior database engineer and data modeler. Your job is to denormalize an existing relational database physical model to improve read performance, then produce a new physical schema for the denormalized design. Keep data correctness in mind.
+Please explain the process in simple terms and help me redesign the database by denormalizing it appropriately. Assume I am new to database modeling.
 
-First, ask me only the minimum questions you need. If I don’t know an answer, propose sensible defaults and clearly label assumptions.
+Task:
+1. Analyze the source tables and relationships I provide.
+2. Identify which tables should be combined, flattened, or summarized for analytics.
+3. Propose a denormalized physical schema that is better for reporting and dashboard queries.
+4. Explain why each change improves read performance.
+5. Include suggested primary keys, foreign keys, indexes, partitions, and any useful summary tables.
+6. Show the new schema in a clear format, and if possible provide SQL DDL for it.
+7. Warn me about tradeoffs such as duplication, storage cost, and update complexity.
 
-What you must request from me (ask as a checklist):
+Important:
+- Focus on transforming the base system into an analytics-friendly structure.
+- Use clear, beginner-friendly language.
+- If information is missing, state your assumptions before proposing the design.
 
-RDBMS (PostgreSQL/MySQL/SQL Server/Oracle/etc.) + version
-Current schema DDL (tables, PKs/FKs, indexes)
-Top 5–10 slow/important read queries (actual SQL if possible)
-Data volumes (row counts, growth), read/write ratio
-Consistency needs (can data be slightly stale? seconds/minutes?)
-Update patterns (what gets inserted/updated most)
-Constraints: storage limits, ETL windows, allowed features (triggers/materialized views)
-After you have enough info, produce the output in this exact structure:
-A) “What I understood” (bullet summary of workload + constraints)
-B) “Current pain points” (why reads are slow: joins, cardinality, indexes, etc.)
-C) “Denormalization plan” (3–6 concrete changes, each with reason + tradeoff)
-D) “New denormalized physical schema (DDL)”
+Here is my current schema and query workload:
+[PASTE SCHEMA AND EXAMPLES HERE]
 
-Provide CREATE TABLE statements
-Provide PK/FK decisions (you may drop some FKs if justified)
-Provide recommended indexes for the main read queries
-E) “How to keep data consistent”
-Options: application writes, triggers, batch jobs, materialized views
-For the chosen option, outline step-by-step maintenance logic
-F) “Migration approach”
-Steps to backfill data, cut over reads, and validate correctness
-G) “Verification”
-How to measure improvement (EXPLAIN plans, timings, cache effects)
-A short checklist of tests
-Rules:
+------------------------------------------
+------------------------------------------
+INTERMEDIATE:
+Act as a database architect. I have a normalized OLTP relational database and I need a denormalized physical model for analytics.
 
-Prefer the simplest denormalization that improves the top read paths.
-Never denormalize blindly; tie each change to a query pattern.
-Call out risks: write amplification, anomalies, refresh lag, storage growth.
-If you introduce summary tables, define refresh strategy and keys.
-Now start by asking the checklist questions.
+Your job is to:
+- Review the source schema and typical reporting queries.
+- Design a denormalized schema that improves read performance for analytical workloads.
+- Prefer star-like or wide-table structures where appropriate.
+- Identify fact tables, dimension tables, pre-aggregated tables, and any flattened entities.
+- Recommend indexes, partitioning, clustering, materialized views, and other physical design choices.
+- Explain the mapping from the normalized source to the denormalized target.
+- Provide SQL DDL for the new physical schema.
+- Include ETL or ELT loading considerations if needed.
+- State the tradeoffs in query speed, storage, and data maintenance.
 
-INTERMEDIÁRIO
+Assumptions:
+- The goal is analytics, reporting, and dashboard performance.
+- The target schema is a new physical schema, not a redesign of the transactional source.
 
-Intermediate prompt (assumes you can provide DDL + query workload)
-
-Act as a database performance engineer. Given my current physical schema and read workload, design a denormalized physical schema optimized for read performance, and provide the complete DDL for the new schema.
-
-Inputs I will provide:
-
-RDBMS + version
-Current DDL (tables, constraints, indexes)
-Representative read queries (top N) with rough frequency/latency
-Data volumes and growth
-Acceptable staleness (if any)
-Your tasks:
-
-Identify the join paths and high-cost operations in the read workload (explain in plain language).
-Propose denormalization changes, choosing from:
-widening tables (selective column duplication)
-pre-joined “read models” per major query
-summary/aggregate tables
-materialized views (if supported)
-selective de-FK’ing (only if it materially helps and risk is acceptable)
-Produce a new physical schema:
-DDL for denormalized tables/views
-Index strategy aligned to the provided queries
-Partitioning suggestions only if justified by volumes and access patterns
-Provide a maintenance strategy:
-How writes will update both normalized and denormalized structures
-If async refresh: refresh cadence, incremental logic, and conflict handling
-Provide a migration plan with rollback and validation.
 Output format:
+1. Design summary
+2. Target schema
+3. Table-by-table rationale
+4. DDL
+5. Performance considerations
+6. Risks and tradeoffs
 
-“Workload-driven design decisions” (table of: query → denorm choice → index choice)
-“New schema DDL” (grouped by logical area)
-“Maintenance & consistency” (chosen approach + alternatives)
-“Migration & validation plan” (step-by-step)
-Constraints:
+Source schema:
+[PASTE SCHEMA HERE]
 
-Optimize for reads first, but quantify write and storage tradeoffs.
-Do not add new features not supported by the specified RDBMS.
-If multiple viable designs exist, present 2 options (minimal vs aggressive) and recommend one.
-When you’re ready, ask me for the inputs in a compact bullet list.
+Typical analytics queries:
+[PASTE QUERIES HERE]
 
-EXPERT
+------------------------------------------
+------------------------------------------
 
-Expert prompt (engine-specific, tradeoff-heavy, decision matrix)
+EXPERT:
+You are a senior data architect specializing in physical data modeling for analytics. I need a denormalized physical 
+schema derived from a normalized relational source system, with the primary goal of optimizing read performance for analytical workloads.
 
-You are an expert database architect specializing in physical design and denormalized read-optimized models. Your objective: denormalize an existing relational physical model to improve read performance and deliver a new denormalized physical schema, with a rigorous rationale and operational plan.
+Design the target model with rigor:
+- Analyze the source schema, entity relationships, and workload patterns.
+- Define the analytical grain explicitly.
+- Recommend a denormalized physical design appropriate for the access patterns: wide tables, star schema, snowflake reduction,
+  summary tables, materialized views, or hybrid patterns where justified.
+- Minimize joins for frequent reads while preserving analytical correctness.
+- Specify surrogate keys, conformed dimensions, degenerate dimensions, slowly changing dimension strategy if relevant, 
+  and aggregation strategy.
+- Include physical storage considerations such as partitioning, clustering, indexing, compression, and refresh strategy.
+- Provide SQL DDL for the denormalized target schema.
+- Provide an implementation approach for loading from the operational source into the analytics model.
+- Call out edge cases, semantic tradeoffs, and data quality risks.
+- Optimize for BI/reporting latency rather than write efficiency.
 
-I will provide:
+Deliverables:
+- Analytical workload assumptions
+- Proposed physical model
+- Schema DDL
+- Source-to-target mapping
+- Load/refresh strategy
+- Performance rationale
+- Tradeoff analysis
 
-RDBMS + version + deployment (single node/replicas), hardware constraints
-Full DDL + existing indexes/constraints
-Query workload: top read queries, frequency, p95 latency, concurrency, and whether they must be strongly consistent
-Write workload: inserts/updates per table, contention hotspots
-Cardinalities/selectivity estimates and row counts
-Operational constraints: migration window, refresh SLA, acceptable staleness, storage budget
-Your deliverables:
+Input:
+Source schema: [PASTE HERE]
+Representative queries and metrics: [PASTE HERE]
+Business questions the analytics layer must answer: [PASTE HERE]
 
-A decision matrix comparing denormalization approaches per access pattern:
-column duplication vs pre-joined tables vs aggregates vs materialized views
-synchronous vs asynchronous maintenance
-expected impact on read latency, write amplification, storage, and complexity
-A proposed denormalized physical schema with engine-specific optimizations:
-DDL including data types, keys, constraints strategy
-Indexes (and include/covering indexes where applicable)
-Partitioning/sharding recommendations only when strongly justified
-Any computed columns / generated columns / clustering (if supported)
-A consistency and maintenance design:
-invariants to preserve
-refresh mechanics (incremental builds, watermarking, CDC if relevant)
-failure modes + reconciliation strategy
-A migration plan:
-online/backfill approach, dual-write or backfill-then-switch
-validation queries, checksum strategy, rollback plan
-A measurement plan:
-exactly what to measure (EXPLAIN/ANALYZE, buffer reads, lock waits)
-acceptance criteria tied to the workload
-Rules:
 
-Tie every denormalized artifact to a specific query or class of queries.
-Make all assumptions explicit; never hide uncertainty.
-Prefer minimal changes that achieve the SLO; justify any complexity.
-Highlight risks around anomalies, update contention, and data drift.
-Start by asking only the missing inputs required to build the decision matrix (do not ask for everything if I already provided it).
 

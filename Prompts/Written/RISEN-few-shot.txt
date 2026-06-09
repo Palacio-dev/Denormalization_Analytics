@@ -1,31 +1,28 @@
-RACE FRAMEWORK (Role - Action - Context  - Examples)
+RISEN FRAMEWORK (Role - Input - Steps - Expectation - Narrowing)
 
 <Role>
-  You are a Senior Data Enginner with 15 years of experience specialized in relational and non-relational databases, 
-  SQL, and analytical database performance. 
+    You are a Senior Data Engineer with 15 years of experience specialized in relational and non-relational databases, SQL,
+    and analytical database performance tuning.
 </Role>
 
-<Action>
-  Your task is to denormalize the physical model of a relational database to
-  improve performance, creating a new physical schema for the denormalized version.
-  
-  Steps to follow:
-    0 - Here is the schema to analyze:
-
+<Input>
+    Your task is to denormalize the physical model of a relational database to improve read performance and create a new physical 
+    schema for the denormalized version.
+    
+    Here is the schema to denormalize:
+    
 {SCHEMA_CONTENT}
+</Input>
 
-    1 - Perform a deep analysis of the provided SQL creation script.
+<Steps>
+    1 - Perform an analysis of the provided SQL creation script.
     2 - Analyze the 'Frequent Queries / Workload Context'. If none is provided, infer the most likely heavy read queries and JOIN 
         bottlenecks based on the table relationships.
-    3 - Evaluate the [COMMON DENORMALIZATION TECHNIQUES] provided below to determine which are best suited for this specific model.
-    4 - Desing multiple possible denormalized schemas using/combining the [COMMON DENORMALIZATION TECHNIQUES].
-    5 - Evaluate each one of the new schemas and choose the most consistent one.
-    6 - Design the new denormalized schema.
-</Action>
-
-<Context>
-  We are optimizing a database for read-heavy analytical workloads. 
-</Context>
+    3 - Evaluate the [COMMON DENORMALIZATION TECHNIQUES] provided below.
+    4 - For each identified bottleneck, select the most appropriate denormalization technique(s) 
+        from [COMMON DENORMALIZATION TECHNIQUES], explicitly stating your reasoning.
+    5 - Design the new denormalized schema based on the decisions made in step 4.
+</Steps>
 
 <COMMON DENORMALIZATION TECHNIQUES>
     1 - Adding Redundant Attributes: Adding redundant attributes is useful when certain queries involving multiple joins
@@ -50,6 +47,27 @@ RACE FRAMEWORK (Role - Action - Context  - Examples)
         product ID and pricing-related attributes. This approach reduces unnecessary column access and improves cache
         efficiency for common queries.
 </COMMON DENORMALIZATION TECHNIQUES>
+
+<Expectation>
+    Provide your answer in three distinct sections:
+    Section 1: Explain structural decisions (merges, splits, table creation), attribute-level changes (added redundancies,
+               derived columns, removals), and any tradeoffs acknowledged
+    Section 2: For each denormalization decision, provide the query pattern that motivated it. If no workload context 
+               was provided, provide the inferred query.
+    Section 3: A SQL file containing the complete DDL creation script of the denormalized model.
+</Expectation>
+
+<Narrowing_and_Constraints>
+    - Ensure the output SQL dialect matches the input SQL dialect (e.g., PostgreSQL, MySQL).
+    - The denormalized schema must preserve full semantic equivalence with the original 
+      (all original data must remain reconstructible).
+    - Preserve appropriate Semantics and Data Types from the original schema.
+    - Every non-key attribute in the normalized model must appear in the denormalized result. 
+      (across all output tables combined — attributes may move but must not be dropped).
+    - Each column name must appear EXACTLY ONCE per table.
+    - Each CREATE TABLE statement must appear EXACTLY ONCE.
+    - Generate only ONE final schema. 
+</Narrowing_and_Constraints>
 
 <Examples>
     <Example1>

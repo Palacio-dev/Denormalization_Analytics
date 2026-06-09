@@ -1,44 +1,35 @@
-You are a principal database architect. Design a denormalized read-optimized physical schema derived from my existing
-normalized relational schema. The goal is measurable read performance improvement under my workload, with explicit 
-handling of correctness, refresh, and operational complexity.
+You are a senior data architect and physical database designer. I need you to redesign a normalized relational OLTP 
+schema into a denormalized analytics-ready physical model.
 
-Context I will provide:
-- Current DDL + constraints + indexes
-- Operational constraints (no triggers allowed? limited batch windows? CDC available?)
+Objective:
+I will provide a normalized relational physical schema from a transactional system, and I need you to redesign it into 
+a denormalized analytics-oriented physical schema suitable for a data mart or reporting layer. The objective is to improve 
+read performance and simplify analytical queries by reshaping the base into an analytics-ready version.
 
-Hard requirements:
-- Preserve business correctness; document any intentional staleness windows
-- Produce a NEW physical schema for denormalized reads
-- Provide an implementation plan that is safe, observable, and reversible
+What you must do:
 
-Tasks:
-1) Model-to-workload mapping:
-   - Derive an access-pattern matrix (tables/columns touched per top query)
-   - Identify join hotspots and aggregation hotspots
-2) Denormalization patterns (choose and justify):
-   - Wide read tables (pre-joined dimensions)
-   - Pre-aggregated rollups (by time bucket / entity)
-   - Snapshot tables for “current state”
-   - Materialized views (or engine equivalent)
-   - Optional: star schema / fact-dimension split for analytics-style reads
-3) Physical design details:
-   - DDL with exact PK/UK strategy, constraints (where feasible), and indexing
-   - Partitioning keys and pruning logic (only if it improves the target workload)
-   - Optional: clustering/ordering keys, compression, and storage parameters if engine supports
-4) Consistency architecture:
-   - Define data lineage: source-of-truth columns → denormalized columns
-5) Risk analysis:
-   - Write amplification, lock contention, failure modes, backfill runtime, storage growth
-   - Monitoring/alerts: lag, freshness, reconciliation diffs, query latency regressions
+- Reverse-engineer the source schema and infer business processes, entities, and relationships.
+- Define the analytical grain explicitly for each target table.
+- Choose an appropriate denormalization pattern:
+    - star schema
+    - snowflake with partial denormalization
+    - wide analytical table
+    - selective attribute duplication
+    - hybrid model
+- Justify the chosen pattern based on workload and query shapes.
+- Model conformed dimensions where relevant.
+- Flatten or pre-join descriptive attributes that are repeatedly used in analytics.
+- Propose surrogate keys, natural key retention, and any bridge tables if many-to-many relationships exist.
+- Recommend partitioning, indexing, clustering, materialized views, or other physical optimizations appropriate for the target DBMS.
+- Identify potential data quality risks introduced by denormalization.
+- Provide migration mapping from source tables to target structures.
+- Explain what should be materialized now versus computed at query time.
 
-Output format:
-- Executive Summary (1–2 paragraphs)
-- Access-Pattern Matrix
-- Proposed Denormalized Schema (DDL)
+Required output:
+    Provide your answer in three distinct sections:
+        Section 1: Explain structural decisions (merges, splits, table creation), attribute-level changes (added redundancies,
+                derived columns, removals), and any tradeoffs acknowledged
+        Section 2: For each denormalization decision, provide the query pattern that motivated it. If no workload context 
+                was provided, provide the inferred query.
+        Section 3: A SQL file containing the complete DDL creation script of the denormalized model.
 
-Tie every denormalized artifact to a specific query or class of queries.
-Make all assumptions explicit; never hide uncertainty.
-Prefer minimal changes; justify any complexity.
-
-The current normalized schema DDL is here:
-{SCHEMA_CONTENT}

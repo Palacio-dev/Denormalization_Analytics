@@ -1,33 +1,24 @@
-Act as a senior database performance engineer. Denormalize my relational database physical model to optimize
-read performance and produce a new physical schema.
-
-Assume I care about:
-- Lower latency on read-heavy workloads
-- Preserving correctness for business-critical fields
-
-Your tasks:
-1 Workload-driven analysis:
-   - Identify the join paths and high-cost operations in the read workload (explain in plain language).
-   - Determine denormalization candidates
-2 Denormalization design:
-   - Propose specific denormalizations (duplicate attributes, precomputed aggregates, “snapshot” fact tables,
-    star-like read model, covering indexes)
-   - Pre-joined “wide” tables where appropriate
-   - Summary/aggregate tables (with grain explicitly stated)
-   - Carefully chosen redundant attributes (only those that remove frequent joins)
-   - Index strategy (including composite/covering indexes aligned to filters/sorts)
-   - Partitioning/clustering suggestions if relevant to read patterns
-3 Produce the new physical schema:
-   - DDL for new/modified tables/views/materialized views (engine-appropriate)
-   - Index strategy (composite indexes aligned to predicates, include/cover columns where supported)
+Act as a database architect. I need to transform an existing normalized relational physical model into a denormalized
+physical schema for analytics and read-heavy workloads.
 
 
-Output:
-- Full DDL for the denormalized schema
+Your task:
+- Redesign the schema for analytics consumption.
+- Reduce joins where possible by denormalizing strategically.
+- Include table structures, key columns, duplicated dimensions, summary tables, and indexing or partitioning recommendations.
+- Explain the mapping from the normalized source to the denormalized target.
+- Preserve data consistency where needed, but prioritize read performance.
+- Produce a new physical schema that could support a data mart or reporting layer.
+- State the tradeoffs in query speed, storage, and data maintenance.
 
-Avoid generic advice; be concrete and tie every schema change to a query pattern.
+Deliverables:
+    Provide your answer in three distinct sections:
+        Section 1: Explain structural decisions (merges, splits, table creation), attribute-level changes (added redundancies,
+                derived columns, removals), and any tradeoffs acknowledged
+        Section 2: For each denormalization decision, provide the query pattern that motivated it. If no workload context 
+                was provided, provide the inferred query.
+        Section 3: A SQL file containing the complete DDL creation script of the denormalized model.
 
 
-Here is my current physical schema (DDL):
-{SCHEMA_CONTENT}
+
 
