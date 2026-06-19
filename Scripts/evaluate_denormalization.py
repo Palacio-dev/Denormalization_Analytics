@@ -237,27 +237,56 @@ class SQLParser:
         return False
     
     @staticmethod
-    def get_all_attributes(tables: Dict, exclude_junction_tables: bool = True, exclude_foreign_keys: bool = True) -> List[str]:
+    def is_metadata_column(column_name: str) -> bool:
         """
-        Get all column definitions from all tables
+        Heuristic to detect if a column is a standard audit/system metadata attribute.
+        Matches common patterns like created_at, modifieddate, rowguid, etc.
+        """
+        # Clean the name and convert to lowercase for easy matching
+        name = column_name.lower().strip('"\'')
         
-        Args:
-            tables: Dictionary of tables
-            exclude_junction_tables: If True, skip many-to-many junction tables
-            exclude_foreign_keys: If True, skip foreign key columns based on the fk_blacklist identified during parsing
+        # 1. Check for standard replication/system IDs
+        if name in ('rowguid', 'guid', 'sys_id'):
+            return True
+            
+        # 2. Check for common Audit Log combinations
+        audit_verbs = ['creat', 'update', 'modif', 'delete', 'insert']
+        audit_suffixes = ['at', 'by', 'date', 'time']
+        
+        for verb in audit_verbs:
+            for suffix in audit_suffixes:
+                # Matches: created_at, modifieddate, update_time, deleted_by, etc.
+                if verb in name and suffix in name:
+                    return True
+                    
+        return False
+    
+    @staticmethod
+    def get_all_attributes(tables: Dict, exclude_junction_tables: bool = True, exclude_foreign_keys: bool = True, 
+                           exclude_metadata: bool = True) -> List[str]:
+        """
+        Get all column definitions from all tables.
         """
         attributes = []
         for table_name, table_info in tables.items():
-            # Skip junction tables if requested
             if exclude_junction_tables and SQLParser.is_junction_table(table_info):
                 continue
+            
             blacklist = table_info.get('fk_blacklist', [])
+            
             for column in table_info['columns']:
                 col_info = SQLParser.extract_column_info(column)
                 if col_info:
-                    if exclude_foreign_keys and col_info['name'] in blacklist:
+                    # Filter out Foreign Keys
+                    if exclude_foreign_keys and (col_info['name'] in blacklist):
+                        continue 
+                    
+                    #Filter out Audit/Metadata columns
+                    if exclude_metadata and SQLParser.is_metadata_column(col_info['name']):
                         continue
+                    
                     attributes.append(column)
+                    
         return attributes
 
 
@@ -286,7 +315,7 @@ class ModelComparator:
         return denorm_count / rel_count
     
     
-    def pair_identifiers(self, exclude_foreign_keys: bool = True) -> Tuple[List[Tuple[Dict, Dict]], float]:
+    def pair_identifiers(self, exclude_foreign_keys: bool = True, exclude_metadata: bool = True) -> Tuple[List[Tuple[Dict, Dict]], float]:
         """
         Pair equivalent identifiers between relational and denormalized models.
         Uses the following matching strategy:
@@ -312,6 +341,10 @@ class ModelComparator:
                     # 2. Block the Foreign Keys from entering the matching pool!
                     if col_info['name'] in blacklist:
                         continue
+
+                    # NEW: Block Metadata columns from entering the relational matching pool
+                    if exclude_metadata and SQLParser.is_metadata_column(col_info['name']):
+                        continue
                         
                     # Add table context to avoid name collisions
                     col_info['table'] = table_name
@@ -324,6 +357,10 @@ class ModelComparator:
                 col_info = SQLParser.extract_column_info(col_def)
                 if col_info:
                     if col_info['name'] in blacklist:
+                        continue
+
+                    # NEW: Block Metadata columns from entering the relational matching pool
+                    if exclude_metadata and SQLParser.is_metadata_column(col_info['name']):
                         continue
                     col_info['table'] = table_name
                     denorm_columns_list.append(col_info)
@@ -437,17 +474,10 @@ class ModelComparator:
         results['average_levenshtein'] = avg_levenshtein
         return results
     
-    def build_combined_attribute_text(self, tables: Dict, exclude_junction_tables: bool = True) -> str:
+    def build_combined_attribute_text(self, tables: Dict, exclude_junction_tables: bool = True, exclude_foreign_keys: bool = True, exclude_metadata: bool = True) -> str:
         """
         Build combined text from all column names in tables.
         Extracts all column names, sorts them alphabetically, and joins as space-separated string.
-        
-        Args:
-            tables: Dictionary of tables
-            exclude_junction_tables: If True, skip many-to-many junction tables
-            
-        Returns:
-            Space-separated string of sorted column names
         """
         column_names = []
         
@@ -455,11 +485,25 @@ class ModelComparator:
             # Skip junction tables if requested
             if exclude_junction_tables and SQLParser.is_junction_table(table_info):
                 continue
+                
+            # Fetch the FK blacklist for this table
+            blacklist = table_info.get('fk_blacklist', []) if exclude_foreign_keys else []
             
             for col_def in table_info['columns']:
                 col_info = SQLParser.extract_column_info(col_def)
                 if col_info:
-                    column_names.append(col_info['name'])
+                    col_name = col_info['name']
+                    
+                    # 1. Filter out Foreign Keys (Relational Glue)
+                    if exclude_foreign_keys and (col_name in blacklist):
+                        continue
+                        
+                    # 2. Filter out System Metadata (Audit Exhaust)
+                    if exclude_metadata and SQLParser.is_metadata_column(col_name):
+                        continue
+                        
+                    # If it survives the filters, it's true business data!
+                    column_names.append(col_name)
         
         # Sort alphabetically for reproducible comparison
         column_names.sort()
@@ -476,8 +520,8 @@ class ModelComparator:
             Dictionary with metric scores and combined texts
         """
         # Build combined texts from both models
-        rel_text = self.build_combined_attribute_text(self.relational_tables, exclude_junction_tables=True)
-        denorm_text = self.build_combined_attribute_text(self.denormalized_tables, exclude_junction_tables=True)
+        rel_text = self.build_combined_attribute_text(self.relational_tables)
+        denorm_text = self.build_combined_attribute_text(self.denormalized_tables)
         
         results = {
             'relational_text': rel_text,
