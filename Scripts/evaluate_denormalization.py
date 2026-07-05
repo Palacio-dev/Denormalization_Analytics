@@ -18,7 +18,19 @@ from scipy.optimize import linear_sum_assignment
 
 class SQLParser:
     """Parser for SQL CREATE TABLE statements"""
-    
+
+    NUMERIC_TYPES = ('INT', 'FLOAT', 'DECIMAL', 'NUMERIC', 'REAL', 'DOUBLE', 'MONEY', 'BIGINT', 'SMALLINT', 'SERIAL', 
+                     'INTEGER', 'DOUBLE PRECISION', 'SMALLSERIAL', 'BIGSERIAL')
+    TEXT_TYPES = ('CHAR', 'VARCHAR', 'TEXT', 'STRING')
+
+    @staticmethod
+    def is_numeric_type(data_type: str) -> bool:
+        return any(nt in data_type.upper() for nt in SQLParser.NUMERIC_TYPES)
+
+    @staticmethod
+    def is_text_type(data_type: str) -> bool:
+        return any(tt in data_type.upper() for tt in SQLParser.TEXT_TYPES)
+
     @staticmethod
     def remove_sql_comments(text: str) -> str:
         """
@@ -31,6 +43,42 @@ class SQLParser:
         text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
         return text
     
+    @staticmethod
+    def extract_fk_references(line: str) -> List[Dict]:
+        """
+        Single source of truth for foreign-key detection on one logical line
+        (a constraint line OR a column-definition line). Handles both:
+          - table-level:  FOREIGN KEY (col1, col2) REFERENCES other_table
+          - inline:       col_name TYPE ... REFERENCES other_table(...)
+        Returns a list of {'local_column': str, 'target_table': str or None}.
+        Previously this logic was reimplemented three times (parse_file's inline
+        scan, get_table_role's constraint scan, OLAPAvaluator._extract_fk_references)
+        with three slightly different regexes that could disagree on the same input.
+        """
+        line_upper = line.upper()
+        refs = []
+
+        if 'FOREIGN KEY' in line_upper:
+            match = re.search(
+                r'FOREIGN KEY\s*\((.*?)\)\s*(?:REFERENCES\s*([^\s\(]+))?',
+                line, re.IGNORECASE
+            )
+            if match:
+                cols = [c.strip().strip('"\'') for c in match.group(1).split(',')]
+                target = match.group(2).strip() if match.group(2) else None
+                for col in cols:
+                    refs.append({'local_column': col, 'target_table': target})
+            return refs
+
+        if ' REFERENCES ' in line_upper:
+            # Inline column-level FK: the column name is the first token on the line.
+            local_col = line.split()[0].strip('"\'')
+            target_match = re.search(r'REFERENCES\s*([^\s\(]+)', line, re.IGNORECASE)
+            target = target_match.group(1).strip() if target_match else None
+            refs.append({'local_column': local_col, 'target_table': target})
+
+        return refs
+
     @staticmethod
     def parse_file(filepath: str) -> Dict[str, Dict]:
         """
@@ -53,6 +101,7 @@ class SQLParser:
             columns = []
             constraints = []
             fk_columns = []
+            fk_references = []
             
             # Split by commas, but respect parentheses
             # This handles cases like: PRIMARY KEY (col1, col2)
@@ -87,48 +136,45 @@ class SQLParser:
                     line_upper.startswith('UNIQUE') or        
                     line_upper.startswith('CHECK')):          
                     constraints.append(line)
-                    if 'FOREIGN KEY' in line_upper:
-                        fk_match = re.search(r'FOREIGN KEY\s*\((.*?)\)', line, re.IGNORECASE)
-                        if fk_match:
-                            cols = [c.strip().strip('"\'') for c in fk_match.group(1).split(',')]
-                            fk_columns.extend(cols)
+                    refs = SQLParser.extract_fk_references(line)
+                    fk_references.extend(refs)
+                    fk_columns.extend(r['local_column'] for r in refs)
                 else:
                     # It's a column definition
                     # Additional validation: a column definition should have at least a name and type
                     # Skip if it looks like a fragment or noise
                     if len(line.split()) >= 2:
                         columns.append(line)
-                    
-                        if ' REFERENCES ' in line_upper:
-                            # The column name is ALWAYS the very first word on this line
-                            inline_fk_name = line.split()[0]
-                            
-                            # Clean it up (remove quotes if they used "id_uf")
-                            inline_fk_name = inline_fk_name.strip('"\'')
-                            
-                            # Add it to our blacklist!
-                            fk_columns.append(inline_fk_name)
+                        refs = SQLParser.extract_fk_references(line)
+                        fk_references.extend(refs)
+                        fk_columns.extend(r['local_column'] for r in refs)
                 
             
             tables[table_name] = {
                 'columns': columns,
                 'constraints': constraints,
-                'fk_blacklist': list(set(fk_columns))  # Unique list of columns involved in foreign keys
+                'fk_blacklist': list(set(fk_columns)),  # Unique list of columns involved in foreign keys
+                'fk_references': fk_references  # Structured: [{'local_column', 'target_table'}, ...]
             }
         
         # --- END OF CREATE TABLE LOOP ---
         
         # Now that all tables are created, sweep for external ALTER TABLE Foreign Keys
-        alter_pattern = r'ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:(?:\w+)\.)?(?:"([^"]+)"|\'([^\']+)\'|(\w+))[^;]+?FOREIGN\s+KEY\s*\((.*?)\)'
+        alter_pattern = (
+            r'ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:(?:\w+)\.)?'
+            r'(?:"([^"]+)"|\'([^\']+)\'|(\w+))[^;]+?'
+            r'FOREIGN\s+KEY\s*\((.*?)\)\s*(?:REFERENCES\s*([^\s\(;]+))?'
+        )
         alter_matches = re.findall(alter_pattern, content, re.IGNORECASE | re.DOTALL)
         
         for match in alter_matches:
-            # The regex returns a tuple of 4 groups. 
+            # The regex returns a tuple of 5 groups.
             # match[0] = double-quoted name, match[1] = single-quoted name, match[2] = unquoted name
-            # match[3] = The foreign key column(s)
+            # match[3] = the foreign key column(s), match[4] = referenced target table (optional)
             
             table_name = match[0] or match[1] or match[2]
             fk_str = match[3]
+            target_table = match[4].strip() if match[4] else None
             
             # Check if this table actually exists in our parsed dictionary
             if table_name in tables:
@@ -137,6 +183,9 @@ class SQLParser:
                 
                 # Add the new columns to the existing blacklist
                 tables[table_name]['fk_blacklist'].extend(cols)
+                tables[table_name]['fk_references'].extend(
+                    {'local_column': c, 'target_table': target_table} for c in cols
+                )
                 
                 # Remove duplicates just to keep the list clean
                 tables[table_name]['fk_blacklist'] = list(set(tables[table_name]['fk_blacklist']))
@@ -184,57 +233,49 @@ class SQLParser:
         }
     
     @staticmethod
-    def is_junction_table(table_info: Dict) -> bool:
+    def get_table_role(table_info: Dict) -> str:
         """
-        Detect if a table is a many-to-many junction table.
-        Criteria:
-        1. Has FOREIGN KEY constraints
-        2. All columns (or most) are part of foreign keys
-        3. Typically has a composite primary key
+        Analyzes a table's structure to determine its architectural role.
+        Returns: 'JUNCTION_TABLE', 'FACT'
+
+        Note: relies on table_info['fk_blacklist'], which is populated by
+        parse_file via extract_fk_references (covers both table-level
+        FOREIGN KEY(...) constraints and inline "col TYPE REFERENCES ..."
+        definitions). Previously this method re-derived FK columns with its
+        own regex that only matched the table-level form, silently missing
+        inline FKs and disagreeing with the rest of the codebase.
         """
-        columns = table_info['columns']
-        constraints = table_info['constraints']
-        
-        # Check if there are FOREIGN KEY constraints
-        has_foreign_keys = any('FOREIGN KEY' in constraint.upper() for constraint in constraints)
-        
-        if not has_foreign_keys:
-            return False
-        
-        # Count how many FOREIGN KEY references exist
-        fk_count = sum(1 for constraint in constraints if 'FOREIGN KEY' in constraint.upper())
-        
-        # If table has 2+ foreign keys and the number of columns is small (<=3),
-        # it's likely a junction table
-        # This covers cases like: user_id, entitlement_id, created_at (optional timestamp)
-        if fk_count >= 2 and len(columns) <= 3:
-            return True
-        
-        # Additional check: if ALL columns are referenced in FOREIGN KEYs
-        # Extract column names from FOREIGN KEY constraints
-        # Better extraction logic
-        fk_columns = set()
-        for constraint in constraints:
-            if 'FOREIGN KEY' in constraint.upper():
-                # Capture everything inside the parentheses
-                fk_match = re.search(r'FOREIGN KEY\s*\((.*?)\)', constraint, re.IGNORECASE)
-                if fk_match:
-                    # Split by comma and strip spaces to handle composite keys!
-                    cols = [c.strip() for c in fk_match.group(1).split(',')]
-                    fk_columns.update(cols)
-        
-        # Get actual column names
+        columns = table_info.get('columns', [])
+        fk_columns = set(table_info.get('fk_blacklist', []))
+        fk_count = len(fk_columns)
+
         column_names = set()
+        numeric_count = 0
+        text_count = 0
+
         for col_def in columns:
             col_info = SQLParser.extract_column_info(col_def)
             if col_info:
-                column_names.add(col_info['name'])
-        
-        # If all columns are foreign keys, it's definitely a junction table
-        if column_names and fk_columns and column_names == fk_columns:
-            return True
-        
-        return False
+                col_name = col_info['name']
+                col_type = col_info['type']
+                column_names.add(col_name)
+
+                # If it's NOT a Foreign Key, analyze its data type
+                if col_name not in fk_columns:
+                    if SQLParser.is_numeric_type(col_type):
+                        numeric_count += 1
+                    else:
+                        text_count += 1
+
+        # --- CLASSIFICATION LOGIC ---
+
+        # RULE A: Pure Junction (Everything is an FK, or mostly FKs with no real payload)
+        if len(column_names) > 0 and column_names == fk_columns:
+            return 'JUNCTION_TABLE'
+        if fk_count >= 2 and len(columns) <= 3:
+            return 'JUNCTION_TABLE'
+
+        return 'FACT'
     
     @staticmethod
     def is_metadata_column(column_name: str) -> bool:
@@ -262,33 +303,304 @@ class SQLParser:
         return False
     
     @staticmethod
+    def iter_filtered_columns(tables: Dict, exclude_junction_tables: bool = True,
+                               exclude_foreign_keys: bool = True, exclude_metadata: bool = True):
+        """
+        Single source of truth for the "which columns count as real business
+        attributes" filter chain: skip junction tables, skip FK columns, skip
+        audit/metadata columns. Previously this exact three-step chain was
+        copy-pasted across get_all_attributes, pair_identifiers, and
+        build_combined_attribute_text -- any fix to the filter rules (e.g. the
+        modifieddate/rowguid exclusion) had to be made in three places by hand,
+        and it would be easy for them to silently drift apart again.
+
+        Yields (table_name, col_info, raw_column_def) for every column that
+        survives the filters.
+        """
+        for table_name, table_info in tables.items():
+            if exclude_junction_tables and SQLParser.get_table_role(table_info) == 'JUNCTION_TABLE':
+                continue
+
+            blacklist = table_info.get('fk_blacklist', []) if exclude_foreign_keys else []
+
+            for column in table_info['columns']:
+                col_info = SQLParser.extract_column_info(column)
+                if not col_info:
+                    continue
+                if exclude_foreign_keys and col_info['name'] in blacklist:
+                    continue
+                if exclude_metadata and SQLParser.is_metadata_column(col_info['name']):
+                    continue
+                yield table_name, col_info, column
+
+    @staticmethod
     def get_all_attributes(tables: Dict, exclude_junction_tables: bool = True, exclude_foreign_keys: bool = True, 
                            exclude_metadata: bool = True) -> List[str]:
         """
-        Get all column definitions from all tables.
+        Get all column definitions (raw strings) from all tables, after
+        applying the standard junction/FK/metadata filter chain.
         """
-        attributes = []
-        for table_name, table_info in tables.items():
-            if exclude_junction_tables and SQLParser.is_junction_table(table_info):
-                continue
-            
-            blacklist = table_info.get('fk_blacklist', [])
-            
-            for column in table_info['columns']:
-                col_info = SQLParser.extract_column_info(column)
-                if col_info:
-                    # Filter out Foreign Keys
-                    if exclude_foreign_keys and (col_info['name'] in blacklist):
-                        continue 
-                    
-                    #Filter out Audit/Metadata columns
-                    if exclude_metadata and SQLParser.is_metadata_column(col_info['name']):
-                        continue
-                    
-                    attributes.append(column)
-                    
-        return attributes
+        return [
+            raw_column for _, _, raw_column in SQLParser.iter_filtered_columns(
+                tables, exclude_junction_tables, exclude_foreign_keys, exclude_metadata
+            )
+        ]
 
+
+class OLAPAvaluator:
+    def __init__(self, denormalized_tables: Dict[str, Dict]):
+        self.tables = denormalized_tables
+        self.classifications = {}
+        self.report = {
+            "fact_tables": [],
+            "dimension_tables": [],
+            "warnings": [],
+            "metrics": {}
+        }
+
+    def _fk_references(self, table_info: Dict) -> List[Dict]:
+        """
+        FK references for a table, derived from its already-parsed
+        'fk_references' (built once by SQLParser.parse_file). Falls back to
+        re-deriving from constraints for tables that didn't go through
+        parse_file's structured path.
+        """
+        if 'fk_references' in table_info:
+            return table_info['fk_references']
+        refs = []
+        for constraint in table_info.get('constraints', []):
+            refs.extend(SQLParser.extract_fk_references(constraint))
+        return refs
+
+    def _parsed_columns(self, table_info: Dict) -> List[Dict]:
+        """
+        Converts the raw column-definition strings in table_info['columns']
+        into structured dicts via SQLParser.extract_column_info.
+        table_info['columns'] is always a list of strings like
+        "customer_id INT NOT NULL" -- never pre-parsed dicts. Code here used
+        to call col.get('name', '') directly on those strings, which raises
+        AttributeError the moment any fact/dimension table has columns.
+        """
+        parsed = []
+        for col_def in table_info.get('columns', []):
+            col_info = SQLParser.extract_column_info(col_def)
+            if col_info:
+                parsed.append(col_info)
+        return parsed
+
+    def classify_tables(self):
+        """Classify tables as FACT or DIMENSION based on FK count."""
+        for table_name, table_info in self.tables.items():
+            fks = self._fk_references(table_info)
+
+            if len(fks) >= 2:
+                self.classifications[table_name] = 'FACT'
+                self.report['fact_tables'].append(table_name)
+            else:
+                self.classifications[table_name] = 'DIMENSION'
+                self.report['dimension_tables'].append(table_name)
+
+
+    def evaluate_one_big_table(self):
+        """
+        Run the specific checks for a One-Big-Table (OBT) denormalization approach.
+        In a pure OBT, there should be exactly 1 main table (or isolated tables),
+        0 Foreign Keys, and at least 1 Primary Key.
+        """
+        table_count = len(self.tables)
+
+        # General Architecture Warning
+        if table_count > 1:
+            self.report['warnings'].append(
+                f"OBT ARCHITECTURE WARNING: Found {table_count} tables. A true One-Big-Table approach typically collapses data into exactly 1 table."
+            )
+
+        for table_name, table_info in self.tables.items():
+            constraints = table_info.get('constraints', [])
+            columns = self._parsed_columns(table_info)
+
+            fks = self._fk_references(table_info)
+
+            # Count PKs once: table-level constraints OR column-level "PRIMARY KEY"
+            # token, never both for the same key (previous version double-counted
+            # whenever a PK appeared in constraints AND tried to re-read it off
+            # raw column strings, which also crashed on col.get(...)).
+            pk_count = sum(1 for c in constraints if 'PRIMARY KEY' in c.upper())
+            if pk_count == 0:
+                pk_count = sum(
+                    1 for col in columns
+                    if any('PRIMARY' in c.upper() for c in col['constraints'])
+                )
+
+            # Check 1: The "Zero Link" Rule (No Foreign Keys)
+            if len(fks) > 0:
+                self.report['warnings'].append(
+                    f"OBT FK VIOLATION: Table '{table_name}' contains {len(fks)} Foreign Key(s). A pure One-Big-Table must have 0 relationships."
+                )
+
+            # Check 2: The Identity Rule (Must have a Primary Key)
+            if pk_count == 0:
+                self.report['warnings'].append(
+                    f"OBT PK WARNING: Table '{table_name}' lacks a Primary Key. Even deeply flattened tables require a unique identifier."
+                )
+
+
+    def evaluate_galaxy_schema(self):
+        """Ensure no Fact table has a Foreign Key pointing to another Fact table."""
+        for table_name in self.report['fact_tables']:
+            fks = self._fk_references(self.tables[table_name])
+            for fk in fks:
+                target = fk.get('target_table')
+                if not target:
+                    continue
+                target_clean = re.sub(r'["\[\]]', '', target)
+                target_clean = target_clean.split('.')[-1] if '.' in target_clean else target_clean
+
+                # Search our classifications (ignoring schema prefixes if needed)
+                for class_table_name, classification in self.classifications.items():
+                    class_table_clean = class_table_name.split('.')[-1] if '.' in class_table_name else class_table_name
+
+                    if class_table_clean == target_clean and classification == 'FACT':
+                        self.report['warnings'].append(
+                            f"GALAXY VIOLATION: Fact table '{table_name}' has an FK pointing to Fact '{target}'. Facts must only join to Dimensions."
+                        )
+
+
+    def evaluate_fact_tables(self):
+        """Run the Kimball-derived checks for Fact tables."""
+        for table_name in self.report['fact_tables']:
+            table_info = self.tables[table_name]
+            columns = self._parsed_columns(table_info)
+            fk_columns = {fk['local_column'] for fk in self._fk_references(table_info)}
+
+            numeric_count = 0
+            text_count = 0
+
+            for col in columns:
+                col_name = col['name']
+                col_type = col['type']
+                col_constraints_upper = ' '.join(col['constraints']).upper()
+                is_nullable = 'NOT NULL' not in col_constraints_upper
+
+                # Check: NOT NULL Foreign Key Check.
+                # Kimball: "nulls must be avoided in the fact table's foreign
+                # keys because these nulls would automatically cause a
+                # referential integrity violation" (Ch.2, Nulls in Fact Tables).
+                if col_name in fk_columns and is_nullable:
+                    self.report['warnings'].append(
+                        f"FACT FK VIOLATION: Foreign Key '{col_name}' in Fact '{table_name}' allows NULL values."
+                    )
+
+                # Payload counting (ignore keys for payload analysis)
+                if col_name not in fk_columns and 'PRIMARY' not in col_constraints_upper:
+                    if SQLParser.is_numeric_type(col_type):
+                        numeric_count += 1
+                    else:
+                        text_count += 1
+
+            # Payload check: a fact table dominated by text columns is a smell --
+            # Kimball facts are "almost always numeric" (Ch.2, Facts for Measurements).
+            self.report['metrics'][table_name] = {
+                "numeric_payload_cols": numeric_count,
+                "text_payload_cols": text_count
+            }
+            if text_count > numeric_count:
+                self.report['warnings'].append(
+                    f"PAYLOAD WARNING: Fact table '{table_name}' contains more text attributes ({text_count}) than numeric measures ({numeric_count})."
+                )
+
+    def evaluate_dimension_tables(self):
+        """Run the Kimball-derived checks for Dimension tables."""
+        for table_name in self.report['dimension_tables']:
+            table_info = self.tables[table_name]
+            columns = self._parsed_columns(table_info)
+            constraints = table_info.get('constraints', [])
+
+            # Snowflake Audit: a dimension with outgoing FKs to other attribute
+            # tables hasn't been flattened (Ch.2, Snowflaked Dimensions).
+            fks = self._fk_references(table_info)
+            if len(fks) > 0:
+                self.report['warnings'].append(
+                    f"SNOWFLAKE VIOLATION: Dimension '{table_name}' contains {len(fks)} Foreign Key(s). It is not fully flattened."
+                )
+
+            pk_count = 0
+            numeric_count = 0
+            text_count = 0
+
+            for col in columns:
+                col_name = col['name']
+                col_type = col['type']
+                col_constraints = ' '.join(col['constraints']).upper()
+
+                is_pk_col = 'PRIMARY KEY' in col_constraints
+
+                if is_pk_col:
+                    pk_count += 1
+                else:
+                    # No NULL Attributes (Ch.2, Null Attributes in Dimensions --
+                    # nulls should be replaced with an explicit "Unknown"/"N/A" row).
+                    if 'NOT NULL' not in col_constraints:
+                        self.report['warnings'].append(
+                            f"DIMENSION NULL WARNING: Attribute '{col_name}' in '{table_name}' allows NULLs. Consider demanding default values."
+                        )
+
+                    if SQLParser.is_numeric_type(col_type):
+                        numeric_count += 1
+                    else:
+                        text_count += 1
+
+            # Single Primary Key check (Ch.2, Dimension Surrogate Keys: "every
+            # dimension table has a single primary key column").
+            if pk_count == 0:
+                pk_in_constraints = sum(1 for c in constraints if 'PRIMARY KEY' in c.upper())
+                if pk_in_constraints != 1:
+                    self.report['warnings'].append(
+                        f"PK VIOLATION: Dimension '{table_name}' does not have exactly 1 Primary Key."
+                    )
+            elif pk_count > 1:
+                self.report['warnings'].append(
+                    f"PK VIOLATION: Dimension '{table_name}' has a composite Primary Key ({pk_count} cols). It should use a single Surrogate Key."
+                )
+
+            self.report['metrics'][table_name] = {
+                "numeric_payload_cols": numeric_count,
+                "text_payload_cols": text_count
+            }
+
+    def run_full_audit(self):
+        """
+        Executes the complete architectural audit for OLAP structures.
+        Dynamically adjusts checks based on Star vs. Galaxy detection.
+        """
+        # 1. Categorize all tables into Facts and Dimensions first
+        self.classify_tables()
+
+        # 2. Extract the count of Fact tables to determine the exact OLAP subtype
+        fact_count = len(self.report['fact_tables'])
+
+        # 3. Conditional Galaxy Schema Audit
+        if fact_count > 1:
+            self.report['warnings'].append(
+                f"[i] INFO: Detected {fact_count} Fact tables. Evaluating as a GALAXY SCHEMA."
+            )
+            # Only run the cross-fact validation if it's actually a Galaxy
+            self.evaluate_galaxy_schema()
+        elif fact_count == 1:
+            self.report['warnings'].append(
+                "[i] INFO: Detected exactly 1 Fact table. Evaluating as a standard STAR SCHEMA."
+            )
+        else:
+            self.report['warnings'].append(
+                "[!] CRITICAL: OLAP schema detected, but 0 Fact tables found. Evaluation may be compromised."
+            )
+
+        # 4. Proceed with standard Kimball validations regardless of fact_count,
+        # so dimension-only issues are still reported even in the 0-fact case.
+        self.evaluate_fact_tables()
+        self.evaluate_dimension_tables()
+
+        return self.report
 
 class ModelComparator:
     """Compare relational and denormalized models"""
@@ -327,43 +639,22 @@ class ModelComparator:
         - The average Levenshtein distance of the matched pairs (float)
         """
         rel_columns_list = []
-        for table_name, table_info in self.relational_tables.items():
-            # Skip junction tables in the relational model
-            if SQLParser.is_junction_table(table_info):
-                continue
-                
-            # 1. Fetch the blacklist for this specific relational table
-            blacklist = table_info.get('fk_blacklist', []) if exclude_foreign_keys else []
-                
-            for col_def in table_info['columns']:
-                col_info = SQLParser.extract_column_info(col_def)
-                if col_info:
-                    # 2. Block the Foreign Keys from entering the matching pool!
-                    if col_info['name'] in blacklist:
-                        continue
+        for table_name, col_info, _ in SQLParser.iter_filtered_columns(
+            self.relational_tables, exclude_junction_tables=True,
+            exclude_foreign_keys=exclude_foreign_keys, exclude_metadata=exclude_metadata
+        ):
+            col_info = dict(col_info)  # avoid mutating the cached dict with 'table'
+            col_info['table'] = table_name
+            rel_columns_list.append(col_info)
 
-                    # NEW: Block Metadata columns from entering the relational matching pool
-                    if exclude_metadata and SQLParser.is_metadata_column(col_info['name']):
-                        continue
-                        
-                    # Add table context to avoid name collisions
-                    col_info['table'] = table_name
-                    rel_columns_list.append(col_info)
-        
         denorm_columns_list = []
-        for table_name, table_info in self.denormalized_tables.items():
-            blacklist = table_info.get('fk_blacklist', []) if exclude_foreign_keys else []
-            for col_def in table_info['columns']:
-                col_info = SQLParser.extract_column_info(col_def)
-                if col_info:
-                    if col_info['name'] in blacklist:
-                        continue
-
-                    # NEW: Block Metadata columns from entering the relational matching pool
-                    if exclude_metadata and SQLParser.is_metadata_column(col_info['name']):
-                        continue
-                    col_info['table'] = table_name
-                    denorm_columns_list.append(col_info)
+        for table_name, col_info, _ in SQLParser.iter_filtered_columns(
+            self.denormalized_tables, exclude_junction_tables=True,
+            exclude_foreign_keys=exclude_foreign_keys, exclude_metadata=exclude_metadata
+        ):
+            col_info = dict(col_info)
+            col_info['table'] = table_name
+            denorm_columns_list.append(col_info)
         
         # Build cost matrix: rows = relational columns, cols = denormalized columns
         cost_matrix = np.zeros((len(rel_columns_list), len(denorm_columns_list)))
@@ -479,35 +770,15 @@ class ModelComparator:
         Build combined text from all column names in tables.
         Extracts all column names, sorts them alphabetically, and joins as space-separated string.
         """
-        column_names = []
-        
-        for table_name, table_info in tables.items():
-            # Skip junction tables if requested
-            if exclude_junction_tables and SQLParser.is_junction_table(table_info):
-                continue
-                
-            # Fetch the FK blacklist for this table
-            blacklist = table_info.get('fk_blacklist', []) if exclude_foreign_keys else []
-            
-            for col_def in table_info['columns']:
-                col_info = SQLParser.extract_column_info(col_def)
-                if col_info:
-                    col_name = col_info['name']
-                    
-                    # 1. Filter out Foreign Keys (Relational Glue)
-                    if exclude_foreign_keys and (col_name in blacklist):
-                        continue
-                        
-                    # 2. Filter out System Metadata (Audit Exhaust)
-                    if exclude_metadata and SQLParser.is_metadata_column(col_name):
-                        continue
-                        
-                    # If it survives the filters, it's true business data!
-                    column_names.append(col_name)
-        
+        column_names = [
+            col_info['name'] for _, col_info, _ in SQLParser.iter_filtered_columns(
+                tables, exclude_junction_tables, exclude_foreign_keys, exclude_metadata
+            )
+        ]
+
         # Sort alphabetically for reproducible comparison
         column_names.sort()
-        
+
         # Join as space-separated string
         return ' '.join(column_names)
     
@@ -538,6 +809,34 @@ class ModelComparator:
         results['meteor'] = meteor
         
         return results
+
+
+    def detect_strategy(self) -> str:
+        """
+        Determines the denormalization strategy used by the LLM based on
+        table counts and architectural roles.
+        """
+        # 1. Check for One-Big-Table (OBT)
+        # If the LLM squashed everything into exactly 1 table.
+        if len(self.denormalized_tables) <= 1:
+            return 'OBT'
+
+        # 2. Classify tables as FACT/DIMENSION using the same logic the OLAP
+        # auditor uses, so detect_strategy and run_full_audit never disagree
+        # about what counts as a fact table. (Previously this called
+        # SQLParser.classify_table, which does not exist anywhere in this
+        # module and raised AttributeError on every multi-table schema.)
+        olap_eval = OLAPAvaluator(self.denormalized_tables)
+        olap_eval.classify_tables()
+
+        # 3. Check for Dimensional Modeling (Star/Galaxy)
+        # If at least one table acts as a central hub with multiple FKs.
+        if olap_eval.report['fact_tables']:
+            return 'OLAP'
+
+        # 4. Fallback for undefined/messy architectures
+        # Multiple tables exist, but no clear Fact table bridges them.
+        return 'Generic'
     
     def generate_report(self, output_file: str = None):
         """Generate comprehensive evaluation report"""
@@ -554,22 +853,18 @@ class ModelComparator:
         report_lines.append(f"Relational Model:")
         report_lines.append(f"  - Tables: {len(self.relational_tables)}")
         report_lines.append(f"  - Total Attributes: {len(self.relational_attrs)}")
+        junction_tables = []
         for table_name, table_info in self.relational_tables.items():
-            report_lines.append(f"    * {table_name}: {len(table_info['columns'])} columns")
-        
-        # # Identify junction tables
-        # junction_tables = []
-        # for table_name, table_info in self.relational_tables.items():
-        #     is_junction = SQLParser.is_junction_table(table_info)
-        #     marker = " (junction table - excluded from analysis)" if is_junction else ""
-        #     report_lines.append(f"    * {table_name}: {len(table_info['columns'])} columns{marker}")
-        #     if is_junction:
-        #         junction_tables.append(table_name)
-        
-        # if junction_tables:
-        #     report_lines.append(f"\n  Note: {len(junction_tables)} junction table(s) detected and excluded from analysis:")
-        #     for jt in junction_tables:
-        #         report_lines.append(f"    - {jt}")
+            is_junction = SQLParser.get_table_role(table_info) == 'JUNCTION_TABLE'
+            marker = " (junction table - excluded from attribute analysis)" if is_junction else ""
+            report_lines.append(f"    * {table_name}: {len(table_info['columns'])} columns{marker}")
+            if is_junction:
+                junction_tables.append(table_name)
+
+        if junction_tables:
+            report_lines.append(f"\n  Note: {len(junction_tables)} junction table(s) detected and excluded from attribute analysis:")
+            for jt in junction_tables:
+                report_lines.append(f"    - {jt}")
         
         report_lines.append(f"\nDenormalized Model:")
         report_lines.append(f"  - Tables: {len(self.denormalized_tables)}")
@@ -612,6 +907,42 @@ class ModelComparator:
         report_lines.append(f"ROUGE-1:                   {structural_metrics['rouge1']:.2f}")
         report_lines.append(f"METEOR Score:              {structural_metrics['meteor']:.2f}")
         
+        strategy = self.detect_strategy()
+        if strategy == 'OLAP':
+            report_lines.append("\n4. OLAP ARCHITECTURE (STAR/GALAXY)")
+            report_lines.append("-" * 80)
+            olap_eval = OLAPAvaluator(self.denormalized_tables)
+            olap_report = olap_eval.run_full_audit()
+
+            report_lines.append(f"Fact Tables Detected: {', '.join(olap_report['fact_tables']) or 'None'}")
+            report_lines.append(f"Dimension Tables Detected: {', '.join(olap_report['dimension_tables']) or 'None'}")
+
+            if olap_report['warnings']:
+                report_lines.append("\n⚠ Architectural Violations/Warnings:")
+                for warning in olap_report['warnings']:
+                    report_lines.append(f"  - {warning}")
+            else:
+                report_lines.append("\n✓ Perfect Star Schema Architecture Detected! No violations.")
+
+            report_lines.append("\nPayload Analysis (Text vs Numeric Metrics):")
+            for table, metrics in olap_report['metrics'].items():
+                report_lines.append(f"  * {table}: {metrics['numeric_payload_cols']} Numeric, {metrics['text_payload_cols']} Text")
+
+        if strategy == 'OBT':
+            report_lines.append("\n4. ONE-BIG-TABLE (OBT) ARCHITECTURE AUDIT")
+            report_lines.append("-" * 80)
+            obt_eval = OLAPAvaluator(self.denormalized_tables)
+            obt_eval.evaluate_one_big_table()
+            obt_report = obt_eval.report
+
+            if obt_report['warnings']:
+                report_lines.append("\n⚠ OBT Violations/Warnings:")
+                for warning in obt_report['warnings']:
+                    report_lines.append(f"  - {warning}")
+            else:
+                report_lines.append("\n✓ No OBT violations detected! The architecture resembles a true One-Big-Table approach.")
+
+        report_lines.append("\n" + "=" * 80)
 
         report_lines.append("-" * 80)
 
@@ -683,4 +1014,3 @@ def main():
 
 if __name__ == "__main__":
     exit(main())
-    
