@@ -1,0 +1,387 @@
+RISEN FRAMEWORK (Role - Input - Steps - Expectation - Narrowing)
+
+<Role>
+    You are a Senior Data Engineer with 15 years of experience specialized in relational and non-relational databases, SQL,
+    and analytical database performance tuning.
+</Role>
+
+<Input>
+    Your task is to denormalize the [RELATIONAL MODEL] of a database to improve read performance and create a new physical 
+    schema for the denormalized version.
+</Input>
+
+<RELATIONAL MODEL>
+    {SCHEMA_CONTENT}
+</RELATIONAL MODEL>
+
+<Frequent Queries / Workload Context>
+    NONE
+</Frequent Queries / Workload Context>
+
+<Steps>
+    1 - Perform an analysis of the provided SQL creation script, the [RELATIONAL MODEL].
+    2 - Analyze the [Frequent Queries / Workload Context]. If none is provided, infer the most likely heavy read queries 
+    and JOIN bottlenecks based on the table relationships.
+    3 - Design the new denormalized schema based on the [ONE-BIG-TABLE MODEL] strategy.
+</Steps>
+
+<ONE-BIG-TABLE MODEL>
+    In this strategy, the denormalized model has only ONE table, containing all the attributes from the relational,
+    normalized version, except for the Foreign Keys.The model must have one single Primary Key, and must not have any 
+    Foreign keys.
+</ONE-BIG-TABLE MODEL>
+
+<Expectation>
+    Output structure in JSON:
+    {
+    "section_1": {
+        "summary": "Explanation of the denormalization strategy",
+        "structural_decisions": [
+        {
+            "decision_id": "D1",
+            "description": "Description of the structural modification, you may include source and target tables involved",
+        }
+        ],
+        "attribute_level_changes": [
+        {
+            "decision_id": "A1",
+            "description": "Description of the attribute-level modification, you may include if some attribute was added, derived or removed",
+        }
+        ],
+        "tradeoffs": [
+        {
+            "tradeoff_id": "A1",
+            "description": "Description of the tradeoff",
+        }
+        ]
+    },
+
+    "section_2": {
+        "query_patterns": [
+        {
+            "decision_id": "D1",
+            "query_pattern_type": "provided|inferred",
+            "query_pattern_description": "Business or analytical query pattern that motivated the denormalization decision",
+        }
+        ]
+    }
+    }
+    After that, outside the JSON, provide the complete SQL DDL creation script for the denormalized schema.
+</Expectation>
+
+<Narrowing_and_Constraints>
+    - Ensure the output SQL dialect matches the input SQL dialect (e.g., PostgreSQL, MySQL).
+    - The denormalized schema must preserve full semantic equivalence with the original 
+      (all original data must remain reconstructible).
+    - Preserve appropriate Semantics and Data Types from the original schema.
+    - Every non-key attribute in the normalized model must appear in the denormalized result. 
+      (across all output tables combined — attributes may move but must not be dropped).
+    - Each column name must appear EXACTLY ONCE per table.
+    - When merging attributes from multiple source tables that share a column name, prefix with the source table/entity 
+    name to avoid ambiguity.
+    - Each CREATE TABLE statement must appear EXACTLY ONCE.
+    - Generate only ONE final schema. 
+</Narrowing_and_Constraints>
+
+<Examples>
+    <Example1>
+        <NORMALIZED MODEL 1>
+            DROP TABLE IF EXISTS regiao_escolar CASCADE;
+            CREATE TABLE IF NOT EXISTS regiao_escolar (
+                id_regiao SERIAL PRIMARY KEY,
+                NO_MUNICIPIO VARCHAR(255),
+                SG_UF VARCHAR(2)
+            );
+
+            DROP TABLE IF EXISTS escolas CASCADE;
+            CREATE TABLE escolas (
+                co_entidade INTEGER PRIMARY KEY,
+                no_entidade VARCHAR(255) NOT NULL,
+                tp_dependencia VARCHAR(20),     -- Ex: "Federal", "Estadual", etc.
+                tp_localizacao VARCHAR(20),     -- Ex: "Urbana", "Rural"
+                regiao_id INTEGER NOT NULL REFERENCES regiao_escolar(id_regiao)
+            );
+
+            DROP TABLE IF EXISTS agua CASCADE;
+            CREATE TABLE IF NOT EXISTS agua (
+                agua_id SERIAL PRIMARY KEY,
+                NU_ANO_CENSO INTEGER,
+                CO_ENTIDADE INTEGER,
+                FOREIGN KEY(CO_ENTIDADE) REFERENCES escolas(CO_ENTIDADE),
+                IN_AGUA_REDE_PUBLICA BOOLEAN,
+                IN_AGUA_POCO_ARTESIANO BOOLEAN,
+                IN_AGUA_CACIMBA BOOLEAN,
+                IN_AGUA_FONTE_RIO BOOLEAN,
+                IN_AGUA_INEXISTENTE BOOLEAN
+            );
+
+            DROP TABLE IF EXISTS energia CASCADE;
+            CREATE TABLE IF NOT EXISTS energia (
+                energia_id SERIAL PRIMARY KEY,
+                NU_ANO_CENSO INTEGER,
+                CO_ENTIDADE INTEGER,
+                FOREIGN KEY(CO_ENTIDADE) REFERENCES escolas(CO_ENTIDADE),
+                IN_ENERGIA_REDE_PUBLICA BOOLEAN,
+                IN_ENERGIA_GERADOR_FOSSIL BOOLEAN,
+                IN_ENERGIA_RENOVAVEL BOOLEAN,
+                IN_ENERGIA_INEXISTENTE BOOLEAN
+            );
+
+            DROP TABLE IF EXISTS esgoto CASCADE;
+            CREATE TABLE IF NOT EXISTS esgoto (
+                esgoto_id SERIAL PRIMARY KEY,
+                NU_ANO_CENSO INTEGER,
+                CO_ENTIDADE INTEGER,
+                FOREIGN KEY(CO_ENTIDADE) REFERENCES escolas(CO_ENTIDADE),
+                IN_ESGOTO_REDE_PUBLICA BOOLEAN,
+                IN_ESGOTO_FOSSA_SEPTICA BOOLEAN,
+                IN_ESGOTO_FOSSA_COMUM BOOLEAN,
+                IN_ESGOTO_FOSSA BOOLEAN,
+                IN_ESGOTO_INEXISTENTE BOOLEAN
+            );
+
+            DROP TABLE IF EXISTS infraestrutura CASCADE;
+            CREATE TABLE IF NOT EXISTS infraestrutura (
+                infraestrutura_id SERIAL PRIMARY KEY,
+                NU_ANO_CENSO INTEGER,
+                CO_ENTIDADE INTEGER,
+                FOREIGN KEY(CO_ENTIDADE) REFERENCES escolas(CO_ENTIDADE),
+                IN_AREA_VERDE BOOLEAN,
+                IN_BANHEIRO BOOLEAN,
+                IN_BIBLIOTECA BOOLEAN,
+                IN_LABORATORIO_INFORMATICA BOOLEAN
+            );
+
+            DROP TABLE IF EXISTS internet CASCADE;
+            CREATE TABLE IF NOT EXISTS internet (
+                id SERIAL PRIMARY KEY,
+                NU_ANO_CENSO INTEGER,
+                CO_ENTIDADE INTEGER,
+                FOREIGN KEY(CO_ENTIDADE) REFERENCES escolas(CO_ENTIDADE),
+                IN_INTERNET BOOLEAN,
+                IN_INTERNET_ALUNOS BOOLEAN,
+                IN_INTERNET_ADMINISTRATIVO BOOLEAN,
+                IN_INTERNET_APRENDIZAGEM BOOLEAN,
+                TP_REDE_LOCAL NUMERIC(2,1)
+            );
+
+            DROP TABLE IF EXISTS funcionarios CASCADE;
+            CREATE TABLE IF NOT EXISTS funcionarios (
+                id SERIAL PRIMARY KEY,
+                NU_ANO_CENSO INTEGER,
+                CO_ENTIDADE INTEGER,
+                FOREIGN KEY(CO_ENTIDADE) REFERENCES escolas(CO_ENTIDADE),
+                QT_PROF_SAUDE NUMERIC(7,1),
+                QT_PROF_PSICOLOGO NUMERIC(7,1),
+                QT_PROF_ASSIST_SOCIAL NUMERIC(7,1)
+            );
+
+            DROP TABLE IF EXISTS rendimento_escolar CASCADE;
+            CREATE TABLE IF NOT EXISTS rendimento_escolar (
+                id_rendimento SERIAL PRIMARY KEY,
+                NU_ANO_CENSO INTEGER,
+                CO_ENTIDADE INTEGER,
+                FOREIGN KEY(CO_ENTIDADE) REFERENCES escolas(CO_ENTIDADE),
+                FUNDAMENTAL NUMERIC(4,1),
+                ENSINO_MEDIO NUMERIC(4,1)
+            );
+
+            DROP TABLE IF EXISTS rendimento_enem CASCADE;
+            CREATE TABLE IF NOT EXISTS rendimento_enem (
+                rendimento_enem_id SERIAL PRIMARY KEY,
+                NU_ANO INTEGER,
+                CO_ESCOLA_EDUCACENSO INTEGER,
+                FOREIGN KEY(CO_ESCOLA_EDUCACENSO) REFERENCES escolas(CO_ENTIDADE),
+                NU_MATRICULAS INTEGER,
+                NU_PARTICIPANTES INTEGER,
+                NU_TAXA_PARTICIPACAO NUMERIC(5,2),
+                NU_MEDIA_TOT NUMERIC(5,2),
+                PORTE_ESCOLA VARCHAR(255)
+            );
+        </NORMALIZED MODEL 1>
+
+        <DENORMALIZED MODEL 1>
+            CREATE TABLE IF NOT EXISTS ESCOLAS (
+            NU_ANO_CENSO integer,CO_ENTIDADE integer,
+            IN_AGUA_REDE_PUBLICA boolean,
+            IN_AGUA_POCO_ARTESIANO boolean, 
+            IN_AGUA_CACIMBA boolean,
+            IN_AGUA_FONTE_RIO boolean,
+            IN_AGUA_INEXISTENTE boolean,
+            QT_PROF_SAUDE float,
+            QT_PROF_PSICOLOGO float,
+            QT_PROF_ASSIST_SOCIAL float, 
+            IN_AREA_VERDE boolean,
+            IN_BANHEIRO boolean,
+            IN_BIBLIOTECA boolean,
+            IN_LABORATORIO_INFORMATICA boolean,
+            IN_ENERGIA_REDE_PUBLICA boolean,
+            IN_ENERGIA_GERADOR_FOSSIL boolean,
+            IN_ENERGIA_RENOVAVEL boolean,
+            IN_ENERGIA_INEXISTENTE boolean,
+            IN_ESGOTO_REDE_PUBLICA boolean,
+            IN_ESGOTO_FOSSA_SEPTICA boolean,
+            IN_ESGOTO_FOSSA_COMUM boolean,
+            IN_ESGOTO_FOSSA boolean,
+            IN_ESGOTO_INEXISTENTE boolean,
+            IN_INTERNET boolean,
+            IN_INTERNET_ALUNOS boolean,
+            IN_INTERNET_ADMINISTRATIVO boolean,
+            IN_INTERNET_APRENDIZAGEM boolean,
+            TP_REDE_LOCAL boolean,
+            NU_MATRICULAS float,NU_PARTICIPANTES float,
+            NU_TAXA_PARTICIPACAO float,
+            NU_MEDIA_TOT float,
+            PORTE_ESCOLA text,
+            FUNDAMENTAL float,
+            ENSINO_MEDIO float,
+            NO_ENTIDADE text,
+            TP_DEPENDENCIA text,
+            TP_LOCALIZACAO text,
+            NO_MUNICIPIO text,
+            SG_UF text
+            );
+        </DENORMALIZED MODEL 1>
+    </Example1>
+
+    <Example2>
+        <NORMALIZED MODEL 2>
+            BEGIN;
+
+            CREATE TABLE IF NOT EXISTS public."Country"
+            (
+                "ID_Country" serial PRIMARY KEY,
+                "Name" character varying(100)
+            );
+
+            CREATE TABLE IF NOT EXISTS public."Environmental Indicator"
+            (
+                "ID_Environmental" serial PRIMARY KEY,
+                "CO2_Emision" numeric(15, 10),
+                "Year" integer,
+                "Country_ID" integer NOT NULL,
+                CONSTRAINT "fk_env_country" FOREIGN KEY ("Country_ID") REFERENCES public."Country" ("ID_Country")
+            );
+
+            CREATE TABLE IF NOT EXISTS public."Investment"
+            (
+                "ID_Investment" serial PRIMARY KEY,
+                "GDP" numeric(12, 2),
+                "Investment_Energy" numeric(15, 2),
+                "Health_Expenditure" numeric(15, 2),
+                "Year" integer,
+                "Country_ID" integer NOT NULL,
+                CONSTRAINT "fk_inv_country" FOREIGN KEY ("Country_ID") REFERENCES public."Country" ("ID_Country")
+            );
+
+            CREATE TABLE IF NOT EXISTS public."Development"
+            (
+                "ID_Development" serial PRIMARY KEY,
+                "IDH" numeric(6, 2),
+                "Electricity" numeric(6, 2),
+                "Sanitation" numeric(6, 2),
+                "Health" numeric(6, 2),
+                "Standard_Living" numeric(6, 2),
+                "Ano" integer,
+                "Country_ID" integer NOT NULL,
+                CONSTRAINT "fk_dev_country" FOREIGN KEY ("Country_ID") REFERENCES public."Country" ("ID_Country"),
+                CONSTRAINT "uq_dev_country_ano" UNIQUE ("Country_ID", "Ano")
+            );
+
+            CREATE TABLE IF NOT EXISTS public."Power Consumed"
+            (
+                "ID_Consumed" serial PRIMARY KEY,
+                "GWH" numeric(12, 2),
+                "PowerImport" numeric(12, 2),
+                "Renewable_Energy" numeric(7, 4),
+                "Year" integer,
+                "Country_ID" integer NOT NULL,
+                CONSTRAINT "fk_power_country" FOREIGN KEY ("Country_ID") REFERENCES public."Country" ("ID_Country"),
+                CONSTRAINT "uq_power_country_year" UNIQUE ("Country_ID", "Year")
+            );
+
+            CREATE TABLE IF NOT EXISTS public."Power Source"
+            (
+                "ID_Power" serial PRIMARY KEY,
+                "Name" character varying(100),
+                "Renewable" boolean
+            );
+
+            CREATE TABLE IF NOT EXISTS public."Sector"
+            (
+                "ID_Sector" serial PRIMARY KEY,
+                "Name" character varying(100)
+            );
+
+            CREATE TABLE IF NOT EXISTS public."Sector_Country"
+            (
+                "Sector_ID_Sector" integer NOT NULL,
+                "Country_ID_Country" integer NOT NULL,
+                "CO2_Emission" numeric(12, 4),
+                "Year" integer,
+                CONSTRAINT "pk_sector_country" PRIMARY KEY ("Sector_ID_Sector", "Country_ID_Country", "Year"),
+                CONSTRAINT "fk_sector_country_sector" FOREIGN KEY ("Sector_ID_Sector") REFERENCES public."Sector" ("ID_Sector"),
+                CONSTRAINT "fk_sector_country_country" FOREIGN KEY ("Country_ID_Country") REFERENCES public."Country" ("ID_Country")
+            );
+
+            CREATE TABLE IF NOT EXISTS public."Power Source_Country"
+            (
+                "Power Source_ID_Power" integer NOT NULL,
+                "Country_ID_Country" integer NOT NULL,
+                "Year" integer,
+                "CO2_Emission" numeric(12, 4),
+                "Power_Generation" numeric(12, 4),
+                CONSTRAINT "pk_power_source_country" PRIMARY KEY ("Power Source_ID_Power", "Country_ID_Country"),
+                CONSTRAINT "fk_psc_power" FOREIGN KEY ("Power Source_ID_Power") REFERENCES public."Power Source" ("ID_Power"),
+                CONSTRAINT "fk_psc_country" FOREIGN KEY ("Country_ID_Country") REFERENCES public."Country" ("ID_Country")
+            );
+
+            CREATE TABLE IF NOT EXISTS public."Demography"
+            (
+                "ID" serial PRIMARY KEY,
+                "Year" integer,
+                "Population" BIGINT,
+                "Country_ID" integer NOT NULL,
+                CONSTRAINT "fk_population_country" FOREIGN KEY ("Country_ID") REFERENCES public."Country" ("ID_Country"),
+                CONSTRAINT "uq_population_country_year" UNIQUE ("Country_ID", "Year")
+            );
+
+            ALTER TABLE "Investment"
+            ADD CONSTRAINT uq_investment_country_year
+            UNIQUE ("Country_ID", "Year");
+
+            ALTER TABLE "Environmental Indicator"
+            ADD CONSTRAINT uq_environmental_country_year
+            UNIQUE ("Country_ID", "Year");
+
+
+            END;
+        </NORMALIZED MODEL 2>
+
+        <DENORMALIZED MODEL 2>
+            CREATE TABLE info_pais (
+                Country VARCHAR,
+                Year INTEGER,
+                Population BIGINT,
+                IDH FLOAT,
+                Electricity FLOAT,
+                Sanitation FLOAT,
+                Health FLOAT,
+                Standard_Living FLOAT,
+                GDP FLOAT,
+                Eletricity_Investimente FLOAT,
+                Health_Investimente FLOAT,
+                CO2_Emission_Total FLOAT,
+                Power_Consumed FLOAT,
+                Renewable_share_pct FLOAT,
+                Power_Import FLOAT,
+                Sector VARCHAR,
+                CO2_Emission_Sector FLOAT,
+                Power_Source VARCHAR,
+                Power_is_renewable BOOLEAN,
+                Power_Generation FLOAT,
+                CO2_Emission_Power FLOAT
+            );
+        </DENORMALIZED MODEL 2>
+    </Example2>
+</Examples>
