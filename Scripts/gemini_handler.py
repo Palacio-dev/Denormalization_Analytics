@@ -77,7 +77,7 @@ class GeminiHandler:
                 temperature=1.0,
                 topP=0.65,
                 topK=10,
-                maxOutputTokens=16384,
+                maxOutputTokens=65536,
             )
             print("  Calling Gemini API ...")
             response = self.client.models.generate_content(
@@ -106,17 +106,7 @@ class GeminiHandler:
         from experiment_utils import inject_schema
         
         prompt_with_schema = inject_schema(prompt_content, schema_content)
-        
-        # Create temporary schema file for upload
-        schema_file_path = self.config.results_dir / "temp_schema.txt"
-        try:
-            with open(schema_file_path, 'w', encoding='utf-8') as f:
-                f.write(schema_content)
             
-            result = self.generate_denormalization(prompt_with_schema)
-            return result
+        result = self.generate_denormalization(prompt_with_schema)
+        return result
         
-        finally:
-            # Clean up temporary file
-            if schema_file_path.exists():
-                schema_file_path.unlink()
