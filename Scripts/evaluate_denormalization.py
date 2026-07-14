@@ -389,10 +389,15 @@ class OLAPAvaluator:
         return parsed
 
     def classify_tables(self):
-        """Classify tables as FACT or DIMENSION based on FK count."""
+        """Classify tables as FACT, DIMENSION, or JUNCTION."""
         for table_name, table_info in self.tables.items():
-            fks = self._fk_references(table_info)
+            role = SQLParser.get_table_role(table_info)
+            if role == 'JUNCTION_TABLE':
+                self.classifications[table_name] = 'JUNCTION_TABLE'
+                self.report.setdefault('junction_tables', []).append(table_name)
+                continue
 
+            fks = self._fk_references(table_info)
             if len(fks) >= 2:
                 self.classifications[table_name] = 'FACT'
                 self.report['fact_tables'].append(table_name)
