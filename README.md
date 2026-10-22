@@ -226,6 +226,8 @@ The script generates a detailed report with:
 4. Pair-by-pair metric comparison
 5. Overall metrics summary
 
+## License
 
+This project is licensed under the [MIT License](LICENSE).
 
 
