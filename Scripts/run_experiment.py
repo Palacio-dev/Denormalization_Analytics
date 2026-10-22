@@ -4,6 +4,7 @@ Denormalization Experiment Runner.
 Interactive CLI for running denormalization experiments with different LLMs, prompts, and schemas.
 """
 
+import argparse
 import sys
 from pathlib import Path
 from experiment_utils import (
@@ -160,9 +161,38 @@ def run_experiment(model_key: str, prompt_name: str, prompt_content: str,
         print(f"\nError running experiment: {e}")
         raise
 
+def print_summary(model_display, prompt_display, schema_display):
+    print("\n" + "-" * 60)
+    print(f"Model:   {model_display}")
+    print(f"Prompt:  {prompt_display}")
+    print(f"Schema:  {schema_display}")
+    print("-" * 60)
+
+def run_and_save(model_key, prompt_display, prompt_content,
+                 schema_display, schema_content, config):
+    """Run one experiment and persist the result."""
+    result = run_experiment(
+        model_key, prompt_display, prompt_content,
+        schema_display, schema_content, config,
+    )
+    print("\n" + "=" * 60)
+    print("Saving result...")
+    result_path = save_result(model_key, prompt_display, schema_display, result, config)
+    print(f"✓ Result saved to: {result_path}")
+    print("=" * 60 + "\n")
 
 def main():
     """Main entry point."""
+    parser = argparse.ArgumentParser(description="Select an LLM provider.")
+    parser.add_argument(
+        "--auto-run",
+        choices=["gemini", "ollama_api", "ollama_local"],
+        default=None,
+        help="LLM provider to automatically run all experiments.",
+    )
+    args = parser.parse_args()
+
+
     print_header()
     
     # Initialize config
@@ -185,16 +215,34 @@ def main():
     print(f"✓ Loaded {len(prompts)} prompts and {len(schemas)} schemas\n")
     
     # Interactive selection
+    if args.auto_run:
+        model_key = args.auto_run
+        model_display = model_key
+
+        for prompt_file in prompt_names:
+            prompt_display = prompt_file.replace(".txt", "")
+            prompt_content = prompts[prompt_file]
+
+            for schema_file in schema_names:
+                schema_display = schema_file.replace(".txt", "")
+                schema_content = schemas[schema_file]
+
+                print_summary(model_display, prompt_display, schema_display)
+                try:
+                    run_and_save(model_key, prompt_display, prompt_content,
+                                 schema_display, schema_content, config)
+                except Exception as e:
+                    print(f"\nExperiment failed: {e}")
+                    continue  # Continue with next experiment
+        print("\nAll experiments completed.")
+        sys.exit(0)
+
     model_key, model_display = select_model()
     prompt_file, prompt_display = select_prompt(prompt_names)
     schema_file, schema_display = select_schema(schema_names)
     
     # Confirmation
-    print("\n" + "-" * 60)
-    print(f"Model:   {model_display}")
-    print(f"Prompt:  {prompt_display}")
-    print(f"Schema:  {schema_display}")
-    print("-" * 60)
+    print_summary(model_display, prompt_display, schema_display)
     
     confirm = input("\nProceed? (y/n): ").strip().lower()
     if confirm != "y":
@@ -207,22 +255,8 @@ def main():
     
     # Run experiment
     try:
-        result = run_experiment(
-            model_key,
-            prompt_display,
-            prompt_content,
-            schema_display,
-            schema_content,
-            config
-        )
-        
-        # Save result
-        print("\n" + "=" * 60)
-        print("Saving result...")
-        result_path = save_result(model_key, prompt_display, schema_display, result, config)
-        print(f"✓ Result saved to: {result_path}")
-        print("=" * 60 + "\n")
-    
+        run_and_save(model_key, prompt_display, prompt_content,
+                     schema_display, schema_content, config)
     except Exception as e:
         print(f"\nExperiment failed: {e}")
         sys.exit(1)
