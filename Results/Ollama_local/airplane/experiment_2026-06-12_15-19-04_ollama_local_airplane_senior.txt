@@ -1,0 +1,247 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_15-19-04
+Model: ollama_local
+Prompt: senior
+Schema: airplane
+==================================================
+
+# Principal Data Architect Analysis: Airline Analytics Platform Transformation
+
+## Phase 1 – Schema Assessment
+
+### Entity Relationships & Cardinalities
+The source schema exhibits a classic **OLTP (Online Transaction Processing)** design with normalized entities to ensure data integrity and minimize storage during write operations.
+- **Fact Entities**: `bookings` (transactional events), `boarding_passes` (assignment events), `ticket_flights` (pricing/segment events).
+- **Dimension Entities**: `aircrafts_data`, `airports_data`, `flights`, `seats`, `tickets`.
+- **Relationships**:
+    - `tickets` $\leftrightarrow$ `bookings` (1:1)
+    - `tickets` $\leftrightarrow$ `ticket_flights` (1:1)
+    - `ticket_flights` $\leftrightarrow$ `flights` (1:1)
+    - `boarding_passes` $\leftrightarrow$ `ticket_flights` (1:1)
+    - `flights` $\leftrightarrow$ `aircrafts_data` (1:1)
+    - `flights` $\leftrightarrow$ `airports_data` (1:N via departure/arrival)
+    - `seats` $\leftrightarrow$ `flights` (1:N via aircraft_code, though `seats` is defined per aircraft/seat, not per flight; this implies a static seat map per aircraft type).
+
+### Query Access Patterns
+Analytical workloads for this domain typically involve:
+1.  **Global Aggregations**: Total revenue by region, flight status distribution, load factor by aircraft type.
+2.  **Temporal Analysis**: Revenue per day, booking trends over time.
+3.  **Geospatial Analysis**: Flight paths, airport connectivity, city-level demand.
+4.  **Complex Joins**: Calculating revenue per passenger, combining seat availability with flight schedules and aircraft specs.
+
+**Current Bottleneck**: Queries requiring these metrics must perform multiple nested joins (e.g., `bookings` $\to$ `tickets` $\to$ `ticket_flights` $\to$ `flights` $\to$ `aircrafts`/`airports`). In a columnar OLAP engine (like ClickHouse, Snowflake, or Redshift), this creates high I/O overhead and limits the ability to push down filters.
+
+---
+
+## Phase 2 - Analytical Modeling Strategy
+
+### Chosen Architecture: **Star Schema with Wide Dimension Tables**
+**Justification**:
+1.  **Read-Optimized**: The goal is to maximize query speed for aggregations. A star schema minimizes join operations, allowing the query optimizer to filter on fact tables before joining dimensions.
+2.  **BI Compatibility**: Most BI tools (Tableau, PowerBI, Looker) perform best with a single central fact table and wide dimensions.
+3.  **Complexity Reduction**: The `ticket_flights` table acts as a critical junction for pricing and segments. Absorbing `flight_id` into `tickets` and `aircraft_code` into `seats` (where appropriate) reduces join depth from 4-5 to 1-2.
+
+### Denormalization Decisions
+
+| Decision ID | Description | Performance Objective | Join Reduction | Redundancy | Maintenance Implication |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **D1** | **Flatten `tickets`**: Add `flight_id` and `aircraft_code` directly to `tickets`. | Eliminates the need to join `tickets` $\to$ `ticket_flights` $\to$ `flights` for basic passenger/flight context. | Reduces join count by 2. | `flight_id` and `aircraft_code` are duplicated in `tickets`. | Requires update on `ticket_flights` to propagate changes to `tickets` (or accept stale data if using a snapshot model). |
+| **D2** | **Absorb `seats` into `flights`**: Create a `flight_segments` table containing `flight_id`, `aircraft_code`, `seat_no`, `fare_conditions`. | Allows direct aggregation of seat capacity and pricing per flight without joining the static `seats` table. | Reduces join count by 1. | `seats` table becomes redundant. | `seats` table is no longer needed for active analytics. |
+| **D3** | **Wide `flights`**: Include `aircraft_code`, `departure_airport_code`, `arrival_airport_code`, `status` in the main fact table (or a dedicated `flight_info` dimension joined once). | Enables filtering by aircraft type or route status without joining multiple dimension tables. | Reduces join count by 2. | Repeats airport codes and aircraft codes. | Minimal impact; data is read-heavy, not write-heavy. |
+| **D4** | **Reference Data Absorption**: Create `airport_info` and `aircraft_info` tables with full details (name, city, coordinates, model) to replace lookups. | Enables direct filtering on airport names or aircraft models without joining the small lookup tables. | Reduces join count by 2. | High redundancy of text/coordinates. | Negligible; updates are rare for reference data. |
+
+---
+
+## Phase 3 – Analytical Physical Model Design
+
+The following schema is designed for a columnar store (e.g., PostgreSQL with hypertables, Snowflake, or ClickHouse). It prioritizes **query throughput** over **write atomicity**.
+
+### Key Design Choices:
+- **Partitioning**: `bookings`, `tickets`, and `ticket_flights` are partitioned by `book_date` (or `created_at`) to enable efficient pruning of historical data.
+- **Clustering**: `tickets` and `ticket_flights` are clustered by `ticket_no` to speed up passenger-centric queries.
+- **Data Types**: `JSONB` is retained for unstructured data (contact info, model details) to avoid rigid schema changes, but critical fields are normalized.
+- **Surrogate Keys**: `ticket_no` is used as the natural key (PK) across the denormalized core.
+
+### SQL DDL Script
+
+```sql
+-- Drop existing tables if they exist to ensure clean state
+DROP TABLE IF EXISTS bookings.ticket_flights;
+DROP TABLE IF EXISTS bookings.tickets;
+DROP TABLE IF EXISTS bookings.bookings;
+DROP TABLE IF EXISTS bookings.seats;
+DROP TABLE IF EXISTS bookings.flights;
+DROP TABLE IF EXISTS bookings.boarding_passes;
+DROP TABLE IF EXISTS bookings.aircrafts_data;
+DROP TABLE IF EXISTS bookings.airports_data;
+
+-- ==========================================
+-- DIMENSION TABLES (Reference Data)
+-- ==========================================
+
+-- Airports: Expanded to include city and coordinates for direct filtering
+CREATE TABLE IF NOT EXISTS bookings.airports_data (
+    airport_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    airport_name jsonb NOT NULL,
+    city jsonb NOT NULL,
+    coordinates point NOT NULL,
+    timezone text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT airports_data_pkey PRIMARY KEY (airport_code)
+);
+
+-- Aircrafts: Simplified for lookup, kept as dimension
+CREATE TABLE IF NOT EXISTS bookings.aircrafts_data (
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    model jsonb NOT NULL,
+    range integer NOT NULL,
+    CONSTRAINT aircrafts_pkey PRIMARY KEY (aircraft_code)
+);
+
+-- ==========================================
+-- FACT TABLES (Denormalized & Optimized)
+-- ==========================================
+
+-- Fact: Bookings (Transaction Level)
+-- Partitioned by date for time-series analysis
+CREATE TABLE IF NOT EXISTS bookings.bookings (
+    book_ref character(6) COLLATE pg_catalog."default" NOT NULL,
+    book_date timestamp with time zone NOT NULL,
+    total_amount numeric(10, 2) NOT NULL,
+    CONSTRAINT bookings_pkey PRIMARY KEY (book_ref),
+    CONSTRAINT bookings_book_date_range_part PARTITION BY RANGE (book_date)
+);
+
+-- Create partition for current year (example)
+CREATE TABLE IF NOT EXISTS bookings.bookings_2023 PARTITION OF bookings.bookings
+    FOR RANGE FROM DATE '2023-01-01' TO DATE '2024-01-01';
+
+-- Fact: Tickets (Denormalized to include Flight/Aircraft context)
+-- Key Denormalization: Added flight_id and aircraft_code to reduce joins
+CREATE TABLE IF NOT EXISTS bookings.tickets (
+    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL,
+    book_ref character(6) COLLATE pg_catalog."default" NOT NULL,
+    passenger_id character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    passenger_name text COLLATE pg_catalog."default" NOT NULL,
+    contact_data jsonb,
+    -- Denormalized Attributes for Analytics
+    flight_id integer NOT NULL,
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT tickets_pkey PRIMARY KEY (ticket_no),
+    CONSTRAINT tickets_book_ref_fkey FOREIGN KEY (book_ref) REFERENCES bookings.bookings (book_ref)
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+);
+
+-- Create clustering index for passenger lookups
+CREATE INDEX IF NOT EXISTS idx_tickets_passenger ON bookings.tickets (passenger_id);
+
+-- Fact: Ticket Flights (Pricing/Segment Level)
+-- Key Denormalization: Absorbed fare_conditions and amount directly here
+CREATE TABLE IF NOT EXISTS bookings.ticket_flights (
+    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL,
+    flight_id integer NOT NULL,
+    fare_conditions character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    amount numeric(10, 2) NOT NULL,
+    -- Denormalized Attributes to avoid joining 'seats' table
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    seat_no character varying(4) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT ticket_flights_pkey PRIMARY KEY (ticket_no, flight_id),
+    CONSTRAINT ticket_flights_ticket_no_unique UNIQUE (ticket_no)
+);
+
+-- Fact: Flights (Expanded to include route/aircraft context)
+-- Key Denormalization: Includes airport codes and aircraft code directly
+CREATE TABLE IF NOT EXISTS bookings.flights (
+    flight_id serial NOT NULL,
+    flight_no character(6) COLLATE pg_catalog."default" NOT NULL,
+    scheduled_departure timestamp with time zone NOT NULL,
+    scheduled_arrival timestamp with time zone NOT NULL,
+    departure_airport character(3) COLLATE pg_catalog."default" NOT NULL,
+    arrival_airport character(3) COLLATE pg_catalog."default" NOT NULL,
+    status character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    -- Denormalized Attributes for route analysis
+    -- (Note: airport codes are already present, but we ensure they are indexed)
+    CONSTRAINT flights_pkey PRIMARY KEY (flight_id),
+    CONSTRAINT flights_flight_no_scheduled_departure_key UNIQUE (flight_no, scheduled_departure)
+);
+
+-- Create partition for flights by year
+CREATE TABLE IF NOT EXISTS bookings.flights_2023 PARTITION OF bookings.flights
+    FOR RANGE FROM DATE '2023-01-01' TO DATE '2024-01-01';
+
+-- Fact: Boarding Passes (Assignment Level)
+-- Minimal denormalization, primarily for operational analytics
+CREATE TABLE IF NOT EXISTS bookings.boarding_passes (
+    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL,
+    flight_id integer NOT NULL,
+    boarding_no integer NOT NULL,
+    seat_no character varying(4) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT boarding_passes_pkey PRIMARY KEY (ticket_no, flight_id),
+    CONSTRAINT boarding_passes_flight_id_boarding_no_key UNIQUE (flight_id, boarding_no),
+    CONSTRAINT boarding_passes_flight_id_seat_no_key UNIQUE (flight_id, seat_no)
+);
+
+-- ==========================================
+-- CONSTRAINTS & FOREIGN KEYS
+-- ==========================================
+
+-- Ensure referential integrity where critical for data quality
+ALTER TABLE IF EXISTS bookings.tickets
+    ADD CONSTRAINT tickets_flight_id_fkey FOREIGN KEY (flight_id)
+    REFERENCES bookings.flights (flight_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS bookings.tickets
+    ADD CONSTRAINT tickets_aircraft_code_fkey FOREIGN KEY (aircraft_code)
+    REFERENCES bookings.aircrafts_data (aircraft_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS bookings.ticket_flights
+    ADD CONSTRAINT ticket_flights_flight_id_fkey FOREIGN KEY (flight_id)
+    REFERENCES bookings.flights (flight_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS bookings.ticket_flights
+    ADD CONSTRAINT ticket_flights_aircraft_code_fkey FOREIGN KEY (aircraft_code)
+    REFERENCES bookings.aircrafts_data (aircraft_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS bookings.flights
+    ADD CONSTRAINT flights_departure_airport_fkey FOREIGN KEY (departure_airport)
+    REFERENCES bookings.airports_data (airport_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS bookings.flights
+    ADD CONSTRAINT flights_arrival_airport_fkey FOREIGN KEY (arrival_airport)
+    REFERENCES bookings.airports_data (airport_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+-- ==========================================
+-- OPTIMIZATION INDEXES
+-- ==========================================
+
+-- Indexes for common analytical filters
+CREATE INDEX IF NOT EXISTS idx_bookings_date ON bookings.bookings (book_date);
+CREATE INDEX IF NOT EXISTS idx_tickets_flight ON bookings.tickets (flight_id);
+CREATE INDEX IF NOT EXISTS idx_tickets_aircraft ON bookings.tickets (aircraft_code);
+CREATE INDEX IF NOT EXISTS idx_tickets_passenger ON bookings.tickets (passenger_id);
+CREATE INDEX IF NOT EXISTS idx_flights_route ON bookings.flights (departure_airport, arrival_airport);
+CREATE INDEX IF NOT EXISTS idx_flights_status ON bookings.flights (status);
+CREATE INDEX IF NOT EXISTS idx_flights_aircraft ON bookings.flights (aircraft_code);
+
+-- Composite index for complex revenue queries
+CREATE INDEX IF NOT EXISTS idx_revenue_calc ON bookings.bookings (book_date, total_amount);
+
+```
+
+### Summary of Tradeoffs
+1.  **Storage Growth**: We have increased storage requirements due to duplicating `flight_id`, `aircraft_code`, and `seat_no` in the `tickets` and `ticket_flights` tables. However, this is a standard tradeoff in data warehousing to gain query performance.
+2.  **Update Latency**: If a flight changes its aircraft type, the `flights` table must be updated, and potentially the `tickets` table if it was denormalized to include the specific flight's aircraft (though usually, the aircraft type is static per flight). In a strict OLTP environment, this requires careful handling; in an OLAP environment, we often accept a slight lag or use a "snapshot" approach where `tickets` are loaded at a specific point in time.
+3.  **Traceability**: The primary key `ticket_no` remains the anchor across `tickets`, `ticket_flights`, and `boarding_passes`, ensuring full traceability of a passenger's journey even without complex joins.

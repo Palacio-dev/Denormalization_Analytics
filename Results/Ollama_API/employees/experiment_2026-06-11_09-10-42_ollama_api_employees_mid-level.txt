@@ -1,0 +1,157 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-10-42
+Model: ollama_api
+Prompt: mid-level
+Schema: employees
+==================================================
+
+{
+  "section_1": {
+    "summary": "The original schema is highly normalized to support transactional operations with clear separation of entities.
+     For analytical purposes, this structure requires multiple joins that can impact performance. The denormalization strategy 
+     consolidates related entities into fewer, wider tables optimized for read-heavy analytical queries. We create a central 
+     employee dimension table that includes current department, title, and salary, along with slowly changing dimension support 
+     for historical analysis. We also introduce a fact table for employment events and maintain a separate department dimension.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidate employee, department_employee, title, and salary into a single employee dimension table with current and historical attributes."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Create a separate department dimension table from the original department table, adding descriptive attributes."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Introduce a fact table for employment events (hires, department changes, promotions, salary changes) to support event-based analysis."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Denormalize manager relationships into the department dimension, storing current manager's employee key."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added current department name, current title, and current salary to the employee dimension for faster access."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added effective date ranges (from_date, to_date) to the employee dimension to support slowly changing dimensions."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added a flag is_current to the employee dimension to easily identify the latest version of an employee record."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Created surrogate keys for employee and department dimensions to decouple from source system keys."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Added full_name as a derived attribute in the employee dimension by concatenating first_name and last_name."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage requirements due to denormalization and duplication of data (e.g., department name stored with each employee)."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified read queries at the cost of more complex ETL processes to maintain consistency."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of strict normalization benefits like update anomaly prevention, but acceptable for read-only analytical workloads."
+      },
+      {
+        "tradeoff_id": "T4",
+        "description": "Historical tracking of changes requires careful SCD Type 2 management in ETL, increasing complexity."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Frequent queries about employee details including their current department, title, and salary. Denormalization avoids joins to four separate tables."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting on department-level metrics such as headcount, average salary. A dedicated department dimension improves performance."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analysis of employment events over time, such as hiring trends, turnover, promotions. A fact table supports efficient aggregations."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Identifying current managers for departments. Storing this in the department dimension avoids complex date-logic joins."
+      }
+    ]
+  }
+}
+
+```sql
+-- Denormalized Analytical Schema
+
+-- Dimension: Employee
+CREATE TABLE employees.dim_employee (
+    employee_sk BIGINT PRIMARY KEY, -- Surrogate Key
+    employee_id BIGINT NOT NULL, -- Business Key
+    first_name VARCHAR(14),
+    last_name VARCHAR(16),
+    full_name VARCHAR(32), -- Derived Attribute
+    birth_date DATE,
+    gender CHAR(1),
+    hire_date DATE,
+    -- Current Attributes
+    current_department_id CHAR(4),
+    current_department_name VARCHAR(40),
+    current_title VARCHAR(50),
+    current_salary_amount BIGINT,
+    -- SCD Type 2 Support
+    is_current BOOLEAN NOT NULL,
+    effective_from_date DATE NOT NULL,
+    effective_to_date DATE,
+    -- Metadata
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Dimension: Department
+CREATE TABLE employees.dim_department (
+    department_sk BIGINT PRIMARY KEY, -- Surrogate Key
+    department_id CHAR(4) NOT NULL, -- Business Key
+    dept_name VARCHAR(40) NOT NULL,
+    current_manager_employee_sk BIGINT, -- Reference to dim_employee surrogate key
+    -- Metadata
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Fact: Employment Events
+CREATE TABLE employees.fact_employment_events (
+    event_id BIGSERIAL PRIMARY KEY,
+    employee_sk BIGINT NOT NULL, -- Foreign Key to dim_employee
+    department_sk BIGINT, -- Foreign Key to dim_department
+    event_type VARCHAR(20) NOT NULL, -- 'HIRE', 'DEPT_CHANGE', 'PROMOTION', 'SALARY_CHANGE', 'TERMINATION'
+    event_date DATE NOT NULL,
+    -- Measures
+    salary_amount BIGINT,
+    -- Metadata
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for performance
+CREATE INDEX idx_dim_employee_id ON employees.dim_employee(employee_id);
+CREATE INDEX idx_dim_employee_current ON employees.dim_employee(is_current);
+CREATE INDEX idx_dim_employee_dates ON employees.dim_employee(effective_from_date, effective_to_date);
+CREATE INDEX idx_dim_department_id ON employees.dim_department(department_id);
+CREATE INDEX idx_fact_events_employee_sk ON employees.fact_employment_events(employee_sk);
+CREATE INDEX idx_fact_events_department_sk ON employees.fact_employment_events(department_sk);
+CREATE INDEX idx_fact_events_date ON employees.fact_employment_events(event_date);
+```

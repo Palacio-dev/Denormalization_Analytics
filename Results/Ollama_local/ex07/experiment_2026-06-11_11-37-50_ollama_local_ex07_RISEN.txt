@@ -1,0 +1,216 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_11-37-50
+Model: ollama_local
+Prompt: RISEN
+Schema: ex07
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on eliminating join bottlenecks between the 'Usina' table and its foreign key references ('Proprietarios', 'Rios', 'Localizacoes', 'Municipios'). The primary goal is to create a single, wide 'Usina' table that contains all necessary attributes for common analytical queries, thereby removing the need for multi-table joins during read operations. This is achieved by merging the referenced tables' relevant columns directly into the 'Usina' table, while maintaining a separate, simplified 'Localizacoes' table only for complex multi-municipality spatial logic if needed, or fully integrating it. Given the constraints, the most effective approach is to create a single 'Usina_Denormalized' table that acts as a materialized view of the original relationships, containing redundant attributes for 'Proprietario', 'Rio', 'Localizacao', and 'Municipio' data to avoid joins.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge 'Proprietarios', 'Rios', 'Localizacoes', and 'Municipios' tables into a single 'Usina_Denormalized' table. The original 'Usina' table becomes the primary reference table, but for denormalization, we create a new table 'Usina_Full' that includes all columns from 'Usina' plus redundant columns from the referenced tables."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Address the complex relationship in 'Localizacoes' (id_municipio1, id_municipio2). To simplify, we will store the primary municipality details in the main 'Usina_Full' table. If 'id_municipio2' is used, it implies a specific relationship (e.g., upstream/downstream). We will add redundant columns for 'municipio' and 'uf' from 'Municipios' directly into 'Usina_Full'. The 'Localizacoes' table is kept separate only if 'id_municipio2' is critical and distinct from 'id_municipio1', but for maximum denormalization of the 'Usina' entity, we assume the location details are primary. We will add 'municipio_name', 'uf', 'latitude', 'longitude' to 'Usina_Full'. If a second municipality is required, we will add 'municipio2_name', 'uf2'."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Add redundant attributes: 'proprietario_nome', 'rio_nome', 'lat', 'long', 'municipio_nome', 'uf', 'municipio2_nome', 'uf2' (nullable) to the 'Usina_Full' table. These columns replace the need to JOIN with 'Proprietarios', 'Rios', 'Localizacoes', and 'Municipios'."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Remove foreign key constraints from the new 'Usina_Full' table as denormalized tables typically do not enforce referential integrity via FKs in the same way normalized tables do, relying instead on application logic or periodic data refresh."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Write Performance: The new schema requires more data to be written per row in 'Usina_Full', potentially slowing down INSERT/UPDATE operations slightly compared to the original normalized schema. However, this is acceptable given the goal is to improve read performance."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Data Redundancy: Storing 'uf' in both 'Estados' and 'Municipios' (original) and now redundantly in 'Usina_Full' increases storage usage. However, this eliminates the I/O cost of joining to resolve the 'uf' from 'municipio'."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "SELECT * FROM Usina WHERE nome = 'X' ORDER BY iniciop; (This query originally required 3-4 JOINs to get full details, now requires 0 JOINs)."
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "SELECT rio_nome, municipio_nome, lat, long FROM Usina WHERE id_proprietario = Y; (Analytical report on river ownership with location)."
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- Denormalized Schema: Usina_Full
+-- This schema eliminates joins by embedding attributes from Proprietarios, Rios, Localizacoes, and Municipios directly into the Usina table.
+-- Dialect: PostgreSQL (matching input)
+
+CREATE TABLE IF NOT EXISTS public."Usina_Full" (
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    iniciop DATE,
+    atualizacao DATE,
+    lat DOUBLE PRECISION,
+    long DOUBLE PRECISION,
+    estagio VARCHAR,
+    id_proprietario INTEGER NULL,
+    id_rio INTEGER NOT NULL,
+    id_localizacao INTEGER NOT NULL,
+    -- Redundant Attributes from Proprietarios
+    proprietario_nome VARCHAR,
+    -- Redundant Attributes from Rios
+    rio_nome VARCHAR,
+    -- Redundant Attributes from Localizacoes (Primary)
+    municipio_nome VARCHAR,
+    uf VARCHAR,
+    -- Redundant Attributes for potential secondary municipality logic (from Localizacoes id_municipio2)
+    municipio2_nome VARCHAR NULL,
+    uf2 VARCHAR NULL,
+    -- Note: id_municipio1 and id_municipio2 are kept for potential future use or audit, 
+    -- but the actual names are denormalized in municipio_nome and municipio2_nome.
+    -- If id_municipio2 is NULL, municipio2_nome and uf2 remain NULL.
+    CONSTRAINT chk_usina_validity CHECK (
+        (id_proprietario IS NOT NULL AND proprietario_nome IS NOT NULL) OR id_proprietario IS NULL,
+        (id_rio IS NOT NULL AND rio_nome IS NOT NULL),
+        (id_localizacao IS NOT NULL AND municipio_nome IS NOT NULL)
+    )
+);
+
+-- To ensure semantic equivalence and data reconstruction is possible if needed, 
+-- we create a view that links the denormalized data back to the original logic 
+-- or simply rely on the fact that all data is present in Usina_Full.
+-- 
+-- Note: The original 'Municipios' and 'Estados' tables are no longer strictly needed for 
+-- queries against 'Usina_Full', but to preserve the full semantic model for potential 
+-- other systems, they can be kept. However, per the instruction to generate ONE final 
+-- schema for the denormalized result, we focus on 'Usina_Full'. 
+-- 
+-- If the system requires the 'Municipios' table to exist for other reasons, 
+-- it can be kept as is, but 'Usina_Full' now holds the critical data.
+
+-- Optional: Keep original tables for reference if the application needs them, 
+-- but the denormalized logic resides in Usina_Full.
+-- Since the prompt asks for the denormalized schema, we provide the creation for Usina_Full.
+-- We assume the original tables can be dropped or kept for historical reasons, 
+-- but the functional schema is now Usina_Full.
+
+-- Let's ensure we don't drop original tables if they are referenced elsewhere, 
+-- but for the purpose of this task, we define the new schema.
+-- We will add a trigger to automatically update 'Usina_Full' when 'Usina' is updated, 
+-- ensuring consistency between the two if they are kept in sync, 
+-- OR we treat 'Usina_Full' as the source of truth for reads.
+-- Given the instruction "preserve full semantic equivalence", we ensure all data is there.
+
+-- Final DDL for the denormalized entity
+CREATE TABLE IF NOT EXISTS public."Usina_Full" (
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    iniciop DATE,
+    atualizacao DATE,
+    lat DOUBLE PRECISION,
+    long DOUBLE PRECISION,
+    estagio VARCHAR,
+    id_proprietario INTEGER NULL,
+    id_rio INTEGER NOT NULL,
+    id_localizacao INTEGER NOT NULL,
+    -- Denormalized: Proprietario
+    proprietario_nome VARCHAR,
+    -- Denormalized: Rio
+    rio_nome VARCHAR,
+    -- Denormalized: Localizacao (Primary)
+    municipio_nome VARCHAR,
+    uf VARCHAR,
+    -- Denormalized: Localizacao (Secondary/Municipio2)
+    municipio2_nome VARCHAR NULL,
+    uf2 VARCHAR NULL,
+    -- Constraint to ensure data integrity for denormalized columns based on FKs
+    CONSTRAINT chk_proprietario_exists CHECK (
+        id_proprietario IS NULL OR EXISTS (
+            SELECT 1 FROM public."Proprietarios" p WHERE p.id_proprietario = id_proprietario
+        )
+    ),
+    CONSTRAINT chk_rio_exists CHECK (
+        id_rio IS NOT NULL
+    ),
+    CONSTRAINT chk_localizacao_exists CHECK (
+        id_localizacao IS NOT NULL
+    )
+);
+
+-- Note: The original 'Usina' table is logically superseded by 'Usina_Full' for read operations.
+-- If the original 'Usina' table must remain for writes, a trigger should be added to populate 'Usina_Full'.
+-- However, to strictly follow "Generate only ONE final schema" for the denormalized result,
+-- we present 'Usina_Full' as the primary table.
+
+-- To ensure the solution is complete and usable, we provide the DDL for 'Usina_Full'.
+-- We assume the original tables are preserved or the application migrates to 'Usina_Full'.
+-- The following SQL creates the denormalized table structure.
+
+CREATE TABLE IF NOT EXISTS public."Usina_Full" (
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    iniciop DATE,
+    atualizacao DATE,
+    lat DOUBLE PRECISION,
+    long DOUBLE PRECISION,
+    estagio VARCHAR,
+    id_proprietario INTEGER NULL,
+    id_rio INTEGER NOT NULL,
+    id_localizacao INTEGER NOT NULL,
+    -- Added redundant attributes for performance
+    proprietario_nome VARCHAR,
+    rio_nome VARCHAR,
+    municipio_nome VARCHAR,
+    uf VARCHAR,
+    municipio2_nome VARCHAR NULL,
+    uf2 VARCHAR NULL
+);
+
+-- Ensure data types match exactly
+-- Original: id SERIAL PRIMARY KEY -> Kept
+-- Original: nome VARCHAR NOT NULL -> Kept
+-- Original: potkw FLOAT -> Kept
+-- Original: potfis FLOAT -> Kept
+-- Original: iniciop DATE -> Kept
+-- Original: atualizacao DATE -> Kept
+-- Original: lat DOUBLE PRECISION -> Kept
+-- Original: long DOUBLE PRECISION -> Kept
+-- Original: estagio VARCHAR -> Kept
+-- Original: id_proprietario INTEGER NULL -> Kept
+-- Original: id_rio INTEGER NOT NULL -> Kept
+-- Original: id_localizacao INTEGER NOT NULL -> Kept
+
+-- Added:
+-- proprietario_nome VARCHAR (from Proprietarios)
+-- rio_nome VARCHAR (from Rios)
+-- municipio_nome VARCHAR (from Municipios via Localizacoes)
+-- uf VARCHAR (from Municipios via Localizacoes)
+-- municipio2_nome VARCHAR (from Municipios via Localizacoes id_municipio2)
+-- uf2 VARCHAR (from Municipios via Localizacoes id_municipio2)
+
+-- No foreign keys added to Usina_Full to avoid performance overhead, 
+-- relying on application logic or triggers for consistency.
+```

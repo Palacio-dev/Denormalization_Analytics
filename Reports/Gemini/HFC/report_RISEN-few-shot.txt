@@ -1,0 +1,583 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 37
+  - Total Attributes: 139
+    * alteracoes: 10 columns
+    * autores: 5 columns
+    * colecoes_anexas: 5 columns
+    * coletores: 5 columns
+    * coletores_complementares: 4 columns
+    * configuracao: 7 columns
+    * enderecos: 7 columns
+    * especies: 7 columns
+    * estados: 6 columns
+    * familias: 5 columns
+    * fase_sucessional: 4 columns
+    * generos: 5 columns
+    * herbarios: 8 columns
+    * historico_acessos: 3 columns
+    * identificadores: 4 columns
+    * locais_coleta: 7 columns
+    * migrations: 2 columns
+    * paises: 5 columns
+    * reflora: 6 columns
+    * reinos: 4 columns
+    * relevos: 4 columns
+    * remessas: 7 columns
+    * retirada_exsiccata_tombos: 7 columns
+    * solos: 4 columns
+    * specieslink: 6 columns
+    * sub_especies: 8 columns
+    * sub_familias: 6 columns
+    * telefones: 3 columns
+    * tipos: 4 columns
+    * tipos_usuarios: 4 columns
+    * tombo_alteracoes_antigas: 4 columns
+    * tombos: 39 columns
+    * tombos_fotos: 9 columns
+    * tombos_identificadores: 3 columns (junction table - excluded from attribute analysis)
+    * usuarios: 12 columns
+    * variedades: 8 columns
+    * vegetacoes: 4 columns
+
+  Note: 1 junction table(s) detected and excluded from attribute analysis:
+    - tombos_identificadores
+
+Denormalized Model:
+  - Tables: 10
+  - Total Attributes: 113
+    * fact_tombos: 51 columns
+    * dim_herbario: 9 columns
+    * dim_herbario_telefones: 3 columns
+    * fact_tombos_fotos: 7 columns
+    * fact_sincronizacao: 7 columns
+    * fact_remessas: 9 columns
+    * fact_tombos_identificadores: 4 columns
+    * dim_usuarios: 10 columns
+    * dim_geografia: 6 columns
+    * dim_configuracao: 7 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Normalized model has MORE attributes (113 vs 139)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: id (BIGSERIAL) -> foto_id (BIGINT)
+  - Type mismatch: status (ALTERACOES_STATUS) -> estado_id (BIGINT)
+  - Type mismatch: tombo_json (TEXT) -> tombo_hcf (BIGINT)
+  - Type mismatch: identificacao (BOOLEAN) -> identificador_nome (CHARACTER)
+  - Type mismatch: tipo (COLECOES_ANEXAS_TIPO) -> tipo_nome (CHARACTER)
+  - Type mismatch: id (BIGSERIAL) -> ordem (SMALLINT)
+  - Type mismatch: id (BIGSERIAL) -> pais_id (INTEGER)
+  - Type mismatch: id (BIGSERIAL) -> herbario_id (BIGINT)
+  - Type mismatch: id (BIGSERIAL) -> herbario_id (BIGINT)
+  - Type mismatch: sigla (CHARACTER(4)) -> herbario_sigla (CHARACTER)
+  - Type mismatch: numero (BIGINT) -> telefone_numero (CHARACTER)
+  - Type mismatch: id (BIGSERIAL) -> herbario_id (BIGINT)
+  - Type mismatch: sigla (CHARACTER) -> pais_sigla (CHARACTER(4))
+  - Type mismatch: email (CHARACTER) -> remessa_id (BIGINT)
+  - Type mismatch: data_criacao (TIMESTAMP) -> variedade_autor_observacao (CHARACTER)
+  - Type mismatch: name (CHARACTER) -> entidade_id (BIGINT)
+  - Type mismatch: applied_at (TIMESTAMP) -> especie_autor_nome (CHARACTER)
+  - Type mismatch: nome (CHARACTER) -> tombo_hcf (BIGINT)
+  - Type mismatch: cod_barra (CHARACTER) -> configuracao_id (BIGINT)
+  - Type mismatch: tombo_json (TEXT) -> tombo_hcf (BIGINT)
+  - Type mismatch: ja_comparou (BOOLEAN) -> sub_familia_autor_nome (CHARACTER)
+  - Type mismatch: ja_requisitou (BOOLEAN) -> colecao_anexa_tipo (COLECOES_ANEXAS_TIPO)
+  - Type mismatch: nro_requisicoes (BIGINT) -> sub_especie_autor_observacao (CHARACTER)
+  - Type mismatch: numero (CHARACTER) -> local_coleta_fase_numero (BIGINT)
+  - Type mismatch: data (DATE) -> plataforma (CHARACTER)
+  - Type mismatch: hcf (BIGSERIAL) -> hcf (BIGINT)
+  - Type mismatch: observacao (TEXT) -> especie_autor_observacao (CHARACTER)
+  - Type mismatch: variedade_id (BIGINT) -> variedade_nome (CHARACTER)
+  - Type mismatch: ativo (BOOLEAN) -> usuario_telefone (CHARACTER)
+  - Type mismatch: coletor_id (BIGINT) -> coletor_email (CHARACTER)
+  - Type mismatch: descricao (TEXT) -> identificador_id (BIGINT)
+  - Type mismatch: fase_sucessional_id (BIGINT) -> fase_sucessional_nome (CHARACTER)
+  - Type mismatch: sequencia (BIGINT) -> sub_especie_autor_nome (CHARACTER)
+  - Type mismatch: telefone (CHARACTER) -> telefone_id (BIGSERIAL)
+--------------------------------------------------------------------------------
+Completeness Ratio:        0.81
+Data Type Preservation:    0.70
+Avg Levenshtein Distance:  5.84
+BLEU Score:                0.29
+ROUGE-1:                   0.69
+METEOR Score:              0.27
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  altitude applied_at ativo ativo caminho_foto caminho_logotipo cidade_id cidade_id cidade_id cod_barra cod_barra codigo_barra coletor_id complementares complemento data data_coleta_ano data_coleta_dia data_coleta_mes data_criacao data_envio data_identificacao_ano data_identificacao_dia data_identificacao_mes data_proxima_atualizacao data_tombo data_vencimento descricao descricao descricao devolvido em_vivo email email email entidade_destino_id fase_sucessional_id hcf hora_fim hora_inicio id id id id id id id id id id id id id id id id id id id id id id id id id id id id id id identificacao ja_comparou ja_comparou ja_requisitou ja_requisitou latitude logradouro longitude name nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome_arquivo nome_cientifico nomes_populares nro_requisicoes nro_requisicoes num_barra numero numero numero numero_coleta observacao observacao observacao observacao observacoes periodicidade ra rascunho reino_id senha sequencia sequencia servico sigla sigla sigla situacao status taxon telefone tipo tipo tipo token_troca_senha token_troca_senha_expiracao tombo_json tombo_json tombo_json unicata usuario_id variedade_id
+
+Denormalized Model (Combined Text):
+  altitude ativo caminho_foto cod_barra codigo_barra colecao_anexa_observacoes colecao_anexa_tipo coletor_email coletor_nome coletores_complementares configuracao_id data_coleta_ano data_coleta_dia data_coleta_mes data_envio data_identificacao_ano data_identificacao_dia data_identificacao_mes data_proxima_atualizacao data_tombo descricao em_vivo endereco_cidade_id endereco_complemento endereco_logradouro endereco_numero entidade_destino_id entidade_id especie_autor_nome especie_autor_observacao especie_nome estado_id estado_nome estado_sigla familia_nome fase_sucessional_nome foto_id genero_nome hcf herbario_caminho_logotipo herbario_email herbario_id herbario_id herbario_id herbario_nome herbario_origem_id herbario_sigla hora_fim hora_inicio identificador_id identificador_nome ja_comparou ja_requisitou latitude local_coleta_cidade_id local_coleta_descricao local_coleta_fase_numero longitude nome_arquivo nome_cientifico nomes_populares nro_requisicoes num_barra numero_coleta observacao observacao ordem pais_id pais_nome pais_sigla periodicidade plataforma rascunho reino_nome relevo_nome remessa_id retirada_data_vencimento retirada_devolvido retirada_tipo sequencia servico situacao solo_nome sub_especie_autor_nome sub_especie_autor_observacao sub_especie_nome sub_familia_autor_nome sub_familia_autor_observacao sub_familia_nome sync_id taxon telefone_id telefone_numero tipo_nome tipo_usuario_nome tombo_cidade_id tombo_hcf tombo_hcf tombo_hcf tombo_json unicata usuario_email usuario_id usuario_nome usuario_ra usuario_senha usuario_telefone usuario_token_troca_senha usuario_token_troca_senha_expiracao variedade_autor_nome variedade_autor_observacao variedade_nome vegetacao_nome
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 113 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id BIGSERIAL
+  Denormalized:  foto_id BIGINT
+
+Pair 2:
+  Relational:    status ALTERACOES_STATUS
+  Denormalized:  estado_id BIGINT
+
+Pair 3:
+  Relational:    observacao TEXT
+  Denormalized:  observacao TEXT
+
+Pair 4:
+  Relational:    tombo_json TEXT
+  Denormalized:  tombo_hcf BIGINT
+
+Pair 5:
+  Relational:    ativo BOOLEAN
+  Denormalized:  ativo BOOLEAN
+
+Pair 6:
+  Relational:    identificacao BOOLEAN
+  Denormalized:  identificador_nome CHARACTER
+
+Pair 7:
+  Relational:    id BIGSERIAL
+  Denormalized:  sync_id BIGSERIAL
+
+Pair 8:
+  Relational:    nome CHARACTER
+  Denormalized:  solo_nome CHARACTER
+
+Pair 9:
+  Relational:    observacao CHARACTER
+  Denormalized:  sub_familia_autor_observacao CHARACTER
+
+Pair 10:
+  Relational:    tipo COLECOES_ANEXAS_TIPO
+  Denormalized:  tipo_nome CHARACTER
+
+Pair 11:
+  Relational:    observacoes TEXT
+  Denormalized:  colecao_anexa_observacoes TEXT
+
+Pair 12:
+  Relational:    id BIGSERIAL
+  Denormalized:  ordem SMALLINT
+
+Pair 13:
+  Relational:    id BIGSERIAL
+  Denormalized:  pais_id INTEGER
+
+Pair 14:
+  Relational:    nome CHARACTER
+  Denormalized:  coletor_nome CHARACTER
+
+Pair 15:
+  Relational:    email CHARACTER
+  Denormalized:  herbario_email CHARACTER
+
+Pair 16:
+  Relational:    complementares CHARACTER
+  Denormalized:  coletores_complementares CHARACTER
+
+Pair 17:
+  Relational:    id BIGSERIAL
+  Denormalized:  herbario_id BIGINT
+
+Pair 18:
+  Relational:    hora_inicio CHARACTER
+  Denormalized:  hora_inicio CHARACTER
+
+Pair 19:
+  Relational:    hora_fim CHARACTER
+  Denormalized:  hora_fim CHARACTER
+
+Pair 20:
+  Relational:    periodicidade CONFIGURACAO_PERIODICIDADE
+  Denormalized:  periodicidade CONFIGURACAO_PERIODICIDADE
+
+Pair 21:
+  Relational:    data_proxima_atualizacao CHARACTER
+  Denormalized:  data_proxima_atualizacao CHARACTER
+
+Pair 22:
+  Relational:    nome_arquivo CHARACTER
+  Denormalized:  nome_arquivo CHARACTER
+
+Pair 23:
+  Relational:    servico CONFIGURACAO_SERVICO
+  Denormalized:  servico CONFIGURACAO_SERVICO
+
+Pair 24:
+  Relational:    logradouro CHARACTER
+  Denormalized:  endereco_logradouro CHARACTER
+
+Pair 25:
+  Relational:    numero CHARACTER
+  Denormalized:  endereco_numero CHARACTER
+
+Pair 26:
+  Relational:    complemento TEXT
+  Denormalized:  endereco_complemento TEXT
+
+Pair 27:
+  Relational:    cidade_id BIGINT
+  Denormalized:  tombo_cidade_id BIGINT
+
+Pair 28:
+  Relational:    id BIGSERIAL
+  Denormalized:  herbario_id BIGINT
+
+Pair 29:
+  Relational:    nome CHARACTER
+  Denormalized:  genero_nome CHARACTER
+
+Pair 30:
+  Relational:    nome CHARACTER
+  Denormalized:  especie_nome CHARACTER
+
+Pair 31:
+  Relational:    sigla CHARACTER(4)
+  Denormalized:  herbario_sigla CHARACTER
+
+Pair 32:
+  Relational:    nome CHARACTER
+  Denormalized:  vegetacao_nome CHARACTER
+
+Pair 33:
+  Relational:    reino_id BIGINT
+  Denormalized:  herbario_origem_id BIGINT
+
+Pair 34:
+  Relational:    numero BIGINT
+  Denormalized:  telefone_numero CHARACTER
+
+Pair 35:
+  Relational:    nome CHARACTER
+  Denormalized:  relevo_nome CHARACTER
+
+Pair 36:
+  Relational:    id BIGSERIAL
+  Denormalized:  herbario_id BIGINT
+
+Pair 37:
+  Relational:    nome CHARACTER
+  Denormalized:  sub_familia_nome CHARACTER
+
+Pair 38:
+  Relational:    nome CHARACTER
+  Denormalized:  familia_nome CHARACTER
+
+Pair 39:
+  Relational:    caminho_logotipo TEXT
+  Denormalized:  herbario_caminho_logotipo TEXT
+
+Pair 40:
+  Relational:    sigla CHARACTER
+  Denormalized:  pais_sigla CHARACTER(4)
+
+Pair 41:
+  Relational:    email CHARACTER
+  Denormalized:  remessa_id BIGINT
+
+Pair 42:
+  Relational:    data_criacao TIMESTAMP
+  Denormalized:  variedade_autor_observacao CHARACTER
+
+Pair 43:
+  Relational:    usuario_id BIGINT
+  Denormalized:  usuario_id BIGINT
+
+Pair 44:
+  Relational:    nome CHARACTER
+  Denormalized:  variedade_autor_nome CHARACTER
+
+Pair 45:
+  Relational:    descricao TEXT
+  Denormalized:  descricao TEXT
+
+Pair 46:
+  Relational:    cidade_id BIGINT
+  Denormalized:  local_coleta_cidade_id BIGINT
+
+Pair 47:
+  Relational:    name CHARACTER
+  Denormalized:  entidade_id BIGINT
+
+Pair 48:
+  Relational:    applied_at TIMESTAMP
+  Denormalized:  especie_autor_nome CHARACTER
+
+Pair 49:
+  Relational:    nome CHARACTER
+  Denormalized:  herbario_nome CHARACTER
+
+Pair 50:
+  Relational:    sigla CHARACTER(4)
+  Denormalized:  estado_sigla CHARACTER(4)
+
+Pair 51:
+  Relational:    cod_barra CHARACTER
+  Denormalized:  cod_barra CHARACTER
+
+Pair 52:
+  Relational:    tombo_json TEXT
+  Denormalized:  tombo_json TEXT
+
+Pair 53:
+  Relational:    ja_comparou BOOLEAN
+  Denormalized:  ja_comparou BOOLEAN
+
+Pair 54:
+  Relational:    ja_requisitou BOOLEAN
+  Denormalized:  ja_requisitou BOOLEAN
+
+Pair 55:
+  Relational:    nro_requisicoes BIGINT
+  Denormalized:  nro_requisicoes BIGINT
+
+Pair 56:
+  Relational:    nome CHARACTER
+  Denormalized:  tombo_hcf BIGINT
+
+Pair 57:
+  Relational:    nome CHARACTER
+  Denormalized:  usuario_nome CHARACTER
+
+Pair 58:
+  Relational:    observacao TEXT
+  Denormalized:  observacao TEXT
+
+Pair 59:
+  Relational:    data_envio TIMESTAMP
+  Denormalized:  data_envio TIMESTAMP
+
+Pair 60:
+  Relational:    entidade_destino_id BIGINT
+  Denormalized:  entidade_destino_id BIGINT
+
+Pair 61:
+  Relational:    tipo RETIRADA_EXSICCATA_TOMBOS_TIPO
+  Denormalized:  retirada_tipo RETIRADA_EXSICCATA_TOMBOS_TIPO
+
+Pair 62:
+  Relational:    data_vencimento TIMESTAMP
+  Denormalized:  retirada_data_vencimento TIMESTAMP
+
+Pair 63:
+  Relational:    devolvido BOOLEAN
+  Denormalized:  retirada_devolvido BOOLEAN
+
+Pair 64:
+  Relational:    nome CHARACTER
+  Denormalized:  reino_nome CHARACTER
+
+Pair 65:
+  Relational:    cod_barra CHARACTER
+  Denormalized:  configuracao_id BIGINT
+
+Pair 66:
+  Relational:    tombo_json TEXT
+  Denormalized:  tombo_hcf BIGINT
+
+Pair 67:
+  Relational:    ja_comparou BOOLEAN
+  Denormalized:  sub_familia_autor_nome CHARACTER
+
+Pair 68:
+  Relational:    ja_requisitou BOOLEAN
+  Denormalized:  colecao_anexa_tipo COLECOES_ANEXAS_TIPO
+
+Pair 69:
+  Relational:    nro_requisicoes BIGINT
+  Denormalized:  sub_especie_autor_observacao CHARACTER
+
+Pair 70:
+  Relational:    nome CHARACTER
+  Denormalized:  sub_especie_nome CHARACTER
+
+Pair 71:
+  Relational:    nome CHARACTER
+  Denormalized:  estado_nome CHARACTER
+
+Pair 72:
+  Relational:    numero CHARACTER
+  Denormalized:  local_coleta_fase_numero BIGINT
+
+Pair 73:
+  Relational:    nome CHARACTER
+  Denormalized:  pais_nome CHARACTER
+
+Pair 74:
+  Relational:    tipo CHARACTER
+  Denormalized:  tipo_usuario_nome CHARACTER
+
+Pair 75:
+  Relational:    sequencia BIGINT
+  Denormalized:  sequencia BIGINT
+
+Pair 76:
+  Relational:    data DATE
+  Denormalized:  plataforma CHARACTER
+
+Pair 77:
+  Relational:    descricao TEXT
+  Denormalized:  local_coleta_descricao TEXT
+
+Pair 78:
+  Relational:    hcf BIGSERIAL
+  Denormalized:  hcf BIGINT
+
+Pair 79:
+  Relational:    data_tombo TIMESTAMP
+  Denormalized:  data_tombo TIMESTAMP
+
+Pair 80:
+  Relational:    data_coleta_dia BIGINT
+  Denormalized:  data_coleta_dia BIGINT
+
+Pair 81:
+  Relational:    observacao TEXT
+  Denormalized:  especie_autor_observacao CHARACTER
+
+Pair 82:
+  Relational:    nomes_populares TEXT
+  Denormalized:  nomes_populares TEXT
+
+Pair 83:
+  Relational:    numero_coleta BIGINT
+  Denormalized:  numero_coleta BIGINT
+
+Pair 84:
+  Relational:    latitude DOUBLE
+  Denormalized:  latitude DOUBLE
+
+Pair 85:
+  Relational:    longitude DOUBLE
+  Denormalized:  longitude DOUBLE
+
+Pair 86:
+  Relational:    altitude DOUBLE
+  Denormalized:  altitude DOUBLE
+
+Pair 87:
+  Relational:    variedade_id BIGINT
+  Denormalized:  variedade_nome CHARACTER
+
+Pair 88:
+  Relational:    data_identificacao_dia SMALLINT
+  Denormalized:  data_identificacao_dia SMALLINT
+
+Pair 89:
+  Relational:    data_identificacao_mes SMALLINT
+  Denormalized:  data_identificacao_mes SMALLINT
+
+Pair 90:
+  Relational:    data_identificacao_ano INTEGER
+  Denormalized:  data_identificacao_ano INTEGER
+
+Pair 91:
+  Relational:    situacao TOMBOS_SITUACAO
+  Denormalized:  situacao TOMBOS_SITUACAO
+
+Pair 92:
+  Relational:    nome_cientifico TEXT
+  Denormalized:  nome_cientifico TEXT
+
+Pair 93:
+  Relational:    data_coleta_mes BIGINT
+  Denormalized:  data_coleta_mes BIGINT
+
+Pair 94:
+  Relational:    data_coleta_ano BIGINT
+  Denormalized:  data_coleta_ano BIGINT
+
+Pair 95:
+  Relational:    ativo BOOLEAN
+  Denormalized:  usuario_telefone CHARACTER
+
+Pair 96:
+  Relational:    taxon CHARACTER
+  Denormalized:  taxon CHARACTER
+
+Pair 97:
+  Relational:    rascunho BOOLEAN
+  Denormalized:  rascunho BOOLEAN
+
+Pair 98:
+  Relational:    coletor_id BIGINT
+  Denormalized:  coletor_email CHARACTER
+
+Pair 99:
+  Relational:    descricao TEXT
+  Denormalized:  identificador_id BIGINT
+
+Pair 100:
+  Relational:    unicata BOOLEAN
+  Denormalized:  unicata BOOLEAN
+
+Pair 101:
+  Relational:    cidade_id BIGINT
+  Denormalized:  endereco_cidade_id BIGINT
+
+Pair 102:
+  Relational:    fase_sucessional_id BIGINT
+  Denormalized:  fase_sucessional_nome CHARACTER
+
+Pair 103:
+  Relational:    codigo_barra CHARACTER
+  Denormalized:  codigo_barra CHARACTER
+
+Pair 104:
+  Relational:    num_barra CHARACTER
+  Denormalized:  num_barra CHARACTER
+
+Pair 105:
+  Relational:    caminho_foto TEXT
+  Denormalized:  caminho_foto TEXT
+
+Pair 106:
+  Relational:    em_vivo BOOLEAN
+  Denormalized:  em_vivo BOOLEAN
+
+Pair 107:
+  Relational:    sequencia BIGINT
+  Denormalized:  sub_especie_autor_nome CHARACTER
+
+Pair 108:
+  Relational:    ra CHARACTER
+  Denormalized:  usuario_ra CHARACTER
+
+Pair 109:
+  Relational:    email CHARACTER
+  Denormalized:  usuario_email CHARACTER
+
+Pair 110:
+  Relational:    senha CHARACTER
+  Denormalized:  usuario_senha CHARACTER
+
+Pair 111:
+  Relational:    telefone CHARACTER
+  Denormalized:  telefone_id BIGSERIAL
+
+Pair 112:
+  Relational:    token_troca_senha CHARACTER
+  Denormalized:  usuario_token_troca_senha CHARACTER
+
+Pair 113:
+  Relational:    token_troca_senha_expiracao TIMESTAMP
+  Denormalized:  usuario_token_troca_senha_expiracao TIMESTAMP
+
+
+================================================================================

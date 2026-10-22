@@ -1,0 +1,362 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-00-45
+Model: ollama_api
+Prompt: RISEN
+Schema: adv_works
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on reducing JOIN overhead for common analytical and operational queries by collapsing relations, adding redundant attributes, and vertically partitioning large tables. Key bottlenecks identified include employee-department relationships, product-sales relationships, and address-related information. The approach preserves all original data while optimizing for read-heavy workloads typical in data warehouse or reporting scenarios.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapse employee and department information into a single denormalized employee table by joining humanresources.employee with humanresources.employeedepartmenthistory and humanresources.department to avoid frequent JOINs when retrieving employee-department data."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapse product and subcategory/category information into a single denormalized product table by joining production.product with production.productsubcategory and production.productcategory to eliminate JOINs in product dimension queries."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Collapse sales order headers and details into a single wide table by joining sales.salesorderheader and sales.salesorderdetail to optimize order analysis queries."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Vertically partition person.person into core identity information and extended demographic/contact information to optimize queries that only need basic person data."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Add redundant address information (city, state, country) directly to salesorderheader to avoid JOINs with person.address and related tables for shipping/billing location analysis."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant department name and group name to employee table from department table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added redundant product subcategory name and category name to product table from productsubcategory and productcategory tables."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added derived total line amount (unitprice * orderqty * (1 - unitpricediscount)) to sales order details."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added redundant address details (city, state, country) to salesorderheader for both billto and shipto addresses."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Split person table into person_core (frequently accessed fields) and person_extended (less frequently accessed fields like demographics)."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Storage overhead increases due to redundant data, but read performance improves significantly by eliminating JOINs."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Data modification complexity increases as updates to denormalized fields must be propagated to multiple locations."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Vertical partitioning of person table requires applications to access two tables when full person details are needed."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Frequent queries to retrieve employee information along with current department for HR reporting and organizational analysis."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Common analytical queries joining products with their categories for sales analysis and inventory reporting."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Heavy read workload for order analysis, requiring JOINs between salesorderheader and salesorderdetail for revenue calculations."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries that frequently access only core person information (name, type) without needing extended demographic data."
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Geographic analysis of sales orders requiring JOINs with address, stateprovince, and countryregion tables."
+      }
+    ]
+  }
+}
+
+-- Denormalized Schema DDL
+-- Section 1: Core Business Entities with Collapsed Relations
+
+CREATE TABLE IF NOT EXISTS humanresources.employee_denorm
+(
+    businessentityid integer NOT NULL,
+    nationalidnumber character varying(15) COLLATE pg_catalog."default" NOT NULL,
+    loginid character varying(256) COLLATE pg_catalog."default" NOT NULL,
+    jobtitle character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    birthdate date NOT NULL,
+    maritalstatus character(1) COLLATE pg_catalog."default" NOT NULL,
+    gender character(1) COLLATE pg_catalog."default" NOT NULL,
+    hiredate date NOT NULL,
+    salariedflag boolean NOT NULL DEFAULT true,
+    vacationhours smallint NOT NULL DEFAULT 0,
+    sickleavehours smallint NOT NULL DEFAULT 0,
+    currentflag boolean NOT NULL DEFAULT true,
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    organizationnode character varying COLLATE pg_catalog."default" DEFAULT '/'::character varying,
+    
+    -- Redundant department information
+    departmentid integer,
+    departmentname character varying COLLATE pg_catalog."default",
+    departmentgroupname character varying COLLATE pg_catalog."default",
+    
+    -- Current flag for department assignment
+    iscurrentdepartment boolean DEFAULT true,
+    
+    CONSTRAINT "PK_EmployeeDenorm_BusinessEntityID" PRIMARY KEY (businessentityid)
+);
+
+COMMENT ON TABLE humanresources.employee_denorm
+    IS 'Denormalized employee information with current department assignment.';
+
+CREATE TABLE IF NOT EXISTS production.product_denorm
+(
+    productid serial NOT NULL,
+    name character varying COLLATE pg_catalog."default" NOT NULL,
+    productnumber character varying(25) COLLATE pg_catalog."default" NOT NULL,
+    makeflag boolean NOT NULL DEFAULT true,
+    finishedgoodsflag boolean NOT NULL DEFAULT true,
+    color character varying(15) COLLATE pg_catalog."default",
+    safetystocklevel smallint NOT NULL,
+    reorderpoint smallint NOT NULL,
+    standardcost numeric NOT NULL,
+    listprice numeric NOT NULL,
+    size character varying(5) COLLATE pg_catalog."default",
+    sizeunitmeasurecode character(3) COLLATE pg_catalog."default",
+    weightunitmeasurecode character(3) COLLATE pg_catalog."default",
+    weight numeric(8, 2),
+    daystomanufacture integer NOT NULL,
+    productline character(2) COLLATE pg_catalog."default",
+    class character(2) COLLATE pg_catalog."default",
+    style character(2) COLLATE pg_catalog."default",
+    sellstartdate timestamp without time zone NOT NULL,
+    sellenddate timestamp without time zone,
+    discontinueddate timestamp without time zone,
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- Redundant category information
+    productsubcategoryid integer,
+    productsubcategoryname character varying COLLATE pg_catalog."default",
+    productcategoryid integer,
+    productcategoryname character varying COLLATE pg_catalog."default",
+    
+    CONSTRAINT "PK_ProductDenorm_ProductID" PRIMARY KEY (productid)
+);
+
+COMMENT ON TABLE production.product_denorm
+    IS 'Denormalized product information with category hierarchy.';
+
+-- Section 2: Vertically Partitioned Person Tables
+
+CREATE TABLE IF NOT EXISTS person.person_core
+(
+    businessentityid integer NOT NULL,
+    persontype character(2) COLLATE pg_catalog."default" NOT NULL,
+    namestyle boolean NOT NULL DEFAULT false,
+    title character varying(8) COLLATE pg_catalog."default",
+    firstname character varying COLLATE pg_catalog."default" NOT NULL,
+    middlename character varying COLLATE pg_catalog."default",
+    lastname character varying COLLATE pg_catalog."default" NOT NULL,
+    suffix character varying(10) COLLATE pg_catalog."default",
+    emailpromotion integer NOT NULL DEFAULT 0,
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "PK_PersonCore_BusinessEntityID" PRIMARY KEY (businessentityid)
+);
+
+COMMENT ON TABLE person.person_core
+    IS 'Core person information for frequently accessed queries.';
+
+CREATE TABLE IF NOT EXISTS person.person_extended
+(
+    businessentityid integer NOT NULL,
+    additionalcontactinfo xml,
+    demographics xml,
+    CONSTRAINT "PK_PersonExtended_BusinessEntityID" PRIMARY KEY (businessentityid)
+);
+
+COMMENT ON TABLE person.person_extended
+    IS 'Extended person information for less frequently accessed queries.';
+
+-- Section 3: Denormalized Sales Order Tables
+
+CREATE TABLE IF NOT EXISTS sales.salesorder_denorm
+(
+    salesorderid serial NOT NULL,
+    revisionnumber smallint NOT NULL DEFAULT 0,
+    orderdate timestamp without time zone NOT NULL DEFAULT now(),
+    duedate timestamp without time zone NOT NULL,
+    shipdate timestamp without time zone,
+    status smallint NOT NULL DEFAULT 1,
+    onlineorderflag boolean NOT NULL DEFAULT true,
+    purchaseordernumber character varying(25) COLLATE pg_catalog."default",
+    accountnumber character varying(15) COLLATE pg_catalog."default",
+    customerid integer NOT NULL,
+    salespersonid integer,
+    territoryid integer,
+    shipmethodid integer NOT NULL,
+    creditcardid integer,
+    creditcardapprovalcode character varying(15) COLLATE pg_catalog."default",
+    currencyrateid integer,
+    subtotal numeric NOT NULL DEFAULT 0.00,
+    taxamt numeric NOT NULL DEFAULT 0.00,
+    freight numeric NOT NULL DEFAULT 0.00,
+    totaldue numeric,
+    comment character varying(128) COLLATE pg_catalog."default",
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- Denormalized order line details (repeating group)
+    salesorderdetailid integer,
+    carriertrackingnumber character varying(25) COLLATE pg_catalog."default",
+    orderqty smallint,
+    productid integer,
+    specialofferid integer,
+    unitprice numeric,
+    unitpricediscount numeric NOT NULL DEFAULT 0.0,
+    linetotal numeric, -- Derived attribute: unitprice * orderqty * (1 - unitpricediscount)
+    
+    -- Denormalized address information
+    billtoaddressid integer,
+    billto_city character varying(30) COLLATE pg_catalog."default",
+    billto_state character varying COLLATE pg_catalog."default",
+    billto_country character varying(3) COLLATE pg_catalog."default",
+    shiptoaddressid integer,
+    shipto_city character varying(30) COLLATE pg_catalog."default",
+    shipto_state character varying COLLATE pg_catalog."default",
+    shipto_country character varying(3) COLLATE pg_catalog."default",
+    
+    CONSTRAINT "PK_SalesOrderDenorm_SalesOrderID" PRIMARY KEY (salesorderid, salesorderdetailid)
+);
+
+COMMENT ON TABLE sales.salesorder_denorm
+    IS 'Denormalized sales order header and detail information.';
+
+-- Section 4: Preserved Tables (No Changes Needed for Denormalization)
+
+CREATE TABLE IF NOT EXISTS humanresources.department
+(
+    departmentid serial NOT NULL,
+    name character varying COLLATE pg_catalog."default" NOT NULL,
+    groupname character varying COLLATE pg_catalog."default" NOT NULL,
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "PK_Department_DepartmentID" PRIMARY KEY (departmentid)
+);
+
+CREATE TABLE IF NOT EXISTS humanresources.shift
+(
+    shiftid serial NOT NULL,
+    name character varying COLLATE pg_catalog."default" NOT NULL,
+    starttime time without time zone NOT NULL,
+    endtime time without time zone NOT NULL,
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "PK_Shift_ShiftID" PRIMARY KEY (shiftid)
+);
+
+CREATE TABLE IF NOT EXISTS person.address
+(
+    addressid serial NOT NULL,
+    addressline1 character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    addressline2 character varying(60) COLLATE pg_catalog."default",
+    city character varying(30) COLLATE pg_catalog."default" NOT NULL,
+    stateprovinceid integer NOT NULL,
+    postalcode character varying(15) COLLATE pg_catalog."default" NOT NULL,
+    spatiallocation bytea,
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "PK_Address_AddressID" PRIMARY KEY (addressid)
+);
+
+CREATE TABLE IF NOT EXISTS person.stateprovince
+(
+    stateprovinceid serial NOT NULL,
+    stateprovincecode character(3) COLLATE pg_catalog."default" NOT NULL,
+    countryregioncode character varying(3) COLLATE pg_catalog."default" NOT NULL,
+    isonlystateprovinceflag boolean NOT NULL DEFAULT true,
+    name character varying COLLATE pg_catalog."default" NOT NULL,
+    territoryid integer NOT NULL,
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "PK_StateProvince_StateProvinceID" PRIMARY KEY (stateprovinceid)
+);
+
+CREATE TABLE IF NOT EXISTS person.countryregion
+(
+    countryregioncode character varying(3) COLLATE pg_catalog."default" NOT NULL,
+    name character varying COLLATE pg_catalog."default" NOT NULL,
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "PK_CountryRegion_CountryRegionCode" PRIMARY KEY (countryregioncode)
+);
+
+CREATE TABLE IF NOT EXISTS sales.customer
+(
+    customerid serial NOT NULL,
+    personid integer,
+    storeid integer,
+    territoryid integer,
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "PK_Customer_CustomerID" PRIMARY KEY (customerid)
+);
+
+CREATE TABLE IF NOT EXISTS sales.salesterritory
+(
+    territoryid serial NOT NULL,
+    name character varying COLLATE pg_catalog."default" NOT NULL,
+    countryregioncode character varying(3) COLLATE pg_catalog."default" NOT NULL,
+    "group" character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    salesytd numeric NOT NULL DEFAULT 0.00,
+    saleslastyear numeric NOT NULL DEFAULT 0.00,
+    costytd numeric NOT NULL DEFAULT 0.00,
+    costlastyear numeric NOT NULL DEFAULT 0.00,
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "PK_SalesTerritory_TerritoryID" PRIMARY KEY (territoryid)
+);
+
+CREATE TABLE IF NOT EXISTS purchasing.shipmethod
+(
+    shipmethodid serial NOT NULL,
+    name character varying COLLATE pg_catalog."default" NOT NULL,
+    shipbase numeric NOT NULL DEFAULT 0.00,
+    shiprate numeric NOT NULL DEFAULT 0.00,
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "PK_ShipMethod_ShipMethodID" PRIMARY KEY (shipmethodid)
+);
+
+CREATE TABLE IF NOT EXISTS sales.creditcard
+(
+    creditcardid serial NOT NULL,
+    cardtype character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    cardnumber character varying(25) COLLATE pg_catalog."default" NOT NULL,
+    expmonth smallint NOT NULL,
+    expyear smallint NOT NULL,
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "PK_CreditCard_CreditCardID" PRIMARY KEY (creditcardid)
+);

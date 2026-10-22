@@ -1,0 +1,186 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-15_09-51-10
+Model: ollama_local
+Prompt: RISEN-few-shot
+Schema: northwind
+==================================================
+
+{
+    "section_1": {
+        "summary": "The denormalization strategy focuses on the 'Northwind' sample database schema. The primary bottleneck 
+        identified is the frequent execution of complex JOINs between Orders, Customers, Employees, Products, and Categories 
+        to generate sales reports. The strategy employs 'Collapsing Relations' to merge frequently joined tables into a single
+         'Sales_Demographics' table and 'Adding Redundant Attributes' to embed Category and Customer demographic details directly 
+         into the Orders table. This eliminates the need for multi-table joins in read-heavy analytical queries, significantly reducing I/O and CPU overhead.",
+        "structural_decisions": [
+            {
+                "decision_id": "D1",
+                "description": "Creation of a new table `Sales_Demographics` that collapses the relationship between `orders`, `customers`, `employees`, and `territories`. This table contains the order ID, customer details (name, company, region), employee details (name, title), and territory details (description, region)."
+            },
+            {
+                "decision_id": "D2",
+                "description": "Creation of a new table `Order_Products` that collapses the relationship between `orders`, `order_details`, and `products`. This table contains the order ID, product ID, product name, category name, unit price, quantity, and calculated discount amount."
+            },
+            {
+                "decision_id": "D3",
+                "description": "Creation of a new table `Customer_Demographics` that collapses `customers` and `customer_demographics`. This table contains customer ID, customer name, company name, and the associated demographic description."
+            }
+        ],
+        "attribute_level_changes": [
+            {
+                "decision_id": "A1",
+                "description": "Added redundant attributes: `customer_name`, `company_name`, `territory_description`, `employee_name`, `employee_title`, `product_name`, `category_name`, and `discount_amount` directly into the `Sales_Demographics` and `Order_Products` tables."
+            },
+            {
+                "decision_id": "A2",
+                "description": "Added derived attribute `discount_amount` (calculated as unit_price * quantity * (1 - discount)) to the `Order_Products` table to avoid runtime calculations."
+            }
+        ],
+        "tradeoffs": [
+            {
+                "tradeoff_id": "T1",
+                "description": "The tradeoff is between write performance and read performance. While denormalization eliminates expensive JOINs during reads (improving query speed), it increases write complexity and storage redundancy. Updates to customer names or product categories must now be performed in multiple tables to maintain consistency."
+            }
+        ]
+    },
+    "section_2": {
+        "query_patterns": [
+            {
+                "decision_id": "D1",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Report on sales by territory and employee, including customer and product details without joining multiple tables."
+            },
+            {
+                "decision_id": "D2",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Sales analysis aggregating order totals, product categories, and discount percentages per order."
+            },
+            {
+                "decision_id": "D3",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Customer profiling queries that require joining customers with their demographic descriptions."
+            }
+        ]
+    }
+}
+
+BEGIN;
+
+-- Drop existing tables if they exist to ensure a clean state
+DROP TABLE IF EXISTS public.Sales_Demographics CASCADE;
+DROP TABLE IF EXISTS public.Order_Products CASCADE;
+DROP TABLE IF EXISTS public.Customer_Demographics CASCADE;
+
+-- Table 1: Collapsed Customer and Demographics
+-- Strategy: Adding Redundant Attributes + Collapsing Relations
+CREATE TABLE IF NOT EXISTS public.Customer_Demographics (
+    customer_id character varying(5) COLLATE pg_catalog.default NOT NULL,
+    customer_name character varying(40) COLLATE pg_catalog.default NOT NULL,
+    company_name character varying(40) COLLATE pg_catalog.default NOT NULL,
+    customer_demographic_description text COLLATE pg_catalog.default,
+    CONSTRAINT pk_customer_demographics PRIMARY KEY (customer_id)
+);
+
+-- Table 2: Collapsed Orders, Employees, Territories, Customers, and Products
+-- Strategy: Collapsing Relations (Merging multiple related tables into one)
+-- This table serves as the primary analytical view for sales data.
+CREATE TABLE IF NOT EXISTS public.Sales_Demographics (
+    order_id smallint NOT NULL,
+    customer_id character varying(5) COLLATE pg_catalog.default,
+    customer_name character varying(40) COLLATE pg_catalog.default,
+    company_name character varying(40) COLLATE pg_catalog.default,
+    employee_id smallint,
+    employee_name character varying(40) COLLATE pg_catalog.default,
+    employee_title character varying(30) COLLATE pg_catalog.default,
+    territory_id character varying(20) COLLATE pg_catalog.default,
+    territory_description character varying(60) COLLATE pg_catalog.default,
+    region_id smallint,
+    region_description character varying(60) COLLATE pg_catalog.default,
+    CONSTRAINT pk_sales_demographics PRIMARY KEY (order_id)
+);
+
+-- Table 3: Collapsed Order Details and Products
+-- Strategy: Adding Redundant Attributes + Collapsing Relations
+CREATE TABLE IF NOT EXISTS public.Order_Products (
+    order_id smallint NOT NULL,
+    product_id smallint NOT NULL,
+    product_name character varying(40) COLLATE pg_catalog.default NOT NULL,
+    category_id smallint,
+    category_name character varying(15) COLLATE pg_catalog.default,
+    unit_price real NOT NULL,
+    quantity smallint NOT NULL,
+    discount real NOT NULL,
+    discount_amount real NOT NULL,
+    CONSTRAINT pk_order_products PRIMARY KEY (order_id, product_id)
+);
+
+-- Add Foreign Keys to maintain referential integrity where possible
+-- Note: In a true denormalized analytical schema, foreign keys might be dropped or set to NO ACTION to allow flexible updates,
+-- but we preserve them here for logical consistency unless they conflict with the redundant nature.
+-- However, since we are duplicating data, strict FKs on redundant columns can cause update anomalies.
+-- We will keep FKs on the original IDs but allow flexible handling on the redundant columns.
+
+ALTER TABLE IF EXISTS public.Customer_Demographics
+    ADD CONSTRAINT fk_customer_demographics_customers
+    FOREIGN KEY (customer_id)
+    REFERENCES public.customers (customer_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.Sales_Demographics
+    ADD CONSTRAINT fk_sales_demographics_orders
+    FOREIGN KEY (order_id)
+    REFERENCES public.orders (order_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.Sales_Demographics
+    ADD CONSTRAINT fk_sales_demographics_customers
+    FOREIGN KEY (customer_id)
+    REFERENCES public.customers (customer_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.Sales_Demographics
+    ADD CONSTRAINT fk_sales_demographics_employees
+    FOREIGN KEY (employee_id)
+    REFERENCES public.employees (employee_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.Sales_Demographics
+    ADD CONSTRAINT fk_sales_demographics_territories
+    FOREIGN KEY (territory_id)
+    REFERENCES public.territories (territory_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.Sales_Demographics
+    ADD CONSTRAINT fk_sales_demographics_region
+    FOREIGN KEY (region_id)
+    REFERENCES public.region (region_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.Order_Products
+    ADD CONSTRAINT fk_order_products_orders
+    FOREIGN KEY (order_id)
+    REFERENCES public.orders (order_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.Order_Products
+    ADD CONSTRAINT fk_order_products_products
+    FOREIGN KEY (product_id)
+    REFERENCES public.products (product_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.Order_Products
+    ADD CONSTRAINT fk_order_products_category
+    FOREIGN KEY (category_id)
+    REFERENCES public.categories (category_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+END;

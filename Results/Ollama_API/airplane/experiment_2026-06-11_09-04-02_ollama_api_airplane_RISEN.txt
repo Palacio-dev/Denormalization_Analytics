@@ -1,0 +1,230 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-04-02
+Model: ollama_api
+Prompt: RISEN
+Schema: airplane
+==================================================
+
+{
+  "section_1": {
+    "summary": "The strategy focuses on reducing JOINs in read-heavy analytical workloads by denormalizing key relationships. Aircraft and airport metadata are embedded into flights for faster access to model and location details. Ticket and booking information is merged into ticket_flights to reduce traversal through multiple tables. Boarding pass data is integrated into ticket_flights to support seat and boarding analytics. Derived fields such as flight duration are added to improve analytical performance.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge aircraft model and range from aircrafts_data into flights to avoid joins when querying flight details."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Embed departure and arrival airport names and cities from airports_data into flights for analytical queries involving routes."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Collapse tickets and bookings into ticket_flights to reduce JOINs for passenger and booking-level analytics."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Integrate boarding_passes into ticket_flights to provide seat_no and boarding_no in a single table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived attribute 'scheduled_duration' to flights as the difference between scheduled_arrival and scheduled_departure."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added derived attribute 'actual_duration' to flights as the difference between actual_arrival and actual_departure."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added redundant attributes: aircraft_model, aircraft_range, departure_airport_name, arrival_airport_name, departure_city, arrival_city."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added redundant attributes: passenger_id, passenger_name, contact_data, book_date, total_amount from tickets and bookings."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Added redundant attributes: boarding_no, seat_no from boarding_passes."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage footprint due to redundant data replication (e.g., aircraft model repeated per flight)."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Write complexity increases due to need to maintain consistency across replicated fields during updates."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of normalization benefits such as single point of update for airport or aircraft details."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical queries reporting on flight performance often require aircraft model and range. Embedding these avoids a JOIN with aircrafts_data."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Route-based analytics (e.g., popular city pairs) benefit from embedding airport names and cities directly into flights."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries analyzing revenue or passenger behavior by booking or ticket require joining multiple tables. Merging these reduces JOINs."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Seat occupancy and boarding analytics require linking ticket_flights and boarding_passes. Denormalization simplifies this."
+      }
+    ]
+  }
+}
+
+```sql
+CREATE TABLE IF NOT EXISTS bookings_denormalized.aircrafts_data
+(
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    model jsonb NOT NULL,
+    range integer NOT NULL,
+    CONSTRAINT aircrafts_pkey PRIMARY KEY (aircraft_code)
+);
+
+COMMENT ON TABLE bookings_denormalized.aircrafts_data
+    IS 'Aircrafts (internal data)';
+
+COMMENT ON COLUMN bookings_denormalized.aircrafts_data.aircraft_code
+    IS 'Aircraft code, IATA';
+
+COMMENT ON COLUMN bookings_denormalized.aircrafts_data.model
+    IS 'Aircraft model';
+
+COMMENT ON COLUMN bookings_denormalized.aircrafts_data.range
+    IS 'Maximal flying distance, km';
+
+CREATE TABLE IF NOT EXISTS bookings_denormalized.airports_data
+(
+    airport_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    airport_name jsonb NOT NULL,
+    city jsonb NOT NULL,
+    coordinates point NOT NULL,
+    timezone text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT airports_data_pkey PRIMARY KEY (airport_code)
+);
+
+COMMENT ON TABLE bookings_denormalized.airports_data
+    IS 'Airports (internal data)';
+
+COMMENT ON COLUMN bookings_denormalized.airports_data.airport_code
+    IS 'Airport code';
+
+COMMENT ON COLUMN bookings_denormalized.airports_data.airport_name
+    IS 'Airport name';
+
+COMMENT ON COLUMN bookings_denormalized.airports_data.city
+    IS 'City';
+
+COMMENT ON COLUMN bookings_denormalized.airports_data.coordinates
+    IS 'Airport coordinates (longitude and latitude)';
+
+COMMENT ON COLUMN bookings_denormalized.airports_data.timezone
+    IS 'Airport time zone';
+
+CREATE TABLE IF NOT EXISTS bookings_denormalized.seats
+(
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    seat_no character varying(4) COLLATE pg_catalog."default" NOT NULL,
+    fare_conditions character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT seats_pkey PRIMARY KEY (aircraft_code, seat_no)
+);
+
+COMMENT ON TABLE bookings_denormalized.seats
+    IS 'Seats';
+
+COMMENT ON COLUMN bookings_denormalized.seats.aircraft_code
+    IS 'Aircraft code, IATA';
+
+COMMENT ON COLUMN bookings_denormalized.seats.seat_no
+    IS 'Seat number';
+
+COMMENT ON COLUMN bookings_denormalized.seats.fare_conditions
+    IS 'Travel class';
+
+CREATE TABLE IF NOT EXISTS bookings_denormalized.flights_denormalized
+(
+    flight_id serial NOT NULL,
+    flight_no character(6) COLLATE pg_catalog."default" NOT NULL,
+    scheduled_departure timestamp with time zone NOT NULL,
+    scheduled_arrival timestamp with time zone NOT NULL,
+    departure_airport character(3) COLLATE pg_catalog."default" NOT NULL,
+    arrival_airport character(3) COLLATE pg_catalog."default" NOT NULL,
+    status character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    actual_departure timestamp with time zone,
+    actual_arrival timestamp with time zone,
+    aircraft_model jsonb NOT NULL,
+    aircraft_range integer NOT NULL,
+    departure_airport_name jsonb NOT NULL,
+    arrival_airport_name jsonb NOT NULL,
+    departure_city jsonb NOT NULL,
+    arrival_city jsonb NOT NULL,
+    scheduled_duration interval GENERATED ALWAYS AS (scheduled_arrival - scheduled_departure) STORED,
+    actual_duration interval GENERATED ALWAYS AS (actual_arrival - actual_departure) STORED,
+    CONSTRAINT flights_denormalized_pkey PRIMARY KEY (flight_id)
+);
+
+COMMENT ON TABLE bookings_denormalized.flights_denormalized
+    IS 'Denormalized Flights with embedded aircraft and airport data';
+
+CREATE TABLE IF NOT EXISTS bookings_denormalized.ticket_flights_denormalized
+(
+    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL,
+    flight_id integer NOT NULL,
+    fare_conditions character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    amount numeric(10, 2) NOT NULL,
+    book_ref character(6) COLLATE pg_catalog."default" NOT NULL,
+    book_date timestamp with time zone NOT NULL,
+    total_amount numeric(10, 2) NOT NULL,
+    passenger_id character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    passenger_name text COLLATE pg_catalog."default" NOT NULL,
+    contact_data jsonb,
+    boarding_no integer,
+    seat_no character varying(4) COLLATE pg_catalog."default",
+    CONSTRAINT ticket_flights_denormalized_pkey PRIMARY KEY (ticket_no, flight_id)
+);
+
+COMMENT ON TABLE bookings_denormalized.ticket_flights_denormalized
+    IS 'Denormalized ticket flights with embedded ticket, booking, and boarding pass data';
+
+ALTER TABLE IF EXISTS bookings_denormalized.seats
+    ADD CONSTRAINT seats_aircraft_code_fkey FOREIGN KEY (aircraft_code)
+    REFERENCES bookings_denormalized.aircrafts_data (aircraft_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE CASCADE;
+
+ALTER TABLE IF EXISTS bookings_denormalized.flights_denormalized
+    ADD CONSTRAINT flights_aircraft_code_fkey FOREIGN KEY (aircraft_code)
+    REFERENCES bookings_denormalized.aircrafts_data (aircraft_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS bookings_denormalized.flights_denormalized
+    ADD CONSTRAINT flights_arrival_airport_fkey FOREIGN KEY (arrival_airport)
+    REFERENCES bookings_denormalized.airports_data (airport_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS bookings_denormalized.flights_denormalized
+    ADD CONSTRAINT flights_departure_airport_fkey FOREIGN KEY (departure_airport)
+    REFERENCES bookings_denormalized.airports_data (airport_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+```

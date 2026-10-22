@@ -1,0 +1,499 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 9
+  - Total Attributes: 96
+    * s_purchase_lineitem: 8 columns
+    * s_purchase: 8 columns
+    * s_catalog_order: 8 columns
+    * s_web_order: 8 columns
+    * s_catalog_order_lineitem: 12 columns
+    * s_web_order_lineitem: 11 columns
+    * s_store_returns: 17 columns
+    * s_catalog_returns: 20 columns
+    * s_inventory: 4 columns
+
+Denormalized Model:
+  - Tables: 15
+  - Total Attributes: 114
+    * s_orders: 10 columns
+    * s_order_lineitem: 15 columns
+    * s_sales: 11 columns
+    * s_sale_lineitem: 10 columns
+    * s_returns: 19 columns
+    * s_inventory_snapshots: 7 columns
+    * s_store_dim: 4 columns
+    * s_customer_dim: 5 columns
+    * s_item_dim: 10 columns
+    * s_promotion_dim: 3 columns
+    * s_warehouse_dim: 5 columns
+    * s_web_site_dim: 3 columns
+    * s_call_center_dim: 6 columns
+    * s_ship_mode_dim: 3 columns
+    * s_reason_dim: 3 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Denormalized model has MORE attributes (96 vs 114)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: plin_sale_price (NUMERIC(7, 2)) -> f_sale_price (DECIMAL(12, 2))
+  - Type mismatch: plin_coupon_amt (NUMERIC(7, 2)) -> f_coupon_amt (DECIMAL(12, 2))
+  - Type mismatch: purc_purchase_date (CHAR(10)) -> f_purchase_date (DATE)
+  - Type mismatch: purc_comment (CHAR(100)) -> f_purchase_comments (VARCHAR(100))
+  - Type mismatch: cord_bill_customer_id (CHAR(16)) -> f_call_center_city (VARCHAR(100))
+  - Type mismatch: cord_ship_customer_id (CHAR(16)) -> f_customer_city (VARCHAR(100))
+  - Type mismatch: cord_order_date (CHAR(10)) -> f_order_date (DATE)
+  - Type mismatch: word_order_id (INTEGER) -> f_warehouse_id (CHAR(16))
+  - Type mismatch: word_ship_customer_id (CHAR(16)) -> f_customer_name (VARCHAR(100))
+  - Type mismatch: word_order_date (CHAR(10)) -> f_order_quantity (INTEGER)
+  - Type mismatch: word_order_time (INTEGER) -> f_source_type (CHAR(1))
+  - Type mismatch: word_order_comments (CHAR(100)) -> f_order_amount (DECIMAL(12, 2))
+  - Type mismatch: clin_sales_price (NUMERIC(7, 2)) -> f_sales_price (DECIMAL(12, 2))
+  - Type mismatch: clin_coupon_amt (NUMERIC(7, 2)) -> f_coupon_amt (DECIMAL(12, 2))
+  - Type mismatch: clin_ship_date (CHAR(10)) -> f_ship_date (DATE)
+  - Type mismatch: clin_ship_cost (NUMERIC(7, 2)) -> f_ship_cost (DECIMAL(12, 2))
+  - Type mismatch: wlin_sales_price (NUMERIC(7, 2)) -> f_sale_amount (DECIMAL(12, 2))
+  - Type mismatch: wlin_coupon_amt (NUMERIC(7, 2)) -> f_promotion_name (VARCHAR(100))
+  - Type mismatch: wlin_ship_date (CHAR(10)) -> f_snapshot_date (DATE)
+  - Type mismatch: wlin_ship_cost (NUMERIC(7, 2)) -> f_item_color (VARCHAR(50))
+  - Type mismatch: sret_purchase_id (CHAR(16)) -> f_purchase_line_id (INTEGER)
+  - Type mismatch: sret_return_date (CHAR(10)) -> f_return_date (DATE)
+  - Type mismatch: sret_return_amt (NUMERIC(7, 2)) -> f_return_amount (DECIMAL(12, 2))
+  - Type mismatch: sret_return_tax (NUMERIC(7, 2)) -> f_return_tax (DECIMAL(12, 2))
+  - Type mismatch: sret_return_fee (NUMERIC(7, 2)) -> f_return_fee (DECIMAL(12, 2))
+  - Type mismatch: sret_return_ship_cost (NUMERIC(7, 2)) -> f_return_ship_cost (DECIMAL(12, 2))
+  - Type mismatch: sret_refunded_cash (NUMERIC(7, 2)) -> f_refunded_cash (DECIMAL(12, 2))
+  - Type mismatch: sret_reversed_charge (NUMERIC(7, 2)) -> f_reversed_charge (DECIMAL(12, 2))
+  - Type mismatch: sret_store_credit (NUMERIC(7, 2)) -> f_store_credit (DECIMAL(12, 2))
+  - Type mismatch: cret_line_number (INTEGER) -> f_web_site_name (VARCHAR(100))
+  - Type mismatch: cret_return_date (CHAR(10)) -> f_reason_name (VARCHAR(100))
+  - Type mismatch: cret_return_time (CHAR(10)) -> f_source_type (CHAR(1))
+  - Type mismatch: cret_return_qty (INTEGER) -> f_warehouse_city (VARCHAR(100))
+  - Type mismatch: cret_return_amt (NUMERIC(7, 2)) -> f_item_name (VARCHAR(100))
+  - Type mismatch: cret_return_tax (NUMERIC(7, 2)) -> f_return_id (INTEGER)
+  - Type mismatch: cret_return_fee (NUMERIC(7, 2)) -> f_store_name (VARCHAR(100))
+  - Type mismatch: cret_return_ship_cost (NUMERIC(7, 2)) -> f_warehouse_zipcode (VARCHAR(10))
+  - Type mismatch: cret_refunded_cash (NUMERIC(7, 2)) -> f_warehouse_name (VARCHAR(100))
+  - Type mismatch: cret_reversed_charge (NUMERIC(7, 2)) -> f_warehouse_state (VARCHAR(10))
+  - Type mismatch: cret_merchant_credit (NUMERIC(7, 2)) -> f_merchant_credit (DECIMAL(12, 2))
+  - Type mismatch: cret_shipmode_id (CHAR(16)) -> f_ship_mode_name (VARCHAR(100))
+  - Type mismatch: cret_catalog_page_id (CHAR(16)) -> f_item_catalog_page (INTEGER)
+  - Type mismatch: invn_item_id (CHAR(16)) -> f_item_size (VARCHAR(50))
+  - Type mismatch: invn_date (CHAR(10)) -> f_state (VARCHAR(10))
+--------------------------------------------------------------------------------
+Completeness Ratio:        1.19
+Data Type Preservation:    0.54
+Avg Levenshtein Distance:  6.03
+BLEU Score:                0.00
+ROUGE-1:                   0.49
+METEOR Score:              0.00
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  clin_catalog_number clin_catalog_page_number clin_coupon_amt clin_item_id clin_line_number clin_order_id clin_promotion_id clin_quantity clin_sales_price clin_ship_cost clin_ship_date clin_warehouse_id cord_bill_customer_id cord_call_center_id cord_order_comments cord_order_date cord_order_id cord_order_time cord_ship_customer_id cord_ship_mode_id cret_call_center_id cret_catalog_page_id cret_item_id cret_line_number cret_merchant_credit cret_order_id cret_reason_id cret_refund_customer_id cret_refunded_cash cret_return_amt cret_return_customer_id cret_return_date cret_return_fee cret_return_qty cret_return_ship_cost cret_return_tax cret_return_time cret_reversed_charge cret_shipmode_id cret_warehouse_id invn_date invn_item_id invn_qty_on_hand invn_warehouse_id plin_comment plin_coupon_amt plin_item_id plin_line_number plin_promotion_id plin_purchase_id plin_quantity plin_sale_price purc_clerk_id purc_comment purc_customer_id purc_purchase_date purc_purchase_id purc_purchase_time purc_register_id purc_store_id sret_customer_id sret_item_id sret_line_number sret_purchase_id sret_reason_id sret_refunded_cash sret_return_amt sret_return_date sret_return_fee sret_return_qty sret_return_ship_cost sret_return_tax sret_return_time sret_reversed_charge sret_store_credit sret_store_id sret_ticket_number wlin_coupon_amt wlin_item_id wlin_line_number wlin_order_id wlin_promotion_id wlin_quantity wlin_sales_price wlin_ship_cost wlin_ship_date wlin_warehouse_id wlin_web_page_id word_bill_customer_id word_order_comments word_order_date word_order_id word_order_time word_ship_customer_id word_ship_mode_id word_web_site_id
+
+Denormalized Model (Combined Text):
+  f_call_center_address f_call_center_city f_call_center_id f_call_center_id f_call_center_id f_call_center_name f_call_center_state f_call_center_zipcode f_catalog_number f_catalog_number f_catalog_page_number f_catalog_page_number f_city f_clerk_id f_coupon_amt f_coupon_amt f_customer_address f_customer_city f_customer_id f_customer_id f_customer_name f_customer_state f_item_brand f_item_catalog_number f_item_catalog_page f_item_category f_item_color f_item_description f_item_id f_item_id f_item_id f_item_id f_item_manufacturer f_item_name f_item_size f_line_number f_line_number f_line_quantity f_merchant_credit f_order_amount f_order_comments f_order_date f_order_id f_order_id f_order_line_id f_order_quantity f_order_time f_promotion_description f_promotion_id f_promotion_id f_promotion_id f_promotion_name f_purchase_comments f_purchase_date f_purchase_id f_purchase_id f_purchase_line_id f_purchase_time f_qty_on_hand f_quantity f_quantity f_reason_description f_reason_id f_reason_name f_refund_customer_id f_refunded_cash f_register_id f_return_amount f_return_customer_id f_return_date f_return_fee f_return_id f_return_qty f_return_reason_id f_return_ship_cost f_return_tax f_return_time f_reversed_charge f_sale_amount f_sale_price f_sales_price f_ship_cost f_ship_date f_ship_mode_description f_ship_mode_id f_ship_mode_id f_ship_mode_name f_snapshot_date f_snapshot_id f_source_type f_source_type f_source_type f_source_type f_source_type f_state f_store_credit f_store_id f_store_id f_store_name f_ticket_number f_warehouse_city f_warehouse_id f_warehouse_id f_warehouse_id f_warehouse_id f_warehouse_id f_warehouse_name f_warehouse_state f_warehouse_zipcode f_web_page_id f_web_site_id f_web_site_id f_web_site_name f_web_site_url
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 96 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    plin_purchase_id INTEGER
+  Denormalized:  f_purchase_id INTEGER
+
+Pair 2:
+  Relational:    plin_line_number INTEGER
+  Denormalized:  f_line_number INTEGER
+
+Pair 3:
+  Relational:    plin_item_id CHAR(16)
+  Denormalized:  f_item_id CHAR(16)
+
+Pair 4:
+  Relational:    plin_promotion_id CHAR(16)
+  Denormalized:  f_promotion_id CHAR(16)
+
+Pair 5:
+  Relational:    plin_quantity INTEGER
+  Denormalized:  f_line_quantity INTEGER
+
+Pair 6:
+  Relational:    plin_sale_price NUMERIC(7, 2)
+  Denormalized:  f_sale_price DECIMAL(12, 2)
+
+Pair 7:
+  Relational:    plin_coupon_amt NUMERIC(7, 2)
+  Denormalized:  f_coupon_amt DECIMAL(12, 2)
+
+Pair 8:
+  Relational:    plin_comment VARCHAR(100)
+  Denormalized:  f_city VARCHAR(100)
+
+Pair 9:
+  Relational:    purc_purchase_id INTEGER
+  Denormalized:  f_purchase_id INTEGER
+
+Pair 10:
+  Relational:    purc_store_id CHAR(16)
+  Denormalized:  f_store_id CHAR(16)
+
+Pair 11:
+  Relational:    purc_customer_id CHAR(16)
+  Denormalized:  f_customer_id CHAR(16)
+
+Pair 12:
+  Relational:    purc_purchase_date CHAR(10)
+  Denormalized:  f_purchase_date DATE
+
+Pair 13:
+  Relational:    purc_purchase_time INTEGER
+  Denormalized:  f_purchase_time INTEGER
+
+Pair 14:
+  Relational:    purc_register_id INTEGER
+  Denormalized:  f_register_id INTEGER
+
+Pair 15:
+  Relational:    purc_clerk_id INTEGER
+  Denormalized:  f_clerk_id INTEGER
+
+Pair 16:
+  Relational:    purc_comment CHAR(100)
+  Denormalized:  f_purchase_comments VARCHAR(100)
+
+Pair 17:
+  Relational:    cord_order_id INTEGER
+  Denormalized:  f_order_line_id INTEGER
+
+Pair 18:
+  Relational:    cord_bill_customer_id CHAR(16)
+  Denormalized:  f_call_center_city VARCHAR(100)
+
+Pair 19:
+  Relational:    cord_ship_customer_id CHAR(16)
+  Denormalized:  f_customer_city VARCHAR(100)
+
+Pair 20:
+  Relational:    cord_order_date CHAR(10)
+  Denormalized:  f_order_date DATE
+
+Pair 21:
+  Relational:    cord_order_time INTEGER
+  Denormalized:  f_order_time INTEGER
+
+Pair 22:
+  Relational:    cord_ship_mode_id CHAR(16)
+  Denormalized:  f_ship_mode_id CHAR(16)
+
+Pair 23:
+  Relational:    cord_call_center_id CHAR(16)
+  Denormalized:  f_call_center_id CHAR(16)
+
+Pair 24:
+  Relational:    cord_order_comments VARCHAR(100)
+  Denormalized:  f_order_comments VARCHAR(100)
+
+Pair 25:
+  Relational:    word_order_id INTEGER
+  Denormalized:  f_warehouse_id CHAR(16)
+
+Pair 26:
+  Relational:    word_bill_customer_id CHAR(16)
+  Denormalized:  f_call_center_id CHAR(16)
+
+Pair 27:
+  Relational:    word_ship_customer_id CHAR(16)
+  Denormalized:  f_customer_name VARCHAR(100)
+
+Pair 28:
+  Relational:    word_order_date CHAR(10)
+  Denormalized:  f_order_quantity INTEGER
+
+Pair 29:
+  Relational:    word_order_time INTEGER
+  Denormalized:  f_source_type CHAR(1)
+
+Pair 30:
+  Relational:    word_ship_mode_id CHAR(16)
+  Denormalized:  f_ship_mode_id CHAR(16)
+
+Pair 31:
+  Relational:    word_web_site_id CHAR(16)
+  Denormalized:  f_web_site_id CHAR(16)
+
+Pair 32:
+  Relational:    word_order_comments CHAR(100)
+  Denormalized:  f_order_amount DECIMAL(12, 2)
+
+Pair 33:
+  Relational:    clin_order_id INTEGER
+  Denormalized:  f_order_id INTEGER
+
+Pair 34:
+  Relational:    clin_line_number INTEGER
+  Denormalized:  f_catalog_page_number INTEGER
+
+Pair 35:
+  Relational:    clin_item_id CHAR(16)
+  Denormalized:  f_item_id CHAR(16)
+
+Pair 36:
+  Relational:    clin_promotion_id CHAR(16)
+  Denormalized:  f_promotion_id CHAR(16)
+
+Pair 37:
+  Relational:    clin_quantity INTEGER
+  Denormalized:  f_quantity INTEGER
+
+Pair 38:
+  Relational:    clin_sales_price NUMERIC(7, 2)
+  Denormalized:  f_sales_price DECIMAL(12, 2)
+
+Pair 39:
+  Relational:    clin_coupon_amt NUMERIC(7, 2)
+  Denormalized:  f_coupon_amt DECIMAL(12, 2)
+
+Pair 40:
+  Relational:    clin_warehouse_id CHAR(16)
+  Denormalized:  f_warehouse_id CHAR(16)
+
+Pair 41:
+  Relational:    clin_ship_date CHAR(10)
+  Denormalized:  f_ship_date DATE
+
+Pair 42:
+  Relational:    clin_catalog_number INTEGER
+  Denormalized:  f_catalog_number INTEGER
+
+Pair 43:
+  Relational:    clin_catalog_page_number INTEGER
+  Denormalized:  f_catalog_page_number INTEGER
+
+Pair 44:
+  Relational:    clin_ship_cost NUMERIC(7, 2)
+  Denormalized:  f_ship_cost DECIMAL(12, 2)
+
+Pair 45:
+  Relational:    wlin_order_id INTEGER
+  Denormalized:  f_snapshot_id INTEGER
+
+Pair 46:
+  Relational:    wlin_line_number INTEGER
+  Denormalized:  f_line_number INTEGER
+
+Pair 47:
+  Relational:    wlin_item_id CHAR(16)
+  Denormalized:  f_item_id CHAR(16)
+
+Pair 48:
+  Relational:    wlin_promotion_id CHAR(16)
+  Denormalized:  f_promotion_id CHAR(16)
+
+Pair 49:
+  Relational:    wlin_quantity INTEGER
+  Denormalized:  f_quantity INTEGER
+
+Pair 50:
+  Relational:    wlin_sales_price NUMERIC(7, 2)
+  Denormalized:  f_sale_amount DECIMAL(12, 2)
+
+Pair 51:
+  Relational:    wlin_coupon_amt NUMERIC(7, 2)
+  Denormalized:  f_promotion_name VARCHAR(100)
+
+Pair 52:
+  Relational:    wlin_warehouse_id CHAR(16)
+  Denormalized:  f_warehouse_id CHAR(16)
+
+Pair 53:
+  Relational:    wlin_ship_date CHAR(10)
+  Denormalized:  f_snapshot_date DATE
+
+Pair 54:
+  Relational:    wlin_ship_cost NUMERIC(7, 2)
+  Denormalized:  f_item_color VARCHAR(50)
+
+Pair 55:
+  Relational:    wlin_web_page_id CHAR(16)
+  Denormalized:  f_web_page_id CHAR(16)
+
+Pair 56:
+  Relational:    sret_store_id CHAR(16)
+  Denormalized:  f_store_id CHAR(16)
+
+Pair 57:
+  Relational:    sret_purchase_id CHAR(16)
+  Denormalized:  f_purchase_line_id INTEGER
+
+Pair 58:
+  Relational:    sret_line_number INTEGER
+  Denormalized:  f_catalog_number INTEGER
+
+Pair 59:
+  Relational:    sret_item_id CHAR(16)
+  Denormalized:  f_item_id CHAR(16)
+
+Pair 60:
+  Relational:    sret_customer_id CHAR(16)
+  Denormalized:  f_customer_id CHAR(16)
+
+Pair 61:
+  Relational:    sret_return_date CHAR(10)
+  Denormalized:  f_return_date DATE
+
+Pair 62:
+  Relational:    sret_return_time CHAR(10)
+  Denormalized:  f_return_time CHAR(10)
+
+Pair 63:
+  Relational:    sret_ticket_number CHAR(20)
+  Denormalized:  f_ticket_number CHAR(20)
+
+Pair 64:
+  Relational:    sret_return_qty INTEGER
+  Denormalized:  f_return_qty INTEGER
+
+Pair 65:
+  Relational:    sret_return_amt NUMERIC(7, 2)
+  Denormalized:  f_return_amount DECIMAL(12, 2)
+
+Pair 66:
+  Relational:    sret_return_tax NUMERIC(7, 2)
+  Denormalized:  f_return_tax DECIMAL(12, 2)
+
+Pair 67:
+  Relational:    sret_return_fee NUMERIC(7, 2)
+  Denormalized:  f_return_fee DECIMAL(12, 2)
+
+Pair 68:
+  Relational:    sret_return_ship_cost NUMERIC(7, 2)
+  Denormalized:  f_return_ship_cost DECIMAL(12, 2)
+
+Pair 69:
+  Relational:    sret_refunded_cash NUMERIC(7, 2)
+  Denormalized:  f_refunded_cash DECIMAL(12, 2)
+
+Pair 70:
+  Relational:    sret_reversed_charge NUMERIC(7, 2)
+  Denormalized:  f_reversed_charge DECIMAL(12, 2)
+
+Pair 71:
+  Relational:    sret_store_credit NUMERIC(7, 2)
+  Denormalized:  f_store_credit DECIMAL(12, 2)
+
+Pair 72:
+  Relational:    sret_reason_id CHAR(16)
+  Denormalized:  f_reason_id CHAR(16)
+
+Pair 73:
+  Relational:    cret_call_center_id CHAR(16)
+  Denormalized:  f_call_center_id CHAR(16)
+
+Pair 74:
+  Relational:    cret_order_id INTEGER
+  Denormalized:  f_order_id INTEGER
+
+Pair 75:
+  Relational:    cret_line_number INTEGER
+  Denormalized:  f_web_site_name VARCHAR(100)
+
+Pair 76:
+  Relational:    cret_item_id CHAR(16)
+  Denormalized:  f_web_site_id CHAR(16)
+
+Pair 77:
+  Relational:    cret_return_customer_id CHAR(16)
+  Denormalized:  f_return_customer_id CHAR(16)
+
+Pair 78:
+  Relational:    cret_refund_customer_id CHAR(16)
+  Denormalized:  f_refund_customer_id CHAR(16)
+
+Pair 79:
+  Relational:    cret_return_date CHAR(10)
+  Denormalized:  f_reason_name VARCHAR(100)
+
+Pair 80:
+  Relational:    cret_return_time CHAR(10)
+  Denormalized:  f_source_type CHAR(1)
+
+Pair 81:
+  Relational:    cret_return_qty INTEGER
+  Denormalized:  f_warehouse_city VARCHAR(100)
+
+Pair 82:
+  Relational:    cret_return_amt NUMERIC(7, 2)
+  Denormalized:  f_item_name VARCHAR(100)
+
+Pair 83:
+  Relational:    cret_return_tax NUMERIC(7, 2)
+  Denormalized:  f_return_id INTEGER
+
+Pair 84:
+  Relational:    cret_return_fee NUMERIC(7, 2)
+  Denormalized:  f_store_name VARCHAR(100)
+
+Pair 85:
+  Relational:    cret_return_ship_cost NUMERIC(7, 2)
+  Denormalized:  f_warehouse_zipcode VARCHAR(10)
+
+Pair 86:
+  Relational:    cret_refunded_cash NUMERIC(7, 2)
+  Denormalized:  f_warehouse_name VARCHAR(100)
+
+Pair 87:
+  Relational:    cret_reversed_charge NUMERIC(7, 2)
+  Denormalized:  f_warehouse_state VARCHAR(10)
+
+Pair 88:
+  Relational:    cret_merchant_credit NUMERIC(7, 2)
+  Denormalized:  f_merchant_credit DECIMAL(12, 2)
+
+Pair 89:
+  Relational:    cret_reason_id CHAR(16)
+  Denormalized:  f_return_reason_id CHAR(16)
+
+Pair 90:
+  Relational:    cret_shipmode_id CHAR(16)
+  Denormalized:  f_ship_mode_name VARCHAR(100)
+
+Pair 91:
+  Relational:    cret_catalog_page_id CHAR(16)
+  Denormalized:  f_item_catalog_page INTEGER
+
+Pair 92:
+  Relational:    cret_warehouse_id CHAR(16)
+  Denormalized:  f_warehouse_id CHAR(16)
+
+Pair 93:
+  Relational:    invn_warehouse_id CHAR(16)
+  Denormalized:  f_warehouse_id CHAR(16)
+
+Pair 94:
+  Relational:    invn_item_id CHAR(16)
+  Denormalized:  f_item_size VARCHAR(50)
+
+Pair 95:
+  Relational:    invn_date CHAR(10)
+  Denormalized:  f_state VARCHAR(10)
+
+Pair 96:
+  Relational:    invn_qty_on_hand INTEGER
+  Denormalized:  f_qty_on_hand INTEGER
+
+
+================================================================================

@@ -1,0 +1,170 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-15-12
+Model: ollama_api
+Prompt: mid-level
+Schema: ex04
+==================================================
+
+{
+  "section_1": {
+    "summary": "The original schema is highly normalized with 11 separate tables, including multiple fact-like entities (e.g., survey, economy, education) and dimensions (e.g., country, region). To optimize for read-heavy analytical workloads, we denormalize by consolidating related tables into fewer, wider tables that reduce the need for joins. We create two main analytical tables: a survey-based fact table and a country-year fact table. Dimensional data such as country and region is embedded directly into these tables to improve query performance. Decile data is kept in a separate table since it is a one-to-many relationship with survey.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidate country and region information into survey and country_year tables to eliminate joins with the region and country tables."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge demography, employment, education, economy, and health into a single wide fact table (country_year_fact) to reduce query complexity and improve performance for multi-domain analysis."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Keep the decile table separate but denormalize by including survey identifiers for direct access."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Remove the population and life_expectancy tables, embedding key attributes as columns in the demography table or the new country_year_fact table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added region_name and country_name to the survey_fact table to avoid joins with the country and region tables."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Renamed 'number' column in population to 'population_count' for clarity and embedded as pop_male, pop_female, etc. in country_year_fact."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Derived and aggregated life_expectancy values (life_expectancy_male, life_expectancy_female) into the country_year_fact table."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Renamed id_demography references to year and country_code in country_year_fact to maintain granularity without foreign key lookups."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Storage overhead increases due to denormalization (e.g., repeating country and region names), but this is acceptable for analytical systems."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Data consistency is harder to enforce due to duplication of dimensional attributes, but this is mitigated by ETL processes and batch updates."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of granularity in population and life_expectancy data due to embedding, but this enables faster aggregations."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Users often query poverty and welfare indicators by country and region, requiring frequent joins with country and region tables. Embedding region and country names in the survey_fact table avoids these joins."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical dashboards often require multi-domain metrics (e.g., education, employment, health) for a given country and year. Consolidating these into a single wide table improves performance."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Income distribution analysis requires access to decile data. Keeping it in a separate table preserves the one-to-many relationship while optimizing for analytical queries."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Population and life expectancy data are often aggregated by gender and age group. Embedding these as columns in the country_year_fact table simplifies reporting."
+      }
+    ]
+  }
+}
+
+-- SQL DDL for the denormalized schema
+
+-- Denormalized fact table for survey data
+CREATE TABLE IF NOT EXISTS public.survey_fact (
+    id_survey SERIAL NOT NULL,
+    country_code VARCHAR NOT NULL,
+    country_name VARCHAR,
+    region_code VARCHAR NOT NULL,
+    region_name VARCHAR NOT NULL,
+    welfare_type VARCHAR,
+    survey_acronym VARCHAR,
+    survey_comparability INTEGER,
+    comparable_spell VARCHAR,
+    poverty_line DOUBLE PRECISION,
+    headcount DOUBLE PRECISION,
+    poverty_gap DOUBLE PRECISION,
+    poverty_severity DOUBLE PRECISION,
+    gini DOUBLE PRECISION,
+    reporting_pop INTEGER,
+    reporting_pce DOUBLE PRECISION,
+    distribution_type VARCHAR,
+    spl DOUBLE PRECISION,
+    survey_year INTEGER,
+    survey_coverage VARCHAR,
+    reporting_level VARCHAR,
+    PRIMARY KEY (id_survey)
+);
+
+-- Denormalized fact table for country-year data
+CREATE TABLE IF NOT EXISTS public.country_year_fact (
+    id SERIAL NOT NULL,
+    year INTEGER,
+    country_code VARCHAR NOT NULL,
+    country_name VARCHAR,
+    region_code VARCHAR NOT NULL,
+    region_name VARCHAR NOT NULL,
+    pop_density DOUBLE PRECISION,
+    urban_pop DOUBLE PRECISION,
+    rural_pop DOUBLE PRECISION,
+    net_migration DOUBLE PRECISION,
+    death_rate DOUBLE PRECISION,
+    birth_rate DOUBLE PRECISION,
+    child_emp DOUBLE PRECISION,
+    unemp DOUBLE PRECISION,
+    vulnerable_emp DOUBLE PRECISION,
+    part_time DOUBLE PRECISION,
+    employers DOUBLE PRECISION,
+    labor_force_total DOUBLE PRECISION,
+    labor_force_fem DOUBLE PRECISION,
+    child_out_of_school DOUBLE PRECISION,
+    progression_to_sec DOUBLE PRECISION,
+    expenditure_education DOUBLE PRECISION,
+    preprim_enroll DOUBLE PRECISION,
+    prim_enrol DOUBLE PRECISION,
+    sec_enrol DOUBLE PRECISION,
+    terti_enrol DOUBLE PRECISION,
+    gdp DOUBLE PRECISION,
+    inflation DOUBLE PRECISION,
+    tax_revenue DOUBLE PRECISION,
+    hospital_beds DOUBLE PRECISION,
+    physicians DOUBLE PRECISION,
+    expenditure_health DOUBLE PRECISION,
+    life_expectancy_male DOUBLE PRECISION,
+    life_expectancy_female DOUBLE PRECISION,
+    pop_male_0_14 DOUBLE PRECISION,
+    pop_female_0_14 DOUBLE PRECISION,
+    pop_male_15_64 DOUBLE PRECISION,
+    pop_female_15_64 DOUBLE PRECISION,
+    pop_male_65_plus DOUBLE PRECISION,
+    pop_female_65_plus DOUBLE PRECISION,
+    PRIMARY KEY (id)
+);
+
+-- Denormalized decile table with embedded survey identifiers
+CREATE TABLE IF NOT EXISTS public.decile_fact (
+    id_decile SERIAL NOT NULL,
+    value DOUBLE PRECISION,
+    name VARCHAR,
+    id_survey INTEGER NOT NULL,
+    survey_year INTEGER,
+    country_code VARCHAR NOT NULL,
+    PRIMARY KEY (id_decile)
+);

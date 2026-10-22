@@ -1,0 +1,82 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-26-10
+Model: ollama_api
+Prompt: junior
+Schema: harperdb
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy involves merging the three normalized tables (users, entitlements, and user_entitlements) into a single denormalized table. This eliminates the need for joins when querying user entitlement information, significantly improving query performance for analytics and reporting. The many-to-many relationship between users and entitlements is resolved by creating separate rows for each user-entitlement combination.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge users, entitlements, and user_entitlements tables into a single denormalized table to eliminate join operations"
+      },
+      {
+        "decision_id": "D2",
+        "description": "Transform the many-to-many relationship into a flattened structure where each row represents a unique user-entitlement combination"
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added user_id column from users table and entitlement_id column from entitlements table as direct attributes in the denormalized table"
+      },
+      {
+        "decision_id": "A2",
+        "description": "Preserved all original attributes from entitlements table (activeDate, inactiveDate, useLimit, useCount, featureType, packageType, activeFlag) without modification"
+      },
+      {
+        "decision_id": "A3",
+        "description": "Removed the separate primary key structure in favor of a composite key (user_id, entitlement_id) in the denormalized table"
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved query performance at the cost of increased storage space due to data duplication (entitlement details repeated for each user)"
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified read operations but more complex write operations when updating entitlement information (must update multiple rows)"
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of data integrity enforcement that was provided by foreign key constraints in the normalized schema"
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical queries that need to analyze user entitlements by joining user information with entitlement details, such as counting active entitlements per user or finding users with specific feature types"
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting queries that require filtering users based on entitlement attributes like activeFlag, featureType, or date ranges without needing to perform joins"
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregation queries that summarize entitlement usage across users, such as average useCount by packageType or feature distribution analysis"
+      }
+    ]
+  }
+}
+
+CREATE TABLE user_entitlements_denormalized (
+    user_id INT,
+    entitlement_id INT,
+    activeDate DATE,
+    inactiveDate DATE,
+    useLimit INT,
+    useCount INT,
+    featureType VARCHAR(4),
+    packageType VARCHAR(4),
+    activeFlag INT,
+    PRIMARY KEY (user_id, entitlement_id)
+);

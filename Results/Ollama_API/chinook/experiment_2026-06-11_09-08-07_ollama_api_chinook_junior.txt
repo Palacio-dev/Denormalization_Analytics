@@ -1,0 +1,157 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-08-07
+Model: ollama_api
+Prompt: junior
+Schema: chinook
+==================================================
+
+{
+  "section_1": {
+    "summary": "The original schema is highly normalized with 11 tables connected through foreign key relationships. The goal of denormalization is to reduce the number of joins required for common analytical queries by merging related tables. We will create a denormalized schema focused on key analytical entities: Sales/Invoices, Tracks, Albums, Artists, and Customers. This will allow faster reporting on sales by track, album, artist, customer demographics, and more.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge 'InvoiceLine' with 'Invoice' to create a denormalized 'SalesFact' table containing sales details at the line-item level with invoice metadata."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge 'Track' with 'Album', 'Artist', 'Genre', and 'MediaType' to create a rich 'TrackDimension' table containing all track-related descriptive information."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge 'Customer' with 'Employee' (support rep) to create a 'CustomerDimension' table that includes both customer and their support representative details."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Keep 'Playlist' and 'PlaylistTrack' as a separate denormalized table 'PlaylistTrack' since playlist analytics might be a secondary concern and it avoids bloating the main fact table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived columns like 'FullName' for employees and customers where first and last names are combined."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added 'InvoiceYear', 'InvoiceMonth', 'InvoiceDay' as derived date part columns in the SalesFact table for easier time-based filtering/grouping."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Duplicated descriptive fields (e.g., Artist Name, Album Title, Genre Name) into the denormalized tables to eliminate joins."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage space due to data duplication in favor of faster query performance."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified read queries at the cost of more complex data loading and update processes (ETL complexity increases)."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Potential for data inconsistency if denormalized copies are not synchronized during updates, though this is less of a concern for read-only analytical workloads."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Report total sales revenue by track name, album title, and artist name. This requires joining Invoice, InvoiceLine, Track, Album, and Artist tables in the normalized schema."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze customer purchasing behavior by country, state, and support representative. This requires joining Customer and Employee tables."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze sales trends over time (e.g., monthly sales) by genre or media type. This requires joining multiple tables including Invoice, InvoiceLine, Track, Genre, and MediaType."
+      }
+    ]
+  }
+}
+
+```sql
+-- Denormalized Schema DDL Script
+
+-- 1. Denormalized Track Dimension Table
+CREATE TABLE IF NOT EXISTS public."TrackDimension"
+(
+    "TrackId" integer NOT NULL,
+    "TrackName" character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    "Composer" character varying(220) COLLATE pg_catalog."default",
+    "Milliseconds" integer NOT NULL,
+    "Bytes" integer,
+    "UnitPrice" numeric(10, 2) NOT NULL,
+    "AlbumId" integer,
+    "AlbumTitle" character varying(160) COLLATE pg_catalog."default",
+    "ArtistId" integer,
+    "ArtistName" character varying(120) COLLATE pg_catalog."default",
+    "GenreId" integer,
+    "GenreName" character varying(120) COLLATE pg_catalog."default",
+    "MediaTypeId" integer NOT NULL,
+    "MediaTypeName" character varying(120) COLLATE pg_catalog."default",
+    CONSTRAINT "PK_TrackDimension" PRIMARY KEY ("TrackId")
+);
+
+-- 2. Denormalized Customer Dimension Table
+CREATE TABLE IF NOT EXISTS public."CustomerDimension"
+(
+    "CustomerId" integer NOT NULL,
+    "CustomerFirstName" character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    "CustomerLastName" character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    "CustomerFullName" character varying(61) COLLATE pg_catalog."default" NOT NULL, -- Derived
+    "Company" character varying(80) COLLATE pg_catalog."default",
+    "Address" character varying(70) COLLATE pg_catalog."default",
+    "City" character varying(40) COLLATE pg_catalog."default",
+    "State" character varying(40) COLLATE pg_catalog."default",
+    "Country" character varying(40) COLLATE pg_catalog."default",
+    "PostalCode" character varying(10) COLLATE pg_catalog."default",
+    "Phone" character varying(24) COLLATE pg_catalog."default",
+    "Fax" character varying(24) COLLATE pg_catalog."default",
+    "Email" character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    "SupportRepId" integer,
+    "SupportRepFirstName" character varying(20) COLLATE pg_catalog."default",
+    "SupportRepLastName" character varying(20) COLLATE pg_catalog."default",
+    "SupportRepFullName" character varying(41) COLLATE pg_catalog."default", -- Derived
+    "SupportRepTitle" character varying(30) COLLATE pg_catalog."default",
+    CONSTRAINT "PK_CustomerDimension" PRIMARY KEY ("CustomerId")
+);
+
+-- 3. Denormalized Sales Fact Table (combines Invoice and InvoiceLine)
+CREATE TABLE IF NOT EXISTS public."SalesFact"
+(
+    "InvoiceLineId" integer NOT NULL,
+    "InvoiceId" integer NOT NULL,
+    "CustomerId" integer NOT NULL,
+    "TrackId" integer NOT NULL,
+    "InvoiceDate" timestamp without time zone NOT NULL,
+    "InvoiceYear" integer NOT NULL,  -- Derived
+    "InvoiceMonth" integer NOT NULL, -- Derived
+    "InvoiceDay" integer NOT NULL,   -- Derived
+    "BillingAddress" character varying(70) COLLATE pg_catalog."default",
+    "BillingCity" character varying(40) COLLATE pg_catalog."default",
+    "BillingState" character varying(40) COLLATE pg_catalog."default",
+    "BillingCountry" character varying(40) COLLATE pg_catalog."default",
+    "BillingPostalCode" character varying(10) COLLATE pg_catalog."default",
+    "UnitPrice" numeric(10, 2) NOT NULL,
+    "Quantity" integer NOT NULL,
+    "LineTotal" numeric(10, 2) NOT NULL, -- Derived as UnitPrice * Quantity
+    "InvoiceTotal" numeric(10, 2) NOT NULL, -- From original Invoice table
+    CONSTRAINT "PK_SalesFact" PRIMARY KEY ("InvoiceLineId")
+);
+
+-- 4. Denormalized Playlist-Track Table (optional, kept separate for clarity)
+CREATE TABLE IF NOT EXISTS public."PlaylistTrackDenorm"
+(
+    "PlaylistId" integer NOT NULL,
+    "PlaylistName" character varying(120) COLLATE pg_catalog."default",
+    "TrackId" integer NOT NULL,
+    CONSTRAINT "PK_PlaylistTrackDenorm" PRIMARY KEY ("PlaylistId", "TrackId")
+);
+```

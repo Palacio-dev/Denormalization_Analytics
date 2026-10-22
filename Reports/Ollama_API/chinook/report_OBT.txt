@@ -1,0 +1,249 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 11
+  - Total Attributes: 62
+    * Album: 3 columns
+    * Artist: 2 columns
+    * Customer: 13 columns
+    * Employee: 15 columns
+    * Genre: 2 columns
+    * Invoice: 9 columns
+    * InvoiceLine: 5 columns
+    * MediaType: 2 columns
+    * Playlist: 2 columns
+    * PlaylistTrack: 2 columns (junction table - excluded from attribute analysis)
+    * Track: 9 columns
+
+  Note: 1 junction table(s) detected and excluded from attribute analysis:
+    - PlaylistTrack
+
+Denormalized Model:
+  - Tables: 1
+  - Total Attributes: 44
+    * DenormalizedMusicStore: 44 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Normalized model has MORE attributes (44 vs 62)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: "ArtistId" (INTEGER) -> "Artist_Name" (CHARACTER)
+  - Type mismatch: "CustomerId" (INTEGER) -> "Customer_Fax" (CHARACTER)
+  - Type mismatch: "CustomerId" (INTEGER) -> "Customer_City" (CHARACTER)
+  - Type mismatch: "TrackId" (INTEGER) -> "Track_Name" (CHARACTER)
+  - Type mismatch: "MediaTypeId" (INTEGER) -> "MediaType_Name" (CHARACTER)
+  - Type mismatch: "GenreId" (INTEGER) -> "Genre_Name" (CHARACTER)
+--------------------------------------------------------------------------------
+Completeness Ratio:        0.71
+Data Type Preservation:    0.86
+Avg Levenshtein Distance:  6.41
+BLEU Score:                0.14
+ROUGE-1:                   0.62
+METEOR Score:              0.49
+
+4. ONE-BIG-TABLE (OBT) ARCHITECTURE AUDIT
+--------------------------------------------------------------------------------
+
+✓ No OBT violations detected! The architecture resembles a true One-Big-Table approach.
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  "Address" "Address" "AlbumId" "AlbumId" "ArtistId" "ArtistId" "BillingAddress" "BillingCity" "BillingCountry" "BillingPostalCode" "BillingState" "BirthDate" "Bytes" "City" "City" "Company" "Composer" "Country" "Country" "CustomerId" "CustomerId" "Email" "Email" "EmployeeId" "Fax" "Fax" "FirstName" "FirstName" "GenreId" "GenreId" "HireDate" "InvoiceDate" "InvoiceId" "InvoiceId" "InvoiceLineId" "LastName" "LastName" "MediaTypeId" "MediaTypeId" "Milliseconds" "Name" "Name" "Name" "Name" "Name" "Phone" "Phone" "PlaylistId" "PostalCode" "PostalCode" "Quantity" "ReportsTo" "State" "State" "SupportRepId" "Title" "Title" "Total" "TrackId" "TrackId" "UnitPrice" "UnitPrice"
+
+Denormalized Model (Combined Text):
+  "AlbumId" "Album_Title" "ArtistId" "Artist_Name" "Customer_Address" "Customer_City" "Customer_Company" "Customer_Country" "Customer_Email" "Customer_Fax" "Customer_FirstName" "Customer_LastName" "Customer_Phone" "Customer_PostalCode" "Customer_State" "GenreId" "Genre_Name" "InvoiceId" "InvoiceLineId" "InvoiceLine_Quantity" "InvoiceLine_UnitPrice" "Invoice_BillingAddress" "Invoice_BillingCity" "Invoice_BillingCountry" "Invoice_BillingPostalCode" "Invoice_BillingState" "Invoice_CustomerId" "Invoice_InvoiceDate" "Invoice_Total" "MediaTypeId" "MediaType_Name" "PlaylistId" "Playlist_Name" "SupportRepId" "SupportRep_Email" "SupportRep_FirstName" "SupportRep_LastName" "SupportRep_Title" "TrackId" "Track_Bytes" "Track_Composer" "Track_Milliseconds" "Track_Name" "Track_UnitPrice"
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 44 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    "AlbumId" INTEGER
+  Denormalized:  "AlbumId" INTEGER
+
+Pair 2:
+  Relational:    "Title" CHARACTER
+  Denormalized:  "Album_Title" CHARACTER
+
+Pair 3:
+  Relational:    "ArtistId" INTEGER
+  Denormalized:  "ArtistId" INTEGER
+
+Pair 4:
+  Relational:    "ArtistId" INTEGER
+  Denormalized:  "Artist_Name" CHARACTER
+
+Pair 5:
+  Relational:    "Name" CHARACTER
+  Denormalized:  "Playlist_Name" CHARACTER
+
+Pair 6:
+  Relational:    "CustomerId" INTEGER
+  Denormalized:  "Customer_Fax" CHARACTER
+
+Pair 7:
+  Relational:    "FirstName" CHARACTER
+  Denormalized:  "SupportRep_FirstName" CHARACTER
+
+Pair 8:
+  Relational:    "LastName" CHARACTER
+  Denormalized:  "SupportRep_LastName" CHARACTER
+
+Pair 9:
+  Relational:    "Company" CHARACTER
+  Denormalized:  "Customer_Company" CHARACTER
+
+Pair 10:
+  Relational:    "Address" CHARACTER
+  Denormalized:  "Customer_Address" CHARACTER
+
+Pair 11:
+  Relational:    "State" CHARACTER
+  Denormalized:  "Customer_State" CHARACTER
+
+Pair 12:
+  Relational:    "Country" CHARACTER
+  Denormalized:  "Customer_Country" CHARACTER
+
+Pair 13:
+  Relational:    "PostalCode" CHARACTER
+  Denormalized:  "Customer_PostalCode" CHARACTER
+
+Pair 14:
+  Relational:    "Phone" CHARACTER
+  Denormalized:  "Customer_Phone" CHARACTER
+
+Pair 15:
+  Relational:    "Email" CHARACTER
+  Denormalized:  "Customer_Email" CHARACTER
+
+Pair 16:
+  Relational:    "SupportRepId" INTEGER
+  Denormalized:  "SupportRepId" INTEGER
+
+Pair 17:
+  Relational:    "LastName" CHARACTER
+  Denormalized:  "Customer_LastName" CHARACTER
+
+Pair 18:
+  Relational:    "FirstName" CHARACTER
+  Denormalized:  "Customer_FirstName" CHARACTER
+
+Pair 19:
+  Relational:    "Title" CHARACTER
+  Denormalized:  "SupportRep_Title" CHARACTER
+
+Pair 20:
+  Relational:    "Email" CHARACTER
+  Denormalized:  "SupportRep_Email" CHARACTER
+
+Pair 21:
+  Relational:    "GenreId" INTEGER
+  Denormalized:  "GenreId" INTEGER
+
+Pair 22:
+  Relational:    "InvoiceId" INTEGER
+  Denormalized:  "InvoiceId" INTEGER
+
+Pair 23:
+  Relational:    "CustomerId" INTEGER
+  Denormalized:  "Customer_City" CHARACTER
+
+Pair 24:
+  Relational:    "InvoiceDate" TIMESTAMP
+  Denormalized:  "Invoice_InvoiceDate" TIMESTAMP
+
+Pair 25:
+  Relational:    "BillingAddress" CHARACTER
+  Denormalized:  "Invoice_BillingAddress" CHARACTER
+
+Pair 26:
+  Relational:    "BillingCity" CHARACTER
+  Denormalized:  "Invoice_BillingCity" CHARACTER
+
+Pair 27:
+  Relational:    "BillingState" CHARACTER
+  Denormalized:  "Invoice_BillingState" CHARACTER
+
+Pair 28:
+  Relational:    "BillingCountry" CHARACTER
+  Denormalized:  "Invoice_BillingCountry" CHARACTER
+
+Pair 29:
+  Relational:    "BillingPostalCode" CHARACTER
+  Denormalized:  "Invoice_BillingPostalCode" CHARACTER
+
+Pair 30:
+  Relational:    "Total" NUMERIC(10, 2)
+  Denormalized:  "Invoice_Total" NUMERIC(10, 2)
+
+Pair 31:
+  Relational:    "InvoiceLineId" INTEGER
+  Denormalized:  "InvoiceLineId" INTEGER
+
+Pair 32:
+  Relational:    "InvoiceId" INTEGER
+  Denormalized:  "Invoice_CustomerId" INTEGER
+
+Pair 33:
+  Relational:    "TrackId" INTEGER
+  Denormalized:  "TrackId" INTEGER
+
+Pair 34:
+  Relational:    "UnitPrice" NUMERIC(10, 2)
+  Denormalized:  "Track_UnitPrice" NUMERIC(10, 2)
+
+Pair 35:
+  Relational:    "Quantity" INTEGER
+  Denormalized:  "InvoiceLine_Quantity" INTEGER
+
+Pair 36:
+  Relational:    "MediaTypeId" INTEGER
+  Denormalized:  "MediaTypeId" INTEGER
+
+Pair 37:
+  Relational:    "PlaylistId" INTEGER
+  Denormalized:  "PlaylistId" INTEGER
+
+Pair 38:
+  Relational:    "TrackId" INTEGER
+  Denormalized:  "Track_Name" CHARACTER
+
+Pair 39:
+  Relational:    "MediaTypeId" INTEGER
+  Denormalized:  "MediaType_Name" CHARACTER
+
+Pair 40:
+  Relational:    "GenreId" INTEGER
+  Denormalized:  "Genre_Name" CHARACTER
+
+Pair 41:
+  Relational:    "Composer" CHARACTER
+  Denormalized:  "Track_Composer" CHARACTER
+
+Pair 42:
+  Relational:    "Milliseconds" INTEGER
+  Denormalized:  "Track_Milliseconds" INTEGER
+
+Pair 43:
+  Relational:    "Bytes" INTEGER
+  Denormalized:  "Track_Bytes" INTEGER
+
+Pair 44:
+  Relational:    "UnitPrice" NUMERIC(10, 2)
+  Denormalized:  "InvoiceLine_UnitPrice" NUMERIC(10, 2)
+
+
+================================================================================

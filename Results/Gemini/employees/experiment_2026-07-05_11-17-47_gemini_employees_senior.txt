@@ -1,0 +1,218 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-17-47
+Model: gemini
+Prompt: senior
+Schema: employees
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions a highly normalized, temporal OLTP schema into a Hybrid Dimensional Model featuring a Periodic Snapshot Fact and a consolidated Type 2 Slowly Changing Dimension (SCD). The source schema's primary analytical bottleneck is the independent temporal tracking (from_date, to_date) across salary, title, department, and manager tables. Joining these in BI tools requires complex overlapping date logic, which severely degrades OLAP performance. The target model resolves this by creating a 'fact_employee_monthly_snapshot' for time-series aggregations (headcount, salary trends) and a wide 'dim_employee_scd' to resolve all overlapping temporal ranges into contiguous, non-overlapping state records.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidate source tables (employee, title, department_employee, department_manager, salary) into a wide 'dim_employee_scd' table. This resolves overlapping temporal ranges into contiguous, non-overlapping state records (One Big Table for employee state)."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Create 'fact_employee_monthly_snapshot' to capture the exact state (salary, title, department) of every employee at the end of each month. This eliminates the need for complex date-range joins in BI tools for trend analysis."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Extract 'department' into 'dim_department' as a standard Type 1 dimension for simple, non-temporal hierarchical aggregations."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Introduce a 'dim_date' reference table to standardize time-based aggregations across the data warehouse."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Introduced surrogate keys (employee_sk, department_sk, date_sk) to isolate the data warehouse from source system natural key changes and optimize join performance."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Derived an 'is_manager' boolean flag in the snapshot and SCD tables by evaluating the department_manager temporal ranges, simplifying manager filtering for BI users."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added 'is_current', 'effective_date', and 'expiration_date' to 'dim_employee_scd' to standardize SCD Type 2 tracking."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Derived 'full_name' and 'tenure_days' in the employee dimensions to pre-calculate common BI presentation logic."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Storage Expansion vs. Query Performance: The monthly snapshot fact table significantly increases storage requirements by duplicating state data every month. However, it reduces time-series query execution time from minutes to milliseconds."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "ETL Complexity vs. BI Simplicity: Calculating mutually exclusive date ranges for 'dim_employee_scd' requires complex ETL logic (temporal Cartesian products) to resolve overlaps. This pushes computation to write-time, drastically simplifying read-time BI queries."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Monthly headcount and average salary by department over time. (Solved by fact_employee_monthly_snapshot)"
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Current roster of employees, their current titles, departments, and salaries. (Solved by dim_employee_scd where is_current = true)"
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Point-in-time lookup of an employee's exact title and department when a specific historical salary was paid. (Solved by dim_employee_scd effective/expiration dates)"
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Creation Script for Denormalized Schema
+
+```sql
+-- ==============================================================================
+-- Target Analytical Physical Model (OLAP)
+-- Schema: analytics
+-- Architecture: Hybrid Dimensional Model (Star Schema + Periodic Snapshot)
+-- ==============================================================================
+
+CREATE SCHEMA IF NOT EXISTS analytics;
+
+-- ------------------------------------------------------------------------------
+-- 1. Date Dimension (dim_date)
+-- Role: Standardize time-based aggregations.
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS analytics.dim_date
+(
+    date_sk integer NOT NULL, -- Format: YYYYMMDD
+    full_date date NOT NULL,
+    calendar_year smallint NOT NULL,
+    calendar_quarter smallint NOT NULL,
+    calendar_month smallint NOT NULL,
+    month_name character varying(15) NOT NULL,
+    day_of_week smallint NOT NULL,
+    day_name character varying(15) NOT NULL,
+    is_weekend boolean NOT NULL,
+    is_last_day_of_month boolean NOT NULL,
+    CONSTRAINT pk_dim_date PRIMARY KEY (date_sk)
+);
+
+-- Indexing: Highly filtered columns in BI
+CREATE INDEX idx_dim_date_ym ON analytics.dim_date(calendar_year, calendar_month);
+
+-- ------------------------------------------------------------------------------
+-- 2. Department Dimension (dim_department)
+-- Role: SCD Type 1 dimension for department attributes.
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS analytics.dim_department
+(
+    department_sk bigserial NOT NULL,
+    department_id character(4) NOT NULL, -- Natural Key
+    department_name character varying(40) NOT NULL,
+    CONSTRAINT pk_dim_department PRIMARY KEY (department_sk)
+);
+
+-- Indexing: Natural key lookup
+CREATE UNIQUE INDEX idx_dim_dept_nk ON analytics.dim_department(department_id);
+
+-- ------------------------------------------------------------------------------
+-- 3. Employee Dimension - Static (dim_employee)
+-- Role: SCD Type 1 dimension for immutable/rarely changing employee attributes.
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS analytics.dim_employee
+(
+    employee_sk bigserial NOT NULL,
+    employee_id bigint NOT NULL, -- Natural Key
+    first_name character varying(14) NOT NULL,
+    last_name character varying(16) NOT NULL,
+    full_name character varying(31) NOT NULL, -- Derived
+    gender character varying(1) NOT NULL,
+    birth_date date NOT NULL,
+    hire_date date NOT NULL,
+    CONSTRAINT pk_dim_employee PRIMARY KEY (employee_sk)
+);
+
+-- Indexing: Natural key lookup
+CREATE UNIQUE INDEX idx_dim_emp_nk ON analytics.dim_employee(employee_id);
+
+-- ------------------------------------------------------------------------------
+-- 4. Employee SCD Dimension - Wide (dim_employee_scd)
+-- Role: SCD Type 2 dimension resolving all temporal overlaps (Title, Dept, Salary).
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS analytics.dim_employee_scd
+(
+    employee_scd_sk bigserial NOT NULL,
+    employee_id bigint NOT NULL, -- Natural Key
+    
+    -- Degenerated/Flattened Attributes
+    first_name character varying(14) NOT NULL,
+    last_name character varying(16) NOT NULL,
+    gender character varying(1) NOT NULL,
+    department_name character varying(40),
+    title character varying(50),
+    salary_amount bigint,
+    is_manager boolean DEFAULT false,
+    
+    -- SCD Type 2 Tracking Attributes
+    effective_date date NOT NULL,
+    expiration_date date NOT NULL,
+    is_current boolean NOT NULL,
+    
+    CONSTRAINT pk_dim_employee_scd PRIMARY KEY (employee_scd_sk)
+);
+
+-- Clustering/Indexing: Optimized for "Current State" queries and temporal lookups
+CREATE INDEX idx_dim_emp_scd_current ON analytics.dim_employee_scd(is_current) WHERE is_current = true;
+CREATE INDEX idx_dim_emp_scd_nk_dates ON analytics.dim_employee_scd(employee_id, effective_date, expiration_date);
+
+-- ------------------------------------------------------------------------------
+-- 5. Employee Monthly Snapshot Fact (fact_employee_monthly_snapshot)
+-- Role: Periodic snapshot fact table for time-series trending (Headcount, Salary).
+-- Partitioning: RANGE partitioned by snapshot_date_sk to support large-scale 
+-- time-based pruning and data lifecycle management.
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS analytics.fact_employee_monthly_snapshot
+(
+    snapshot_date_sk integer NOT NULL, -- FK to dim_date (Last day of the month)
+    employee_sk bigint NOT NULL,       -- FK to dim_employee
+    department_sk bigint NOT NULL,     -- FK to dim_department
+    
+    -- Degenerate Dimensions (to avoid excessive joins for common slices)
+    title character varying(50) NOT NULL,
+    is_manager boolean NOT NULL,
+    
+    -- Facts / Measures
+    salary_amount bigint NOT NULL,
+    tenure_months integer NOT NULL,    -- Derived measure
+    
+    CONSTRAINT pk_fact_emp_monthly PRIMARY KEY (snapshot_date_sk, employee_sk)
+) PARTITION BY RANGE (snapshot_date_sk);
+
+-- Create initial partitions (Example for 1990s, would be dynamically generated in production)
+CREATE TABLE analytics.fact_emp_monthly_1990 PARTITION OF analytics.fact_employee_monthly_snapshot FOR VALUES FROM (19900101) TO (19910101);
+CREATE TABLE analytics.fact_emp_monthly_1991 PARTITION OF analytics.fact_employee_monthly_snapshot FOR VALUES FROM (19910101) TO (19920101);
+CREATE TABLE analytics.fact_emp_monthly_default PARTITION OF analytics.fact_employee_monthly_snapshot DEFAULT;
+
+-- Foreign Keys (Logical enforcement, can be disabled in MPP databases like Redshift/Snowflake)
+ALTER TABLE analytics.fact_employee_monthly_snapshot
+    ADD CONSTRAINT fk_fact_date FOREIGN KEY (snapshot_date_sk) REFERENCES analytics.dim_date(date_sk);
+ALTER TABLE analytics.fact_employee_monthly_snapshot
+    ADD CONSTRAINT fk_fact_emp FOREIGN KEY (employee_sk) REFERENCES analytics.dim_employee(employee_sk);
+ALTER TABLE analytics.fact_employee_monthly_snapshot
+    ADD CONSTRAINT fk_fact_dept FOREIGN KEY (department_sk) REFERENCES analytics.dim_department(department_sk);
+
+-- Clustering/Indexing: Optimized for department and title aggregations over time
+CREATE INDEX idx_fact_emp_monthly_dept ON analytics.fact_employee_monthly_snapshot(department_sk, snapshot_date_sk);
+CREATE INDEX idx_fact_emp_monthly_title ON analytics.fact_employee_monthly_snapshot(title, snapshot_date_sk);
+```

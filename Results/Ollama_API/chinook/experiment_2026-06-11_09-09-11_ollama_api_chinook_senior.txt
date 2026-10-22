@@ -1,0 +1,239 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-09-11
+Model: ollama_api
+Prompt: senior
+Schema: chinook
+==================================================
+
+{
+  "section_1": {
+    "summary": "The source schema is a normalized OLTP database with 11 entities, including core entities like Customer, Invoice, Track, Album, Artist, and supporting reference tables like Genre, MediaType, Employee, etc. The relationships are primarily hierarchical or associative. For analytical purposes, we adopt a hybrid dimensional model that combines star schema principles with selective flattening to reduce joins, improve aggregation performance, and support self-service BI tools. The main fact table is 'InvoiceLine', representing transactional sales data. Dimensions include Customer, Employee, Track, Album, Artist, Genre, MediaType, Invoice, and Playlist. We flatten some dimensions (e.g., embedding artist name into track), absorb small reference tables, and precompute derived fields where appropriate.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Create a central fact table 'FactInvoiceLine' from the 'InvoiceLine' entity, capturing transactional grain (line item level)."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Denormalize Customer and Employee into a single 'DimCustomerSupportRep' dimension to avoid multiple joins for support rep analysis."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Flatten Track, Album, Artist, Genre, and MediaType into a single wide 'DimTrackExtended' dimension to reduce joins and simplify query paths."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Absorb small reference tables (Genre, MediaType) directly into larger dimensions (DimTrackExtended) to reduce lookup overhead."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Introduce surrogate keys for dimensions to decouple from source keys and support slowly changing dimensions (SCD Type 1 for simplicity)."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Retain 'DimInvoice' as a separate dimension to preserve invoice-level attributes like billing address and date, which may be used for filtering or grouping."
+      },
+      {
+        "decision_id": "D7",
+        "description": "Create a bridge table 'BridgePlaylistTrack' to maintain many-to-many relationship between playlists and tracks, preserving granularity."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Add computed field 'LineTotal' = UnitPrice * Quantity in FactInvoiceLine for easier aggregation."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Embed 'ArtistName' into 'DimTrackExtended' by joining with Artist table to reduce join complexity."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Add 'FullName' (concatenation of FirstName and LastName) in DimCustomerSupportRep for reporting convenience."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Include 'InvoiceDateKey' (integer YYYYMMDD) in FactInvoiceLine for efficient date-based filtering and partitioning."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Introduce 'TrackDurationSeconds' as a derived field from Milliseconds in DimTrackExtended."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Flattening Track, Album, Artist, Genre, and MediaType introduces redundancy but reduces 4 joins per query."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Merging Customer and Employee into one dimension increases row width but simplifies support rep analysis."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Precomputing LineTotal improves query performance but requires recomputation on data refresh if not handled in ETL."
+      },
+      {
+        "tradeoff_id": "T4",
+        "description": "Use of surrogate keys improves flexibility but adds ETL complexity and storage overhead."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "What is the total revenue by genre and country?"
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Which artists generate the most sales by region?"
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "How many tracks were sold per media type and month?"
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Who are the top support reps by customer sales volume?"
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Which playlists contain the most purchased tracks?"
+      }
+    ]
+  }
+}
+
+---
+
+```sql
+-- Denormalized Analytical Schema DDL
+
+-- Dimension: DimTrackExtended
+CREATE TABLE IF NOT EXISTS public."DimTrackExtended"
+(
+    "TrackSK" integer NOT NULL,
+    "TrackId" integer NOT NULL,
+    "TrackName" character varying(200),
+    "AlbumId" integer,
+    "AlbumTitle" character varying(160),
+    "ArtistId" integer,
+    "ArtistName" character varying(120),
+    "MediaTypeId" integer,
+    "MediaTypeName" character varying(120),
+    "GenreId" integer,
+    "GenreName" character varying(120),
+    "Composer" character varying(220),
+    "Milliseconds" integer,
+    "TrackDurationSeconds" numeric(10,2),
+    "Bytes" integer,
+    "UnitPrice" numeric(10, 2),
+    CONSTRAINT "PK_DimTrackExtended" PRIMARY KEY ("TrackSK")
+);
+
+-- Dimension: DimCustomerSupportRep
+CREATE TABLE IF NOT EXISTS public."DimCustomerSupportRep"
+(
+    "CustomerSupportRepSK" integer NOT NULL,
+    "CustomerId" integer,
+    "CustomerFirstName" character varying(40),
+    "CustomerLastName" character varying(20),
+    "CustomerFullName" character varying(100),
+    "CustomerCompany" character varying(80),
+    "CustomerAddress" character varying(70),
+    "CustomerCity" character varying(40),
+    "CustomerState" character varying(40),
+    "CustomerCountry" character varying(40),
+    "CustomerPostalCode" character varying(10),
+    "CustomerPhone" character varying(24),
+    "CustomerFax" character varying(24),
+    "CustomerEmail" character varying(60),
+    "SupportRepId" integer,
+    "SupportRepFirstName" character varying(20),
+    "SupportRepLastName" character varying(20),
+    "SupportRepFullName" character varying(100),
+    "SupportRepTitle" character varying(30),
+    "SupportRepBirthDate" timestamp without time zone,
+    "SupportRepHireDate" timestamp without time zone,
+    "SupportRepAddress" character varying(70),
+    "SupportRepCity" character varying(40),
+    "SupportRepState" character varying(40),
+    "SupportRepCountry" character varying(40),
+    "SupportRepPostalCode" character varying(10),
+    "SupportRepPhone" character varying(24),
+    "SupportRepFax" character varying(24),
+    "SupportRepEmail" character varying(60),
+    CONSTRAINT "PK_DimCustomerSupportRep" PRIMARY KEY ("CustomerSupportRepSK")
+);
+
+-- Dimension: DimInvoice
+CREATE TABLE IF NOT EXISTS public."DimInvoice"
+(
+    "InvoiceSK" integer NOT NULL,
+    "InvoiceId" integer,
+    "CustomerId" integer,
+    "InvoiceDate" timestamp without time zone,
+    "InvoiceDateKey" integer, -- YYYYMMDD
+    "BillingAddress" character varying(70),
+    "BillingCity" character varying(40),
+    "BillingState" character varying(40),
+    "BillingCountry" character varying(40),
+    "BillingPostalCode" character varying(10),
+    "Total" numeric(10, 2),
+    CONSTRAINT "PK_DimInvoice" PRIMARY KEY ("InvoiceSK")
+);
+
+-- Dimension: DimPlaylist
+CREATE TABLE IF NOT EXISTS public."DimPlaylist"
+(
+    "PlaylistSK" integer NOT NULL,
+    "PlaylistId" integer,
+    "PlaylistName" character varying(120),
+    CONSTRAINT "PK_DimPlaylist" PRIMARY KEY ("PlaylistSK")
+);
+
+-- Fact Table: FactInvoiceLine
+CREATE TABLE IF NOT EXISTS public."FactInvoiceLine"
+(
+    "InvoiceLineId" integer NOT NULL,
+    "InvoiceSK" integer NOT NULL,
+    "TrackSK" integer NOT NULL,
+    "CustomerSupportRepSK" integer NOT NULL,
+    "InvoiceDateKey" integer NOT NULL,
+    "UnitPrice" numeric(10, 2),
+    "Quantity" integer,
+    "LineTotal" numeric(10, 2), -- Derived: UnitPrice * Quantity
+    CONSTRAINT "PK_FactInvoiceLine" PRIMARY KEY ("InvoiceLineId"),
+    CONSTRAINT "FK_FactInvoiceLine_InvoiceSK" FOREIGN KEY ("InvoiceSK") REFERENCES public."DimInvoice"("InvoiceSK"),
+    CONSTRAINT "FK_FactInvoiceLine_TrackSK" FOREIGN KEY ("TrackSK") REFERENCES public."DimTrackExtended"("TrackSK"),
+    CONSTRAINT "FK_FactInvoiceLine_CustomerSupportRepSK" FOREIGN KEY ("CustomerSupportRepSK") REFERENCES public."DimCustomerSupportRep"("CustomerSupportRepSK")
+);
+
+-- Bridge Table: BridgePlaylistTrack
+CREATE TABLE IF NOT EXISTS public."BridgePlaylistTrack"
+(
+    "PlaylistSK" integer NOT NULL,
+    "TrackSK" integer NOT NULL,
+    CONSTRAINT "PK_BridgePlaylistTrack" PRIMARY KEY ("PlaylistSK", "TrackSK"),
+    CONSTRAINT "FK_BridgePlaylistTrack_PlaylistSK" FOREIGN KEY ("PlaylistSK") REFERENCES public."DimPlaylist"("PlaylistSK"),
+    CONSTRAINT "FK_BridgePlaylistTrack_TrackSK" FOREIGN KEY ("TrackSK") REFERENCES public."DimTrackExtended"("TrackSK")
+);
+
+-- Index Recommendations
+CREATE INDEX IF NOT EXISTS "IX_FactInvoiceLine_InvoiceDateKey" ON public."FactInvoiceLine"("InvoiceDateKey");
+CREATE INDEX IF NOT EXISTS "IX_FactInvoiceLine_TrackSK" ON public."FactInvoiceLine"("TrackSK");
+CREATE INDEX IF NOT EXISTS "IX_FactInvoiceLine_CustomerSupportRepSK" ON public."FactInvoiceLine"("CustomerSupportRepSK");
+CREATE INDEX IF NOT EXISTS "IX_DimTrackExtended_ArtistName" ON public."DimTrackExtended"("ArtistName");
+CREATE INDEX IF NOT EXISTS "IX_DimTrackExtended_GenreName" ON public."DimTrackExtended"("GenreName");
+CREATE INDEX IF NOT EXISTS "IX_DimCustomerSupportRep_CustomerCountry" ON public."DimCustomerSupportRep"("CustomerCountry");
+CREATE INDEX IF NOT EXISTS "IX_DimInvoice_InvoiceDate" ON public."DimInvoice"("InvoiceDate");
+
+-- Partitioning Recommendation (example for FactInvoiceLine by InvoiceDateKey)
+-- ALTER TABLE public."FactInvoiceLine" PARTITION BY RANGE ("InvoiceDateKey");
+```

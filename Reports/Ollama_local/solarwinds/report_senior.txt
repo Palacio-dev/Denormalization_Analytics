@@ -1,0 +1,126 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 4
+  - Total Attributes: 11
+    * customers: 4 columns
+    * orders: 3 columns
+    * products: 3 columns
+    * order_details: 4 columns
+
+Denormalized Model:
+  - Tables: 3
+  - Total Attributes: 17
+    * dim_customer: 6 columns
+    * dim_product: 4 columns
+    * fact_orders: 11 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Denormalized model has MORE attributes (11 vs 17)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: customer_id (SERIAL) -> customer_id (INT)
+  - Type mismatch: order_id (SERIAL) -> revenue (DECIMAL(15, 2))
+  - Type mismatch: product_id (SERIAL) -> product_id (INT)
+  - Type mismatch: order_detail_id (SERIAL) -> customer_email (VARCHAR(100))
+--------------------------------------------------------------------------------
+Completeness Ratio:        1.55
+Data Type Preservation:    0.64
+Avg Levenshtein Distance:  2.09
+BLEU Score:                0.47
+ROUGE-1:                   0.63
+METEOR Score:              0.54
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: fact_orders
+Dimension Tables Detected: dim_customer, dim_product
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected exactly 1 Fact table. Evaluating as a standard STAR SCHEMA.
+  - FACT FK VIOLATION: Foreign Key 'customer_id' in Fact 'fact_orders' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'product_id' in Fact 'fact_orders' allows NULL values.
+  - PAYLOAD WARNING: Fact table 'fact_orders' contains more text attributes (5) than numeric measures (4).
+  - DIMENSION NULL WARNING: Attribute 'customer_name' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'customer_email' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'customer_address' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'is_active' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'last_updated' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'product_name' in 'dim_product' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'product_category' in 'dim_product' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'created_at' in 'dim_product' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * fact_orders: 4 Numeric, 5 Text
+  * dim_customer: 0 Numeric, 5 Text
+  * dim_product: 0 Numeric, 3 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  customer_address customer_email customer_id customer_name order_date order_detail_id order_id price product_id product_name quantity
+
+Denormalized Model (Combined Text):
+  customer_address customer_address customer_email customer_email customer_id customer_name customer_name is_active order_date product_category product_id product_name product_name quantity revenue total_order_value unit_price
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 11 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    customer_id SERIAL
+  Denormalized:  customer_id INT
+
+Pair 2:
+  Relational:    customer_name VARCHAR(100)
+  Denormalized:  customer_name VARCHAR(100)
+
+Pair 3:
+  Relational:    customer_email VARCHAR(100)
+  Denormalized:  customer_email VARCHAR(100)
+
+Pair 4:
+  Relational:    customer_address TEXT
+  Denormalized:  customer_address TEXT
+
+Pair 5:
+  Relational:    order_id SERIAL
+  Denormalized:  revenue DECIMAL(15, 2)
+
+Pair 6:
+  Relational:    order_date DATE
+  Denormalized:  order_date DATE
+
+Pair 7:
+  Relational:    product_id SERIAL
+  Denormalized:  product_id INT
+
+Pair 8:
+  Relational:    product_name VARCHAR(100)
+  Denormalized:  product_name VARCHAR(100)
+
+Pair 9:
+  Relational:    price DECIMAL(10, 2)
+  Denormalized:  unit_price DECIMAL(10, 2)
+
+Pair 10:
+  Relational:    order_detail_id SERIAL
+  Denormalized:  customer_email VARCHAR(100)
+
+Pair 11:
+  Relational:    quantity INT
+  Denormalized:  quantity INT
+
+
+================================================================================

@@ -1,0 +1,194 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-52-41
+Model: gemini
+Prompt: OBT
+Schema: northwind
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy adopts the ONE-BIG-TABLE (OBT) model, flattening the entire Northwind-like relational schema (14 tables) into a single wide table. This approach eliminates costly multi-table joins for OLAP and analytical workloads, optimizing for heavy read performance. A new surrogate primary key is introduced, all foreign key constraints are removed, and original primary keys are retained as standard attributes to ensure data reconstructibility.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidated all 14 normalized tables (categories, customers, employees, orders, products, etc.) into a single denormalized table named 'sales_obt'."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Introduced a single surrogate primary key 'obt_id' (BIGSERIAL) to uniquely identify each flattened record."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Removed all Foreign Key constraints to maximize read and bulk-load performance."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Retained all original Primary Keys (e.g., order_id, product_id, customer_id) as regular columns (degenerate dimensions) to maintain full semantic equivalence and allow data reconstruction."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Prefixed 'company_name' with source table names to avoid ambiguity: 'customer_company_name', 'shipper_company_name', 'supplier_company_name'."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Prefixed shared geographic and contact attributes ('address', 'city', 'region', 'postal_code', 'country', 'phone', 'fax', 'contact_name', 'contact_title') with 'customer_', 'employee_', 'shipper_', or 'supplier_' respectively."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Prefixed 'unit_price' to 'order_unit_price' (from order_details) and 'product_unit_price' (from products)."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Renamed 'description' from the categories table to 'category_description' to maintain clear domain context."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Massive data redundancy: Customer, employee, and product details are repeated for every single order detail line, significantly increasing the storage footprint."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update anomalies: Modifying a dimension attribute (e.g., a customer's address or a product's price) requires updating thousands of rows instead of a single record."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "ETL Complexity: Populating this table requires a complex ETL pipeline to perform the massive Cartesian/Left joins from the source transactional system."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "Q1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Comprehensive Sales Dashboards: Aggregating revenue and discounts by product category, customer region, and employee territory simultaneously, which previously required joining 8+ tables."
+      },
+      {
+        "decision_id": "Q2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Supply Chain & Logistics Analysis: Correlating supplier locations and product inventory levels with shipping delays and freight costs."
+      }
+    ]
+  }
+}
+```
+
+```sql
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS public.sales_obt
+(
+    -- Single Surrogate Primary Key
+    obt_id BIGSERIAL PRIMARY KEY,
+
+    -- Original Keys (Degenerate Dimensions for Reconstructibility)
+    order_id smallint,
+    product_id smallint,
+    customer_id character varying(5) COLLATE pg_catalog."default",
+    employee_id smallint,
+    shipper_id smallint,
+    supplier_id smallint,
+    category_id smallint,
+    territory_id character varying(20) COLLATE pg_catalog."default",
+    region_id smallint,
+    customer_type_id character varying(5) COLLATE pg_catalog."default",
+    state_id smallint,
+
+    -- Order Details Attributes
+    order_unit_price real,
+    order_quantity smallint,
+    order_discount real,
+
+    -- Orders Attributes
+    order_date date,
+    required_date date,
+    shipped_date date,
+    freight real,
+    ship_name character varying(40) COLLATE pg_catalog."default",
+    ship_address character varying(60) COLLATE pg_catalog."default",
+    ship_city character varying(15) COLLATE pg_catalog."default",
+    ship_region character varying(15) COLLATE pg_catalog."default",
+    ship_postal_code character varying(10) COLLATE pg_catalog."default",
+    ship_country character varying(15) COLLATE pg_catalog."default",
+
+    -- Products Attributes
+    product_name character varying(40) COLLATE pg_catalog."default",
+    quantity_per_unit character varying(20) COLLATE pg_catalog."default",
+    product_unit_price real,
+    units_in_stock smallint,
+    units_on_order smallint,
+    reorder_level smallint,
+    discontinued integer,
+
+    -- Categories Attributes
+    category_name character varying(15) COLLATE pg_catalog."default",
+    category_description text COLLATE pg_catalog."default",
+    picture bytea,
+
+    -- Customers Attributes
+    customer_company_name character varying(40) COLLATE pg_catalog."default",
+    customer_contact_name character varying(30) COLLATE pg_catalog."default",
+    customer_contact_title character varying(30) COLLATE pg_catalog."default",
+    customer_address character varying(60) COLLATE pg_catalog."default",
+    customer_city character varying(15) COLLATE pg_catalog."default",
+    customer_region character varying(15) COLLATE pg_catalog."default",
+    customer_postal_code character varying(10) COLLATE pg_catalog."default",
+    customer_country character varying(15) COLLATE pg_catalog."default",
+    customer_phone character varying(24) COLLATE pg_catalog."default",
+    customer_fax character varying(24) COLLATE pg_catalog."default",
+
+    -- Customer Demographics Attributes
+    customer_desc text COLLATE pg_catalog."default",
+
+    -- Employees Attributes
+    employee_last_name character varying(20) COLLATE pg_catalog."default",
+    employee_first_name character varying(10) COLLATE pg_catalog."default",
+    employee_title character varying(30) COLLATE pg_catalog."default",
+    employee_title_of_courtesy character varying(25) COLLATE pg_catalog."default",
+    employee_birth_date date,
+    employee_hire_date date,
+    employee_address character varying(60) COLLATE pg_catalog."default",
+    employee_city character varying(15) COLLATE pg_catalog."default",
+    employee_region character varying(15) COLLATE pg_catalog."default",
+    employee_postal_code character varying(10) COLLATE pg_catalog."default",
+    employee_country character varying(15) COLLATE pg_catalog."default",
+    employee_home_phone character varying(24) COLLATE pg_catalog."default",
+    employee_extension character varying(4) COLLATE pg_catalog."default",
+    photo bytea,
+    notes text COLLATE pg_catalog."default",
+    reports_to smallint,
+    photo_path character varying(255) COLLATE pg_catalog."default",
+
+    -- Territories & Region Attributes
+    territory_description character varying(60) COLLATE pg_catalog."default",
+    region_description character varying(60) COLLATE pg_catalog."default",
+
+    -- Shippers Attributes
+    shipper_company_name character varying(40) COLLATE pg_catalog."default",
+    shipper_phone character varying(24) COLLATE pg_catalog."default",
+
+    -- Suppliers Attributes
+    supplier_company_name character varying(40) COLLATE pg_catalog."default",
+    supplier_contact_name character varying(30) COLLATE pg_catalog."default",
+    supplier_contact_title character varying(30) COLLATE pg_catalog."default",
+    supplier_address character varying(60) COLLATE pg_catalog."default",
+    supplier_city character varying(15) COLLATE pg_catalog."default",
+    supplier_region character varying(15) COLLATE pg_catalog."default",
+    supplier_postal_code character varying(10) COLLATE pg_catalog."default",
+    supplier_country character varying(15) COLLATE pg_catalog."default",
+    supplier_phone character varying(24) COLLATE pg_catalog."default",
+    supplier_fax character varying(24) COLLATE pg_catalog."default",
+    homepage text COLLATE pg_catalog."default",
+
+    -- US States Attributes
+    state_name character varying(100) COLLATE pg_catalog."default",
+    state_abbr character varying(2) COLLATE pg_catalog."default",
+    state_region character varying(50) COLLATE pg_catalog."default"
+);
+
+END;
+```

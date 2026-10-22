@@ -1,0 +1,197 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_10-37-13
+Model: gemini
+Prompt: OBT
+Schema: TPC_DS
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy follows the One-Big-Table (OBT) model by consolidating all nine tables (sales channels, returns, and inventory) into a single unified table named 'unified_retail_records'. This eliminates the need for complex JOINs across headers, line items, and distinct channels. A surrogate primary key and a record type indicator are introduced to manage the different event grains.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged all 9 source tables (s_purchase, s_purchase_lineitem, s_catalog_order, s_catalog_order_lineitem, s_web_order, s_web_order_lineitem, s_store_returns, s_catalog_returns, s_inventory) into a single target table 'unified_retail_records'."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Added a surrogate primary key 'record_id' to uniquely identify each transaction/event row, replacing the composite primary keys of the normalized model."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Added a 'record_type' column to distinguish the source event type (e.g., 'STORE_SALE', 'CATALOG_RETURN', 'INVENTORY_SNAPSHOT') for each row."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Retained all original column names and their table-specific prefixes (e.g., purc_, plin_, cord_) to ensure zero naming collisions and full reconstructibility of the original normalized data."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed all Foreign Key constraints from relational linking columns (e.g., plin_purchase_id, clin_order_id) to comply with the OBT constraint while keeping the columns themselves for data lineage."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "High data sparsity (many NULLs): Since each row represents a specific event type, columns belonging to other channels or event types will be NULL, increasing storage overhead."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Increased write penalty: Appending data to a massive, wide table can be slower than writing to narrow, specialized tables, especially if columnar compression is not optimal."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Query complexity for global metrics: Calculating global totals (e.g., total quantity sold) requires using COALESCE across channel-specific columns (plin_quantity, clin_quantity, wlin_quantity)."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "Q1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Cross-channel sales analysis: Aggregating sales revenue and quantities across Store, Catalog, and Web channels by item and date without requiring FULL OUTER JOINs."
+      },
+      {
+        "decision_id": "Q2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Return rate analysis: Comparing return quantities and amounts against original sales for specific items or stores within a single table using window functions or conditional aggregation."
+      },
+      {
+        "decision_id": "Q3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Inventory depletion tracking: Correlating daily inventory snapshots (invn_qty_on_hand) with daily sales events across all channels to optimize restocking."
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- ============================================================
+--   Table: unified_retail_records                               
+-- ============================================================
+CREATE TABLE unified_retail_records
+(
+    -- Surrogate PK and Event Identifier
+    record_id                   SERIAL PRIMARY KEY,
+    record_type                 VARCHAR(50)                   ,
+
+    -- Attributes from s_purchase_lineitem
+    plin_purchase_id            integer                       ,
+    plin_line_number            integer                       ,
+    plin_item_id                char(16)                      ,
+    plin_promotion_id           char(16)                      ,
+    plin_quantity               integer                       ,
+    plin_sale_price             numeric(7,2)                  ,
+    plin_coupon_amt             numeric(7,2)                  ,
+    plin_comment                varchar(100)                  ,
+
+    -- Attributes from s_purchase
+    purc_purchase_id            integer                       ,
+    purc_store_id               char(16)                      ,
+    purc_customer_id            char(16)                      ,
+    purc_purchase_date          char(10)                      ,
+    purc_purchase_time          integer                       ,
+    purc_register_id            integer                       ,
+    purc_clerk_id               integer                       ,
+    purc_comment                char(100)                     ,
+
+    -- Attributes from s_catalog_order
+    cord_order_id               integer                       ,
+    cord_bill_customer_id       char(16)                      ,
+    cord_ship_customer_id       char(16)                      ,
+    cord_order_date             char(10)                      ,
+    cord_order_time             integer                       ,
+    cord_ship_mode_id           char(16)                      ,
+    cord_call_center_id         char(16)                      ,
+    cord_order_comments         varchar(100)                  ,
+
+    -- Attributes from s_web_order
+    word_order_id               integer                       ,
+    word_bill_customer_id       char(16)                      ,
+    word_ship_customer_id       char(16)                      ,
+    word_order_date             char(10)                      ,
+    word_order_time             integer                       ,
+    word_ship_mode_id           char(16)                      ,
+    word_web_site_id            char(16)                      ,
+    word_order_comments         char(100)                     ,
+
+    -- Attributes from s_catalog_order_lineitem
+    clin_order_id               integer                       ,
+    clin_line_number            integer                       ,
+    clin_item_id                char(16)                      ,
+    clin_promotion_id           char(16)                      ,
+    clin_quantity               integer                       ,
+    clin_sales_price            numeric(7,2)                  ,
+    clin_coupon_amt             numeric(7,2)                  ,
+    clin_warehouse_id           char(16)                      ,
+    clin_ship_date              char(10)                      ,
+    clin_catalog_number         integer                       ,
+    clin_catalog_page_number    integer                       ,
+    clin_ship_cost              numeric(7,2)                  ,
+
+    -- Attributes from s_web_order_lineitem
+    wlin_order_id               integer                       ,
+    wlin_line_number            integer                       ,
+    wlin_item_id                char(16)                      ,
+    wlin_promotion_id           char(16)                      ,
+    wlin_quantity               integer                       ,
+    wlin_sales_price            numeric(7,2)                  ,
+    wlin_coupon_amt             numeric(7,2)                  ,
+    wlin_warehouse_id           char(16)                      ,
+    wlin_ship_date              char(10)                      ,
+    wlin_ship_cost              numeric(7,2)                  ,
+    wlin_web_page_id            char(16)                      ,
+
+    -- Attributes from s_store_returns
+    sret_store_id               char(16)                      ,
+    sret_purchase_id            char(16)                      ,
+    sret_line_number            integer                       ,
+    sret_item_id                char(16)                      ,
+    sret_customer_id            char(16)                      ,
+    sret_return_date            char(10)                      ,
+    sret_return_time            char(10)                      ,
+    sret_ticket_number          char(20)                      ,
+    sret_return_qty             integer                       ,
+    sret_return_amt             numeric(7,2)                  ,
+    sret_return_tax             numeric(7,2)                  ,
+    sret_return_fee             numeric(7,2)                  ,
+    sret_return_ship_cost       numeric(7,2)                  ,
+    sret_refunded_cash          numeric(7,2)                  ,
+    sret_reversed_charge        numeric(7,2)                  ,
+    sret_store_credit           numeric(7,2)                  ,
+    sret_reason_id              char(16)                      ,
+
+    -- Attributes from s_catalog_returns
+    cret_call_center_id         char(16)                      ,
+    cret_order_id               integer                       ,
+    cret_line_number            integer                       ,
+    cret_item_id                char(16)                      ,
+    cret_return_customer_id     char(16)                      ,
+    cret_refund_customer_id     char(16)                      ,
+    cret_return_date            char(10)                      ,
+    cret_return_time            char(10)                      ,
+    cret_return_qty             integer                       ,
+    cret_return_amt             numeric(7,2)                  ,
+    cret_return_tax             numeric(7,2)                  ,
+    cret_return_fee             numeric(7,2)                  ,
+    cret_return_ship_cost       numeric(7,2)                  ,
+    cret_refunded_cash          numeric(7,2)                  ,
+    cret_reversed_charge        numeric(7,2)                  ,
+    cret_merchant_credit        numeric(7,2)                  ,
+    cret_reason_id              char(16)                      ,
+    cret_shipmode_id            char(16)                      ,
+    cret_catalog_page_id        char(16)                      ,
+    cret_warehouse_id           char(16)                      ,
+
+    -- Attributes from s_inventory
+    invn_warehouse_id           char(16)                      ,
+    invn_item_id                char(16)                      ,
+    invn_date                   char(10)                      ,
+    invn_qty_on_hand            integer                       
+);
+```

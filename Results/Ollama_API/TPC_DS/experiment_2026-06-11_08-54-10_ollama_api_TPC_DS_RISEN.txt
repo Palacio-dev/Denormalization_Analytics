@@ -1,0 +1,221 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_08-54-10
+Model: ollama_api
+Prompt: RISEN
+Schema: TPC_DS
+==================================================
+
+{
+  "section_1": {
+    "summary": "The strategy involves denormalizing the schema by collapsing relations to reduce the number of joins required for frequent analytical queries. We will merge purchase line items with their parent purchase records, catalog orders with their line items, and web orders with their line items. Additionally, we will add derived attributes for total sales and return amounts to support faster aggregations. Redundant attributes such as customer and item IDs are preserved in denormalized tables to maintain semantic equivalence while improving read performance.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge s_purchase and s_purchase_lineitem into a single table d_purchase_lineitem to eliminate the need for joining these tables during query execution."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge s_catalog_order and s_catalog_order_lineitem into a single table d_catalog_order_lineitem to eliminate the need for joining these tables during query execution."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge s_web_order and s_web_order_lineitem into a single table d_web_order_lineitem to eliminate the need for joining these tables during query execution."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Preserve s_store_returns, s_catalog_returns, and s_inventory as-is due to their independent nature and lack of frequent join patterns with other tables."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived attribute 'total_amount' (quantity * sale_price) in d_purchase_lineitem to support faster aggregation queries."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added derived attribute 'total_amount' (quantity * sales_price) in d_catalog_order_lineitem to support faster aggregation queries."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added derived attribute 'total_amount' (quantity * sales_price) in d_web_order_lineitem to support faster aggregation queries."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Redundant attributes like store_id, customer_id, order_date, etc., are copied into child tables to avoid joins."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Denormalization increases storage requirements due to data duplication but significantly improves read performance for analytical workloads."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Maintaining consistency across denormalized tables requires more complex ETL logic, especially when source data is updated."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Adding derived attributes improves query speed but requires additional computation during data ingestion."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical queries that require joining s_purchase and s_purchase_lineitem to calculate total sales per store or customer."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries analyzing catalog order performance by joining s_catalog_order and s_catalog_order_lineitem to compute revenue and item counts."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Web order analysis requiring joins between s_web_order and s_web_order_lineitem to determine top-selling items or customer behavior."
+      }
+    ]
+  }
+}
+
+```sql
+-- ============================================================
+--   Denormalized Table: d_purchase_lineitem
+-- ============================================================
+create table d_purchase_lineitem
+(
+    plin_purchase_id            integer               not null,
+    plin_line_number            integer               not null,
+    plin_item_id                char(16)                      ,
+    plin_promotion_id           char(16)                      ,
+    plin_quantity               integer                       ,
+    plin_sale_price             numeric(7,2)                  ,
+    plin_coupon_amt             numeric(7,2)                  ,
+    plin_comment                varchar(100)                  ,
+    purc_store_id               char(16)                      ,
+    purc_customer_id            char(16)                      ,
+    purc_purchase_date          char(10)                      ,
+    purc_purchase_time          integer                       ,
+    purc_register_id            integer                       ,
+    purc_clerk_id               integer                       ,
+    purc_comment                char(100)                     ,
+    total_amount                numeric(14,2)                 
+);
+
+-- ============================================================
+--   Denormalized Table: d_catalog_order_lineitem
+-- ============================================================
+create table d_catalog_order_lineitem
+(
+    clin_order_id               integer               not null,
+    clin_line_number            integer               not null,
+    clin_item_id                char(16)                      ,
+    clin_promotion_id           char(16)                      ,
+    clin_quantity               integer                       ,
+    clin_sales_price            numeric(7,2)                  ,
+    clin_coupon_amt             numeric(7,2)                  ,
+    clin_warehouse_id           char(16)                      ,
+    clin_ship_date              char(10)                      ,
+    clin_catalog_number         integer                       ,
+    clin_catalog_page_number    integer                       ,
+    clin_ship_cost              numeric(7,2)                  ,
+    cord_bill_customer_id       char(16)                      ,
+    cord_ship_customer_id       char(16)                      ,
+    cord_order_date             char(10)                      ,
+    cord_order_time             integer                       ,
+    cord_ship_mode_id           char(16)                      ,
+    cord_call_center_id         char(16)                      ,
+    cord_order_comments         varchar(100)                  ,
+    total_amount                numeric(14,2)                 
+);
+
+-- ============================================================
+--   Denormalized Table: d_web_order_lineitem
+-- ============================================================
+create table d_web_order_lineitem
+(
+    wlin_order_id               integer               not null,
+    wlin_line_number            integer               not null,
+    wlin_item_id                char(16)                      ,
+    wlin_promotion_id           char(16)                      ,
+    wlin_quantity               integer                       ,
+    wlin_sales_price            numeric(7,2)                  ,
+    wlin_coupon_amt             numeric(7,2)                  ,
+    wlin_warehouse_id           char(16)                      ,
+    wlin_ship_date              char(10)                      ,
+    wlin_ship_cost              numeric(7,2)                  ,
+    wlin_web_page_id            char(16)                      ,
+    word_bill_customer_id       char(16)                      ,
+    word_ship_customer_id       char(16)                      ,
+    word_order_date             char(10)                      ,
+    word_order_time             integer                       ,
+    word_ship_mode_id           char(16)                      ,
+    word_web_site_id            char(16)                      ,
+    word_order_comments         char(100)                     ,
+    total_amount                numeric(14,2)                 
+);
+
+-- ============================================================
+--   Table: s_store_returns (unchanged)
+-- ============================================================
+create table s_store_returns
+(
+    sret_store_id               char(16)                      ,
+    sret_purchase_id            char(16)              not null,
+    sret_line_number            integer               not null,
+    sret_item_id                char(16)              not null,
+    sret_customer_id            char(16)                      ,
+    sret_return_date            char(10)                      ,
+    sret_return_time            char(10)                      ,
+    sret_ticket_number          char(20)                      ,
+    sret_return_qty             integer                       ,
+    sret_return_amt             numeric(7,2)                  ,
+    sret_return_tax             numeric(7,2)                  ,
+    sret_return_fee             numeric(7,2)                  ,
+    sret_return_ship_cost       numeric(7,2)                  ,
+    sret_refunded_cash          numeric(7,2)                  ,
+    sret_reversed_charge        numeric(7,2)                  ,
+    sret_store_credit           numeric(7,2)                  ,
+    sret_reason_id              char(16)                      
+);
+
+-- ============================================================
+--   Table: s_catalog_returns (unchanged)
+-- ============================================================
+create table s_catalog_returns
+(
+    cret_call_center_id         char(16)                      ,
+    cret_order_id               integer               not null,
+    cret_line_number            integer               not null,
+    cret_item_id                char(16)              not null,
+    cret_return_customer_id     char(16)                      ,
+    cret_refund_customer_id     char(16)                      ,
+    cret_return_date            char(10)                      ,
+    cret_return_time            char(10)                      ,
+    cret_return_qty             integer                       ,
+    cret_return_amt             numeric(7,2)                  ,
+    cret_return_tax             numeric(7,2)                  ,
+    cret_return_fee             numeric(7,2)                  ,
+    cret_return_ship_cost       numeric(7,2)                  ,
+    cret_refunded_cash          numeric(7,2)                  ,
+    cret_reversed_charge        numeric(7,2)                  ,
+    cret_merchant_credit        numeric(7,2)                  ,
+    cret_reason_id              char(16)                      ,
+    cret_shipmode_id            char(16)                      ,
+    cret_catalog_page_id        char(16)                      ,
+    cret_warehouse_id           char(16)                      
+);
+
+-- ============================================================
+--   Table: s_inventory (unchanged)
+-- ============================================================
+create table s_inventory
+(
+    invn_warehouse_id           char(16)              not null,
+    invn_item_id                char(16)              not null,
+    invn_date                   char(10)              not null,
+    invn_qty_on_hand            integer                       
+);
+```

@@ -1,0 +1,185 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_08-54-34
+Model: ollama_local
+Prompt: junior
+Schema: ex06
+==================================================
+
+Here is the analysis and denormalization strategy for your educational database schema, followed by the SQL DDL script.
+
+### JSON Analysis and Strategy
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on transforming the schema from a strict normalized form (3NF) to a wide-table analytics model (2NF/1NF hybrid). The primary goal is to eliminate joins between `MUNICIPIO`, `IES`, `ESCOLA`, `CURSO`, and `ANO` tables. Since the business logic involves reporting on specific metrics (IEB, ENADE, SAEB) per entity type, the data is duplicated within the target tables rather than linked via foreign keys. This allows for `SELECT` statements to retrieve all required dimensions and measures in a single table scan.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge `MUNICIPIO`, `IES`, and `ESCOLA` into a single table named `ENTIDADE_EDUCATIVA`. The relationship between these tables was redundant for reporting because the metrics (`media_ideb`, `qtd_habitantes` etc.) are intrinsic to the entity type (City, School, or Institution). We duplicate the `nome`, `sigla`, `codigo`, and `rede` attributes into one table to allow filtering and grouping by entity type without joining.",
+        "source_tables": ["MUNICIPIO", "IES", "ESCOLA"],
+        "target_tables": ["ENTIDADE_EDUCATIVA"]
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge `CURSO`, `ANO`, `ENADE`, `SAEB`, and `IEB` into a single table named `INDICADOR_CURRICULAR`. The original schema required joining `CURSO` to `ANO` to get metrics, and `ANO` to `ENADE`/`SAEB`/`IEB`. By flattening these, we can report on a specific course in a specific year with all its associated metrics in one go.",
+        "source_tables": ["CURSO", "ANO", "ENADE", "SAEB", "IEB"],
+        "target_tables": ["INDICADOR_CURRICULAR"]
+      },
+      {
+        "decision_id": "D3",
+        "description": "Remove `UF` as a separate table and embed `sigla_uf` and `nome_uf` directly into `ENTIDADE_EDUCATIVA`. Since every `MUNICIPIO` references `UF`, and `MUNICIPIO` is the parent of `IES`/`ESCOLA`, duplicating the state info in the main entity table removes the need to join `UF`.",
+        "source_tables": ["UF", "MUNICIPIO"],
+        "target_tables": ["ENTIDADE_EDUCATIVA"]
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived columns such as `total_escolas_por_municipio` (calculated from `qtd_ESCOLAS` in `MUNICIPIO`), `total_ies_por_municipio` (from `IES`), and `total_participantes_enade` (sum of `total_inscritos` from `ENADE` per year). These are pre-calculated to avoid aggregation functions in ad-hoc queries.",
+        "added_attributes": ["total_escolas_por_municipio", "total_ies_por_municipio", "total_participantes_enade", "ano_referencia"]
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed `id_municipio`, `id_ies`, `id_escola`, `id_curso`, `id_ano` as foreign keys. Instead, we use the `sigla_uf`, `nome_escola`, `sigla_ies`, `nome_curso`, and `ano` as the primary keys or unique identifiers for the denormalized rows.",
+        "removed_attributes": ["id_municipio", "id_ies", "id_escola", "id_curso", "id_ano"]
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Write Amplification: Inserting data now requires writing duplicate records for every entity type (e.g., inserting a city's data into the `ENTIDADE_EDUCATIVA` table even if we only query cities). This increases storage requirements and insert latency compared to the original normalized schema.",
+        "impact": "Higher storage cost and slower data ingestion speeds."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Data Consistency vs. Performance: In the normalized schema, data consistency is guaranteed by the database engine via foreign key constraints. In the denormalized schema, we must ensure data is updated atomically or rely on application logic to keep the duplicates in sync, as there are no foreign keys to enforce referential integrity.",
+        "impact": "Risk of data divergence if update operations are not carefully managed."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Storage vs. Join Latency: The tradeoff is between the small size of the denormalized tables (fewer rows) and the large size of the denormalized tables (more columns per row). While the number of rows decreases significantly, the row size increases, which can impact index size.",
+        "impact": "Larger row size may increase memory usage during sorting/grouping, though it drastically reduces CPU cycles spent on joining."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Report the total number of schools and the average IDEB per municipality, including the state name and population."
+        "original_complexity": "Requires JOINs: MUNICIPIO -> UF and MUNICIPIO -> ESCOLA (if counting schools per city) or just MUNICIPIO -> UF."
+        "new_complexity": "Single table scan on `ENTIDADE_EDUCATIVA` filtering by `sigla_uf`."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Retrieve the gross raw grade (nota_bruta_ce) and the number of enrolled students (total_inscritos) for a specific course in a specific year."
+        "original_complexity": "Requires JOINs: CURSO -> ANO -> ENADE."
+        "new_complexity": "Single table scan on `INDICADOR_CURRICULAR` filtering by `nome_curso` and `ano_referencia`."
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "List all institutions (IES) in a specific state, along with their network type (rede) and the number of students in ENADE for the latest year."
+        "original_complexity": "Requires JOINs: IES -> MUNICIPIO -> UF and IES -> ANO -> ENADE."
+        "new_complexity": "Single table scan on `ENTIDADE_EDUCATIVA` and `INDICADOR_CURRICULAR`."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Creation Script for Denormalized Schema
+
+```sql
+-- Drop existing denormalized tables if they exist
+DROP TABLE IF EXISTS ENTIDADE_EDUCATIVA CASCADE;
+DROP TABLE IF EXISTS INDICADOR_CURRICULAR CASCADE;
+
+-- Table 1: ENTIDADE_EDUCATIVA
+-- Merges MUNICIPIO, IES, and ESCOLA into one wide table.
+-- Includes UF details embedded directly.
+CREATE TABLE ENTIDADE_EDUCATIVA (
+    id_entidade INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    
+    -- UF Attributes (Embedded)
+    sigla_uf VARCHAR(2) UNIQUE NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    
+    -- Attributes specific to MUNICIPIO (Duplicated here)
+    id_municipio_orig VARCHAR(20) GENERATED ALWAYS AS (id_municipio::TEXT) STORED, -- Kept for reference if needed
+    nome_municipio VARCHAR(100) NOT NULL,
+    qtd_habitantes INT CHECK(qtd_habitantes >= 0),
+    qtd_ies INT CHECK(qtd_ies >= 0),
+    qtd_escolas INT CHECK(qtd_escolas >= 0),
+    media_ideb REAL,
+    media_saeb REAL,
+    media_enade REAL,
+    total_participantes INT CHECK(total_participantes >= 0),
+    
+    -- Attributes specific to IES (Duplicated here)
+    id_ies_orig VARCHAR(20) GENERATED ALWAYS AS (id_ies::TEXT) STORED,
+    sigla_ies VARCHAR(20),
+    codigo_ies INT UNIQUE NOT NULL,
+    rede VARCHAR(100) NOT NULL,
+    
+    -- Attributes specific to ESCOLA (Duplicated here)
+    id_escola_orig VARCHAR(20) GENERATED ALWAYS (id_escola::TEXT) STORED,
+    nome_escola VARCHAR(100) NOT NULL,
+    cod_escola INTEGER UNIQUE NOT NULL,
+    
+    -- Metadata for denormalization
+    tipo_entidade VARCHAR(20) NOT NULL DEFAULT 'MUNICIPIO' -- ENUM-like string for flexibility
+    
+    -- Composite Primary Key for uniqueness within the merged table logic
+    CONSTRAINT pk_entidade_composite PRIMARY KEY (id_entidade, tipo_entidade, sigla_uf)
+);
+
+-- Table 2: INDICADOR_CURRICULAR
+-- Merges CURSO, ANO, ENADE, SAEB, and IDEB into one wide table.
+-- Allows querying metrics for a specific course/year without joins.
+CREATE TABLE INDICADOR_CURRICULAR (
+    id_curso_orig VARCHAR(20) GENERATED ALWAYS AS (id_curso::TEXT) STORED,
+    nome_curso VARCHAR(100) NOT NULL,
+    
+    -- ANO Attributes (Embedded)
+    id_ano_orig VARCHAR(20) GENERATED ALWAYS AS (id_ano::TEXT) STORED,
+    ano_referencia INT NOT NULL,
+    
+    -- ENADE Attributes (Duplicated per year/course)
+    total_inscritos INT CHECK(total_inscritos >= 0),
+    total_concluintes INT CHECK(total_concluintes >= 0),
+    nota_bruta_ce REAL,
+    nota_padronizada_ce REAL,
+    nota_bruta_fg REAL,
+    nota_padronizada_fg REAL,
+    nota_enade_continua REAL,
+    nota_enade_faixa REAL,
+    
+    -- SAEB Attributes (Duplicated per year/course)
+    nota_mat REAL,
+    nota_port REAL,
+    nota_padrao REAL,
+    
+    -- IDEB Attributes (Duplicated per year/course)
+    rend_1 REAL,
+    rend_2 REAL,
+    rend_3 REAL,
+    rend_4 REAL,
+    ind_rend REAL,
+    nota_ideb REAL,
+    
+    -- Unique Constraint to prevent duplicate years for the same course
+    CONSTRAINT pk_curso_ano_uniq PRIMARY KEY (id_curso_orig, ano_referencia)
+);
+
+-- Note: 
+-- 1. In a production environment, you would populate these tables using ETL tools 
+--    that aggregate data from the original tables to avoid manual row-by-row duplication.
+-- 2. The `tipo_entidade` column in ENTIDADE_EDUCATIVA is added to help query patterns 
+--    distinguish between Municipality, School, and Institution data in the same table.
+-- 3. Foreign keys are intentionally removed to maximize query speed, relying instead on 
+--    application logic or application-level checks for data consistency.
+```

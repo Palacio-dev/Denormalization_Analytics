@@ -1,0 +1,286 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_08-48-46
+Model: ollama_api
+Prompt: junior
+Schema: HFC
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on creating a comprehensive denormalized table for tombos (specimens) by merging frequently joined reference tables. This approach reduces the need for multiple joins during analytical queries by embedding related data directly into the main tombos table. The strategy preserves referential data while improving query performance for reporting and analytics.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge taxonomic hierarchy tables (reinos, familias, generos, especies, sub_especies, variedades) into tombos table to eliminate joins for species identification queries"
+      },
+      {
+        "decision_id": "D2",
+        "description": "Integrate location hierarchy (paises, estados, cidades) into locais_coleta and then into tombos to reduce geographic query complexity"
+      },
+      {
+        "decision_id": "D3",
+        "description": "Combine collector information (coletores, coletores_complementares) into tombos to simplify collection data queries"
+      },
+      {
+        "decision_id": "D4",
+        "description": "Merge reference data tables (tipos, solos, relevos, vegetacoes, fase_sucessional) directly into tombos to eliminate lookup joins"
+      },
+      {
+        "decision_id": "D5",
+        "description": "Integrate herbarium and user information (herbarios, usuarios, identificadores) into related transaction tables to reduce authentication and institutional query joins"
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added descriptive fields from reference tables as denormalized columns (e.g., familia_nome, genero_nome, especie_nome, pais_nome, estado_nome) to preserve context without joins"
+      },
+      {
+        "decision_id": "A2",
+        "description": "Converted foreign key IDs to meaningful names where appropriate to improve query readability and reduce lookup requirements"
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added computed fields for common aggregations like full_taxonomic_name and full_location_description to support faster reporting"
+      },
+      {
+        "decision_id": "A4",
+        "description": "Removed redundant timestamp fields from denormalized tables to reduce storage overhead while maintaining essential audit trails"
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Storage space increases due to data duplication but query performance improves significantly for analytical workloads"
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Data modification operations become more complex as changes need to propagate to multiple denormalized fields, but read operations for analytics are optimized"
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of strict normalization benefits like data consistency enforcement, but gains significant performance improvements for reporting queries"
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Frequent queries for specimen details including full taxonomic classification require joining 5+ tables (reinos, familias, generos, especies, sub_especies)"
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Geographic analysis queries need to join paises, estados, and cidades tables to get location hierarchies for specimens"
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Collection statistics queries require joining coletores and coletores_complementares tables with tombos for collector information"
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Specimen characteristic analysis queries need joins with tipos, solos, relevos, vegetacoes, and fase_sucessional tables"
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Institutional and user activity reports require joining herbarios, usuarios, and identificadores tables with transaction data"
+      }
+    ]
+  }
+}
+
+```sql
+-- Denormalized schema for improved analytics and reporting performance
+
+-- Main denormalized tombos table containing all relevant specimen information
+CREATE TABLE IF NOT EXISTS public.tombos_denormalized
+(
+    -- Core tombos fields
+    hcf bigserial NOT NULL,
+    data_tombo timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    data_coleta_dia bigint,
+    data_coleta_mes bigint,
+    data_coleta_ano bigint,
+    observacao text COLLATE pg_catalog."default",
+    nomes_populares text COLLATE pg_catalog."default",
+    numero_coleta bigint,
+    latitude double precision,
+    longitude double precision,
+    altitude double precision,
+    variedade_id bigint,
+    tipo_id bigint,
+    data_identificacao_dia smallint,
+    data_identificacao_mes smallint,
+    data_identificacao_ano integer,
+    situacao tombos_situacao DEFAULT 'REGULAR'::tombos_situacao,
+    especie_id bigint,
+    genero_id bigint,
+    familia_id bigint,
+    sub_familia_id bigint,
+    sub_especie_id bigint,
+    nome_cientifico text COLLATE pg_catalog."default",
+    colecao_anexa_id bigint,
+    solo_id bigint,
+    relevo_id bigint,
+    vegetacao_id bigint,
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ativo boolean DEFAULT true,
+    taxon character varying(45) COLLATE pg_catalog."default" DEFAULT NULL::character varying,
+    rascunho boolean DEFAULT false,
+    coletor_id bigint,
+    descricao text COLLATE pg_catalog."default",
+    unicata boolean,
+    cidade_id bigint,
+    fase_sucessional_id bigint,
+    
+    -- Denormalized taxonomic information
+    reino_nome character varying(200) COLLATE pg_catalog."default",
+    familia_nome character varying(200) COLLATE pg_catalog."default",
+    genero_nome character varying(200) COLLATE pg_catalog."default",
+    especie_nome character varying(200) COLLATE pg_catalog."default",
+    sub_especie_nome character varying(255) COLLATE pg_catalog."default",
+    variedade_nome character varying(200) COLLATE pg_catalog."default",
+    sub_familia_nome character varying(300) COLLATE pg_catalog."default",
+    
+    -- Denormalized location information
+    cidade_nome character varying(255) COLLATE pg_catalog."default",
+    estado_nome character varying(255) COLLATE pg_catalog."default",
+    estado_sigla character(4) COLLATE pg_catalog."default",
+    pais_nome character varying(255) COLLATE pg_catalog."default",
+    pais_sigla character(4) COLLATE pg_catalog."default",
+    local_coleta_descricao text COLLATE pg_catalog."default",
+    fase_sucessional_nome character varying(200) COLLATE pg_catalog."default",
+    
+    -- Denormalized collector information
+    coletor_nome character varying(255) COLLATE pg_catalog."default",
+    coletor_complementares character varying(1000) COLLATE pg_catalog."default",
+    
+    -- Denormalized reference data
+    tipo_nome character varying(250) COLLATE pg_catalog."default",
+    solo_nome character varying(300) COLLATE pg_catalog."default",
+    relevo_nome character varying(300) COLLATE pg_catalog."default",
+    vegetacao_nome character varying(300) COLLATE pg_catalog."default",
+    
+    -- Denormalized institutional information
+    entidade_nome character varying(200) COLLATE pg_catalog."default",
+    entidade_sigla character varying(80) COLLATE pg_catalog."default",
+    
+    -- Computed fields for reporting
+    full_taxonomic_name text COLLATE pg_catalog."default",
+    full_location_description text COLLATE pg_catalog."default",
+    
+    CONSTRAINT tombos_denormalized_pkey PRIMARY KEY (hcf)
+);
+
+-- Denormalized alterations table with embedded user and specimen information
+CREATE TABLE IF NOT EXISTS public.alteracoes_denormalized
+(
+    id bigserial NOT NULL,
+    usuario_id bigint NOT NULL,
+    usuario_nome character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    usuario_email character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    usuario_tipo character varying(100) COLLATE pg_catalog."default",
+    status alteracoes_status NOT NULL,
+    observacao text COLLATE pg_catalog."default",
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    tombo_hcf bigint NOT NULL,
+    tombo_nome_cientifico text COLLATE pg_catalog."default",
+    tombo_familia_nome character varying(200) COLLATE pg_catalog."default",
+    tombo_genero_nome character varying(200) COLLATE pg_catalog."default",
+    tombo_especie_nome character varying(200) COLLATE pg_catalog."default",
+    tombo_json text COLLATE pg_catalog."default",
+    ativo boolean,
+    identificacao boolean,
+    CONSTRAINT alteracoes_denormalized_pkey PRIMARY KEY (id)
+);
+
+-- Denormalized shipments table with embedded destination and herbarium information
+CREATE TABLE IF NOT EXISTS public.remessas_denormalized
+(
+    id bigserial NOT NULL,
+    observacao text COLLATE pg_catalog."default",
+    data_envio timestamp with time zone,
+    entidade_destino_id bigint NOT NULL,
+    entidade_destino_nome character varying(200) COLLATE pg_catalog."default",
+    entidade_destino_sigla character varying(80) COLLATE pg_catalog."default",
+    herbario_id bigint NOT NULL,
+    herbario_nome character varying(200) COLLATE pg_catalog."default",
+    herbario_sigla character varying(80) COLLATE pg_catalog."default",
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT remessas_denormalized_pkey PRIMARY KEY (id)
+);
+
+-- Denormalized specimen withdrawals table with embedded shipment and specimen information
+CREATE TABLE IF NOT EXISTS public.retirada_exsiccata_tombos_denormalized
+(
+    retirada_exsiccata_id bigint NOT NULL,
+    tombo_hcf bigint NOT NULL,
+    tipo retirada_exsiccata_tombos_tipo NOT NULL,
+    data_vencimento timestamp with time zone,
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    devolvido boolean DEFAULT false,
+    remessa_observacao text COLLATE pg_catalog."default",
+    remessa_data_envio timestamp with time zone,
+    herbario_nome character varying(200) COLLATE pg_catalog."default",
+    herbario_sigla character varying(80) COLLATE pg_catalog."default",
+    tombo_nome_cientifico text COLLATE pg_catalog."default",
+    tombo_familia_nome character varying(200) COLLATE pg_catalog."default",
+    CONSTRAINT retirada_exsiccata_tombos_denormalized_pkey PRIMARY KEY (retirada_exsiccata_id, tombo_hcf)
+);
+
+-- Denormalized users table with embedded institutional information
+CREATE TABLE IF NOT EXISTS public.usuarios_denormalized
+(
+    id bigserial NOT NULL,
+    nome character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    ra character varying(45) COLLATE pg_catalog."default" DEFAULT NULL::character varying,
+    email character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    senha character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    tipo_usuario_id bigint NOT NULL,
+    tipo_usuario_nome character varying(100) COLLATE pg_catalog."default",
+    telefone character varying(45) COLLATE pg_catalog."default" DEFAULT NULL::character varying,
+    herbario_id bigint NOT NULL,
+    herbario_nome character varying(200) COLLATE pg_catalog."default",
+    herbario_sigla character varying(80) COLLATE pg_catalog."default",
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    token_troca_senha character varying(255) COLLATE pg_catalog."default" DEFAULT NULL::character varying,
+    token_troca_senha_expiracao timestamp with time zone,
+    CONSTRAINT usuarios_denormalized_pkey PRIMARY KEY (id)
+);
+
+-- Denormalized specimen photos table with embedded specimen information
+CREATE TABLE IF NOT EXISTS public.tombos_fotos_denormalized
+(
+    id bigserial NOT NULL,
+    tombo_hcf bigint NOT NULL,
+    tombo_nome_cientifico text COLLATE pg_catalog."default",
+    tombo_familia_nome character varying(200) COLLATE pg_catalog."default",
+    tombo_genero_nome character varying(200) COLLATE pg_catalog."default",
+    codigo_barra character varying(45) COLLATE pg_catalog."default" DEFAULT ''::character varying,
+    num_barra character varying(45) COLLATE pg_catalog."default" DEFAULT ''::character varying,
+    caminho_foto text COLLATE pg_catalog."default",
+    em_vivo boolean NOT NULL DEFAULT false,
+    sequencia bigint,
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT tombos_fotos_denormalized_pkey PRIMARY KEY (id)
+);
+
+-- Indexes for improved query performance
+CREATE INDEX idx_tombos_denorm_taxonomic ON public.tombos_denormalized(familia_nome, genero_nome, especie_nome);
+CREATE INDEX idx_tombos_denorm_location ON public.tombos_denormalized(pais_nome, estado_nome, cidade_nome);
+CREATE INDEX idx_tombos_denorm_dates ON public.tombos_denormalized(data_coleta_ano, data_coleta_mes, data_coleta_dia);
+CREATE INDEX idx_tombos_denorm_coletor ON public.tombos_denormalized(coletor_nome);
+CREATE INDEX idx_alteracoes_denorm_usuario ON public.alteracoes_denormalized(usuario_nome, created_at);
+CREATE INDEX idx_alteracoes_denorm_tombo ON public.alteracoes_denormalized(tombo_hcf, created_at);
+```

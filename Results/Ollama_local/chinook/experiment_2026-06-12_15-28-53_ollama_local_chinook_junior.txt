@@ -1,0 +1,155 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_15-28-53
+Model: ollama_local
+Prompt: junior
+Schema: chinook
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on eliminating the need for joins between frequently accessed tables,
+     specifically the Customer, Employee, and Address-related tables. In an analytical context, joining these tables repeatedly
+      to retrieve customer details, support rep info, and address data is a performance bottleneck. The strategy involves creating 
+      a unified 'CustomerProfile' table that embeds the necessary address and employee details directly into the Customer table, 
+      and a 'TrackMetadata' table that embeds Genre and Media Type details into the Track table to avoid joins when analyzing 
+      music data.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Create a new 'CustomerProfile' table by merging the 'Customer' and 'Employee' tables. This table will include all customer attributes plus the 'FirstName', 'LastName', 'Title', and 'BirthDate' of the Support Rep (assuming a direct link via SupportRepId).",
+        "source_tables": ["Customer", "Employee"],
+        "target_tables": ["CustomerProfile"]
+      },
+      {
+        "decision_id": "D2",
+        "description": "Create a new 'TrackMetadata' table by merging the 'Track', 'Genre', and 'MediaType' tables. This table will include all track attributes plus the 'Name' of the Genre and 'Name' of the MediaType.",
+        "source_tables": ["Track", "Genre", "MediaType"],
+        "target_tables": ["TrackMetadata"]
+      },
+      {
+        "decision_id": "D3",
+        "description": "Create a new 'InvoiceDetails' table by merging the 'Invoice' and 'InvoiceLine' tables. This table will include invoice details plus the track name, unit price, and quantity from the line items, effectively denormalizing the line item data into the main invoice record for easier aggregation.",
+        "source_tables": ["Invoice", "InvoiceLine", "Track"],
+        "target_tables": ["InvoiceDetails"]
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added columns 'SupportRepFirstName', 'SupportRepLastName', 'SupportRepTitle', and 'SupportRepBirthDate' to the CustomerProfile table to avoid joining with the Employee table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added columns 'GenreName' and 'MediaTypeName' to the TrackMetadata table to avoid joining with Genre and MediaType tables."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added columns 'TrackName', 'UnitPrice', and 'Quantity' to the InvoiceDetails table to avoid joining with Track and InvoiceLine tables."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Increased data redundancy and storage space requirements in exchange for significantly reduced query execution time and eliminated join complexity for analytical reports."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Loss of referential integrity constraints (Foreign Keys) in the denormalized tables, as the primary goal is read performance over data consistency enforcement. Updates to source tables will not automatically propagate to the denormalized views."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical reports requiring a list of all customers with their full details, including the name and title of their assigned support representative, without needing to join the Employee table."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Music analytics queries that need to display track names alongside their genre and media type names, avoiding multiple joins to resolve foreign keys."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Sales reporting queries that require aggregating total sales per customer while including the specific track names and quantities sold, avoiding joins to the InvoiceLine and Track tables."
+      }
+    ]
+  }
+}
+```
+
+### Complete SQL DDL Creation Script for the Denormalized Schema
+
+```sql
+-- Drop existing tables if they exist to ensure a clean state for the denormalized schema
+DROP TABLE IF EXISTS public."CustomerProfile";
+DROP TABLE IF EXISTS public."TrackMetadata";
+DROP TABLE IF EXISTS public."InvoiceDetails";
+
+-- 1. Denormalized Customer Profile Table
+-- Merges Customer and Employee (Support Rep) data to eliminate joins for customer reporting.
+CREATE TABLE IF NOT EXISTS public."CustomerProfile"
+(
+    "CustomerId" integer NOT NULL,
+    "FirstName" character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    "LastName" character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    "Company" character varying(80) COLLATE pg_catalog."default",
+    "Address" character varying(70) COLLATE pg_catalog."default",
+    "City" character varying(40) COLLATE pg_catalog."default",
+    "State" character varying(40) COLLATE pg_catalog."default",
+    "Country" character varying(40) COLLATE pg_catalog."default",
+    "PostalCode" character varying(10) COLLATE pg_catalog."default",
+    "Phone" character varying(24) COLLATE pg_catalog."default",
+    "Fax" character varying(24) COLLATE pg_catalog."default",
+    "Email" character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    -- Denormalized Employee Data
+    "SupportRepFirstName" character varying(20) COLLATE pg_catalog."default",
+    "SupportRepLastName" character varying(20) COLLATE pg_catalog."default",
+    "SupportRepTitle" character varying(30) COLLATE pg_catalog."default",
+    "SupportRepBirthDate" timestamp without time zone,
+    CONSTRAINT "PK_CustomerProfile" PRIMARY KEY ("CustomerId")
+);
+
+-- 2. Denormalized Track Metadata Table
+-- Merges Track, Genre, and MediaType data to eliminate joins for music analytics.
+CREATE TABLE IF NOT EXISTS public."TrackMetadata"
+(
+    "TrackId" integer NOT NULL,
+    "Name" character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    "AlbumId" integer,
+    "GenreName" character varying(120) COLLATE pg_catalog."default",
+    "MediaTypeName" character varying(120) COLLATE pg_catalog."default",
+    "Composer" character varying(220) COLLATE pg_catalog."default",
+    "Milliseconds" integer NOT NULL,
+    "Bytes" integer,
+    "UnitPrice" numeric(10, 2) NOT NULL,
+    CONSTRAINT "PK_TrackMetadata" PRIMARY KEY ("TrackId")
+);
+
+-- 3. Denormalized Invoice Details Table
+-- Merges Invoice, InvoiceLine, and Track data to eliminate joins for sales reporting.
+CREATE TABLE IF NOT EXISTS public."InvoiceDetails"
+(
+    "InvoiceId" integer NOT NULL,
+    "CustomerId" integer NOT NULL,
+    "InvoiceDate" timestamp without time zone NOT NULL,
+    "BillingAddress" character varying(70) COLLATE pg_catalog."default",
+    "BillingCity" character varying(40) COLLATE pg_catalog."default",
+    "BillingState" character varying(40) COLLATE pg_catalog."default",
+    "BillingCountry" character varying(40) COLLATE pg_catalog."default",
+    "BillingPostalCode" character varying(10) COLLATE pg_catalog."default",
+    "Total" numeric(10, 2) NOT NULL,
+    -- Denormalized Line Item Data
+    "TrackName" character varying(200) COLLATE pg_catalog."default",
+    "UnitPrice" numeric(10, 2) NOT NULL,
+    "Quantity" integer NOT NULL,
+    CONSTRAINT "PK_InvoiceDetails" PRIMARY KEY ("InvoiceId")
+);
+
+-- Note: In a real-world scenario, you would populate these tables using INSERT ... SELECT statements 
+-- joining the original tables to copy the data. Since this is a schema creation script, 
+-- we only define the structure here.
+```

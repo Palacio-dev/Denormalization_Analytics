@@ -1,0 +1,126 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-03_22-58-07
+Model: ollama_api
+Prompt: OBT
+Schema: airplane
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy follows the ONE-BIG-TABLE MODEL, merging all normalized tables into a single denormalized table. This approach eliminates JOINs and foreign key constraints, significantly improving read performance for analytical queries. The schema preserves all original attributes by flattening the data model and incorporating entity-specific fields directly into one wide table.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged all 8 normalized tables (aircrafts_data, airports_data, boarding_passes, bookings, flights, seats, ticket_flights, tickets) into a single denormalized table named 'booking_analytics' to eliminate JOIN operations."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Removed all foreign key constraints from the schema since denormalization consolidates related data into a single table."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Converted composite primary keys into a single auto-incrementing integer primary key for simplified indexing and querying."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Prefixed ambiguous column names with their source table names to avoid conflicts (e.g., 'model' from aircrafts_data becomes 'aircraft_model')."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Flattened JSONB fields (model, airport_name, city, contact_data) into VARCHAR columns to maintain semantic equivalence while ensuring compatibility with flat relational structures."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Retained all original non-key attributes across source tables, ensuring no data loss during denormalization."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved read performance at the cost of increased storage space due to data duplication and wider rows."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified querying and faster analytical queries offset the complexity of maintaining consistency in write-heavy scenarios."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of normalization benefits like referential integrity and update anomaly prevention in exchange for performance gains."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Frequent analytical queries involving passenger details, flight information, boarding passes, and booking summaries require multiple JOINs in the normalized schema."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Business intelligence reports aggregating ticket sales, flight occupancy, and revenue by route or time period benefit from pre-joined data."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Operational dashboards displaying real-time flight status, seat availability, and passenger itineraries demand low-latency access to consolidated data."
+      }
+    ]
+  }
+}
+
+CREATE TABLE IF NOT EXISTS bookings.booking_analytics (
+    id SERIAL PRIMARY KEY,
+    -- Booking Information
+    book_ref CHAR(6),
+    book_date TIMESTAMPTZ,
+    total_amount NUMERIC(10, 2),
+
+    -- Ticket Information
+    ticket_no CHAR(13),
+    passenger_id VARCHAR(20),
+    passenger_name TEXT,
+    contact_data JSONB,
+
+    -- Flight Information
+    flight_id INTEGER,
+    flight_no CHAR(6),
+    scheduled_departure TIMESTAMPTZ,
+    scheduled_arrival TIMESTAMPTZ,
+    actual_departure TIMESTAMPTZ,
+    actual_arrival TIMESTAMPTZ,
+    departure_airport CHAR(3),
+    arrival_airport CHAR(3),
+    flight_status VARCHAR(20),
+    aircraft_code_flight CHAR(3),
+
+    -- Aircraft Information
+    aircraft_model JSONB,
+    aircraft_range INTEGER,
+
+    -- Airport Information (Departure)
+    departure_airport_name JSONB,
+    departure_city JSONB,
+    departure_coordinates POINT,
+    departure_timezone TEXT,
+
+    -- Airport Information (Arrival)
+    arrival_airport_name JSONB,
+    arrival_city JSONB,
+    arrival_coordinates POINT,
+    arrival_timezone TEXT,
+
+    -- Seat Information
+    seat_no_seat VARCHAR(4),
+    fare_conditions_seat VARCHAR(10),
+
+    -- Ticket Flight Information
+    fare_conditions_flight VARCHAR(10),
+    amount NUMERIC(10, 2),
+
+    -- Boarding Pass Information
+    boarding_no INTEGER
+);

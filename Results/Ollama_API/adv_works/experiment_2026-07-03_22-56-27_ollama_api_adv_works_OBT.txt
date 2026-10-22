@@ -1,0 +1,169 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-03_22-56-27
+Model: ollama_api
+Prompt: OBT
+Schema: adv_works
+==================================================
+
+{
+"section_1": {
+"summary": "The denormalization strategy adopted follows the ONE-BIG-TABLE MODEL, consolidating all relevant entities from the AdventureWorks database into a single table. This approach aims to optimize read performance for analytical queries by eliminating the need for costly JOIN operations. The core entity is the Employee, with related data from Department, Shift, PayHistory, Person, Address, and other related entities embedded as attributes. All foreign key relationships are removed, and the data is flattened into a wide table structure.",
+"structural_decisions": [
+{
+"decision_id": "D1",
+"description": "Consolidate the core HR and Person entities (Employee, Person, BusinessEntity) into the main table, using BusinessEntityID as the primary key."
+},
+{
+"decision_id": "D2",
+"description": "Embed current Department information (name, groupname) from the Department table into the Employee record based on the latest entry in EmployeeDepartmentHistory."
+},
+{
+"decision_id": "D3",
+"description": "Embed current Shift information (name, times) from the Shift table into the Employee record based on the latest entry in EmployeeDepartmentHistory."
+},
+{
+"decision_id": "D4",
+"description": "Embed the latest salary rate and pay frequency from the EmployeePayHistory table."
+},
+{
+"decision_id": "D5",
+"description": "Embed primary address details (line1, line2, city, postalcode) and state/province information by joining BusinessEntityAddress, Address, and StateProvince."
+},
+{
+"decision_id": "D6",
+"description": "Embed primary email address from the EmailAddress table."
+},
+{
+"decision_id": "D7",
+"description": "Embed primary phone number and type from the PersonPhone and PhoneNumberType tables."
+}
+],
+"attribute_level_changes": [
+{
+"decision_id": "A1",
+"description": "Added derived attributes 'current_department_name' and 'current_department_group' by joining with Department via latest EmployeeDepartmentHistory record."
+},
+{
+"decision_id": "A2",
+"description": "Added derived attributes 'current_shift_name', 'current_shift_start', 'current_shift_end' by joining with Shift via latest EmployeeDepartmentHistory record."
+},
+{
+"decision_id": "A3",
+"description": "Added derived attribute 'current_rate' representing the latest pay rate from EmployeePayHistory."
+},
+{
+"decision_id": "A4",
+"description": "Added derived attribute 'current_pay_frequency' from the latest EmployeePayHistory record."
+},
+{
+"decision_id": "A5",
+"description": "Added derived attributes 'address_line1', 'address_line2', 'city', 'postalcode', 'state_province_name', 'country_region_code' for the primary address."
+},
+{
+"decision_id": "A6",
+"description": "Added derived attribute 'primary_email_address' for the main email contact."
+},
+{
+"decision_id": "A7",
+"description": "Added derived attributes 'primary_phone_number' and 'phone_number_type' for the main phone contact."
+},
+{
+"decision_id": "A8",
+"description": "Prefixed ambiguous column names with their source table names to ensure uniqueness (e.g., employee_nationalidnumber, person_firstname)."
+}
+],
+"tradeoffs": [
+{
+"tradeoff_id": "T1",
+"description": "Improved read performance for common HR/personnel queries at the cost of increased storage space and potential data redundancy."
+},
+{
+"tradeoff_id": "T2",
+"description": "Simplified data model for analytics but increased complexity in ETL processes to maintain the denormalized view."
+},
+{
+"tradeoff_id": "T3",
+"description": "Loss of transactional integrity enforcement that normalization provides; data consistency must be managed by ETL processes."
+},
+{
+"tradeoff_id": "T4",
+"description": "Updates to source data (e.g., address change, new pay rate) require a full refresh or complex logic to update the denormalized table."
+}
+]
+},
+"section_2": {
+"query_patterns": [
+{
+"decision_id": "D1",
+"query_pattern_type": "inferred",
+"query_pattern_description": "Frequent HR reports requiring employee details along with current department, shift, pay, and contact information. Example: 'List all employees with their current department, job title, salary, and primary email.' This query would normally require joining Employee, EmployeeDepartmentHistory, Department, Shift, EmployeePayHistory, and EmailAddress."
+},
+{
+"decision_id": "D2",
+"query_pattern_type": "inferred",
+"query_pattern_description": "Personnel lookup queries for an employee's comprehensive profile. Example: 'Get full details for employee with BusinessEntityID 123, including name, address, phone, department, and pay.' This involves joining Employee, Person, BusinessEntityAddress, Address, StateProvince, EmailAddress, PersonPhone, PhoneNumberType, EmployeeDepartmentHistory, Department, Shift, EmployeePayHistory."
+},
+{
+"decision_id": "D3",
+"query_pattern_type": "inferred",
+"query_pattern_description": "Analytical queries on employee demographics and compensation. Example: 'Average salary by department and state.' This requires joining multiple tables to gather the necessary dimensions."
+}
+]
+}
+}
+
+```sql
+CREATE TABLE IF NOT EXISTS humanresources_employee_denormalized (
+    -- Employee Core
+    employee_businessentityid integer NOT NULL,
+    employee_nationalidnumber character varying(15) COLLATE pg_catalog."default" NOT NULL,
+    employee_loginid character varying(256) COLLATE pg_catalog."default" NOT NULL,
+    employee_jobtitle character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    employee_birthdate date NOT NULL,
+    employee_maritalstatus character(1) COLLATE pg_catalog."default" NOT NULL,
+    employee_gender character(1) COLLATE pg_catalog."default" NOT NULL,
+    employee_hiredate date NOT NULL,
+    employee_salariedflag boolean NOT NULL DEFAULT true,
+    employee_vacationhours smallint NOT NULL DEFAULT 0,
+    employee_sickleavehours smallint NOT NULL DEFAULT 0,
+    employee_currentflag boolean NOT NULL DEFAULT true,
+    employee_organizationnode character varying COLLATE pg_catalog."default" DEFAULT '/'::character varying,
+    employee_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- Person Details
+    person_persontype character(2) COLLATE pg_catalog."default" NOT NULL,
+    person_namestyle boolean NOT NULL DEFAULT false,
+    person_title character varying(8) COLLATE pg_catalog."default",
+    person_firstname character varying COLLATE pg_catalog."default" NOT NULL,
+    person_middlename character varying COLLATE pg_catalog."default",
+    person_lastname character varying COLLATE pg_catalog."default" NOT NULL,
+    person_suffix character varying(10) COLLATE pg_catalog."default",
+    person_emailpromotion integer NOT NULL DEFAULT 0,
+    
+    -- Derived Current Department & Shift (from latest EmployeeDepartmentHistory)
+    current_department_name character varying COLLATE pg_catalog."default",
+    current_department_group character varying COLLATE pg_catalog."default",
+    current_shift_name character varying COLLATE pg_catalog."default",
+    current_shift_start time without time zone,
+    current_shift_end time without time zone,
+    
+    -- Derived Latest Pay (from latest EmployeePayHistory)
+    current_rate numeric,
+    current_pay_frequency smallint,
+    
+    -- Derived Primary Address
+    address_line1 character varying(60) COLLATE pg_catalog."default",
+    address_line2 character varying(60) COLLATE pg_catalog."default",
+    city character varying(30) COLLATE pg_catalog."default",
+    postalcode character varying(15) COLLATE pg_catalog."default",
+    state_province_name character varying COLLATE pg_catalog."default",
+    country_region_code character varying(3) COLLATE pg_catalog."default",
+    
+    -- Derived Primary Contact Info
+    primary_email_address character varying(50) COLLATE pg_catalog."default",
+    primary_phone_number character varying COLLATE pg_catalog."default",
+    phone_number_type character varying COLLATE pg_catalog."default",
+    
+    CONSTRAINT "PK_humanresources_employee_denormalized" PRIMARY KEY (employee_businessentityid)
+);
+```

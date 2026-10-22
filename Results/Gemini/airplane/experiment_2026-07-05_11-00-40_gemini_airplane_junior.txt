@@ -1,0 +1,191 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-00-40
+Model: gemini
+Prompt: junior
+Schema: airplane
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions the highly normalized 3NF transactional schema into a Star Schema optimized for OLAP (Online Analytical Processing) and reporting. By pre-joining related entities, we drastically reduce the number of expensive joins required at query time. The new schema revolves around a central fact table for passenger flight segments (`fact_passenger_flights`) and denormalized dimension tables for flights (`dim_flights`) and aircraft capacity (`dim_aircraft_seats`).",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge `flights`, `aircrafts_data`, and `airports_data` (twice, for departure and arrival) into a single denormalized dimension table named `dim_flights`. This eliminates 3 joins for any query analyzing flight schedules, routes, or aircraft usage."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge `ticket_flights`, `tickets`, `bookings`, and `boarding_passes` into a single fact table named `fact_passenger_flights`. The grain is one row per passenger per flight segment. This eliminates 3 joins for revenue, passenger, and booking analytics."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge `seats` and `aircrafts_data` into a denormalized dimension table named `dim_aircraft_seats`. This allows for quick aggregations of aircraft capacity by travel class without joining."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added `dep_` and `arr_` prefixes to the attributes inherited from `airports_data` in the `dim_flights` table (e.g., `dep_airport_name`, `arr_city`) to distinguish between departure and arrival airport details."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Renamed `amount` from `ticket_flights` to `flight_amount`, and `total_amount` from `bookings` to `total_booking_amount` in `fact_passenger_flights` to prevent ambiguity between the segment cost and the overall booking cost."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Included `aircraft_model` directly into `dim_aircraft_seats` and `dim_flights` to avoid needing to look up the model name using the `aircraft_code`."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy: Booking-level data (like `book_date` and `total_booking_amount`) and Ticket-level data (`passenger_name`) are repeated for every flight segment a passenger takes. This increases storage requirements."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If an airport's timezone or city changes, or if a passenger updates their contact info, the update must be applied to multiple rows instead of a single normalized record. This is acceptable for analytical systems where data is typically append-only or updated in bulk."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Wider Tables: Reading a full row from the disk takes slightly more I/O due to the increased number of columns, though columnar storage formats (if used downstream) or targeted SELECT statements mitigate this."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Route Performance Analysis: Calculating average flight delays and cross-referencing them by departure city, arrival city, and aircraft model."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Revenue Dashboards: Aggregating total revenue (`flight_amount`) by `book_date`, `fare_conditions` (travel class), and passenger demographics without traversing from tickets to bookings."
+      },
+      {
+        "decision_id": "D1_and_D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Load Factor / Seat Utilization: Comparing the count of issued boarding passes (`fact_passenger_flights.boarding_no`) against the total physical seats available (`dim_aircraft_seats`) for a specific `dim_flights.flight_id`."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL for Denormalized Schema
+
+```sql
+CREATE SCHEMA IF NOT EXISTS analytics;
+
+-- ==============================================================================
+-- 1. DIMENSION: Flights (Denormalized)
+-- Merges: flights, aircrafts_data, airports_data (Departure & Arrival)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS analytics.dim_flights
+(
+    flight_id integer NOT NULL,
+    flight_no character(6) COLLATE pg_catalog."default" NOT NULL,
+    scheduled_departure timestamp with time zone NOT NULL,
+    scheduled_arrival timestamp with time zone NOT NULL,
+    actual_departure timestamp with time zone,
+    actual_arrival timestamp with time zone,
+    status character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Aircraft Data
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    aircraft_model jsonb NOT NULL,
+    aircraft_range integer NOT NULL,
+    
+    -- Departure Airport Data
+    dep_airport_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    dep_airport_name jsonb NOT NULL,
+    dep_city jsonb NOT NULL,
+    dep_coordinates point NOT NULL,
+    dep_timezone text COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Arrival Airport Data
+    arr_airport_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    arr_airport_name jsonb NOT NULL,
+    arr_city jsonb NOT NULL,
+    arr_coordinates point NOT NULL,
+    arr_timezone text COLLATE pg_catalog."default" NOT NULL,
+    
+    CONSTRAINT dim_flights_pkey PRIMARY KEY (flight_id)
+);
+
+COMMENT ON TABLE analytics.dim_flights IS 'Denormalized dimension table for flights, including aircraft and airport details';
+
+-- ==============================================================================
+-- 2. FACT: Passenger Flights (Denormalized)
+-- Merges: ticket_flights, tickets, bookings, boarding_passes
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS analytics.fact_passenger_flights
+(
+    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL,
+    flight_id integer NOT NULL,
+    
+    -- Booking Data
+    book_ref character(6) COLLATE pg_catalog."default" NOT NULL,
+    book_date timestamp with time zone NOT NULL,
+    total_booking_amount numeric(10, 2) NOT NULL,
+    
+    -- Passenger & Ticket Data
+    passenger_id character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    passenger_name text COLLATE pg_catalog."default" NOT NULL,
+    contact_data jsonb,
+    
+    -- Flight Segment Data
+    fare_conditions character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    flight_amount numeric(10, 2) NOT NULL,
+    
+    -- Boarding Pass Data (Nullable because a passenger might not have checked in yet)
+    boarding_no integer,
+    seat_no character varying(4) COLLATE pg_catalog."default",
+    
+    CONSTRAINT fact_passenger_flights_pkey PRIMARY KEY (ticket_no, flight_id)
+);
+
+COMMENT ON TABLE analytics.fact_passenger_flights IS 'Denormalized fact table for passenger flight segments, including booking, ticket, and boarding pass details';
+
+-- ==============================================================================
+-- 3. DIMENSION: Aircraft Seats (Denormalized)
+-- Merges: seats, aircrafts_data
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS analytics.dim_aircraft_seats
+(
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    aircraft_model jsonb NOT NULL,
+    seat_no character varying(4) COLLATE pg_catalog."default" NOT NULL,
+    fare_conditions character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    
+    CONSTRAINT dim_aircraft_seats_pkey PRIMARY KEY (aircraft_code, seat_no)
+);
+
+COMMENT ON TABLE analytics.dim_aircraft_seats IS 'Denormalized dimension table for aircraft seats and capacity';
+
+-- ==============================================================================
+-- Foreign Keys & Indexes for Analytical Performance
+-- ==============================================================================
+
+-- Link Fact table to Flight Dimension
+ALTER TABLE IF EXISTS analytics.fact_passenger_flights
+    ADD CONSTRAINT fact_passenger_flights_flight_id_fkey FOREIGN KEY (flight_id)
+    REFERENCES analytics.dim_flights (flight_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+-- Indexes for common analytical filtering and grouping
+CREATE INDEX IF NOT EXISTS idx_dim_flights_scheduled_departure 
+    ON analytics.dim_flights(scheduled_departure);
+
+CREATE INDEX IF NOT EXISTS idx_dim_flights_dep_arr_city 
+    ON analytics.dim_flights USING gin (dep_city, arr_city);
+
+CREATE INDEX IF NOT EXISTS idx_fact_passenger_flights_book_date 
+    ON analytics.fact_passenger_flights(book_date);
+
+CREATE INDEX IF NOT EXISTS idx_fact_passenger_flights_flight_id 
+    ON analytics.fact_passenger_flights(flight_id);
+```

@@ -1,0 +1,143 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-37-32
+Model: gemini
+Prompt: RISEN
+Schema: ex10
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transforms a highly normalized 3NF schema into a hybrid Star Schema with One Big Table (OBT) characteristics to optimize analytical read performance. This is achieved by collapsing hierarchical dimensions (merging Continent into Country), merging fact tables that share the exact same Country-Year grain (Population and Emissions), and adding redundant dimension attributes directly into the fact tables. This design eliminates the need for expensive multi-table JOINs during heavy analytical queries while preserving full semantic equivalence and reconstructibility.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapsing Relations: Merged the 'continente' table into the 'paises' table to create a unified 'dim_pais' dimension table. This flattens the geographical hierarchy and removes the need to join country and continent data."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapsing Relations: Merged 'populacao' and 'emissao_g_efeito_estufa' into a single fact table named 'fato_indicadores_anuais'. Both original tables share the exact same granularity (Country and Year), so combining them reduces join overhead for per-capita calculations."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Adding Redundant Attributes: Added 'pais_nome' and 'continente_nome' to both fact tables ('fato_indicadores_anuais' and 'fato_consumo_anual'). This allows most analytical queries to be resolved by scanning a single table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Adding Redundant Attributes: Added 'fonte_energia_nome' directly into 'fato_consumo_anual' to avoid joining with the energy source dimension for consumption reports."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Adding Derived Attributes: Added 'emissao_per_capita' (calculated as emissao_quantidade_emitida / populacao_quantidade_hab) to 'fato_indicadores_anuais' to precompute a highly requested analytical metric."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy vs. Read Performance: Storing dimension names (e.g., pais_nome, continente_nome) inside fact tables increases storage requirements and introduces potential update anomalies if a dimension's name changes. However, it drastically improves read performance by eliminating JOINs."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "ETL Overhead vs. Query Latency: Precomputing the derived attribute 'emissao_per_capita' adds slight overhead during the ETL/ingestion process, but saves CPU cycles and significantly reduces latency for end-user analytical queries."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1",
+        "query": "SELECT continente_nome, SUM(populacao_quantidade_hab) AS total_populacao FROM fato_indicadores_anuais WHERE ano = 2023 GROUP BY continente_nome;"
+      },
+      {
+        "decision_id": "D2",
+        "query": "SELECT pais_nome, ano, emissao_per_capita FROM fato_indicadores_anuais WHERE emissao_per_capita > 10.0 ORDER BY emissao_per_capita DESC;"
+      },
+      {
+        "decision_id": "A1",
+        "query": "SELECT pais_nome, fonte_energia_nome, porcentagem FROM fato_consumo_anual WHERE ano = 2023 AND porcentagem > 50;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- ==============================================================================
+-- DENORMALIZED ANALYTICAL SCHEMA (PostgreSQL)
+-- ==============================================================================
+
+-- 1. DIMENSION: Country & Continent (Collapsed Relation)
+CREATE TABLE IF NOT EXISTS public.dim_pais
+(
+    id_paises integer NOT NULL,
+    pais_nome character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    fundacao integer NOT NULL,
+    id_continente integer NOT NULL,
+    continente_nome character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT dim_pais_pkey PRIMARY KEY (id_paises)
+);
+
+-- 2. DIMENSION: Energy Source (Preserved for independent entity existence)
+CREATE TABLE IF NOT EXISTS public.dim_fonte_energia
+(
+    id_fonte_energia integer NOT NULL,
+    fonte_energia_nome character varying(50)[] COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT dim_fonte_energia_pkey PRIMARY KEY (id_fonte_energia)
+);
+
+-- 3. FACT: Annual Indicators (Merged Population & Emissions + Derived/Redundant Attributes)
+CREATE TABLE IF NOT EXISTS public.fato_indicadores_anuais
+(
+    id_paises integer NOT NULL,
+    ano integer NOT NULL,
+    id_pop integer,
+    id_emissao integer,
+    pais_nome character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    continente_nome character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    populacao_quantidade_hab integer,
+    emissao_quantidade_emitida bigint,
+    emissao_per_capita numeric(15, 6),
+    CONSTRAINT fato_indicadores_anuais_pkey PRIMARY KEY (id_paises, ano)
+);
+
+-- 4. FACT: Annual Energy Consumption (Includes Redundant Attributes for OBT-style querying)
+CREATE TABLE IF NOT EXISTS public.fato_consumo_anual
+(
+    id_consumo integer NOT NULL,
+    id_paises integer NOT NULL,
+    ano integer NOT NULL,
+    pais_nome character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    continente_nome character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    id_fonte_energia integer NOT NULL,
+    fonte_energia_nome character varying(50)[] COLLATE pg_catalog."default" NOT NULL,
+    porcentagem integer NOT NULL,
+    CONSTRAINT fato_consumo_anual_pkey PRIMARY KEY (id_consumo)
+);
+
+-- ==============================================================================
+-- FOREIGN KEYS
+-- ==============================================================================
+
+ALTER TABLE IF EXISTS public.fato_indicadores_anuais
+    ADD CONSTRAINT fato_indicadores_anuais_id_paises_fkey FOREIGN KEY (id_paises)
+    REFERENCES public.dim_pais (id_paises) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+ALTER TABLE IF EXISTS public.fato_consumo_anual
+    ADD CONSTRAINT fato_consumo_anual_id_paises_fkey FOREIGN KEY (id_paises)
+    REFERENCES public.dim_pais (id_paises) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+ALTER TABLE IF EXISTS public.fato_consumo_anual
+    ADD CONSTRAINT fato_consumo_anual_id_fonte_energia_fkey FOREIGN KEY (id_fonte_energia)
+    REFERENCES public.dim_fonte_energia (id_fonte_energia) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+```

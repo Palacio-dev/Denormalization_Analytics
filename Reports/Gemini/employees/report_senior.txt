@@ -1,0 +1,159 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 6
+  - Total Attributes: 18
+    * department: 2 columns
+    * department_employee: 4 columns
+    * department_manager: 4 columns
+    * employee: 6 columns
+    * salary: 4 columns
+    * title: 4 columns
+
+Denormalized Model:
+  - Tables: 5
+  - Total Attributes: 37
+    * dim_date: 10 columns
+    * dim_department: 3 columns
+    * dim_employee: 8 columns
+    * dim_employee_scd: 12 columns
+    * fact_employee_monthly_snapshot: 7 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Denormalized model has MORE attributes (18 vs 37)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: id (CHARACTER(4)) -> title (CHARACTER)
+  - Type mismatch: to_date (DATE) -> day_name (CHARACTER)
+  - Type mismatch: from_date (DATE) -> first_name (CHARACTER)
+  - Type mismatch: to_date (DATE) -> month_name (CHARACTER)
+  - Type mismatch: id (BIGINT) -> gender (CHARACTER)
+  - Type mismatch: gender (EMPLOYEES) -> gender (CHARACTER)
+  - Type mismatch: from_date (DATE) -> full_name (CHARACTER)
+  - Type mismatch: to_date (DATE) -> date_sk (INTEGER)
+  - Type mismatch: from_date (DATE) -> is_manager (BOOLEAN)
+  - Type mismatch: to_date (DATE) -> is_manager (BOOLEAN)
+--------------------------------------------------------------------------------
+Completeness Ratio:        2.06
+Data Type Preservation:    0.44
+Avg Levenshtein Distance:  3.50
+BLEU Score:                0.16
+ROUGE-1:                   0.34
+METEOR Score:              0.21
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: fact_employee_monthly_snapshot
+Dimension Tables Detected: dim_date, dim_department, dim_employee, dim_employee_scd
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected exactly 1 Fact table. Evaluating as a standard STAR SCHEMA.
+  - DIMENSION NULL WARNING: Attribute 'department_name' in 'dim_employee_scd' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'title' in 'dim_employee_scd' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'salary_amount' in 'dim_employee_scd' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'is_manager' in 'dim_employee_scd' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * fact_employee_monthly_snapshot: 2 Numeric, 2 Text
+  * dim_date: 5 Numeric, 5 Text
+  * dim_department: 1 Numeric, 2 Text
+  * dim_employee: 2 Numeric, 6 Text
+  * dim_employee_scd: 3 Numeric, 9 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  amount birth_date dept_name first_name from_date from_date from_date from_date gender hire_date id id last_name title to_date to_date to_date to_date
+
+Denormalized Model (Combined Text):
+  birth_date calendar_month calendar_quarter calendar_year date_sk day_name day_of_week department_id department_name department_name department_sk effective_date employee_id employee_id employee_scd_sk employee_sk expiration_date first_name first_name full_date full_name gender gender hire_date is_current is_last_day_of_month is_manager is_manager is_weekend last_name last_name month_name salary_amount salary_amount tenure_months title title
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 18 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id CHARACTER(4)
+  Denormalized:  title CHARACTER
+
+Pair 2:
+  Relational:    dept_name CHARACTER
+  Denormalized:  last_name CHARACTER
+
+Pair 3:
+  Relational:    from_date DATE
+  Denormalized:  full_date DATE
+
+Pair 4:
+  Relational:    to_date DATE
+  Denormalized:  day_name CHARACTER
+
+Pair 5:
+  Relational:    from_date DATE
+  Denormalized:  first_name CHARACTER
+
+Pair 6:
+  Relational:    to_date DATE
+  Denormalized:  month_name CHARACTER
+
+Pair 7:
+  Relational:    id BIGINT
+  Denormalized:  gender CHARACTER
+
+Pair 8:
+  Relational:    birth_date DATE
+  Denormalized:  birth_date DATE
+
+Pair 9:
+  Relational:    first_name CHARACTER
+  Denormalized:  first_name CHARACTER
+
+Pair 10:
+  Relational:    last_name CHARACTER
+  Denormalized:  last_name CHARACTER
+
+Pair 11:
+  Relational:    gender EMPLOYEES
+  Denormalized:  gender CHARACTER
+
+Pair 12:
+  Relational:    hire_date DATE
+  Denormalized:  hire_date DATE
+
+Pair 13:
+  Relational:    amount BIGINT
+  Denormalized:  salary_amount BIGINT
+
+Pair 14:
+  Relational:    from_date DATE
+  Denormalized:  full_name CHARACTER
+
+Pair 15:
+  Relational:    to_date DATE
+  Denormalized:  date_sk INTEGER
+
+Pair 16:
+  Relational:    title CHARACTER
+  Denormalized:  title CHARACTER
+
+Pair 17:
+  Relational:    from_date DATE
+  Denormalized:  is_manager BOOLEAN
+
+Pair 18:
+  Relational:    to_date DATE
+  Denormalized:  is_manager BOOLEAN
+
+
+================================================================================

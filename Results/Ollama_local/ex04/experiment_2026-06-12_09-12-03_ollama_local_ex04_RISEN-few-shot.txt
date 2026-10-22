@@ -1,0 +1,159 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_09-12-03
+Model: ollama_local
+Prompt: RISEN-few-shot
+Schema: ex04
+==================================================
+
+```json
+{
+    "section_1": {
+        "summary": "The denormalization strategy focuses on collapsing the many-to-many and many-to-one relationships between demographic, economic, and survey data into a single, wide 'Country-Year' fact table. This approach eliminates the need for complex JOINs between Country, Region, Survey, Demography, Employment, Education, Economy, Population, Life Expectancy, and Health tables. Instead, these relationships are represented as redundant attributes (Country Code, Region Code, Survey IDs, etc.) and pre-aggregated derived attributes (Total Population, Average Gini, etc.) within the main table. This is critical for analytical queries that require a holistic view of a country's status over time.",
+        "structural_decisions": [
+            {
+                "decision_id": "D1",
+                "description": "Consolidation of all source tables (country, region, survey, demography, employment, education, economy, population, life_expectancy, health) into a single denormalized table named 'Country_Year_Snapshot'. The 'year' column serves as the primary key for the snapshot concept, allowing multiple snapshots per country if needed, though the original schema implies one row per entity per year."
+            },
+            {
+                "decision_id": "D2",
+                "description": "Merging of 'country' and 'region' tables. The 'region_code' and 'region_name' attributes are moved directly into the 'Country_Year_Snapshot' table, removing the need to join with the 'region' lookup table."
+            },
+            {
+                "decision_id": "D3",
+                "description": "Flattening of the 'survey' hierarchy. Instead of joining 'survey' -> 'decile', the 'survey_acronym', 'survey_comparability', and 'survey_year' are duplicated for every demographic/economic indicator row. Additionally, a derived attribute 'total_survey_count' is added to count the number of surveys per country/year."
+            },
+            {
+                "decision_id": "D4",
+                "description": "Aggregation of demographic, employment, education, and economy tables. Instead of storing individual rows for each indicator (e.g., birth_rate, death_rate), these are pre-aggregated into single columns per country/year (e.g., 'avg_birth_rate', 'total_labor_force', 'total_gdp'). Similarly, 'population' data is aggregated into 'total_population' and 'urban_pop'."
+            },
+            {
+                "decision_id": "D5",
+                "description": "Collapsing 'health' and 'life_expectancy' data. The 'hospital_beds', 'physicians', and 'expenditure' are aggregated into 'total_health_metrics' (or similar), and 'life_expectancy' is stored as a single column 'avg_life_expectancy'."
+            }
+        ],
+        "attribute_level_changes": [
+            {
+                "decision_id": "A1",
+                "description": "Added redundant attributes: 'region_code', 'region_name', 'survey_acronym', 'survey_comparability', 'survey_year', 'total_population', 'avg_birth_rate', 'avg_death_rate', 'total_labor_force', 'total_gdp', 'avg_life_expectancy', 'total_health_beds'. These columns exist in the new table but are not primary keys."
+            },
+            {
+                "decision_id": "A2",
+                "description": "Removed attributes: All foreign keys (country_code, id_demography, id_survey, etc.) are removed from the main table. They are now redundant within the single table structure."
+            },
+            {
+                "decision_id": "A3",
+                "description": "Changed attribute types: 'year' remains the primary identifier. 'id_survey' is replaced by 'survey_acronym' (varchar) to avoid storing large serial integers if the survey IDs are not needed for lookups, but the original schema uses serials. To preserve semantics, we keep 'survey_acronym' and 'survey_year'."
+            }
+        ],
+        "tradeoffs": [
+            {
+                "tradeoff_id": "T1",
+                "description": "Tradeoff: Data Integrity vs. Read Performance. The denormalized schema sacrifices referential integrity (no foreign keys) and requires careful application logic to ensure data consistency. However, it drastically improves read performance by eliminating JOINs, which is crucial for analytical queries on large datasets."
+            },
+            {
+                "tradeoff_id": "T2",
+                "description": "Tradeoff: Storage vs. Query Speed. While the denormalized table is larger due to redundancy, the reduction in I/O operations for complex queries involving multiple tables outweighs the storage cost. However, updates to any attribute (e.g., changing a country name) would require updating every row in the denormalized table."
+            }
+        ]
+    },
+    "section_2": {
+        "query_patterns": [
+            {
+                "decision_id": "D1",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Business Query: 'Provide a dashboard showing GDP, Population, and Life Expectancy for all countries in 2020, sorted by GDP.' In the normalized model, this requires joining 6+ tables. In the denormalized model, it is a simple SELECT with one table."
+            },
+            {
+                "decision_id": "D3",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Analytical Query: 'List all countries with their survey coverage types and poverty lines.' This requires joining 'survey', 'decile', and 'country'. The denormalized schema stores these attributes directly."
+            },
+            {
+                "decision_id": "D4",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Aggregation Query: 'Calculate the average birth rate and death rate for each country.' The normalized model requires aggregating across the 'demography' table rows. The denormalized model pre-calculates this, returning a single value per country."
+            }
+        ]
+    }
+}
+```
+
+```sql
+-- Denormalized Schema: Country_Year_Snapshot
+-- Strategy: Collapse all relational entities into a single wide table to optimize analytical read performance.
+-- All foreign keys from the original schema are removed. Data is pre-aggregated and redundant.
+
+BEGIN;
+
+-- Drop existing tables if they exist to ensure a clean state
+DROP TABLE IF EXISTS public.Country_Year_Snapshot;
+
+-- Create the denormalized fact table
+CREATE TABLE IF NOT EXISTS public.Country_Year_Snapshot (
+    country_code character varying NOT NULL,
+    region_code character varying NOT NULL,
+    region_name character varying,
+    survey_acronym character varying,
+    survey_comparability integer,
+    survey_year integer,
+    poverty_line double precision,
+    headcount double precision,
+    poverty_gap double precision,
+    poverty_severity double precision,
+    gini double precision,
+    reporting_pop integer,
+    reporting_pce double precision,
+    distribution_type character varying,
+    spl double precision,
+    survey_coverage character varying,
+    reporting_level character varying,
+    -- Aggregated Demographics
+    total_population double precision,
+    pop_density double precision,
+    urban_pop double precision,
+    rural_pop double precision,
+    net_migration double precision,
+    death_rate double precision,
+    birth_rate double precision,
+    -- Aggregated Employment
+    child_emp double precision,
+    unemp double precision,
+    vulnerable_emp double precision,
+    part_time double precision,
+    employers double precision,
+    labor_force_total double precision,
+    labor_force_fem double precision,
+    -- Aggregated Education
+    child_out_of_school double precision,
+    progression_to_sec double precision,
+    expenditure double precision,
+    preprim_enroll double precision,
+    prim_enrol double precision,
+    sec_enrol double precision,
+    terti_enrol double precision,
+    -- Aggregated Economy
+    gdp double precision,
+    inflation double precision,
+    tax_revenue double precision,
+    -- Aggregated Health & Life Expectancy
+    total_health_beds double precision,
+    physicians double precision,
+    health_expenditure double precision,
+    avg_life_expectancy double precision,
+    -- Derived Attributes (Pre-computed for efficiency)
+    total_survey_count integer,
+    avg_gini double precision,
+    PRIMARY KEY (country_code, survey_year)
+);
+
+-- Note: The original schema had unique constraints on (country_code, year) for demographic/economy tables.
+-- We enforce uniqueness on (country_code, survey_year) to represent the snapshot concept.
+-- If multiple years exist for a country, they will be distinct rows.
+-- If the original data had one row per entity per year, we aggregate them into a single row per country per year
+-- by summing/aggregating the metrics, as shown in the column definitions above.
+
+-- No Foreign Keys are added to this denormalized table to maximize read performance.
+-- Data integrity must be maintained via application logic or triggers if needed.
+
+END;
+```

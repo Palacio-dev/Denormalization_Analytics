@@ -1,0 +1,65 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-03_23-03-55
+Model: ollama_api
+Prompt: OBT
+Schema: harperdb
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy involves merging the normalized tables (users, entitlements, and user_entitlements) into a single table using the ONE-BIG-TABLE model. This approach eliminates JOIN operations during read queries by precomputing and storing all relevant data in one wide table. The new schema includes all non-key attributes from the original tables and introduces a composite key based on user_id and entitlement_id to maintain uniqueness.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged the 'users', 'entitlements', and 'user_entitlements' tables into a single table to eliminate the need for JOINs during query execution."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added prefixed column names where necessary to avoid ambiguity. For example, 'activeDate' becomes 'entitlements_activeDate'."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Preserved all original attributes including 'id', 'activeDate', 'inactiveDate', 'useLimit', 'useCount', 'featureType', 'packageType', 'activeFlag', and 'user_id'."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved read performance at the cost of increased storage space due to data duplication and wider rows."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified query logic but increased complexity in data maintenance, as updates must be applied consistently across potentially redundant fields."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "Q1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Frequent queries likely involve fetching entitlement details for specific users, which previously required joining the 'user_entitlements' table with the 'entitlements' table."
+      },
+      {
+        "decision_id": "Q2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical queries may aggregate entitlement usage or filter by active status, feature type, or package type, benefiting from having these fields directly accessible without joins."
+      }
+    ]
+  }
+}
+
+CREATE TABLE user_entitlements_denormalized (
+    user_id INT,
+    entitlement_id INT,
+    entitlements_activeDate DATE,
+    entitlements_inactiveDate DATE,
+    entitlements_useLimit INT,
+    entitlements_useCount INT,
+    entitlements_featureType VARCHAR(4),
+    entitlements_packageType VARCHAR(4),
+    entitlements_activeFlag INT,
+    PRIMARY KEY (user_id, entitlement_id)
+);

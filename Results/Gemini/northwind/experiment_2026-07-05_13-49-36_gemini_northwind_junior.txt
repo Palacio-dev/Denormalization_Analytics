@@ -1,0 +1,189 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-49-36
+Model: gemini
+Prompt: junior
+Schema: northwind
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transforms the highly normalized transactional schema (3NF) into a Star Schema optimized for OLAP (Online Analytical Processing). This involves creating a central fact table for sales transactions and consolidating related lookup tables into wide dimension tables. This drastically reduces the number of joins required for typical reporting queries, such as sales by category, employee performance, and customer behavior.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge 'orders' and 'order_details' into a single 'fact_sales' table. Denormalize 'shippers' directly into this fact table by including the shipper's company name."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge 'products', 'categories', and 'suppliers' into a single 'dim_products' table to allow querying product sales by category or supplier without joins."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge 'employees', 'employee_territories', 'territories', and 'region' into a single 'dim_employees' table. Resolve the self-referencing 'reports_to' hierarchy by including a 'manager_name' column."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Merge 'customers', 'customer_customer_demo', and 'customer_demographics' into a single 'dim_customers' table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived metric 'sales_amount' (calculated as quantity * unit_price * (1 - discount)) to 'fact_sales' to pre-calculate revenue."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Concatenated 'first_name' and 'last_name' into 'full_name' in 'dim_employees' for easier reporting."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Aggregated Many-to-Many relationships (territories and customer demographics) into comma-separated text fields ('territories_summary', 'demographics_summary') to maintain a single row per employee and customer."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Removed BLOB/bytea columns ('picture' from categories, 'photo' from employees) as they consume significant storage and are rarely used in analytical aggregations."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy: Storing category and supplier names directly in 'dim_products' increases storage space and means updates to a category name require updating multiple rows (Update Anomaly). This is standard and acceptable in OLAP."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Loss of M:N Granularity: By flattening territories into a comma-separated string in 'dim_employees', filtering or grouping by a specific territory becomes more complex (requires string matching or array unnesting) compared to a dedicated bridge table."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Stale Data: The denormalized schema requires an ETL/ELT process to keep it synchronized with the source transactional database. Real-time reporting might be delayed depending on the refresh cadence."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Revenue reporting over time: Business users frequently query total sales amount, freight costs, and discounts grouped by order date or shipping date."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Product performance analysis: Analysts need to aggregate sales by category name and supplier to identify top-performing product lines without executing 4-way joins."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Sales hierarchy and regional performance: Management queries sales grouped by employee, their direct manager, and their assigned regions."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL for the Denormalized Schema
+
+```sql
+-- ==============================================================================
+-- DENORMALIZED ANALYTICS SCHEMA (STAR SCHEMA)
+-- ==============================================================================
+
+-- 1. DIMENSION: CUSTOMERS
+-- Combines customers, customer_customer_demo, and customer_demographics
+CREATE TABLE IF NOT EXISTS public.dim_customers
+(
+    customer_id character varying(5) COLLATE pg_catalog."default" NOT NULL,
+    company_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    contact_name character varying(30) COLLATE pg_catalog."default",
+    contact_title character varying(30) COLLATE pg_catalog."default",
+    address character varying(60) COLLATE pg_catalog."default",
+    city character varying(15) COLLATE pg_catalog."default",
+    region character varying(15) COLLATE pg_catalog."default",
+    postal_code character varying(10) COLLATE pg_catalog."default",
+    country character varying(15) COLLATE pg_catalog."default",
+    demographics_summary text COLLATE pg_catalog."default", -- Aggregated from customer_demographics
+    CONSTRAINT pk_dim_customers PRIMARY KEY (customer_id)
+);
+
+-- 2. DIMENSION: PRODUCTS
+-- Combines products, categories, and suppliers (Drops the picture bytea column)
+CREATE TABLE IF NOT EXISTS public.dim_products
+(
+    product_id smallint NOT NULL,
+    product_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    category_name character varying(15) COLLATE pg_catalog."default",
+    category_description text COLLATE pg_catalog."default",
+    supplier_name character varying(40) COLLATE pg_catalog."default",
+    supplier_country character varying(15) COLLATE pg_catalog."default",
+    quantity_per_unit character varying(20) COLLATE pg_catalog."default",
+    unit_price real,
+    units_in_stock smallint,
+    discontinued integer NOT NULL,
+    CONSTRAINT pk_dim_products PRIMARY KEY (product_id)
+);
+
+-- 3. DIMENSION: EMPLOYEES
+-- Combines employees, employee_territories, territories, and region. 
+-- Resolves reports_to self-join into manager_name. (Drops the photo bytea column)
+CREATE TABLE IF NOT EXISTS public.dim_employees
+(
+    employee_id smallint NOT NULL,
+    full_name character varying(31) COLLATE pg_catalog."default" NOT NULL, -- Derived: first_name + ' ' + last_name
+    title character varying(30) COLLATE pg_catalog."default",
+    hire_date date,
+    city character varying(15) COLLATE pg_catalog."default",
+    region character varying(15) COLLATE pg_catalog."default",
+    country character varying(15) COLLATE pg_catalog."default",
+    manager_name character varying(31) COLLATE pg_catalog."default", -- Derived from self-join on reports_to
+    territories_summary text COLLATE pg_catalog."default", -- Comma-separated list of territories
+    regions_summary text COLLATE pg_catalog."default",     -- Comma-separated list of regions
+    CONSTRAINT pk_dim_employees PRIMARY KEY (employee_id)
+);
+
+-- 4. FACT: SALES
+-- Combines orders, order_details, and shippers. 
+-- Represents the lowest grain of a transaction (a line item on an order).
+CREATE TABLE IF NOT EXISTS public.fact_sales
+(
+    order_id smallint NOT NULL,
+    product_id smallint NOT NULL,
+    customer_id character varying(5) COLLATE pg_catalog."default",
+    employee_id smallint,
+    
+    -- Date Dimensions (Inline for simplicity, though a dim_date is also common)
+    order_date date,
+    required_date date,
+    shipped_date date,
+    
+    -- Shipper Dimension (Denormalized directly into the fact table)
+    shipper_name character varying(40) COLLATE pg_catalog."default",
+    
+    -- Shipping Geography
+    ship_city character varying(15) COLLATE pg_catalog."default",
+    ship_region character varying(15) COLLATE pg_catalog."default",
+    ship_country character varying(15) COLLATE pg_catalog."default",
+    
+    -- Metrics / Measures
+    unit_price real NOT NULL,
+    quantity smallint NOT NULL,
+    discount real NOT NULL,
+    sales_amount real NOT NULL, -- Derived: quantity * unit_price * (1 - discount)
+    freight real,               -- Note: Freight is at the order level, may need allocation logic in ETL
+    
+    CONSTRAINT pk_fact_sales PRIMARY KEY (order_id, product_id),
+    
+    -- Foreign Keys to Dimensions
+    CONSTRAINT fk_fact_sales_customers FOREIGN KEY (customer_id)
+        REFERENCES public.dim_customers (customer_id) MATCH SIMPLE,
+    CONSTRAINT fk_fact_sales_products FOREIGN KEY (product_id)
+        REFERENCES public.dim_products (product_id) MATCH SIMPLE,
+    CONSTRAINT fk_fact_sales_employees FOREIGN KEY (employee_id)
+        REFERENCES public.dim_employees (employee_id) MATCH SIMPLE
+);
+
+-- Note: The `us_states` table was omitted from the dimensional model as it acts as an isolated 
+-- lookup table in the source schema. If state names are required for reporting, they should be 
+-- joined during the ETL process and stored directly within the `ship_region` or `region` columns 
+-- of the fact and dimension tables.
+```

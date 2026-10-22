@@ -1,0 +1,171 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 6
+  - Total Attributes: 19
+    * Usina: 12 columns
+    * Proprietarios: 2 columns
+    * Municipios: 3 columns
+    * Estados: 1 columns
+    * Rios: 2 columns
+    * Localizacoes: 5 columns
+
+Denormalized Model:
+  - Tables: 4
+  - Total Attributes: 27
+    * dim_data: 9 columns
+    * dim_geografia: 8 columns
+    * dim_usina: 8 columns
+    * fact_usina_capacidade: 6 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Denormalized model has MORE attributes (19 vs 27)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: id (SERIAL) -> dia (INTEGER)
+  - Type mismatch: nome (VARCHAR) -> nome_mes (VARCHAR(20))
+  - Type mismatch: iniciop (DATE) -> sk_usina (SERIAL)
+  - Type mismatch: atualizacao (DATE) -> lat_localizacao (DOUBLE)
+  - Type mismatch: lat (DOUBLE) -> sk_data (INTEGER)
+  - Type mismatch: long (DOUBLE) -> nome_usina (VARCHAR)
+  - Type mismatch: proprietario (VARCHAR) -> trimestre (INTEGER)
+  - Type mismatch: id_proprietario (INTEGER) -> nome_proprietario (VARCHAR)
+  - Type mismatch: municipio (VARCHAR) -> uf_principal (CHAR(2))
+  - Type mismatch: id_municipio (SERIAL) -> id_usina_nk (INTEGER)
+  - Type mismatch: uf (CHAR(2)) -> mes (INTEGER)
+  - Type mismatch: rio (VARCHAR) -> ano (INTEGER)
+  - Type mismatch: id_rio (INTEGER) -> nome_rio (VARCHAR)
+--------------------------------------------------------------------------------
+Completeness Ratio:        1.42
+Data Type Preservation:    0.32
+Avg Levenshtein Distance:  4.47
+BLEU Score:                0.11
+ROUGE-1:                   0.35
+METEOR Score:              0.13
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: fact_usina_capacidade
+Dimension Tables Detected: dim_data, dim_geografia, dim_usina
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected exactly 1 Fact table. Evaluating as a standard STAR SCHEMA.
+  - FACT FK VIOLATION: Foreign Key 'sk_data_iniciop' in Fact 'fact_usina_capacidade' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'sk_data_atualizacao' in Fact 'fact_usina_capacidade' allows NULL values.
+  - DIMENSION NULL WARNING: Attribute 'lat_localizacao' in 'dim_geografia' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'long_localizacao' in 'dim_geografia' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'municipio_secundario' in 'dim_geografia' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'uf_secundario' in 'dim_geografia' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'estagio' in 'dim_usina' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'lat_usina' in 'dim_usina' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'long_usina' in 'dim_usina' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nome_proprietario' in 'dim_usina' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nome_rio' in 'dim_usina' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * fact_usina_capacidade: 2 Numeric, 0 Text
+  * dim_data: 4 Numeric, 4 Text
+  * dim_geografia: 3 Numeric, 4 Text
+  * dim_usina: 3 Numeric, 4 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  atualizacao estagio id id_localização id_municipio id_proprietario id_rio iniciop lat latitude long longitude municipio nome potfis potkw proprietario rio uf
+
+Denormalized Model (Combined Text):
+  ano data_completa dia dia_semana estagio flag_fim_semana id_localizacao_nk id_usina_nk lat_localizacao lat_usina long_localizacao long_usina mes municipio_principal municipio_secundario nome_mes nome_proprietario nome_rio nome_usina potfis potkw sk_data sk_geografia sk_usina trimestre uf_principal uf_secundario
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 19 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id SERIAL
+  Denormalized:  dia INTEGER
+
+Pair 2:
+  Relational:    nome VARCHAR
+  Denormalized:  nome_mes VARCHAR(20)
+
+Pair 3:
+  Relational:    potkw FLOAT
+  Denormalized:  potkw FLOAT
+
+Pair 4:
+  Relational:    potfis FLOAT
+  Denormalized:  potfis FLOAT
+
+Pair 5:
+  Relational:    iniciop DATE
+  Denormalized:  sk_usina SERIAL
+
+Pair 6:
+  Relational:    atualizacao DATE
+  Denormalized:  lat_localizacao DOUBLE
+
+Pair 7:
+  Relational:    lat DOUBLE
+  Denormalized:  sk_data INTEGER
+
+Pair 8:
+  Relational:    long DOUBLE
+  Denormalized:  nome_usina VARCHAR
+
+Pair 9:
+  Relational:    estagio VARCHAR
+  Denormalized:  estagio VARCHAR
+
+Pair 10:
+  Relational:    proprietario VARCHAR
+  Denormalized:  trimestre INTEGER
+
+Pair 11:
+  Relational:    id_proprietario INTEGER
+  Denormalized:  nome_proprietario VARCHAR
+
+Pair 12:
+  Relational:    municipio VARCHAR
+  Denormalized:  uf_principal CHAR(2)
+
+Pair 13:
+  Relational:    id_municipio SERIAL
+  Denormalized:  id_usina_nk INTEGER
+
+Pair 14:
+  Relational:    uf CHAR(2)
+  Denormalized:  mes INTEGER
+
+Pair 15:
+  Relational:    rio VARCHAR
+  Denormalized:  ano INTEGER
+
+Pair 16:
+  Relational:    id_rio INTEGER
+  Denormalized:  nome_rio VARCHAR
+
+Pair 17:
+  Relational:    id_localização INTEGER
+  Denormalized:  id_localizacao_nk INTEGER
+
+Pair 18:
+  Relational:    longitude DOUBLE
+  Denormalized:  long_usina DOUBLE
+
+Pair 19:
+  Relational:    latitude DOUBLE
+  Denormalized:  lat_usina DOUBLE
+
+
+================================================================================

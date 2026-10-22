@@ -1,0 +1,198 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-22-14
+Model: ollama_api
+Prompt: mid-level
+Schema: ex08
+==================================================
+
+{
+  "section_1": {
+    "summary": "The normalized schema has been denormalized into a star schema with one central fact table (fact_matricula_ifb) and several dimension tables. This design improves analytical query performance by reducing join complexity and pre-aggregating data where appropriate. The main transactional entity, matricula_ifb, becomes the central fact table. Dimensions include aluno, curso, escola, localizacao, and enem-related data. Some entities like remuneracao and vinculo_empregaticio are merged into aluno dimension to support employment analysis.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Transform matricula_ifb into central fact table (fact_matricula_ifb) containing measures and foreign keys to dimensions"
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge aluno_ifb with vinculo_empregaticio and remuneracao to create dim_aluno with employment information"
+      },
+      {
+        "decision_id": "D3",
+        "description": "Consolidate escola, localizacao, indicadores_escolares, desempenho_enem, and participacao_enem into dim_escola with historical data arrays"
+      },
+      {
+        "decision_id": "D4",
+        "description": "Keep curso_ifb as separate dimension table (dim_curso) due to its relatively static nature"
+      },
+      {
+        "decision_id": "D5",
+        "description": "Remove separate fact tables for enem performance and escola indicators, integrating them into escola dimension with year-based arrays"
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived attribute 'faixa_etaria' to dim_aluno based on idade for easier grouping"
+      },
+      {
+        "decision_id": "A2",
+        "description": "Created arrays for historical data in dim_escola: indicadores_por_ano, desempenho_enem_por_ano, participacao_enem_por_ano"
+      },
+      {
+        "decision_id": "A3",
+        "description": "Removed id_matricula from fact table as it's not needed for aggregation; kept co_ciclo_matricula as identifier"
+      },
+      {
+        "decision_id": "A4",
+        "description": "Moved all aluno attributes from aluno_ifb to dim_aluno and added employment and remuneration data"
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage due to denormalization and data duplication across dimensions, but improved query performance"
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Loss of granularity in historical escola data due to array aggregation; detailed year-level analysis requires array processing"
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Update complexity increased as changes in source dimensions require updates in multiple places"
+      },
+      {
+        "tradeoff_id": "T4",
+        "description": "Some analytical flexibility lost due to pre-aggregation; ad-hoc analysis of individual enem records not possible without source tables"
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze student enrollment distribution by course, period, and student demographics"
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Study correlation between student background (race, gender, disability) and course enrollment patterns"
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze employment outcomes of students by course and demographic factors"
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Evaluate school performance impact on student enrollment and outcomes using ENEM and indicator data"
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Generate reports on student retention and success rates by various demographic and institutional factors"
+      }
+    ]
+  }
+}
+
+-- Denormalized Schema DDL Creation Script
+
+-- Dimension: dim_aluno
+CREATE TABLE IF NOT EXISTS public.dim_aluno
+(
+    id_aluno integer NOT NULL,
+    data_nascimento date,
+    idade integer,
+    faixa_etaria character varying(20) COLLATE pg_catalog."default",
+    sexo character(1) COLLATE pg_catalog."default",
+    nacionalidade character varying(50) COLLATE pg_catalog."default",
+    raca character varying(50) COLLATE pg_catalog."default",
+    portador_deficiencia boolean,
+    ultimo_ano_rais integer,
+    razao_social character varying(200) COLLATE pg_catalog."default",
+    tipo_vinculo_empregaticio character varying(200) COLLATE pg_catalog."default",
+    data_admissao_declarada date,
+    tempo_emprego integer,
+    motivo_desligamento character varying(200) COLLATE pg_catalog."default",
+    mes_desligamento character varying(20) COLLATE pg_catalog."default",
+    indicador_vinculo_ativo boolean,
+    vl_remun_media_nom numeric(10, 2),
+    vl_remun_media_sm numeric(10, 2),
+    vl_remun_dezembro_nom numeric(10, 2),
+    vl_remun_dezembro_sm numeric(10, 2),
+    qtd_hora_contr integer,
+    vl_ultima_remuneracao_ano numeric(10, 2),
+    vl_salario_contratual numeric(10, 2),
+    CONSTRAINT dim_aluno_pkey PRIMARY KEY (id_aluno)
+);
+
+-- Dimension: dim_curso
+CREATE TABLE IF NOT EXISTS public.dim_curso
+(
+    co_curso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    no_curso character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    co_tipo_curso character varying(10) COLLATE pg_catalog."default",
+    tipo_curso character varying(100) COLLATE pg_catalog."default",
+    co_tipo_nivel character varying(10) COLLATE pg_catalog."default",
+    ds_tipo_nivel character varying(100) COLLATE pg_catalog."default",
+    ds_eixo_tecnologico character varying(200) COLLATE pg_catalog."default",
+    modalidade_ensino character varying(100) COLLATE pg_catalog."default",
+    carga_horaria integer,
+    CONSTRAINT dim_curso_pkey PRIMARY KEY (co_curso)
+);
+
+-- Dimension: dim_escola
+CREATE TABLE IF NOT EXISTS public.dim_escola
+(
+    co_escola_educacenso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    no_escola_educacenso character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    tp_dependencia_adm_escola smallint,
+    tp_localizacao_escola smallint,
+    inse character varying(10) COLLATE pg_catalog."default",
+    uf character varying(2) COLLATE pg_catalog."default" NOT NULL,
+    municipio character varying(100) COLLATE pg_catalog."default" NOT NULL,
+    indicadores_por_ano jsonb,
+    desempenho_enem_por_ano jsonb,
+    participacao_enem_por_ano jsonb,
+    CONSTRAINT dim_escola_pkey PRIMARY KEY (co_escola_educacenso)
+);
+
+-- Fact table: fact_matricula_ifb
+CREATE TABLE IF NOT EXISTS public.fact_matricula_ifb
+(
+    co_ciclo_matricula character varying(50) COLLATE pg_catalog."default",
+    periodo character varying(30) COLLATE pg_catalog."default",
+    situacao_matricula character varying(50) COLLATE pg_catalog."default",
+    tipo_cota character varying(50) COLLATE pg_catalog."default",
+    atestado_baixarenda character varying(20) COLLATE pg_catalog."default",
+    ano character varying(20) COLLATE pg_catalog."default",
+    unidade_ensino character varying(100) COLLATE pg_catalog."default",
+    id_aluno integer,
+    co_curso character varying(50) COLLATE pg_catalog."default",
+    co_escola_educacenso character varying(20) COLLATE pg_catalog."default",
+    CONSTRAINT fact_matricula_ifb_pkey PRIMARY KEY (co_ciclo_matricula),
+    CONSTRAINT fact_matricula_aluno_fk FOREIGN KEY (id_aluno)
+        REFERENCES public.dim_aluno (id_aluno) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION,
+    CONSTRAINT fact_matricula_curso_fk FOREIGN KEY (co_curso)
+        REFERENCES public.dim_curso (co_curso) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION,
+    CONSTRAINT fact_matricula_escola_fk FOREIGN KEY (co_escola_educacenso)
+        REFERENCES public.dim_escola (co_escola_educacenso) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+);
+
+CREATE INDEX IF NOT EXISTS idx_fact_matricula_aluno
+    ON public.fact_matricula_ifb(id_aluno);
+
+CREATE INDEX IF NOT EXISTS idx_fact_matricula_curso
+    ON public.fact_matricula_ifb(co_curso);
+
+CREATE INDEX IF NOT EXISTS idx_fact_matricula_escola
+    ON public.fact_matricula_ifb(co_escola_educacenso);

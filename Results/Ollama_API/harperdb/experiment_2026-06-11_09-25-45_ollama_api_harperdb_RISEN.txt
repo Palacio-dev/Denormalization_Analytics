@@ -1,0 +1,55 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-25-45
+Model: ollama_api
+Prompt: RISEN
+Schema: harperdb
+==================================================
+
+{
+  "section_1": {
+    "summary": "The original schema consists of three normalized tables: users, entitlements, and user_entitlements. The most frequent query patterns involve fetching entitlement data for a given user, which requires joining all three tables. To improve read performance, we collapse the relations by merging user_entitlements with entitlements into a single table, eliminating the need for joins. This denormalization technique reduces query complexity and improves performance for read-heavy workloads.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapse the user_entitlements junction table into the entitlements table by duplicating user_id in the entitlements table. This removes the need for a JOIN between user_entitlements and entitlements when fetching entitlements for a user."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added user_id column to the entitlements table to denormalize the relationship between users and entitlements, effectively collapsing the user_entitlements table."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved read performance at the cost of increased storage due to data duplication (user_id stored multiple times for each entitlement assigned to multiple users)."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified query execution and reduced JOIN overhead in exchange for increased complexity in data maintenance (e.g., ensuring referential integrity during inserts, updates, and deletes)."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Frequently fetch active entitlements for a given user, including feature and package types, which originally required joining users → user_entitlements → entitlements."
+      }
+    ]
+  }
+}
+
+CREATE TABLE entitlements_denormalized (
+    id INT PRIMARY KEY,
+    user_id INT NOT NULL,
+    activeDate DATE,
+    inactiveDate DATE,
+    useLimit INT,
+    useCount INT,
+    featureType VARCHAR(4),
+    packageType VARCHAR(4),
+    activeFlag INT
+);

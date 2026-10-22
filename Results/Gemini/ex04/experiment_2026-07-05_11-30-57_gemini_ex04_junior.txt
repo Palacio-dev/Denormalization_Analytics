@@ -1,0 +1,218 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-30-57
+Model: gemini
+Prompt: junior
+Schema: ex04
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions the highly normalized, transactional schema into a dimensional/star schema optimized for OLAP (Online Analytical Processing). By consolidating tables that share the same grain (e.g., country and year) and embedding hierarchical dimension attributes directly into fact tables, we significantly reduce the number of JOIN operations required for reporting and analytics.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge 'region' and 'country' tables into a single dimension table 'dim_country'. This eliminates the need to join region details every time country data is queried."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Consolidate 'demography', 'employment', 'education', 'economy', and 'health' into a single wide fact table 'fact_yearly_indicators'. All these source tables share the exact same grain: (country_code, year)."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Bypass the 'demography' table for 'population' and 'life_expectancy' by linking them directly to 'country_code' and 'year', creating 'fact_population' and 'fact_life_expectancy'."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Denormalize 'survey' and 'decile' by creating 'fact_survey' and embedding key survey attributes (like survey_year, country_code, welfare_type) directly into 'fact_survey_decile'."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Removed surrogate keys (id_demography, id_employment, id_education, id_economy, id_health) as they are redundant in the consolidated 'fact_yearly_indicators' table, which now uses a composite primary key of (country_code, year)."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Renamed ambiguous columns during consolidation: 'expenditure' in education became 'edu_expenditure', and 'expenditure' in health became 'health_expenditure'."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added 'country_code' and 'year' to 'fact_population' and 'fact_life_expectancy' to replace the 'id_demography' foreign key, allowing direct time-series and geographical querying."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage / Data Redundancy: Storing region names in the country dimension and survey details in the decile fact table increases storage requirements."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Sparsity (NULL values): The consolidated 'fact_yearly_indicators' table may contain NULLs if a country has economic data but lacks health or education data for a specific year."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Update Anomalies: If a region's name changes, it must be updated across all country records belonging to that region, though dimension attributes like this rarely change."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregating metrics (like GDP or population) at the regional level, which previously required joining fact tables to country, and then country to region."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Cross-domain analytical queries, such as correlating a country's health expenditure with its GDP and unemployment rate over time."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Building population pyramids (age and gender distribution) over time without needing to join back to the demography table to resolve the year and country."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyzing income distribution (deciles) alongside poverty lines and Gini coefficients in a single pass for reporting dashboards."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Script for Denormalized Schema
+
+```sql
+BEGIN;
+
+-- 1. Dimension Table: Country & Region
+CREATE TABLE IF NOT EXISTS public.dim_country
+(
+    country_code character varying NOT NULL,
+    country_name character varying,
+    region_code character varying NOT NULL,
+    region_name character varying NOT NULL,
+    PRIMARY KEY (country_code)
+);
+
+-- 2. Consolidated Fact Table: Yearly Indicators (Demography, Economy, Education, Employment, Health)
+CREATE TABLE IF NOT EXISTS public.fact_yearly_indicators
+(
+    country_code character varying NOT NULL,
+    year integer NOT NULL,
+    
+    -- Demography metrics
+    pop_density double precision,
+    urban_pop double precision,
+    rural_pop double precision,
+    net_migration double precision,
+    death_rate double precision,
+    birth_rate double precision,
+    
+    -- Economy metrics
+    gdp double precision,
+    inflation double precision,
+    tax_revenue double precision,
+    
+    -- Education metrics
+    child_out_of_school double precision,
+    progression_to_sec double precision,
+    edu_expenditure double precision,
+    preprim_enroll double precision,
+    prim_enrol double precision,
+    sec_enrol double precision,
+    terti_enrol double precision,
+    
+    -- Employment metrics
+    child_emp double precision,
+    unemp double precision,
+    vulnerable_emp double precision,
+    part_time double precision,
+    employers double precision,
+    labor_force_total double precision,
+    labor_force_fem double precision,
+    
+    -- Health metrics
+    hospital_beds double precision,
+    physicians double precision,
+    health_expenditure double precision,
+    
+    PRIMARY KEY (country_code, year),
+    FOREIGN KEY (country_code) REFERENCES public.dim_country (country_code)
+);
+
+-- 3. Fact Table: Population (Directly linked to country and year)
+CREATE TABLE IF NOT EXISTS public.fact_population
+(
+    id_population serial NOT NULL,
+    country_code character varying NOT NULL,
+    year integer NOT NULL,
+    pop_ages character varying,
+    gender character varying,
+    population_number double precision,
+    PRIMARY KEY (id_population),
+    FOREIGN KEY (country_code) REFERENCES public.dim_country (country_code)
+);
+
+-- 4. Fact Table: Life Expectancy (Directly linked to country and year)
+CREATE TABLE IF NOT EXISTS public.fact_life_expectancy
+(
+    id_life_expectancy serial NOT NULL,
+    country_code character varying NOT NULL,
+    year integer NOT NULL,
+    gender character varying,
+    life_expectancy_value double precision,
+    PRIMARY KEY (id_life_expectancy),
+    FOREIGN KEY (country_code) REFERENCES public.dim_country (country_code)
+);
+
+-- 5. Fact Table: Survey (Standalone survey metrics)
+CREATE TABLE IF NOT EXISTS public.fact_survey
+(
+    id_survey serial NOT NULL,
+    country_code character varying NOT NULL,
+    survey_year integer,
+    welfare_type character varying,
+    survey_acronym character varying,
+    survey_comparability integer,
+    comparable_spell character varying,
+    poverty_line double precision,
+    headcount double precision,
+    poverty_gap double precision,
+    poverty_severity double precision,
+    gini double precision,
+    reporting_pop integer,
+    reporting_pce double precision,
+    distribution_type character varying,
+    spl double precision,
+    survey_coverage character varying,
+    reporting_level character varying,
+    PRIMARY KEY (id_survey),
+    FOREIGN KEY (country_code) REFERENCES public.dim_country (country_code)
+);
+
+-- 6. Fact Table: Survey Deciles (Denormalized with survey context for flat querying)
+CREATE TABLE IF NOT EXISTS public.fact_survey_decile
+(
+    id_decile serial NOT NULL,
+    id_survey integer NOT NULL,
+    country_code character varying NOT NULL,
+    survey_year integer,
+    decile_name character varying,
+    decile_value double precision,
+    
+    -- Denormalized survey context
+    welfare_type character varying,
+    poverty_line double precision,
+    gini double precision,
+    
+    PRIMARY KEY (id_decile),
+    FOREIGN KEY (country_code) REFERENCES public.dim_country (country_code),
+    FOREIGN KEY (id_survey) REFERENCES public.fact_survey (id_survey)
+);
+
+END;
+```

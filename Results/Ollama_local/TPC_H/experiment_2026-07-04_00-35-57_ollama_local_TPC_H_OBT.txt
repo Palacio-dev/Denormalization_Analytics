@@ -1,0 +1,185 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-04_00-35-57
+Model: ollama_local
+Prompt: OBT
+Schema: TPC_H
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy employs the 'One Big Table' approach, collapsing the 9 relational tables (NATION, REGION, PART, SUPPLIER, PARTSUPP, CUSTOMER, ORDERS, LINEITEM) into a single monolithic table. This eliminates join operations for the most common analytical workloads in the TPC-H benchmark, replacing them with simple row lookups. The Primary Key is derived from the combination of `O_ORDERKEY` and `L_LINENUMBER`, as the Line Item is the most granular and frequently accessed entity in standard TPC-H queries.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged all 9 source tables into a single table named `T_PCS` (TPC-H Partitioned/Collocated Store). Removed all Foreign Key relationships and constraints."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Established `O_ORDERKEY` as the root anchor for the table. While `L_LINENUMBER` is part of the logical primary key, the table is structured to support queries often starting from the Order level, but retains Line Item granularity via the composite key logic."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Flattened the hierarchy: NATION -> REGION, SUPPLIER -> NATION, PART -> SUPPLIER, CUSTOMER -> NATION, and LINEITEM -> PART/SUPPLIER/ORDER. All child entities are now rows within the same table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Prefixing: All columns were prefixed with their respective entity name (e.g., `N_NATIONKEY`, `R_REGIONKEY`, `P_PARTKEY`, `S_SUPPKEY`, `PS_PARTKEY`, `C_CUSTKEY`, `O_ORDERKEY`, `L_ORDERKEY`) to ensure semantic clarity and prevent ambiguity, adhering to the constraint that column names must appear exactly once per table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Type Preservation: Strictly preserved original data types (INTEGER, CHAR, VARCHAR, DECIMAL, DATE) and constraints (NOT NULL) from the input schema."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Primary Key Definition: Defined a composite primary key `(O_ORDERKEY, L_LINENUMBER)` to ensure uniqueness of line items, as this is the standard primary key for the TPC-H Line Item table."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Write Performance vs. Read Performance: The single table design drastically improves read performance (zero joins) for complex analytical queries but may impact write performance due to the lack of index isolation and potential locking contention on the entire table."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Data Integrity: Relational Foreign Key constraints and Referential Integrity checks are removed. Data validation must now be handled at the application level or via application-specific triggers."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Indexing Strategy: In the normalized model, indexes are created per table. In this model, indexes must be created on the specific entity prefixes (e.g., `N_NATIONKEY`, `S_SUPPKEY`) and the composite key to optimize specific query patterns."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "The 'Star Schema' aggregation pattern: Summing `L_EXTENDEDPRICE * L_QUANTITY` by `N_NAME` (National Sales) or `S_NAME` (Supplier Sales). This query requires joining 4-5 tables in the normalized model but is a single table scan in the denormalized version."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "The 'Supplier-Nation' pattern: Finding suppliers per nation and their total revenue. This involves joining SUPPLIER, NATION, and PARTSUPP in the original schema."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "The 'Customer-Order' pattern: Retrieving orders for customers in a specific region with their total spend. This requires joining CUSTOMER, ORDERS, and LINEITEM."
+      }
+    ]
+  }
+}
+```
+
+### Complete SQL DDL Creation Script
+
+```sql
+-- Denormalized Schema: T_PCS (TPC-H Partitioned/Collocated Store)
+-- Strategy: One Big Table Model
+-- Primary Key: (O_ORDERKEY, L_LINENUMBER)
+-- Note: All original Foreign Key relationships are removed for performance optimization.
+-- All attributes are prefixed with their source entity name to avoid ambiguity.
+
+CREATE TABLE IF NOT EXISTS T_PCS (
+    -- NATION Entity
+    N_NATIONKEY INTEGER NOT NULL,
+    N_NAME CHAR(25) NOT NULL,
+    N_REGIONKEY INTEGER NOT NULL,
+    N_COMMENT VARCHAR(152),
+    
+    -- REGION Entity
+    R_REGIONKEY INTEGER NOT NULL,
+    R_NAME CHAR(25) NOT NULL,
+    R_COMMENT VARCHAR(152),
+    
+    -- PART Entity
+    P_PARTKEY INTEGER NOT NULL,
+    P_NAME VARCHAR(55) NOT NULL,
+    P_MFGR CHAR(25) NOT NULL,
+    P_BRAND CHAR(10) NOT NULL,
+    P_TYPE VARCHAR(25) NOT NULL,
+    P_SIZE INTEGER NOT NULL,
+    P_CONTAINER CHAR(10) NOT NULL,
+    P_RETAILPRICE DECIMAL(15,2) NOT NULL,
+    P_COMMENT VARCHAR(23) NOT NULL,
+    
+    -- SUPPLIER Entity
+    S_SUPPKEY INTEGER NOT NULL,
+    S_NAME CHAR(25) NOT NULL,
+    S_ADDRESS VARCHAR(40) NOT NULL,
+    S_NATIONKEY INTEGER NOT NULL,
+    S_PHONE CHAR(15) NOT NULL,
+    S_ACCTBAL DECIMAL(15,2) NOT NULL,
+    S_COMMENT VARCHAR(101) NOT NULL,
+    
+    -- PARTSUPP Entity
+    PS_PARTKEY INTEGER NOT NULL,
+    PS_SUPPKEY INTEGER NOT NULL,
+    PS_AVAILQTY INTEGER NOT NULL,
+    PS_SUPPLYCOST DECIMAL(15,2) NOT NULL,
+    PS_COMMENT VARCHAR(199) NOT NULL,
+    
+    -- CUSTOMER Entity
+    C_CUSTKEY INTEGER NOT NULL,
+    C_NAME VARCHAR(25) NOT NULL,
+    C_ADDRESS VARCHAR(40) NOT NULL,
+    C_NATIONKEY INTEGER NOT NULL,
+    C_PHONE CHAR(15) NOT NULL,
+    C_ACCTBAL DECIMAL(15,2) NOT NULL,
+    C_MKTSEGMENT CHAR(10) NOT NULL,
+    C_COMMENT VARCHAR(117) NOT NULL,
+    
+    -- ORDERS Entity
+    O_ORDERKEY INTEGER NOT NULL,
+    O_CUSTKEY INTEGER NOT NULL,
+    O_ORDERSTATUS CHAR(1) NOT NULL,
+    O_TOTALPRICE DECIMAL(15,2) NOT NULL,
+    O_ORDERDATE DATE NOT NULL,
+    O_ORDERPRIORITY CHAR(15) NOT NULL,
+    O_CLERK CHAR(15) NOT NULL,
+    O_SHIPPRIORITY INTEGER NOT NULL,
+    O_COMMENT VARCHAR(79) NOT NULL,
+    
+    -- LINEITEM Entity
+    L_ORDERKEY INTEGER NOT NULL,
+    L_PARTKEY INTEGER NOT NULL,
+    L_SUPPKEY INTEGER NOT NULL,
+    L_LINENUMBER INTEGER NOT NULL,
+    L_QUANTITY DECIMAL(15,2) NOT NULL,
+    L_EXTENDEDPRICE DECIMAL(15,2) NOT NULL,
+    L_DISCOUNT DECIMAL(15,2) NOT NULL,
+    L_TAX DECIMAL(15,2) NOT NULL,
+    L_RETURNFLAG CHAR(1) NOT NULL,
+    L_LINESTATUS CHAR(1) NOT NULL,
+    L_SHIPDATE DATE NOT NULL,
+    L_COMMITDATE DATE NOT NULL,
+    L_RECEIPTDATE DATE NOT NULL,
+    L_SHIPINSTRUCT CHAR(25) NOT NULL,
+    L_SHIPMODE CHAR(10) NOT NULL,
+    L_COMMENT VARCHAR(44) NOT NULL
+);
+
+-- Primary Key: Composite of Order Key and Line Number to ensure unique Line Items
+ALTER TABLE T_PCS 
+ADD CONSTRAINT PK_ORDER_LINEITEM 
+PRIMARY KEY (O_ORDERKEY, L_LINENUMBER);
+
+-- Indexes for common query patterns (simulating performance tuning)
+-- Index for National Sales (Order + Customer + Nation + Region)
+CREATE INDEX IDX_NATION_SALES ON T_PCS (N_NATIONKEY, O_ORDERKEY, O_CUSTKEY);
+
+-- Index for Supplier Sales (Order + Customer + Nation + Supplier)
+CREATE INDEX IDX_SUPPLIER_SALES ON T_PCS (S_SUPPKEY, O_ORDERKEY, O_CUSTKEY);
+
+-- Index for Customer Sales (Order + Customer + Nation)
+CREATE INDEX IDX_CUSTOMER_SALES ON T_PCS (C_CUSTKEY, O_ORDERKEY, O_NATIONKEY);
+
+-- Index for Line Item Aggregations (Order + Part + Supplier)
+CREATE INDEX IDX_LINEITEM_PART_SUPP ON T_PCS (L_ORDERKEY, L_PARTKEY, L_SUPPKEY);
+
+-- Index for Region Analysis (Order + Customer + Nation + Region)
+CREATE INDEX IDX_REGION_ANALYSIS ON T_PCS (R_REGIONKEY, O_ORDERKEY, O_CUSTKEY, C_NATIONKEY);
+```

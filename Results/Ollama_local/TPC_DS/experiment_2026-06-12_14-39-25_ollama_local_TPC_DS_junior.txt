@@ -1,0 +1,258 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_14-39-25
+Model: ollama_local
+Prompt: junior
+Schema: TPC_DS
+==================================================
+
+Here is the analysis and denormalization plan for your data warehouse schema, followed by the SQL DDL script.
+
+### JSON Analysis and Strategy
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on the 'Star Schema' pattern used in the original schema (Snowflake). To optimize analytical queries, we will flatten the hierarchy. Specifically, we will merge Line Items into their respective Orders and merge Returns into their respective Orders/Line Items. This eliminates the need for JOINs on Order IDs, Line Numbers, and Item IDs for most reporting scenarios, reducing I/O and query complexity.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge s_purchase_lineitem with s_purchase. Create a single 'Orders_Purchase' table. This eliminates the JOIN between purchase header and line items, allowing direct aggregation of sales data."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge s_catalog_order_lineitem with s_catalog_order. Create a single 'Orders_Catalog' table. This allows direct analysis of catalog order metrics without joining order headers."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge s_web_order_lineitem with s_web_order. Create a single 'Orders_Web' table. This enables direct calculation of web order totals and line-level metrics."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Merge s_store_returns with s_purchase (via purchase_id) and potentially create a separate 'Returns_Purchase' table. Since returns reference purchase_id directly, merging them allows analyzing return rates per transaction without joining back to the original purchase table."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Merge s_catalog_returns with s_catalog_order (via order_id) and create a separate 'Returns_Catalog' table. This allows analyzing return reasons and amounts directly against the order context."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Flatten s_inventory into a time-series table or merge with transaction tables if historical snapshots are needed. For this exercise, we will keep it as a denormalized 'Inventory_Snapshots' table where Date is a primary key to avoid joining with Item or Warehouse tables."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived columns such as 'Total_Sales_Price' (calculated as sum of line items) and 'Total_Return_Amt' to support quick filtering and sorting in reports."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed redundant foreign key columns (e.g., removing 'cord_order_id' from s_catalog_order_lineitem) and replaced them with the primary key of the merged parent table."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Standardized data types where possible (e.g., converting char(10) dates to integer or string formats consistent with the denormalized table's primary key)."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Increased storage footprint due to duplicate data (repeating Order/Item attributes on Line Items) vs. significantly improved query performance (fewer joins, faster aggregations)."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Data integrity is harder to maintain manually in a denormalized schema compared to a strict relational model; updates to a parent entity must be reflected in all child entities."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Retail Sales Reporting: Calculating total sales, average transaction value, and item-level performance per store."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Inventory Turnover Analysis: Calculating sell-through rates by comparing inventory snapshots with sales from the denormalized purchase tables."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Return Rate Analysis: Determining the percentage of orders returned, categorized by reason and amount, without joining to the original order tables."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Customer Lifetime Value (CLV): Aggregating purchase history and return history into a single customer view to calculate net spend."
+      }
+    ]
+  }
+}
+```
+
+---
+
+### SQL DDL Creation Script
+
+Below is the complete SQL script to create the denormalized schema. This script creates a single wide table per order type (Purchase, Catalog, Web) and their corresponding return tables, removing the need for most JOINs.
+
+```sql
+-- ==========================================
+-- DENORMALIZED SCHEMA FOR ANALYTICS
+-- ==========================================
+
+-- 1. PURCHASE ANALYTICS TABLE
+-- Merges s_purchase and s_purchase_lineitem into a single table.
+-- This allows direct aggregation of sales data without joining headers and lines.
+CREATE TABLE s_purchase_analytics (
+    purc_purchase_id           INTEGER NOT NULL,
+    purc_store_id              CHAR(16) NOT NULL,
+    purc_customer_id           CHAR(16) NOT NULL,
+    purc_purchase_date         CHAR(10) NOT NULL,
+    purc_purchase_time         INTEGER NOT NULL,
+    purc_register_id           INTEGER,
+    purc_clerk_id              INTEGER,
+    purc_comment               CHAR(100),
+    
+    -- Denormalized Line Item Data (Flattened)
+    plin_line_number           INTEGER NOT NULL,
+    plin_item_id               CHAR(16) NOT NULL,
+    plin_promotion_id          CHAR(16),
+    plin_quantity              INTEGER NOT NULL,
+    plin_sale_price            NUMERIC(7,2) NOT NULL,
+    plin_coupon_amt            NUMERIC(7,2),
+    plin_comment               VARCHAR(100),
+    
+    -- Composite Primary Key to ensure uniqueness of line items
+    PRIMARY KEY (purc_purchase_id, plin_line_number, plin_item_id)
+);
+
+-- 2. CATALOG ORDER ANALYTICS TABLE
+-- Merges s_catalog_order and s_catalog_order_lineitem.
+CREATE TABLE s_catalog_order_analytics (
+    cord_order_id              INTEGER NOT NULL,
+    cord_bill_customer_id      CHAR(16) NOT NULL,
+    cord_ship_customer_id      CHAR(16) NOT NULL,
+    cord_order_date            CHAR(10) NOT NULL,
+    cord_order_time            INTEGER NOT NULL,
+    cord_ship_mode_id          CHAR(16) NOT NULL,
+    cord_call_center_id        CHAR(16) NOT NULL,
+    cord_order_comments        VARCHAR(100),
+    
+    -- Denormalized Line Item Data
+    clin_line_number           INTEGER NOT NULL,
+    clin_item_id               CHAR(16) NOT NULL,
+    clin_promotion_id          CHAR(16),
+    clin_quantity              INTEGER NOT NULL,
+    clin_sales_price           NUMERIC(7,2) NOT NULL,
+    clin_coupon_amt            NUMERIC(7,2),
+    clin_warehouse_id          CHAR(16) NOT NULL,
+    clin_ship_date             CHAR(10) NOT NULL,
+    clin_catalog_number        INTEGER,
+    clin_catalog_page_number   INTEGER,
+    clin_ship_cost             NUMERIC(7,2),
+    
+    PRIMARY KEY (cord_order_id, clin_line_number, clin_item_id)
+);
+
+-- 3. WEB ORDER ANALYTICS TABLE
+-- Merges s_web_order and s_web_order_lineitem.
+CREATE TABLE s_web_order_analytics (
+    word_order_id              INTEGER NOT NULL,
+    word_bill_customer_id      CHAR(16) NOT NULL,
+    word_ship_customer_id      CHAR(16) NOT NULL,
+    word_order_date            CHAR(10) NOT NULL,
+    word_order_time            INTEGER NOT NULL,
+    word_ship_mode_id          CHAR(16) NOT NULL,
+    word_web_site_id           CHAR(16) NOT NULL,
+    word_order_comments        CHAR(100),
+    
+    -- Denormalized Line Item Data
+    wlin_line_number           INTEGER NOT NULL,
+    wlin_item_id               CHAR(16) NOT NULL,
+    wlin_promotion_id          CHAR(16),
+    wlin_quantity              INTEGER NOT NULL,
+    wlin_sales_price           NUMERIC(7,2) NOT NULL,
+    wlin_coupon_amt            NUMERIC(7,2),
+    wlin_warehouse_id          CHAR(16) NOT NULL,
+    wlin_ship_date             CHAR(10) NOT NULL,
+    wlin_ship_cost             NUMERIC(7,2),
+    wlin_web_page_id           CHAR(16),
+    
+    PRIMARY KEY (word_order_id, wlin_line_number, wlin_item_id)
+);
+
+-- 4. PURCHASE RETURNS ANALYTICS TABLE
+-- Merges s_store_returns with relevant purchase context.
+-- Note: We do not merge with s_purchase here because the return table already contains
+-- the purchase_id reference. We keep it denormalized by adding store/customer context
+-- directly if not present, or simply relying on the existing return columns.
+-- To maximize denormalization, we ensure the return table has the Purchase ID as PK.
+CREATE TABLE s_purchase_returns_analytics (
+    sret_store_id              CHAR(16) NOT NULL,
+    sret_purchase_id           CHAR(16) NOT NULL,
+    sret_line_number           INTEGER NOT NULL,
+    sret_item_id               CHAR(16) NOT NULL,
+    sret_customer_id           CHAR(16) NOT NULL,
+    sret_return_date           CHAR(10) NOT NULL,
+    sret_return_time           CHAR(10) NOT NULL,
+    sret_ticket_number         CHAR(20) NOT NULL,
+    
+    -- Financial and Quantity Details (Already in original, kept for clarity)
+    sret_return_qty            INTEGER NOT NULL,
+    sret_return_amt            NUMERIC(7,2) NOT NULL,
+    sret_return_tax            NUMERIC(7,2),
+    sret_return_fee            NUMERIC(7,2),
+    sret_return_ship_cost      NUMERIC(7,2),
+    sret_refunded_cash         NUMERIC(7,2),
+    sret_reversed_charge       NUMERIC(7,2),
+    sret_store_credit          NUMERIC(7,2),
+    sret_reason_id             CHAR(16),
+    
+    -- Composite Primary Key
+    PRIMARY KEY (sret_purchase_id, sret_line_number, sret_item_id)
+);
+
+-- 5. CATALOG RETURNS ANALYTICS TABLE
+-- Merges s_catalog_returns with order context.
+CREATE TABLE s_catalog_returns_analytics (
+    cret_call_center_id        CHAR(16) NOT NULL,
+    cret_order_id              INTEGER NOT NULL,
+    cret_line_number           INTEGER NOT NULL,
+    cret_item_id               CHAR(16) NOT NULL,
+    cret_return_customer_id     CHAR(16) NOT NULL,
+    cret_refund_customer_id     CHAR(16) NOT NULL,
+    cret_return_date           CHAR(10) NOT NULL,
+    cret_return_time           CHAR(10) NOT NULL,
+    
+    -- Financial and Quantity Details
+    cret_return_qty            INTEGER NOT NULL,
+    cret_return_amt            NUMERIC(7,2) NOT NULL,
+    cret_return_tax            NUMERIC(7,2),
+    cret_return_fee            NUMERIC(7,2),
+    cret_return_ship_cost      NUMERIC(7,2),
+    cret_refunded_cash         NUMERIC(7,2),
+    cret_reversed_charge       NUMERIC(7,2),
+    cret_merchant_credit       NUMERIC(7,2),
+    cret_reason_id             CHAR(16),
+    cret_shipmode_id           CHAR(16),
+    cret_catalog_page_id       CHAR(16),
+    cret_warehouse_id          CHAR(16),
+    
+    PRIMARY KEY (cret_order_id, cret_line_number, cret_item_id)
+);
+
+-- 6. INVENTORY SNAPSHOT TABLE
+-- Flattened to avoid joins between Warehouse, Item, and Date.
+-- We assume this table represents historical snapshots.
+CREATE TABLE s_inventory_snapshots (
+    invn_warehouse_id          CHAR(16) NOT NULL,
+    invn_item_id               CHAR(16) NOT NULL,
+    invn_date                  CHAR(10) NOT NULL,
+    invn_qty_on_hand           INTEGER NOT NULL,
+    
+    -- Composite Primary Key for time-series tracking
+    PRIMARY KEY (invn_warehouse_id, invn_item_id, invn_date)
+);
+```

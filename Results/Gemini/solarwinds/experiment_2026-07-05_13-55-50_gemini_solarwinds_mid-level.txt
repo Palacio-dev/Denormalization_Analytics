@@ -1,0 +1,187 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-55-50
+Model: gemini
+Prompt: mid-level
+Schema: solarwinds
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The source schema is a highly normalized OLTP model (3NF) designed for transactional integrity. To optimize for read-heavy analytical workloads, the strategy is to transition to a Star Schema. The `orders` and `order_details` tables are consolidated into a single `fact_sales` table, representing the transactional events at the line-item grain. The `customers` and `products` tables are transformed into dimensions (`dim_customers`, `dim_products`) with surrogate keys to support Slowly Changing Dimensions (SCD Type 2) for historical tracking. A new `dim_date` table is introduced to facilitate robust time-series analysis without requiring complex date functions at query time.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge `orders` and `order_details` into a single `fact_sales` table. This eliminates the frequent and costly join between order headers and line items."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Transform `customers` into `dim_customers` and `products` into `dim_products`, introducing surrogate keys to decouple the analytical model from source system natural keys."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Introduce a new `dim_date` dimension table and link it to `fact_sales` using a date surrogate key, replacing the direct `order_date` lookup."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added `unit_price` to `fact_sales`. This captures the historical price of the product at the exact 
+        time of the transaction, protecting historical revenue calculations from future price updates in the products table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Derived and added `total_amount` (quantity * unit_price) as a pre-calculated measure in 
+        `fact_sales` to save compute resources during BI aggregations."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added SCD Type 2 tracking attributes (`valid_from`, `valid_to`, `is_current`) to `dim_customers` 
+        and `dim_products` to track changes in customer addresses or product names over time."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added calendar attributes (`year`, `quarter`, `month`, `day_of_week`) to `dim_date` to enable 
+        immediate slicing and dicing in BI tools."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy vs. Query Performance: Storing `order_id` and `date_id` on every line item in the fact table increases storage requirements, but drastically reduces join complexity and improves read performance."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "ETL Complexity vs. Analytical Accuracy: Implementing surrogate keys and SCD Type 2 logic increases the complexity of the data ingestion pipelines, but ensures accurate point-in-time historical reporting."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Storage vs. Compute: Pre-calculating `total_amount` consumes slightly more disk space, but reduces CPU overhead on the data warehouse during heavy dashboard usage."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Calculate total revenue and quantity sold per product. Merging orders and order_details allows this query to run against the fact table and product dimension with only one join."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Year-over-Year (YoY) and Quarter-over-Quarter (QoQ) sales growth analysis. The `dim_date` table allows grouping by `year` and `quarter` instantly without using CPU-intensive date extraction functions."
+      },
+      {
+        "decision_id": "A1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Accurate historical margin and revenue reporting. Storing `unit_price` in the fact table ensures that if a product's price increases today, past sales reports do not retroactively inflate."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Creation Script
+
+```sql
+-- ==============================================================================
+-- Analytical Data Model (Star Schema)
+-- Optimized for BI Dashboards, Reporting, and Aggregations
+-- ==============================================================================
+
+-- 1. Date Dimension
+-- Enables robust time-series analysis, filtering, and grouping.
+CREATE TABLE dim_date (
+    date_id INT PRIMARY KEY, -- Format: YYYYMMDD
+    full_date DATE NOT NULL,
+    calendar_year INT NOT NULL,
+    calendar_quarter INT NOT NULL,
+    calendar_month INT NOT NULL,
+    month_name VARCHAR(20) NOT NULL,
+    day_of_month INT NOT NULL,
+    day_of_week INT NOT NULL,
+    day_name VARCHAR(20) NOT NULL,
+    is_weekend BOOLEAN NOT NULL
+);
+
+-- 2. Customer Dimension (SCD Type 2)
+-- Tracks customer information and history (e.g., if they move to a new address).
+CREATE TABLE dim_customers (
+    customer_sk SERIAL PRIMARY KEY,       -- Surrogate Key
+    customer_id INT NOT NULL,             -- Natural Key from source
+    customer_name VARCHAR(100),
+    customer_email VARCHAR(100),
+    customer_address TEXT,
+    valid_from DATE NOT NULL,             -- SCD2 Start Date
+    valid_to DATE,                        -- SCD2 End Date
+    is_current BOOLEAN NOT NULL           -- SCD2 Current Flag
+);
+
+-- Create index on natural key for faster ETL lookups
+CREATE INDEX idx_dim_customers_nk ON dim_customers(customer_id);
+
+-- 3. Product Dimension (SCD Type 2)
+-- Tracks product attributes and current pricing.
+CREATE TABLE dim_products (
+    product_sk SERIAL PRIMARY KEY,        -- Surrogate Key
+    product_id INT NOT NULL,              -- Natural Key from source
+    product_name VARCHAR(100),
+    current_price DECIMAL(10,2),
+    valid_from DATE NOT NULL,             -- SCD2 Start Date
+    valid_to DATE,                        -- SCD2 End Date
+    is_current BOOLEAN NOT NULL           -- SCD2 Current Flag
+);
+
+-- Create index on natural key for faster ETL lookups
+CREATE INDEX idx_dim_products_nk ON dim_products(product_id);
+
+-- 4. Sales Fact Table
+-- Grain: One row per order line item (order_detail).
+-- Consolidates 'orders' and 'order_details' to reduce joins.
+CREATE TABLE fact_sales (
+    sales_sk SERIAL PRIMARY KEY,          -- Surrogate Key for the fact record
+    
+    -- Foreign Keys to Dimensions
+    date_id INT NOT NULL REFERENCES dim_date(date_id),
+    customer_sk INT NOT NULL REFERENCES dim_customers(customer_sk),
+    product_sk INT NOT NULL REFERENCES dim_products(product_sk),
+    
+    -- Degenerate Dimensions (kept for audit/drill-through to source)
+    order_id INT NOT NULL,
+    order_detail_id INT NOT NULL,
+    
+    -- Measures
+    quantity INT NOT NULL,
+    unit_price DECIMAL(10,2) NOT NULL,    -- Historical price at the time of purchase
+    total_amount DECIMAL(10,2) NOT NULL   -- Pre-calculated: quantity * unit_price
+);
+
+-- Create indexes on foreign keys to optimize Star Schema joins
+CREATE INDEX idx_fact_sales_date ON fact_sales(date_id);
+CREATE INDEX idx_fact_sales_customer ON fact_sales(customer_sk);
+CREATE INDEX idx_fact_sales_product ON fact_sales(product_sk);
+
+-- Optional: Create an OBT (One Big Table) View for BI tools that prefer flat structures
+CREATE VIEW vw_obt_sales AS
+SELECT 
+    f.order_id,
+    f.order_detail_id,
+    d.full_date AS order_date,
+    d.calendar_year,
+    d.calendar_quarter,
+    d.calendar_month,
+    c.customer_id,
+    c.customer_name,
+    c.customer_email,
+    c.customer_address,
+    p.product_id,
+    p.product_name,
+    f.quantity,
+    f.unit_price,
+    f.total_amount
+FROM fact_sales f
+JOIN dim_date d ON f.date_id = d.date_id
+JOIN dim_customers c ON f.customer_sk = c.customer_sk
+JOIN dim_products p ON f.product_sk = p.product_sk;
+```

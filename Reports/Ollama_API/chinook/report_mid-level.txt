@@ -1,0 +1,314 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 11
+  - Total Attributes: 62
+    * Album: 3 columns
+    * Artist: 2 columns
+    * Customer: 13 columns
+    * Employee: 15 columns
+    * Genre: 2 columns
+    * Invoice: 9 columns
+    * InvoiceLine: 5 columns
+    * MediaType: 2 columns
+    * Playlist: 2 columns
+    * PlaylistTrack: 2 columns (junction table - excluded from attribute analysis)
+    * Track: 9 columns
+
+  Note: 1 junction table(s) detected and excluded from attribute analysis:
+    - PlaylistTrack
+
+Denormalized Model:
+  - Tables: 5
+  - Total Attributes: 58
+    * DimDate: 9 columns
+    * DimTrack: 15 columns
+    * DimCustomer: 16 columns
+    * DimInvoice: 10 columns
+    * FactInvoiceLine: 8 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Normalized model has MORE attributes (58 vs 62)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: "Title" (CHARACTER) -> "DateKey" (DATE)
+  - Type mismatch: "ArtistId" (INTEGER) -> "ArtistName" (CHARACTER)
+  - Type mismatch: "Name" (CHARACTER) -> "DayOfWeek" (INTEGER)
+  - Type mismatch: "City" (CHARACTER) -> "Month" (INTEGER)
+  - Type mismatch: "State" (CHARACTER) -> "Quarter" (INTEGER)
+  - Type mismatch: "Fax" (CHARACTER) -> "Year" (INTEGER)
+  - Type mismatch: "Title" (CHARACTER) -> "LineTotal" (NUMERIC(10, 2))
+  - Type mismatch: "HireDate" (TIMESTAMP) -> "InvoiceDateKey" (DATE)
+  - Type mismatch: "PostalCode" (CHARACTER) -> "CustomerKey" (INTEGER)
+  - Type mismatch: "Phone" (CHARACTER) -> "InvoiceKey" (INTEGER)
+  - Type mismatch: "Fax" (CHARACTER) -> "Day" (INTEGER)
+  - Type mismatch: "GenreId" (INTEGER) -> "IsWeekend" (BOOLEAN)
+  - Type mismatch: "Name" (CHARACTER) -> "DayOfYear" (INTEGER)
+  - Type mismatch: "Name" (CHARACTER) -> "TrackKey" (INTEGER)
+  - Type mismatch: "AlbumId" (INTEGER) -> "AlbumTitle" (CHARACTER)
+  - Type mismatch: "MediaTypeId" (INTEGER) -> "MediaTypeName" (CHARACTER)
+--------------------------------------------------------------------------------
+Completeness Ratio:        0.94
+Data Type Preservation:    0.72
+Avg Levenshtein Distance:  3.81
+BLEU Score:                0.40
+ROUGE-1:                   0.42
+METEOR Score:              0.68
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  "Address" "Address" "AlbumId" "AlbumId" "ArtistId" "ArtistId" "BillingAddress" "BillingCity" "BillingCountry" "BillingPostalCode" "BillingState" "BirthDate" "Bytes" "City" "City" "Company" "Composer" "Country" "Country" "CustomerId" "CustomerId" "Email" "Email" "EmployeeId" "Fax" "Fax" "FirstName" "FirstName" "GenreId" "GenreId" "HireDate" "InvoiceDate" "InvoiceId" "InvoiceId" "InvoiceLineId" "LastName" "LastName" "MediaTypeId" "MediaTypeId" "Milliseconds" "Name" "Name" "Name" "Name" "Name" "Phone" "Phone" "PlaylistId" "PostalCode" "PostalCode" "Quantity" "ReportsTo" "State" "State" "SupportRepId" "Title" "Title" "Total" "TrackId" "TrackId" "UnitPrice" "UnitPrice"
+
+Denormalized Model (Combined Text):
+  "AlbumId" "AlbumTitle" "ArtistId" "ArtistName" "BillingAddress" "BillingCity" "BillingCountry" "BillingPostalCode" "BillingState" "Bytes" "Composer" "CustomerAddress" "CustomerCity" "CustomerCompany" "CustomerCountry" "CustomerEmail" "CustomerFax" "CustomerFirstName" "CustomerId" "CustomerId" "CustomerId" "CustomerKey" "CustomerLastName" "CustomerPhone" "CustomerPostalCode" "CustomerState" "DateKey" "Day" "DayOfWeek" "DayOfYear" "GenreId" "GenreName" "InvoiceDate" "InvoiceDateKey" "InvoiceId" "InvoiceId" "InvoiceKey" "InvoiceLineId" "IsWeekend" "LineTotal" "MediaTypeId" "MediaTypeName" "Milliseconds" "Month" "Quantity" "Quarter" "SupportRepFirstName" "SupportRepId" "SupportRepLastName" "Total" "TrackId" "TrackId" "TrackKey" "TrackName" "UnitPrice" "UnitPrice" "WeekOfYear" "Year"
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 58 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    "AlbumId" INTEGER
+  Denormalized:  "AlbumId" INTEGER
+
+Pair 2:
+  Relational:    "Title" CHARACTER
+  Denormalized:  "DateKey" DATE
+
+Pair 3:
+  Relational:    "ArtistId" INTEGER
+  Denormalized:  "ArtistId" INTEGER
+
+Pair 4:
+  Relational:    "ArtistId" INTEGER
+  Denormalized:  "ArtistName" CHARACTER
+
+Pair 5:
+  Relational:    "Name" CHARACTER
+  Denormalized:  "DayOfWeek" INTEGER
+
+Pair 6:
+  Relational:    "CustomerId" INTEGER
+  Denormalized:  "CustomerId" INTEGER
+
+Pair 7:
+  Relational:    "FirstName" CHARACTER
+  Denormalized:  "SupportRepFirstName" CHARACTER
+
+Pair 8:
+  Relational:    "LastName" CHARACTER
+  Denormalized:  "SupportRepLastName" CHARACTER
+
+Pair 9:
+  Relational:    "Company" CHARACTER
+  Denormalized:  "CustomerCompany" CHARACTER
+
+Pair 10:
+  Relational:    "Address" CHARACTER
+  Denormalized:  "CustomerAddress" CHARACTER
+
+Pair 11:
+  Relational:    "City" CHARACTER
+  Denormalized:  "Month" INTEGER
+
+Pair 12:
+  Relational:    "State" CHARACTER
+  Denormalized:  "Quarter" INTEGER
+
+Pair 13:
+  Relational:    "Country" CHARACTER
+  Denormalized:  "CustomerFax" CHARACTER
+
+Pair 14:
+  Relational:    "PostalCode" CHARACTER
+  Denormalized:  "CustomerPostalCode" CHARACTER
+
+Pair 15:
+  Relational:    "Phone" CHARACTER
+  Denormalized:  "CustomerPhone" CHARACTER
+
+Pair 16:
+  Relational:    "Fax" CHARACTER
+  Denormalized:  "Year" INTEGER
+
+Pair 17:
+  Relational:    "Email" CHARACTER
+  Denormalized:  "CustomerEmail" CHARACTER
+
+Pair 18:
+  Relational:    "SupportRepId" INTEGER
+  Denormalized:  "SupportRepId" INTEGER
+
+Pair 19:
+  Relational:    "EmployeeId" INTEGER
+  Denormalized:  "CustomerId" INTEGER
+
+Pair 20:
+  Relational:    "LastName" CHARACTER
+  Denormalized:  "CustomerLastName" CHARACTER
+
+Pair 21:
+  Relational:    "FirstName" CHARACTER
+  Denormalized:  "CustomerFirstName" CHARACTER
+
+Pair 22:
+  Relational:    "Title" CHARACTER
+  Denormalized:  "LineTotal" NUMERIC(10, 2)
+
+Pair 23:
+  Relational:    "ReportsTo" INTEGER
+  Denormalized:  "WeekOfYear" INTEGER
+
+Pair 24:
+  Relational:    "HireDate" TIMESTAMP
+  Denormalized:  "InvoiceDateKey" DATE
+
+Pair 25:
+  Relational:    "City" CHARACTER
+  Denormalized:  "CustomerCity" CHARACTER
+
+Pair 26:
+  Relational:    "State" CHARACTER
+  Denormalized:  "CustomerState" CHARACTER
+
+Pair 27:
+  Relational:    "Country" CHARACTER
+  Denormalized:  "CustomerCountry" CHARACTER
+
+Pair 28:
+  Relational:    "PostalCode" CHARACTER
+  Denormalized:  "CustomerKey" INTEGER
+
+Pair 29:
+  Relational:    "Phone" CHARACTER
+  Denormalized:  "InvoiceKey" INTEGER
+
+Pair 30:
+  Relational:    "Fax" CHARACTER
+  Denormalized:  "Day" INTEGER
+
+Pair 31:
+  Relational:    "GenreId" INTEGER
+  Denormalized:  "IsWeekend" BOOLEAN
+
+Pair 32:
+  Relational:    "Name" CHARACTER
+  Denormalized:  "DayOfYear" INTEGER
+
+Pair 33:
+  Relational:    "InvoiceId" INTEGER
+  Denormalized:  "InvoiceId" INTEGER
+
+Pair 34:
+  Relational:    "CustomerId" INTEGER
+  Denormalized:  "CustomerId" INTEGER
+
+Pair 35:
+  Relational:    "InvoiceDate" TIMESTAMP
+  Denormalized:  "InvoiceDate" TIMESTAMP
+
+Pair 36:
+  Relational:    "BillingAddress" CHARACTER
+  Denormalized:  "BillingAddress" CHARACTER
+
+Pair 37:
+  Relational:    "BillingCity" CHARACTER
+  Denormalized:  "BillingCity" CHARACTER
+
+Pair 38:
+  Relational:    "BillingState" CHARACTER
+  Denormalized:  "BillingState" CHARACTER
+
+Pair 39:
+  Relational:    "BillingCountry" CHARACTER
+  Denormalized:  "BillingCountry" CHARACTER
+
+Pair 40:
+  Relational:    "BillingPostalCode" CHARACTER
+  Denormalized:  "BillingPostalCode" CHARACTER
+
+Pair 41:
+  Relational:    "Total" NUMERIC(10, 2)
+  Denormalized:  "Total" NUMERIC(10, 2)
+
+Pair 42:
+  Relational:    "InvoiceLineId" INTEGER
+  Denormalized:  "InvoiceLineId" INTEGER
+
+Pair 43:
+  Relational:    "InvoiceId" INTEGER
+  Denormalized:  "InvoiceId" INTEGER
+
+Pair 44:
+  Relational:    "TrackId" INTEGER
+  Denormalized:  "TrackId" INTEGER
+
+Pair 45:
+  Relational:    "UnitPrice" NUMERIC(10, 2)
+  Denormalized:  "UnitPrice" NUMERIC(10, 2)
+
+Pair 46:
+  Relational:    "Quantity" INTEGER
+  Denormalized:  "Quantity" INTEGER
+
+Pair 47:
+  Relational:    "MediaTypeId" INTEGER
+  Denormalized:  "MediaTypeId" INTEGER
+
+Pair 48:
+  Relational:    "Name" CHARACTER
+  Denormalized:  "TrackName" CHARACTER
+
+Pair 49:
+  Relational:    "Name" CHARACTER
+  Denormalized:  "GenreName" CHARACTER
+
+Pair 50:
+  Relational:    "TrackId" INTEGER
+  Denormalized:  "TrackId" INTEGER
+
+Pair 51:
+  Relational:    "Name" CHARACTER
+  Denormalized:  "TrackKey" INTEGER
+
+Pair 52:
+  Relational:    "AlbumId" INTEGER
+  Denormalized:  "AlbumTitle" CHARACTER
+
+Pair 53:
+  Relational:    "MediaTypeId" INTEGER
+  Denormalized:  "MediaTypeName" CHARACTER
+
+Pair 54:
+  Relational:    "GenreId" INTEGER
+  Denormalized:  "GenreId" INTEGER
+
+Pair 55:
+  Relational:    "Composer" CHARACTER
+  Denormalized:  "Composer" CHARACTER
+
+Pair 56:
+  Relational:    "Milliseconds" INTEGER
+  Denormalized:  "Milliseconds" INTEGER
+
+Pair 57:
+  Relational:    "Bytes" INTEGER
+  Denormalized:  "Bytes" INTEGER
+
+Pair 58:
+  Relational:    "UnitPrice" NUMERIC(10, 2)
+  Denormalized:  "UnitPrice" NUMERIC(10, 2)
+
+
+================================================================================

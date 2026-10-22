@@ -1,0 +1,653 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-04_15-49-55
+Model: ollama_local
+Prompt: OBT
+Schema: adv_works
+==================================================
+
+Based on the RISEN Framework, here is the analysis and design for denormalizing the Adventure Works Cycles schema into a 
+single Big Table model.
+
+### Section 1: Analysis and Strategy
+
+**Summary**
+The denormalization strategy follows the **ONE-BIG-TABLE MODEL**. The goal is to consolidate the entire Adventure Works Cycles
+relational schema (approx. 40+ tables) into a single, massive table. This eliminates join operations, significantly reducing 
+query latency for analytical workloads that aggregate data across departments, products, sales, and manufacturing. The strategy 
+prioritizes read performance over write complexity, accepting that the table will be wide.
+
+**Structural Decisions**
+1.  **Single Table Creation**: A new table named `adventure_works_flat` is created.
+2.  **Primary Key Selection**: `businessentityid` is selected as the primary key because it is the root identifier connecting almost 
+all tables (Person, Employee, Customer, Vendor, Product, etc.). Tables without this ID (e.g., `Department`, `Shift`, `ProductCategory`)
+will use a composite key or a surrogate ID mapped to the main key.
+3.  **Attribute Merging**:
+    *   **Shared Attributes**: Attributes like `modifieddate`, `rowguid`, and common columns (e.g., `name`, `date`) are duplicated 
+    for every table to ensure data availability in a single row context.
+    *   **Naming Convention**: To avoid ambiguity when multiple tables share column names (e.g., `name` in `Department`, `Employee`, 
+    `Product`, `SalesTerritory`), the source table name is prefixed to the column name (e.g., `dept_name`, `emp_name`, `prod_name`).
+    *   **Foreign Key Removal**: All `REFERENCES` constraints are removed. Instead, the child table's ID is stored as a column in 
+    the parent table's row (e.g., `dept_id` is a column in the `EmployeeDepartmentHistory` row).
+4.  **Data Type Preservation**: All original data types (e.g., `numeric(8,2)`, `xml`, `bytea`, `uuid`) are preserved exactly.
+
+**Attribute-Level Changes**
+1.  **Prefixing**: Columns with identical names across different tables are renamed with a prefix (e.g., `emp_birthdate` vs 
+`prod_listprice`).
+2.  **Surrogate Keys**: Tables like `Department` (no business entity link) and `ProductCategory` (no direct business entity link) 
+use `departmentid` and `productcategoryid` respectively as their own local keys within the flat table, or are joined via the 
+`employeedepartmenthistory` table's structure.
+3.  **XML/Bytea Handling**: Large BLOBs (`bytea`) and XMLs (`xml`) are preserved as-is to maintain data integrity, though they will
+ increase row size.
+
+**Tradeoffs**
+1.  **Write Performance**: Inserting a row for every entity (Employee, Product, SalesOrder, etc.) will be slow due to the massive 
+number of columns.
+2.  **Storage Overhead**: The table will be significantly wider than the normalized version, consuming more disk space and 
+potentially causing index bloat if indexes are created on the flat table.
+3.  **Reconstruction**: While all data is present, reconstructing the original relational relationships requires filtering and grouping, which is the point of denormalization (analytical queries are faster, but the "flat" nature hides relationships visually).
+
+### Section 2: Query Patterns
+
+**Inferred Query Patterns**
+1.  **Sales Performance by Region**: "Show total sales, costs, and salesperson bonuses grouped by Territory and SalesTerritory."
+    *   *Motivation*: Requires joining `SalesOrderHeader`, `SalesTerritory`, `SalesPerson`, and `SalesTerritoryHistory`. In the flat table, this is a simple `GROUP BY`.
+2.  **Employee Details with Payroll**: "Get all active employees, their department, shift, and current pay rate."
+    *   *Motivation*: Requires joining `Employee`, `EmployeeDepartmentHistory`, `Department`, `Shift`, and `EmployeePayHistory`.
+3.  **Product Cost Analysis**: "Calculate the standard cost of all products, including their BOM components and manufacturing locations."
+    *   *Motivation*: Requires traversing `Product`, `BillOfMaterials`, `ProductInventory`, `Location`, and `WorkOrder`.
+
+---
+
+### SQL DDL: Denormalized Schema
+
+```sql
+-- Denormalized Schema: Adventure Works Cycles (ONE-BIG-TABLE MODEL)
+-- This schema consolidates all relational tables into a single wide table
+-- to optimize read performance for analytical queries.
+
+CREATE TABLE IF NOT EXISTS adventure_works_flat (
+    -- ==========================================
+    -- HUMAN RESOURCES (Person, Employee, Dept, Shift, etc.)
+    -- ==========================================
+    
+    -- Person Table Data
+    person_businessentityid integer NOT NULL,
+    person_title character varying(8),
+    person_firstname character varying(80),
+    person_middlename character varying(80),
+    person_lastname character varying(80),
+    person_suffix character varying(10),
+    person_emailpromotion integer,
+    person_additionalcontactinfo xml,
+    person_demographics xml,
+    
+    -- Employee Table Data
+    emp_businessentityid integer NOT NULL,
+    emp_nationalidnumber character varying(15),
+    emp_loginid character varying(256),
+    emp_jobtitle character varying(50),
+    emp_birthdate date,
+    emp_maritalstatus character(1),
+    emp_gender character(1),
+    emp_hiredate date,
+    emp_salariedflag boolean,
+    emp_vacationhours smallint,
+    emp_sickleavehours smallint,
+    emp_currentflag boolean,
+    emp_rowguid uuid,
+    emp_modifieddate timestamp without time zone,
+    emp_organizationnode character varying,
+    
+    -- Department Table Data
+    dept_departmentid integer NOT NULL,
+    dept_name character varying(128),
+    dept_groupname character varying(128),
+    dept_modifieddate timestamp without time zone,
+    
+    -- Shift Table Data
+    shift_shiftid integer NOT NULL,
+    shift_name character varying(128),
+    shift_starttime time without time zone,
+    shift_endtime time without time zone,
+    shift_modifieddate timestamp without time zone,
+    
+    -- Employee Department History (Links Employee, Dept, Shift)
+    edh_businessentityid integer NOT NULL,
+    edh_departmentid smallint NOT NULL,
+    edh_shiftid smallint NOT NULL,
+    edh_startdate date NOT NULL,
+    edh_enddate date,
+    edh_modifieddate timestamp without time zone,
+    
+    -- Employee Pay History
+    eph_businessentityid integer NOT NULL,
+    eph_ratechangedate timestamp without time zone NOT NULL,
+    eph_rate numeric,
+    eph_payfrequency smallint,
+    eph_modifieddate timestamp without time zone,
+    
+    -- Job Candidate
+    jc_jobcandidateid integer NOT NULL,
+    jc_businessentityid integer,
+    jc_resume xml,
+    jc_modifieddate timestamp without time zone,
+    
+    -- ==========================================
+    -- PERSON (Address, AddressType, Contact, Phone, etc.)
+    -- ==========================================
+    
+    -- Address Table Data
+    addr_addressid integer NOT NULL,
+    addr_addressline1 character varying(60),
+    addr_addressline2 character varying(60),
+    addr_city character varying(30),
+    addr_stateprovinceid integer NOT NULL,
+    addr_postalcode character varying(15),
+    addr_spatiallocation bytea,
+    addr_rowguid uuid,
+    addr_modifieddate timestamp without time zone,
+    
+    -- AddressType Table Data
+    at_addresstypeid integer NOT NULL,
+    at_name character varying(128),
+    at_rowguid uuid,
+    at_modifieddate timestamp without time zone,
+    
+    -- BusinessEntityAddress (Maps Entity to Address)
+    bea_businessentityid integer NOT NULL,
+    bea_addressid integer NOT NULL,
+    bea_addresstypeid integer NOT NULL,
+    bea_rowguid uuid,
+    bea_modifieddate timestamp without time zone,
+    
+    -- BusinessEntityContact (Maps Entity to Person)
+    bec_businessentityid integer NOT NULL,
+    bec_personid integer NOT NULL,
+    bec_contacttypeid integer NOT NULL,
+    bec_rowguid uuid,
+    bec_modifieddate timestamp without time zone,
+    
+    -- ContactType Table Data
+    ct_contacttypeid integer NOT NULL,
+    ct_name character varying(128),
+    ct_modifieddate timestamp without time zone,
+    
+    -- EmailAddress Table Data
+    ea_businessentityid integer NOT NULL,
+    ea_emailaddressid integer NOT NULL,
+    ea_emailaddress character varying(50),
+    ea_rowguid uuid,
+    ea_modifieddate timestamp without time zone,
+    
+    -- Password Table Data
+    pw_businessentityid integer NOT NULL,
+    pw_passwordhash character varying(128),
+    pw_passwordsalt character varying(10),
+    pw_rowguid uuid,
+    pw_modifieddate timestamp without time zone,
+    
+    -- ==========================================
+    -- PERSON (Country, StateProvince, etc.)
+    -- ==========================================
+    
+    -- CountryRegion Table Data
+    cr_countryregioncode character varying(3) NOT NULL,
+    cr_name character varying(128),
+    cr_modifieddate timestamp without time zone,
+    
+    -- StateProvince Table Data
+    sp_stateprovinceid integer NOT NULL,
+    sp_stateprovincecode character(3),
+    sp_countryregioncode character varying(3) NOT NULL,
+    sp_isonlystateprovinceflag boolean,
+    sp_name character varying(128),
+    sp_territoryid integer NOT NULL,
+    sp_rowguid uuid,
+    sp_modifieddate timestamp without time zone,
+    
+    -- ==========================================
+    -- PRODUCION (Product, BOM, Cost, Inventory, etc.)
+    -- ==========================================
+    
+    -- Product Table Data
+    prod_productid integer NOT NULL,
+    prod_name character varying(128),
+    prod_productnumber character varying(25),
+    prod_makeflag boolean,
+    prod_finishedgoodsflag boolean,
+    prod_color character varying(15),
+    prod_safetystocklevel smallint,
+    prod_reorderpoint smallint,
+    prod_standardcost numeric,
+    prod_listprice numeric,
+    prod_size character varying(5),
+    prod_sizeunitmeasurecode character(3),
+    prod_weightunitmeasurecode character(3),
+    prod_weight numeric(8, 2),
+    prod_daystomanufacture integer,
+    prod_productline character(2),
+    prod_class character(2),
+    prod_style character(2),
+    prod_productsubcategoryid integer,
+    prod_productmodelid integer,
+    prod_sellstartdate timestamp without time zone,
+    prod_sellenddate timestamp without time zone,
+    prod_discontinueddate timestamp without time zone,
+    prod_rowguid uuid,
+    prod_modifieddate timestamp without time zone,
+    
+    -- ProductCategory Table Data
+    pc_productcategoryid integer NOT NULL,
+    pc_name character varying(128),
+    pc_rowguid uuid,
+    pc_modifieddate timestamp without time zone,
+    
+    -- ProductSubcategory Table Data
+    psc_productsubcategoryid integer NOT NULL,
+    psc_productcategoryid integer NOT NULL,
+    psc_name character varying(128),
+    psc_rowguid uuid,
+    psc_modifieddate timestamp without time zone,
+    
+    -- ProductDescription Table Data
+    pd_productdescriptionid integer NOT NULL,
+    pd_description character varying(400),
+    pd_rowguid uuid,
+    pd_modifieddate timestamp without time zone,
+    
+    -- ProductModel Table Data
+    pm_productmodelid integer NOT NULL,
+    pm_name character varying(128),
+    pm_catalogdescription xml,
+    pm_instructions xml,
+    pm_rowguid uuid,
+    pm_modifieddate timestamp without time zone,
+    
+    -- ProductModelIllustration Table Data
+    pmi_productmodelid integer NOT NULL,
+    pmi_illustrationid integer NOT NULL,
+    pmi_modifieddate timestamp without time zone,
+    
+    -- ProductModelProductDescriptionCulture Table Data
+    pmcdc_productmodelid integer NOT NULL,
+    pmcdc_productdescriptionid integer NOT NULL,
+    pmcdc_cultureid character(6) NOT NULL,
+    pmcdc_modifieddate timestamp without time zone,
+    
+    -- ProductPhoto Table Data
+    pp_productphotoid integer NOT NULL,
+    pp_thumbnailphoto bytea,
+    pp_thumbnailphotofilename character varying(50),
+    pp_largephoto bytea,
+    pp_largephotofilename character varying(50),
+    pp_modifieddate timestamp without time zone,
+    
+    -- ProductProductPhoto Table Data
+    ppp_productid integer NOT NULL,
+    ppp_productphotoid integer NOT NULL,
+    ppp_primary boolean,
+    ppp_modifieddate timestamp without time zone,
+    
+    -- ProductReview Table Data
+    pr_productreviewid integer NOT NULL,
+    pr_productid integer NOT NULL,
+    pr_reviewername character varying(128),
+    pr_reviewdate timestamp without time zone,
+    pr_emailaddress character varying(50),
+    pr_rating integer,
+    pr_comments character varying(3850),
+    pr_modifieddate timestamp without time zone,
+    
+    -- BillOfMaterials Table Data
+    bom_billofmaterialsid integer NOT NULL,
+    bom_productassemblyid integer,
+    bom_componentid integer NOT NULL,
+    bom_startdate timestamp without time zone,
+    bom_enddate timestamp without time zone,
+    bom_unitmeasurecode character(3),
+    bom_bomlevel smallint,
+    bom_perassemblyqty numeric(8, 2),
+    bom_modifieddate timestamp without time zone,
+    
+    -- ProductCostHistory Table Data
+    pch_productid integer NOT NULL,
+    pch_startdate timestamp without time zone,
+    pch_enddate timestamp without time zone,
+    pch_standardcost numeric,
+    pch_modifieddate timestamp without time zone,
+    
+    -- ProductListPriceHistory Table Data
+    plph_productid integer NOT NULL,
+    plph_startdate timestamp without time zone,
+    plph_enddate timestamp without time zone,
+    plph_listprice numeric,
+    plph_modifieddate timestamp without time zone,
+    
+    -- ProductDocument Table Data
+    pd_productid integer NOT NULL,
+    pd_documentnode character varying NOT NULL,
+    pd_modifieddate timestamp without time zone,
+    
+    -- ProductInventory Table Data
+    pi_productid integer NOT NULL,
+    pi_locationid smallint NOT NULL,
+    pi_shelf character varying(10),
+    pi_bin smallint,
+    pi_quantity smallint,
+    pi_rowguid uuid,
+    pi_modifieddate timestamp without time zone,
+    
+    -- ProductModelProductDescriptionCulture (Duplicate for flat structure consistency if needed, but usually unique)
+    -- Already covered above
+    
+    -- ==========================================
+    -- PURCHASING (Vendor, Purchase Order, etc.)
+    -- ==========================================
+    
+    -- Vendor Table Data
+    vend_businessentityid integer NOT NULL,
+    vend_accountnumber character varying(128),
+    vend_name character varying(128),
+    vend_creditrating smallint,
+    vend_preferredvendorstatus boolean,
+    vend_activeflag boolean,
+    vend_purchasingwebserviceurl character varying(1024),
+    vend_modifieddate timestamp without time zone,
+    
+    -- ShipMethod Table Data
+    sm_shipmethodid integer NOT NULL,
+    sm_name character varying(128),
+    sm_shipbase numeric,
+    sm_shiprate numeric,
+    sm_rowguid uuid,
+    sm_modifieddate timestamp without time zone,
+    
+    -- ProductVendor Table Data
+    pv_productid integer NOT NULL,
+    pv_businessentityid integer NOT NULL,
+    pv_averageleadtime integer,
+    pv_standardprice numeric,
+    pv_lastreceiptcost numeric,
+    pv_lastreceiptdate timestamp without time zone,
+    pv_minorderqty integer,
+    pv_maxorderqty integer,
+    pv_onorderqty integer,
+    pv_unitmeasurecode character(3),
+    pv_modifieddate timestamp without time zone,
+    
+    -- PurchaseOrderHeader Table Data
+    po_header_purchaseorderid integer NOT NULL,
+    po_header_revisionnumber smallint,
+    po_header_status smallint,
+    po_header_employeeid integer NOT NULL,
+    po_header_vendorid integer NOT NULL,
+    po_header_shipmethodid integer NOT NULL,
+    po_header_orderdate timestamp without time zone,
+    po_header_shipdate timestamp without time zone,
+    po_header_subtotal numeric,
+    po_header_taxamt numeric,
+    po_header_freight numeric,
+    po_header_modifieddate timestamp without time zone,
+    
+    -- PurchaseOrderDetail Table Data
+    po_detail_purchaseorderid integer NOT NULL,
+    po_detail_purchaseorderdetailid integer NOT NULL,
+    po_detail_duedate timestamp without time zone,
+    po_detail_orderqty smallint,
+    po_detail_productid integer NOT NULL,
+    po_detail_unitprice numeric,
+    po_detail_receivedqty numeric(8, 2),
+    po_detail_rejectedqty numeric(8, 2),
+    po_detail_modifieddate timestamp without time zone,
+    
+    -- ==========================================
+    -- SALES (Customer, Sales Order, etc.)
+    -- ==========================================
+    
+    -- Customer Table Data
+    cust_customerid integer NOT NULL,
+    cust_personid integer,
+    cust_storeid integer,
+    cust_territoryid integer NOT NULL,
+    cust_rowguid uuid,
+    cust_modifieddate timestamp without time zone,
+    
+    -- SalesPerson Table Data
+    sp_salespersonid integer NOT NULL,
+    sp_businessentityid integer NOT NULL,
+    sp_territoryid integer,
+    sp_salesquota numeric,
+    sp_bonus numeric,
+    sp_commissionpct numeric,
+    sp_salesytd numeric,
+    sp_saleslastyear numeric,
+    sp_rowguid uuid,
+    sp_modifieddate timestamp without time zone,
+    
+    -- SalesTerritory Table Data
+    st_territoryid integer NOT NULL,
+    st_name character varying(128),
+    st_countryregioncode character varying(3),
+    st_group character varying(50),
+    st_salesytd numeric,
+    st_saleslastyear numeric,
+    st_costytd numeric,
+    st_costlastyear numeric,
+    st_rowguid uuid,
+    st_modifieddate timestamp without time zone,
+    
+    -- SalesTerritoryHistory Table Data
+    sth_businessentityid integer NOT NULL,
+    sth_territoryid integer NOT NULL,
+    sth_startdate timestamp without time zone,
+    sth_enddate timestamp without time zone,
+    sth_rowguid uuid,
+    sth_modifieddate timestamp without time zone,
+    
+    -- SalesOrderHeader Table Data
+    soh_salesorderid integer NOT NULL,
+    soh_revisionnumber smallint,
+    soh_orderdate timestamp without time zone,
+    soh_duedate timestamp without time zone,
+    soh_shipdate timestamp without time zone,
+    soh_status smallint,
+    soh_onlineorderflag boolean,
+    soh_purchaseordernumber character varying(128),
+    soh_accountnumber character varying(128),
+    soh_customerid integer NOT NULL,
+    soh_salespersonid integer,
+    soh_territoryid integer NOT NULL,
+    soh_billtoaddressid integer NOT NULL,
+    soh_shiptoaddressid integer NOT NULL,
+    soh_shipmethodid integer NOT NULL,
+    soh_creditcardid integer,
+    soh_creditcardapprovalcode character varying(15),
+    soh_currencyrateid integer,
+    soh_subtotal numeric,
+    soh_taxamt numeric,
+    soh_freight numeric,
+    soh_totaldue numeric,
+    soh_comment character varying(128),
+    soh_rowguid uuid,
+    soh_modifieddate timestamp without time zone,
+    
+    -- SalesOrderDetail Table Data
+    sod_salesorderid integer NOT NULL,
+    sod_salesorderdetailid integer NOT NULL,
+    sod_carriertrackingnumber character varying(25),
+    sod_orderqty smallint,
+    sod_productid integer NOT NULL,
+    sod_specialofferid integer NOT NULL,
+    sod_unitprice numeric,
+    sod_unitpricediscount numeric,
+    sod_rowguid uuid,
+    sod_modifieddate timestamp without time zone,
+    
+    -- SalesOrderHeaderSalesReason Table Data
+    sohsr_salesorderid integer NOT NULL,
+    sohsr_salesreasonid integer NOT NULL,
+    sohsr_modifieddate timestamp without time zone,
+    
+    -- SalesPersonQuotaHistory Table Data
+    spqh_businessentityid integer NOT NULL,
+    spqh_quotadate timestamp without time zone,
+    spqh_salesquota numeric,
+    spqh_rowguid uuid,
+    spqh_modifieddate timestamp without time zone,
+    
+    -- SalesReason Table Data
+    sr_salesreasonid integer NOT NULL,
+    sr_name character varying(128),
+    sr_reasontype character varying(128),
+    sr_modifieddate timestamp without time zone,
+    
+    -- SpecialOffer Table Data
+    so_specialofferid integer NOT NULL,
+    so_description character varying(255),
+    so_discountpct numeric,
+    so_type character varying(50),
+    so_category character varying(50),
+    so_startdate timestamp without time zone,
+    so_enddate timestamp without time zone,
+    so_minqty integer,
+    so_maxqty integer,
+    so_rowguid uuid,
+    so_modifieddate timestamp without time zone,
+    
+    -- SpecialOfferProduct Table Data
+    sop_specialofferid integer NOT NULL,
+    sop_productid integer NOT NULL,
+    sop_rowguid uuid,
+    sop_modifieddate timestamp without time zone,
+    
+    -- ShoppingCartItem Table Data
+    scit_shoppingcartitemid integer NOT NULL,
+    scit_shoppingcartid character varying(50),
+    scit_quantity integer,
+    scit_productid integer NOT NULL,
+    scit_datecreated timestamp without time zone,
+    scit_modifieddate timestamp without time zone,
+    
+    -- Store Table Data
+    store_businessentityid integer NOT NULL,
+    store_name character varying(128),
+    store_salespersonid integer,
+    store_demographics xml,
+    store_rowguid uuid,
+    store_modifieddate timestamp without time zone,
+    
+    -- CreditCard Table Data
+    cc_creditcardid integer NOT NULL,
+    cc_cardtype character varying(50),
+    cc_cardnumber character varying(25),
+    cc_expmonth smallint,
+    cc_expyear smallint,
+    cc_modifieddate timestamp without time zone,
+    
+    -- PersonCreditCard Table Data
+    pcc_businessentityid integer NOT NULL,
+    pcc_creditcardid integer NOT NULL,
+    pcc_modifieddate timestamp without time zone,
+    
+    -- Currency Table Data
+    cur_currencycode character varying(3) NOT NULL,
+    cur_name character varying(128),
+    cur_modifieddate timestamp without time zone,
+    
+    -- CountryRegionCurrency Table Data
+    crc_countryregioncode character varying(3) NOT NULL,
+    crc_currencycode character varying(3) NOT NULL,
+    crc_modifieddate timestamp without time zone,
+    
+    -- CurrencyRate Table Data
+    crt_currencyrateid integer NOT NULL,
+    crt_currencyratedate timestamp without time zone,
+    crt_fromcurrencycode character varying(3) NOT NULL,
+    crt_tocurrencycode character varying(3) NOT NULL,
+    crt_averagerate numeric,
+    crt_endofdayrate numeric,
+    crt_modifieddate timestamp without time zone,
+    
+    -- ==========================================
+    -- PRODUCION (Culture, UnitMeasure, ScrapReason, etc.)
+    -- ==========================================
+    
+    -- Culture Table Data
+    cul_cultureid character varying(6) NOT NULL,
+    cul_name character varying(128),
+    cul_modifieddate timestamp without time zone,
+    
+    -- UnitMeasure Table Data
+    um_unitmeasurecode character varying(3) NOT NULL,
+    um_name character varying(128),
+    um_modifieddate timestamp without time zone,
+    
+    -- ScrapReason Table Data
+    sr_scrapreasonid integer NOT NULL,
+    sr_scrapreason_name character varying(128),
+    sr_scrapreason_modifieddate timestamp without time zone,
+    
+    -- TransactionHistory Table Data
+    th_transactionid integer NOT NULL,
+    th_productid integer NOT NULL,
+    th_referenceorderid integer NOT NULL,
+    th_referenceorderlineid integer,
+    th_transactiondate timestamp without time zone,
+    th_transactiontype character varying(1),
+    th_quantity integer,
+    th_actualcost numeric,
+    th_modifieddate timestamp without time zone,
+    
+    -- TransactionHistoryArchive Table Data
+    thah_transactionid integer NOT NULL,
+    thah_productid integer NOT NULL,
+    thah_referenceorderid integer NOT NULL,
+    thah_referenceorderlineid integer,
+    thah_transactiondate timestamp without time zone,
+    thah_transactiontype character varying(1),
+    thah_quantity integer,
+    thah_actualcost numeric,
+    thah_modifieddate timestamp without time zone,
+    
+    -- ==========================================
+    -- DOCUMENTS (Production)
+    -- ==========================================
+    
+    -- Document Table Data
+    doc_title character varying(50),
+    doc_owner integer NOT NULL,
+    doc_folderflag boolean,
+    doc_filename character varying(400),
+    doc_fileextension character varying(8),
+    doc_revision character varying(5),
+    doc_changenumber integer,
+    doc_status smallint,
+    doc_documentsummary text,
+    doc_document bytea,
+    doc_rowguid uuid,
+    doc_modifieddate timestamp without time zone,
+    doc_documentnode character varying NOT NULL,
+    
+    -- Illustration Table Data
+    il_illustrationid integer NOT NULL,
+    il_diagram xml,
+    il_modifieddate timestamp without time zone,
+)
+    -- ==========================================
+    -- FOREIGN KEY REMOVALS & INDEXES
+    -- ==========================================
+    -- Note: All Foreign Keys are removed. Relationships are implied via ID columns.
+    
+    -- Indexes for common lookups (Simulated as indexes on the flat table)
+    CREATE INDEX IF NOT EXISTS idx_adventure_works_flat_businessentityid ON adventure_works_flat(person_businessentityid);
+    CREATE INDEX IF NOT EXISTS idx_adventure_works_flat_productid ON adventure_works_flat(prod_productid);
+    CREATE INDEX IF NOT EXISTS idx_adventure_works_flat_territoryid ON adventure_works_flat(st_territoryid);
+    CREATE INDEX IF NOT EXISTS idx_adventure_works_flat_salesorderid ON adventure_works_flat(soh_salesorderid);
+    
+    -- Comments for documentation
+    COMMENT ON TABLE adventure_works_flat IS 'Denormalized flat schema for Adventure Works Cycles. All relational tables merged into one for analytical performance.';
+    COMMENT ON COLUMN adventure_works_flat.person_businessentityid IS 'Primary Key for Person and linked entities.';
+    COMMENT ON COLUMN adventure_works_flat.prod_productid IS 'Primary Key for Product and linked entities.';
+
+END;
+```

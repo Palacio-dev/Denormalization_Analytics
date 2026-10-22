@@ -1,0 +1,174 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-04-29
+Model: ollama_api
+Prompt: junior
+Schema: airplane
+==================================================
+
+{
+  "section_1": {
+    "summary": "The original normalized schema contains 8 tables with multiple foreign key relationships. The denormalization 
+    strategy focuses on creating a single comprehensive fact table that combines booking, ticket, flight segment, boarding pass,
+    and aircraft/airport reference data. This approach reduces the need for complex joins when performing analytics on booking
+    behaviors, flight performance, and passenger information.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge bookings, tickets, and ticket_flights into a single denormalized fact table to capture complete
+        booking-to-flight information in one record"
+      },
+      {
+        "decision_id": "D2",
+        "description": "Include aircraft and airport dimension data directly in the fact table to eliminate joins with reference
+        tables during analysis"
+      },
+      {
+        "decision_id": "D3",
+        "description": "Add boarding pass information to the main fact table to enable boarding analytics without separate joins"
+      },
+      {
+        "decision_id": "D4",
+        "description": "Embed seat information in the fact table to analyze seating preferences and fare class distributions"
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived date columns (book_date_date, scheduled_departure_date) for easier time-based analysis"
+      },
+      {
+        "decision_id": "A2",
+        "description": "Flattened JSON model and name fields from aircrafts_data and airports_data into separate string columns 
+        for better query performance"
+      },
+      {
+        "decision_id": "A3",
+        "description": "Combined departure and arrival airport information into the fact table, duplicating commonly accessed 
+        airport attributes"
+      },
+      {
+        "decision_id": "A4",
+        "description": "Included aircraft range directly in the fact table to enable distance-based analysis without joins"
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Storage space increases significantly due to data duplication, but query performance improves for analytical workloads"
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Data modification operations become more complex as changes need to be propagated across duplicated fields"
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Real-time transactional processing performance may decrease, but batch analytical queries benefit from reduced join complexity"
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyzing booking trends over time by joining bookings with tickets and ticket_flights - motivated creation of unified fact table"
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting on flight performance with aircraft details - motivated embedding aircraft information in fact table"
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyzing passenger travel patterns across routes - motivated including airport details directly in fact table"
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Seat occupancy and boarding efficiency analysis - motivated inclusion of boarding pass and seat data in main table"
+      }
+    ]
+  }
+}
+
+```sql
+CREATE TABLE IF NOT EXISTS bookings.booking_analytics_denorm
+(
+    -- Booking Information
+    book_ref character(6) COLLATE pg_catalog."default" NOT NULL,
+    book_date timestamp with time zone NOT NULL,
+    book_date_date date NOT NULL,
+    total_amount numeric(10, 2) NOT NULL,
+    
+    -- Ticket Information
+    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL,
+    passenger_id character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    passenger_name text COLLATE pg_catalog."default" NOT NULL,
+    contact_data jsonb,
+    
+    -- Flight Segment Information
+    flight_id integer NOT NULL,
+    flight_no character(6) COLLATE pg_catalog."default" NOT NULL,
+    scheduled_departure timestamp with time zone NOT NULL,
+    scheduled_departure_date date NOT NULL,
+    scheduled_arrival timestamp with time zone NOT NULL,
+    status character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    segment_fare_conditions character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    segment_amount numeric(10, 2) NOT NULL,
+    
+    -- Aircraft Information
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    aircraft_model_ru text COLLATE pg_catalog."default",
+    aircraft_model_en text COLLATE pg_catalog."default",
+    aircraft_range integer NOT NULL,
+    
+    -- Departure Airport Information
+    departure_airport_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    departure_airport_name_ru text COLLATE pg_catalog."default",
+    departure_airport_name_en text COLLATE pg_catalog."default",
+    departure_city_ru text COLLATE pg_catalog."default",
+    departure_city_en text COLLATE pg_catalog."default",
+    departure_coordinates point NOT NULL,
+    departure_timezone text COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Arrival Airport Information
+    arrival_airport_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    arrival_airport_name_ru text COLLATE pg_catalog."default",
+    arrival_airport_name_en text COLLATE pg_catalog."default",
+    arrival_city_ru text COLLATE pg_catalog."default",
+    arrival_city_en text COLLATE pg_catalog."default",
+    arrival_coordinates point NOT NULL,
+    arrival_timezone text COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Actual Flight Times (for completed flights)
+    actual_departure timestamp with time zone,
+    actual_arrival timestamp with time zone,
+    
+    -- Boarding Pass Information
+    boarding_no integer,
+    seat_no character varying(4) COLLATE pg_catalog."default",
+    
+    -- Seat Information
+    seat_fare_conditions character varying(10) COLLATE pg_catalog."default",
+    
+    -- Calculated Fields
+    flight_duration interval GENERATED ALWAYS AS (scheduled_arrival - scheduled_departure) STORED,
+    
+    -- Primary Key
+    CONSTRAINT booking_analytics_denorm_pkey PRIMARY KEY (ticket_no, flight_id)
+);
+
+COMMENT ON TABLE bookings.booking_analytics_denorm
+    IS 'Denormalized table for booking analytics, combining bookings, tickets, ticket_flights, flights, aircrafts, airports, boarding_passes, and seats data';
+
+-- Indexes for common analytical queries
+CREATE INDEX idx_booking_analytics_book_date ON bookings.booking_analytics_denorm (book_date_date);
+CREATE INDEX idx_booking_analytics_flight_date ON bookings.booking_analytics_denorm (scheduled_departure_date);
+CREATE INDEX idx_booking_analytics_departure_airport ON bookings.booking_analytics_denorm (departure_airport_code);
+CREATE INDEX idx_booking_analytics_arrival_airport ON bookings.booking_analytics_denorm (arrival_airport_code);
+CREATE INDEX idx_booking_analytics_aircraft ON bookings.booking_analytics_denorm (aircraft_code);
+CREATE INDEX idx_booking_analytics_fare_class ON bookings.booking_analytics_denorm (segment_fare_conditions);
+CREATE INDEX idx_booking_analytics_status ON bookings.booking_analytics_denorm (status);
+CREATE INDEX idx_booking_analytics_passenger ON bookings.booking_analytics_denorm (passenger_id);
+```

@@ -1,0 +1,232 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_10-43-26
+Model: gemini
+Prompt: senior
+Schema: TPC_H
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The proposed denormalization strategy transitions the highly normalized 3NF TPC-H OLTP schema into a Kimball-style Star Schema optimized for columnar OLAP databases. The core objective is to minimize expensive multi-table joins at query time, specifically by collapsing the hierarchical snowflake structures (Region -> Nation -> Customer/Supplier) into flat dimensions, and by merging the Order header data directly into the Lineitem fact table. This creates a highly performant, predictable model for BI tools, enabling rapid aggregations over massive datasets while trading off a moderate, acceptable increase in storage footprint.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Flatten NATION and REGION tables into CUSTOMER to create a wide DIM_CUSTOMER table. Eliminates two joins for customer-geography queries."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Flatten NATION and REGION tables into SUPPLIER to create a wide DIM_SUPPLIER table. Eliminates two joins for supplier-geography queries."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Denormalize ORDERS into LINEITEM to create a single FACT_LINEITEM table. Order-level attributes (Order Date, Status, Clerk) are repeated for each line item, eliminating the massive Fact-to-Fact join between Orders and Lineitems."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Transform PARTSUPP into FACT_PARTSUPP. Since it contains measures (Available Quantity, Supply Cost) and represents an inventory/supply cross-reference grain, it is modeled as a secondary fact table rather than a dimension."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Introduce a conformed DIM_DATE table. Replaces raw date columns with Surrogate Keys to support advanced time-series analysis, fiscal calendars, and BI time-intelligence functions."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Introduced Surrogate Keys (SKs) as integers for all dimensions (e.g., CUST_SK, PART_SK) to insulate the analytical model from source system key changes and optimize join performance."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Derived analytical measures in FACT_LINEITEM: Added NET_REVENUE (ExtendedPrice * (1-Discount)) and TOTAL_CHARGES (ExtendedPrice * (1-Discount) * (1+Tax)) to pre-compute heavy row-level math."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Converted all operational DATE columns (O_ORDERDATE, L_SHIPDATE, L_COMMITDATE, L_RECEIPTDATE) into integer Date Surrogate Keys (e.g., ORDER_DATE_SK) linking to DIM_DATE."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Storage Bloat vs. Read Performance: Merging ORDERS into LINEITEM duplicates order-level attributes (Clerk, Order Status, Priority) across millions of line items. In modern columnar storage, this compresses extremely well, making the storage penalty negligible compared to the massive CPU savings from avoiding joins."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies vs. Query Simplicity: Flattening Nation and Region into Customer/Supplier means if a Region name changes, millions of dimension rows must be updated (Type 1 SCD). Given that geographical names are highly static, this is an acceptable tradeoff."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "ETL Complexity vs. BI Simplicity: Generating Surrogate Keys and pre-calculating metrics increases the complexity and processing time of the ETL/ELT pipeline, but shifts the compute burden away from the end-user BI layer."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Revenue and volume analysis by Customer Region and Nation. BI users frequently drill down from Region -> Nation -> Customer. Flattening this hierarchy allows instant filtering and grouping without joining 3 tables."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Market basket and order fulfillment analysis. Queries analyzing shipping delays (L_SHIPDATE > L_COMMITDATE) grouped by Order Priority (O_ORDERPRIORITY) now scan a single table."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Supply chain cost analysis. Identifying the total capital tied up in inventory (PS_AVAILQTY * PS_SUPPLYCOST) by Supplier Region requires joining FACT_PARTSUPP to DIM_SUPPLIER."
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Time-series reporting (e.g., Year-over-Year, Month-over-Month revenue growth). A dedicated Date dimension enables grouping by Quarter, Month, or Day of Week, which raw dates do not natively support without heavy SQL functions."
+      }
+    ]
+  }
+}
+```
+
+### Analytical Physical Model DDL (OLAP Optimized)
+
+The following SQL DDL is designed for a modern columnar OLAP data warehouse (such as Snowflake, BigQuery, or Redshift). It implements the Star Schema design detailed in the JSON above.
+
+```sql
+-- ==============================================================================
+-- DIMENSIONAL MODEL DDL (STAR SCHEMA)
+-- ==============================================================================
+
+-- ------------------------------------------------------------------------------
+-- 1. DIM_DATE (Conformed Dimension)
+-- ------------------------------------------------------------------------------
+CREATE TABLE DIM_DATE (
+    DATE_SK         INTEGER NOT NULL,       -- Format: YYYYMMDD
+    FULL_DATE       DATE NOT NULL,
+    DAY_OF_WEEK     VARCHAR(10) NOT NULL,
+    DAY_NUM_IN_MONTH INTEGER NOT NULL,
+    MONTH_NAME      VARCHAR(10) NOT NULL,
+    MONTH_NUM       INTEGER NOT NULL,
+    QUARTER         INTEGER NOT NULL,
+    YEAR            INTEGER NOT NULL,
+    IS_WEEKEND_FLAG BOOLEAN NOT NULL,
+    PRIMARY KEY (DATE_SK)
+);
+-- Note: Date dimensions are typically small enough to be broadcasted/replicated across all compute nodes.
+
+-- ------------------------------------------------------------------------------
+-- 2. DIM_CUSTOMER (Flattened Snowflake)
+-- ------------------------------------------------------------------------------
+CREATE TABLE DIM_CUSTOMER (
+    CUST_SK         INTEGER NOT NULL,       -- Surrogate Key
+    C_CUSTKEY       INTEGER NOT NULL,       -- Natural/Business Key
+    C_NAME          VARCHAR(25) NOT NULL,
+    C_ADDRESS       VARCHAR(40) NOT NULL,
+    C_PHONE         CHAR(15) NOT NULL,
+    C_ACCTBAL       DECIMAL(15,2) NOT NULL,
+    C_MKTSEGMENT    CHAR(10) NOT NULL,
+    NATION_NAME     CHAR(25) NOT NULL,      -- Denormalized from NATION
+    REGION_NAME     CHAR(25) NOT NULL,      -- Denormalized from REGION
+    C_COMMENT       VARCHAR(117),
+    PRIMARY KEY (CUST_SK)
+);
+-- Clustering Recommendation: Cluster by REGION_NAME, NATION_NAME, C_MKTSEGMENT
+
+-- ------------------------------------------------------------------------------
+-- 3. DIM_SUPPLIER (Flattened Snowflake)
+-- ------------------------------------------------------------------------------
+CREATE TABLE DIM_SUPPLIER (
+    SUPP_SK         INTEGER NOT NULL,       -- Surrogate Key
+    S_SUPPKEY       INTEGER NOT NULL,       -- Natural/Business Key
+    S_NAME          CHAR(25) NOT NULL,
+    S_ADDRESS       VARCHAR(40) NOT NULL,
+    S_PHONE         CHAR(15) NOT NULL,
+    S_ACCTBAL       DECIMAL(15,2) NOT NULL,
+    NATION_NAME     CHAR(25) NOT NULL,      -- Denormalized from NATION
+    REGION_NAME     CHAR(25) NOT NULL,      -- Denormalized from REGION
+    S_COMMENT       VARCHAR(101),
+    PRIMARY KEY (SUPP_SK)
+);
+-- Clustering Recommendation: Cluster by REGION_NAME, NATION_NAME
+
+-- ------------------------------------------------------------------------------
+-- 4. DIM_PART (Standard Dimension)
+-- ------------------------------------------------------------------------------
+CREATE TABLE DIM_PART (
+    PART_SK         INTEGER NOT NULL,       -- Surrogate Key
+    P_PARTKEY       INTEGER NOT NULL,       -- Natural/Business Key
+    P_NAME          VARCHAR(55) NOT NULL,
+    P_MFGR          CHAR(25) NOT NULL,
+    P_BRAND         CHAR(10) NOT NULL,
+    P_TYPE          VARCHAR(25) NOT NULL,
+    P_SIZE          INTEGER NOT NULL,
+    P_CONTAINER     CHAR(10) NOT NULL,
+    P_RETAILPRICE   DECIMAL(15,2) NOT NULL,
+    P_COMMENT       VARCHAR(23),
+    PRIMARY KEY (PART_SK)
+);
+-- Clustering Recommendation: Cluster by P_BRAND, P_MFGR, P_TYPE
+
+-- ------------------------------------------------------------------------------
+-- 5. FACT_LINEITEM (Wide Fact Table)
+-- ------------------------------------------------------------------------------
+CREATE TABLE FACT_LINEITEM (
+    -- Surrogate Keys
+    LINEITEM_SK     BIGINT NOT NULL,        -- Surrogate Key for the Fact row
+    CUST_SK         INTEGER NOT NULL,
+    PART_SK         INTEGER NOT NULL,
+    SUPP_SK         INTEGER NOT NULL,
+    
+    -- Date Surrogate Keys
+    ORDER_DATE_SK   INTEGER NOT NULL,
+    SHIP_DATE_SK    INTEGER NOT NULL,
+    COMMIT_DATE_SK  INTEGER NOT NULL,
+    RECEIPT_DATE_SK INTEGER NOT NULL,
+    
+    -- Degenerate Dimensions / Natural Keys
+    ORDERKEY        BIGINT NOT NULL,
+    LINENUMBER      INTEGER NOT NULL,
+    
+    -- Denormalized Order Header Attributes (from ORDERS)
+    ORDERSTATUS     CHAR(1) NOT NULL,
+    ORDERPRIORITY   CHAR(15) NOT NULL,
+    SHIPPRIORITY    INTEGER NOT NULL,
+    CLERK           CHAR(15) NOT NULL,
+    
+    -- Lineitem Attributes
+    RETURNFLAG      CHAR(1) NOT NULL,
+    LINESTATUS      CHAR(1) NOT NULL,
+    SHIPINSTRUCT    CHAR(25) NOT NULL,
+    SHIPMODE        CHAR(10) NOT NULL,
+    
+    -- Base Measures
+    QUANTITY        DECIMAL(15,2) NOT NULL,
+    EXTENDEDPRICE   DECIMAL(15,2) NOT NULL,
+    DISCOUNT        DECIMAL(15,2) NOT NULL,
+    TAX             DECIMAL(15,2) NOT NULL,
+    
+    -- Derived Analytical Measures
+    NET_REVENUE     DECIMAL(15,4) NOT NULL, -- EXTENDEDPRICE * (1 - DISCOUNT)
+    TOTAL_CHARGES   DECIMAL(15,4) NOT NULL, -- EXTENDEDPRICE * (1 - DISCOUNT) * (1 + TAX)
+    
+    PRIMARY KEY (LINEITEM_SK)
+);
+-- Partitioning Recommendation: Partition by ORDER_DATE_SK (or SHIP_DATE_SK depending on primary query access pattern)
+-- Clustering Recommendation: Cluster by CUST_SK, PART_SK, SUPP_SK
+
+-- ------------------------------------------------------------------------------
+-- 6. FACT_PARTSUPP (Inventory/Supply Fact Table)
+-- ------------------------------------------------------------------------------
+CREATE TABLE FACT_PARTSUPP (
+    -- Surrogate Keys
+    PART_SK         INTEGER NOT NULL,
+    SUPP_SK         INTEGER NOT NULL,
+    
+    -- Measures
+    AVAILQTY        INTEGER NOT NULL,
+    SUPPLYCOST      DECIMAL(15,2) NOT NULL,
+    INVENTORY_VALUE DECIMAL(15,2) NOT NULL, -- Derived: AVAILQTY * SUPPLYCOST
+    
+    PRIMARY KEY (PART_SK, SUPP_SK)
+);
+-- Clustering Recommendation: Cluster by SUPP_SK, PART_SK
+```

@@ -1,0 +1,212 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-05-56
+Model: gemini
+Prompt: RISEN-few-shot
+Schema: chinook
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transforms the highly normalized 11-table OLTP model into a 5-table Star Schema optimized for analytical (OLAP) workloads. We applied 'Collapsing Relations' to merge deep hierarchies (Track, Album, Artist, Genre, MediaType) into a single dimension table (`dim_track`), and transactional tables (Invoice, InvoiceLine) into a single fact table (`fact_sales`). We also used 'Adding Redundant Attributes' to embed frequently queried categorical and geographical data directly into the fact table, enabling zero-join queries for the most common analytical requests. Finally, 'Adding Derived Attributes' was used to precompute sales metrics.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapsing Relations: Merged Track, Album, Artist, Genre, and MediaType into a single denormalized dimension table named dim_track."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapsing Relations: Merged Invoice and InvoiceLine into a single granular fact table named fact_sales."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Collapsing Relations: Merged Playlist and PlaylistTrack into a single fact table named fact_playlist."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Collapsing Relations: Retained Customer and Employee as dim_customer and dim_employee to preserve hierarchy and independent entities, but prepared them for analytical reads."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Adding Derived Attributes: Added LineTotalAmount (Quantity * InvoiceLineUnitPrice) to fact_sales to precompute revenue per line item."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Adding Redundant Attributes: Added ArtistName, GenreName, and TrackName to fact_sales to eliminate joins to dim_track for common product-based aggregations."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Adding Redundant Attributes: Added CustomerCountry, CustomerState, and CustomerCity to fact_sales to eliminate joins to dim_customer for geographical sales aggregations."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Adding Redundant Attributes: Added SupportRepFirstName, SupportRepLastName, and SupportRepTitle to dim_customer to avoid joining with dim_employee for basic representative reporting."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage requirements due to the duplication of text attributes (e.g., ArtistName, CustomerCountry) across fact and dimension tables."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Potential for update anomalies: if an artist's name or a customer's location changes, the redundant attributes in the fact tables must be updated to maintain strict consistency, which adds overhead to ETL processes."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "A2",
+        "query": "SELECT \"ArtistName\", SUM(\"LineTotalAmount\") AS TotalSales FROM public.fact_sales GROUP BY \"ArtistName\" ORDER BY TotalSales DESC;"
+      },
+      {
+        "decision_id": "A3",
+        "query": "SELECT \"CustomerCountry\", SUM(\"LineTotalAmount\") AS TotalSales FROM public.fact_sales GROUP BY \"CustomerCountry\" ORDER BY TotalSales DESC;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+BEGIN;
+
+-- Dimension: Employee
+CREATE TABLE IF NOT EXISTS public.dim_employee
+(
+    "EmployeeId" integer NOT NULL,
+    "LastName" character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    "FirstName" character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    "Title" character varying(30) COLLATE pg_catalog."default",
+    "ReportsTo" integer,
+    "BirthDate" timestamp without time zone,
+    "HireDate" timestamp without time zone,
+    "Address" character varying(70) COLLATE pg_catalog."default",
+    "City" character varying(40) COLLATE pg_catalog."default",
+    "State" character varying(40) COLLATE pg_catalog."default",
+    "Country" character varying(40) COLLATE pg_catalog."default",
+    "PostalCode" character varying(10) COLLATE pg_catalog."default",
+    "Phone" character varying(24) COLLATE pg_catalog."default",
+    "Fax" character varying(24) COLLATE pg_catalog."default",
+    "Email" character varying(60) COLLATE pg_catalog."default",
+    CONSTRAINT "PK_dim_employee" PRIMARY KEY ("EmployeeId")
+);
+
+-- Dimension: Customer
+CREATE TABLE IF NOT EXISTS public.dim_customer
+(
+    "CustomerId" integer NOT NULL,
+    "FirstName" character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    "LastName" character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    "Company" character varying(80) COLLATE pg_catalog."default",
+    "Address" character varying(70) COLLATE pg_catalog."default",
+    "City" character varying(40) COLLATE pg_catalog."default",
+    "State" character varying(40) COLLATE pg_catalog."default",
+    "Country" character varying(40) COLLATE pg_catalog."default",
+    "PostalCode" character varying(10) COLLATE pg_catalog."default",
+    "Phone" character varying(24) COLLATE pg_catalog."default",
+    "Fax" character varying(24) COLLATE pg_catalog."default",
+    "Email" character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    "SupportRepId" integer,
+    "SupportRepFirstName" character varying(20) COLLATE pg_catalog."default",
+    "SupportRepLastName" character varying(20) COLLATE pg_catalog."default",
+    "SupportRepTitle" character varying(30) COLLATE pg_catalog."default",
+    CONSTRAINT "PK_dim_customer" PRIMARY KEY ("CustomerId")
+);
+
+-- Dimension: Track (Collapses Track, Album, Artist, Genre, MediaType)
+CREATE TABLE IF NOT EXISTS public.dim_track
+(
+    "TrackId" integer NOT NULL,
+    "TrackName" character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    "Composer" character varying(220) COLLATE pg_catalog."default",
+    "Milliseconds" integer NOT NULL,
+    "Bytes" integer,
+    "TrackUnitPrice" numeric(10, 2) NOT NULL,
+    "AlbumId" integer,
+    "AlbumTitle" character varying(160) COLLATE pg_catalog."default",
+    "ArtistId" integer,
+    "ArtistName" character varying(120) COLLATE pg_catalog."default",
+    "GenreId" integer,
+    "GenreName" character varying(120) COLLATE pg_catalog."default",
+    "MediaTypeId" integer NOT NULL,
+    "MediaTypeName" character varying(120) COLLATE pg_catalog."default",
+    CONSTRAINT "PK_dim_track" PRIMARY KEY ("TrackId")
+);
+
+-- Fact: Sales (Collapses Invoice, InvoiceLine and includes redundant analytical attributes)
+CREATE TABLE IF NOT EXISTS public.fact_sales
+(
+    "InvoiceLineId" integer NOT NULL,
+    "InvoiceId" integer NOT NULL,
+    "InvoiceDate" timestamp without time zone NOT NULL,
+    "BillingAddress" character varying(70) COLLATE pg_catalog."default",
+    "BillingCity" character varying(40) COLLATE pg_catalog."default",
+    "BillingState" character varying(40) COLLATE pg_catalog."default",
+    "BillingCountry" character varying(40) COLLATE pg_catalog."default",
+    "BillingPostalCode" character varying(10) COLLATE pg_catalog."default",
+    "InvoiceTotal" numeric(10, 2) NOT NULL,
+    "CustomerId" integer NOT NULL,
+    "CustomerCity" character varying(40) COLLATE pg_catalog."default",
+    "CustomerState" character varying(40) COLLATE pg_catalog."default",
+    "CustomerCountry" character varying(40) COLLATE pg_catalog."default",
+    "TrackId" integer NOT NULL,
+    "TrackName" character varying(200) COLLATE pg_catalog."default",
+    "ArtistName" character varying(120) COLLATE pg_catalog."default",
+    "GenreName" character varying(120) COLLATE pg_catalog."default",
+    "InvoiceLineUnitPrice" numeric(10, 2) NOT NULL,
+    "Quantity" integer NOT NULL,
+    "LineTotalAmount" numeric(10, 2) NOT NULL,
+    CONSTRAINT "PK_fact_sales" PRIMARY KEY ("InvoiceLineId")
+);
+
+-- Fact: Playlist (Collapses Playlist, PlaylistTrack)
+CREATE TABLE IF NOT EXISTS public.fact_playlist
+(
+    "PlaylistId" integer NOT NULL,
+    "TrackId" integer NOT NULL,
+    "PlaylistName" character varying(120) COLLATE pg_catalog."default",
+    CONSTRAINT "PK_fact_playlist" PRIMARY KEY ("PlaylistId", "TrackId")
+);
+
+-- Foreign Keys & Indexes
+ALTER TABLE IF EXISTS public.dim_employee
+    ADD CONSTRAINT "FK_dim_employee_ReportsTo" FOREIGN KEY ("ReportsTo")
+    REFERENCES public.dim_employee ("EmployeeId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.dim_customer
+    ADD CONSTRAINT "FK_dim_customer_SupportRepId" FOREIGN KEY ("SupportRepId")
+    REFERENCES public.dim_employee ("EmployeeId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.fact_sales
+    ADD CONSTRAINT "FK_fact_sales_CustomerId" FOREIGN KEY ("CustomerId")
+    REFERENCES public.dim_customer ("CustomerId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.fact_sales
+    ADD CONSTRAINT "FK_fact_sales_TrackId" FOREIGN KEY ("TrackId")
+    REFERENCES public.dim_track ("TrackId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.fact_playlist
+    ADD CONSTRAINT "FK_fact_playlist_TrackId" FOREIGN KEY ("TrackId")
+    REFERENCES public.dim_track ("TrackId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+CREATE INDEX IF NOT EXISTS "IFK_dim_customer_SupportRepId" ON public.dim_customer("SupportRepId");
+CREATE INDEX IF NOT EXISTS "IFK_fact_sales_CustomerId" ON public.fact_sales("CustomerId");
+CREATE INDEX IF NOT EXISTS "IFK_fact_sales_TrackId" ON public.fact_sales("TrackId");
+CREATE INDEX IF NOT EXISTS "IFK_fact_playlist_TrackId" ON public.fact_playlist("TrackId");
+
+END;
+```

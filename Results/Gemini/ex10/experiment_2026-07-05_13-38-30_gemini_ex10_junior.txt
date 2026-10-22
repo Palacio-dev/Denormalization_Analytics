@@ -1,0 +1,115 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-38-30
+Model: gemini
+Prompt: junior
+Schema: ex10
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on reducing joins for analytical queries by flattening the snowflake/relational schema into wide tables. Since the data exists at two distinct granularities (Country-Year for population and emissions, and Country-Year-EnergySource for energy consumption), creating a single 'One Big Table' (OBT) would cause severe data duplication (fan-out) for population and emissions. Instead, the strategy creates two denormalized data marts: one for yearly country metrics (combining population and emissions) and one for energy consumption. Both tables embed the geographic hierarchy (Country and Continent) directly.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge 'continente' and 'paises' into all analytical tables to eliminate geographic lookups."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Combine 'populacao' and 'emissao_g_efeito_estufa' into a single target table ('denorm_pais_ano_metricas') since they share the exact same grain (id_paises, ano)."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge 'consumo_anual' with 'fonte_energia', 'paises', and 'continente' into a separate target table ('denorm_consumo_energia') to handle the finer grain (id_paises, ano, tipo_energia) without duplicating the metrics from D2."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added 'continente_nome' and 'pais_nome' directly into the fact tables to avoid joining with dimension tables."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added 'fonte_energia_nome' directly into the energy consumption table."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Removed transactional surrogate keys ('id_consumo', 'id_emissao', 'id_pop') as they provide no analytical value. Replaced them with composite primary keys based on the natural grain of the data."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage requirements (Data Redundancy): Text fields like continent names, country names, and energy source names are repeated across millions of rows instead of being stored once."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If a country's name changes or is reassigned to a different continent, the update must be applied to every historical row in the denormalized tables rather than a single dimension record."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Compare greenhouse gas emissions per capita by country and continent over time. (Requires population, emissions, country, and continent data in a single scan)."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze the percentage of specific energy sources used per continent over the decades. (Requires energy consumption, energy source names, and continent data without complex joins)."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Script for Denormalized Schema
+
+```sql
+-- ==============================================================================
+-- Denormalized Schema for Analytics and Reporting
+-- ==============================================================================
+
+-- Table 1: Yearly Country Metrics
+-- Grain: Country + Year
+-- Combines: paises, continente, populacao, emissao_g_efeito_estufa
+CREATE TABLE IF NOT EXISTS public.denorm_pais_ano_metricas
+(
+    id_paises integer NOT NULL,
+    pais_nome character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    pais_fundacao integer NOT NULL,
+    id_continente integer NOT NULL,
+    continente_nome character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    ano integer NOT NULL,
+    quantidade_hab integer,
+    quantidade_emitida bigint,
+    CONSTRAINT denorm_pais_ano_metricas_pkey PRIMARY KEY (id_paises, ano)
+);
+
+-- Index to optimize time-series filtering and continent-level aggregations
+CREATE INDEX idx_denorm_metricas_ano ON public.denorm_pais_ano_metricas(ano);
+CREATE INDEX idx_denorm_metricas_continente ON public.denorm_pais_ano_metricas(continente_nome);
+
+
+-- Table 2: Yearly Energy Consumption
+-- Grain: Country + Year + Energy Source
+-- Combines: paises, continente, consumo_anual, fonte_energia
+CREATE TABLE IF NOT EXISTS public.denorm_consumo_energia
+(
+    id_paises integer NOT NULL,
+    pais_nome character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    id_continente integer NOT NULL,
+    continente_nome character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    ano integer NOT NULL,
+    id_fonte_energia integer NOT NULL,
+    fonte_energia_nome character varying(50)[] COLLATE pg_catalog."default" NOT NULL,
+    porcentagem integer NOT NULL,
+    CONSTRAINT denorm_consumo_energia_pkey PRIMARY KEY (id_paises, ano, id_fonte_energia)
+);
+
+-- Index to optimize filtering by energy source and time-series analysis
+CREATE INDEX idx_denorm_consumo_ano ON public.denorm_consumo_energia(ano);
+CREATE INDEX idx_denorm_consumo_continente ON public.denorm_consumo_energia(continente_nome);
+```

@@ -1,0 +1,206 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_11-44-44
+Model: ollama_local
+Prompt: mid-level
+Schema: ex07
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The original schema is a third-normalized (3NF) relational model optimized for data integrity and transactional integrity, featuring multiple join points between Usinas, Proprietarios, Rios, Localizacoes, and Municipios. To optimize for read-heavy analytical workloads (BI dashboards, aggregations), the model is transformed into a denormalized star-schema-like structure. The primary goal is to eliminate complex joins by embedding dimension attributes directly into the main fact table ('Usina') and consolidating related dimension tables. This reduces query latency significantly while accepting increased storage redundancy.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidated 'Usina' into a single fact table containing all dimension keys (id_proprietario, id_rio, id_localizacao) and critical dimension attributes (nome, potkw, lat, long, estagio, etc.) to avoid joining back to dimension tables."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Removed separate 'Proprietarios', 'Rios', and 'Localizacoes' tables. Instead, stored 'proprietario' name, 'rio' name, and coordinates (lat/long) directly in the 'Usina' table, as these are frequently queried alongside plant data."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Flattened the 'Municipios' hierarchy. Instead of joining 'Localizacoes' -> 'Municipios' -> 'Estados', the 'Usina' table now includes 'municipio', 'uf', and 'id_municipio' directly, derived from the location data."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Removed 'id_municipio1' and 'id_municipio2' from a dedicated 'Localizacoes' table. Since 'Usina' already holds the location coordinates, the municipality relationship is simplified to a single primary municipality per plant for reporting purposes, or kept as a single 'municipio' field in 'Usina'."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived attributes to 'Usina': 'proprietario' (from Proprietarios), 'rio_nome' (from Rios), 'municipio_nome' (from Municipios), 'uf' (from Estados), 'latitude', 'longitude' (from Localizacoes)."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed redundant foreign key columns (id_proprietario, id_rio, id_localizacao) from 'Usina' if the primary key strategy changes, or kept them as internal IDs if unique identification is still needed for ETL mapping. Assuming they are kept for traceability but no longer used in joins."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Removed separate 'Proprietarios', 'Rios', 'Municipios', 'Estados', and 'Localizacoes' tables entirely."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Trade-off: Increased storage footprint due to data duplication (e.g., storing 'rio' name in 'Usina' instead of referencing a small 'Rios' table). Benefit: Near-zero join latency for complex reports."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Trade-off: Loss of referential integrity constraints (no FOREIGN KEYs to other tables). Benefit: Simplified DDL and easier data loading without complex constraint enforcement."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Trade-off: Difficulty in detecting orphaned records (e.g., a 'Usina' with an invalid 'municipio' value). Benefit: Faster validation during data ingestion."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Business requirement: Generate a dashboard showing total power output (potkw) per municipality, filtered by state (uf), with plant names and owners. In the normalized schema, this requires 4+ joins. In the denormalized schema, it requires a single GROUP BY on 'municipio'."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Business requirement: Identify all hydroelectric plants (estagio='hidrelétrica') located in the state of 'SP'. The denormalized schema allows this with a simple WHERE clause on 'uf' without joining the 'Estados' table."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Reporting requirement: List the top 10 largest plants by capacity with their corresponding river names and owner names. This pattern was motivated by the need to display rich context in a single view without subqueries or joins."
+      }
+    ]
+  }
+}
+```
+
+### Complete SQL DDL Creation Script for the Denormalized Schema
+
+```sql
+-- Drop existing tables if they exist to ensure a clean slate
+DROP TABLE IF EXISTS public."Usina";
+DROP TABLE IF EXISTS public."Proprietarios";
+DROP TABLE IF EXISTS public."Rios";
+DROP TABLE IF EXISTS public."Localizacoes";
+DROP TABLE IF EXISTS public."Municipios";
+DROP TABLE IF EXISTS public."Estados";
+
+-- 1. Create the Main Fact Table (Usina)
+-- This table now acts as the central hub, containing all dimension attributes
+-- to minimize join operations for analytical queries.
+CREATE TABLE IF NOT EXISTS public."Usina" (
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    iniciop DATE,
+    atualizacao DATE,
+    lat DOUBLE PRECISION,
+    long DOUBLE PRECISION,
+    estagio VARCHAR,
+    -- Dimension attributes embedded for read performance
+    -- Owner info
+    proprietario VARCHAR,
+    -- River info
+    rio_nome VARCHAR,
+    -- Location/Municipality info (Flattened)
+    id_municipio INTEGER,
+    municipio_nome VARCHAR,
+    uf CHAR(2),
+    -- Location coordinates (moved from Localizacoes)
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION
+);
+
+-- 2. Create Dimension Tables (Optional for ETL integrity, but not joined in queries)
+-- Keeping these allows for source system consistency but they are not referenced in the main analytical model.
+CREATE TABLE IF NOT EXISTS public."Proprietarios" (
+    id_proprietario INTEGER PRIMARY KEY,
+    proprietario VARCHAR NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS public."Rios" (
+    id_rio INTEGER PRIMARY KEY,
+    rio VARCHAR NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS public."Municipios" (
+    id_municipio INTEGER PRIMARY KEY,
+    municipio VARCHAR NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS public."Estados" (
+    uf CHAR(2) PRIMARY KEY
+);
+
+-- 3. Data Loading Script (Optional but recommended for demonstration)
+-- This script populates the denormalized 'Usina' table with sample data
+-- simulating the transformation from the original normalized schema.
+
+-- Populate Dimensions
+INSERT INTO public."Estados" (uf) VALUES ('SP'), ('RJ'), ('MG'), ('BA');
+
+INSERT INTO public."Municipios" (id_municipio, municipio) VALUES 
+(1, 'São Paulo'), (2, 'Rio de Janeiro'), (3, 'Belo Horizonte'), (4, 'Salvador');
+
+INSERT INTO public."Proprietarios" (id_proprietario, proprietario) VALUES 
+(1, 'Empresa A'), (2, 'Grupo B');
+
+INSERT INTO public."Rios" (id_rio, rio) VALUES 
+(1, 'Rio Tietê'), (2, 'Rio Paraíba'), (3, 'Rio Doce');
+
+-- Populate Denormalized Fact Table
+INSERT INTO public."Usina" (
+    id, nome, potkw, potfis, iniciop, atualizacao, 
+    lat, long, estagio, 
+    -- Embedded Dimensions
+    proprietario, rio_nome, 
+    id_municipio, municipio_nome, uf,
+    latitude, longitude
+) VALUES 
+(1, 'Usina Hidro 1', 500.0, 0.0, '2020-01-01', '2023-10-01', 
+ -23.5505, -46.6333, 'hidrelétrica',
+ 'Empresa A', 'Rio Tietê',
+ 1, 'São Paulo', 'SP',
+ -23.5505, -46.6333),
+
+(2, 'Usina Hidro 2', 300.0, 0.0, '2019-05-15', '2023-09-20',
+ -22.9068, -43.1729, 'hidrelétrica',
+ 'Grupo B', 'Rio Paraíba',
+ 2, 'Rio de Janeiro', 'RJ',
+ -22.9068, -43.1729),
+
+(3, 'Usina Térmica 1', 800.0, 0.0, '2021-03-10', '2023-11-05',
+ -19.9167, -43.9345, 'térmica',
+ 'Empresa A', 'Rio Doce',
+ 3, 'Belo Horizonte', 'MG',
+ -19.9167, -43.9345),
+
+(4, 'Usina Hidro 3', 450.0, 0.0, '2022-02-20', '2023-10-15',
+ -12.9714, -38.3919, 'hidrelétrica',
+ 'Grupo B', 'Rio Tietê',
+ 4, 'Salvador', 'BA',
+ -12.9714, -38.3919);
+
+-- Note: In a production environment, you would use a Data Loading Tool (ETL)
+-- to populate this table based on the original normalized schema logic.
+-- Example logic:
+-- SELECT 
+--   u.id, u.nome, u.potkw,
+--   p.proprietario, r.rio,
+--   m.id_municipio, m.municipio,
+--   e.uf,
+--   l.latitude, l.longitude
+-- FROM public."Usina" u
+-- JOIN public."Proprietarios" p ON u.id_proprietario = p.id_proprietario
+-- JOIN public."Rios" r ON u.id_rio = r.id_rio
+-- JOIN public."Localizacoes" l ON u.id_localizacao = l.id_localizacao
+-- JOIN public."Municipios" m ON l.id_municipio1 = m.id_municipio
+-- JOIN public."Estados" e ON m.uf = e.uf;
+
+COMMIT;
+```

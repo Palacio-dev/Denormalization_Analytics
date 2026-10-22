@@ -1,0 +1,229 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-02-07
+Model: gemini
+Prompt: mid-level
+Schema: airplane
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions the highly normalized transactional schema into a Kimball-style 
+    Star Schema optimized for read-heavy BI and analytical workloads. The strategy revolves around two fact tables at 
+    different grains: 'fact_flights' (operational flight grain) and 'fact_passenger_flights' (passenger-segment grain). 
+    To minimize expensive joins, transactional entities are consolidated (e.g., bookings and tickets), semi-structured 
+    JSONB data is flattened into standard columnar formats, and dimension keys are pushed down into the lowest-grain fact tables.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidate 'bookings' and 'tickets' into a single 'dim_tickets' dimension table. Since a ticket is inherently tied to a booking, combining them removes a join while providing all passenger and booking context in one place."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge 'ticket_flights' and 'boarding_passes' into a single 'fact_passenger_flights' fact table. This represents the lowest grain of passenger activity (a passenger on a specific flight segment) and unifies revenue (amount) with logistics (seat_no, boarding_no)."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Pre-aggregate the 'seats' table into 'dim_aircrafts'. Instead of joining millions of rows to calculate aircraft capacity, seat counts (total, economy, business) are stored directly as attributes of the aircraft dimension."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Propagate dimension keys (departure_airport, arrival_airport, aircraft_code, scheduled_departure_date) from 'flights' down to 'fact_passenger_flights'. This avoids a snowflake design, allowing BI tools to analyze passenger revenue by route or aircraft without joining through the flights table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Flatten JSONB 'airport_name' and 'city' in 'airports_data' into standard TEXT columns in 'dim_airports' 
+        (assuming extraction of the primary language, e.g., English) to enable direct string aggregations and filtering."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Split the 'coordinates' POINT column in 'airports_data' into two separate NUMERIC columns 
+        ('latitude' and 'longitude') in 'dim_airports' for easier integration with BI mapping tools."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Extract 'email' and 'phone' from the 'contact_data' JSONB column in 'tickets' into dedicated TEXT 
+        columns in 'dim_tickets'."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Derive 'departure_delay_mins' and 'arrival_delay_mins' in 'fact_flights' by calculating the 
+        difference between scheduled and actual times, providing immediate operational metrics."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Duplication: Propagating flight dimension keys into 'fact_passenger_flights' and duplicating 'total_booking_amount' across multiple tickets in 'dim_tickets' increases storage requirements. However, this trades storage for significant read-performance gains."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Loss of Dynamic Localization: Flattening JSONB multi-language fields (like airport_name) into single TEXT columns assumes a primary reporting language, sacrificing the ability to dynamically query in multiple languages without adding explicit columns for each."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Complex Aggregation for Booking Totals: Because 'total_booking_amount' is denormalized into 'dim_tickets', summing this column directly will overstate revenue if a booking has multiple tickets. Analysts must use DISTINCT booking references or rely on the 'amount' column in the fact table for accurate revenue sums."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Revenue analysis by route and aircraft model. Pushing airport and aircraft keys to the passenger fact table allows grouping by route and summing revenue without joining the flights table."
+      },
+      {
+        "decision_id": "A4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Flight operational performance and delay analysis. Pre-calculating delay minutes prevents BI tools from having to perform complex date-math on the fly for every dashboard load."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aircraft load factor analysis (seats sold vs. capacity). Pre-aggregating seats into the aircraft dimension allows a simple join between 'fact_flights' (or passenger counts) and 'dim_aircrafts' to calculate utilization percentages."
+      },
+      {
+        "decision_id": "A3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Customer outreach for disrupted flights. Flattening contact data allows marketing and support teams to easily select emails and phone numbers for passengers on delayed or cancelled flights without parsing JSON."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Creation Script
+
+```sql
+CREATE SCHEMA IF NOT EXISTS analytics;
+
+-- ==========================================
+-- DIMENSIONS
+-- ==========================================
+
+CREATE TABLE IF NOT EXISTS analytics.dim_airports
+(
+    airport_code character(3) NOT NULL,
+    airport_name text NOT NULL, -- Extracted from JSONB
+    city text NOT NULL,         -- Extracted from JSONB
+    longitude numeric(10, 6) NOT NULL, -- Extracted from Point
+    latitude numeric(10, 6) NOT NULL,  -- Extracted from Point
+    timezone text NOT NULL,
+    CONSTRAINT dim_airports_pkey PRIMARY KEY (airport_code)
+);
+
+COMMENT ON TABLE analytics.dim_airports IS 'Dimension: Airports (Denormalized and flattened)';
+COMMENT ON COLUMN analytics.dim_airports.airport_name IS 'Airport name (Primary language extracted from JSONB)';
+COMMENT ON COLUMN analytics.dim_airports.longitude IS 'Longitude extracted from coordinates point';
+COMMENT ON COLUMN analytics.dim_airports.latitude IS 'Latitude extracted from coordinates point';
+
+CREATE TABLE IF NOT EXISTS analytics.dim_aircrafts
+(
+    aircraft_code character(3) NOT NULL,
+    model text NOT NULL, -- Extracted from JSONB
+    range integer NOT NULL,
+    total_capacity integer NOT NULL DEFAULT 0,    -- Pre-aggregated from seats table
+    economy_capacity integer NOT NULL DEFAULT 0,  -- Pre-aggregated from seats table
+    business_capacity integer NOT NULL DEFAULT 0, -- Pre-aggregated from seats table
+    comfort_capacity integer NOT NULL DEFAULT 0,  -- Pre-aggregated from seats table
+    CONSTRAINT dim_aircrafts_pkey PRIMARY KEY (aircraft_code)
+);
+
+COMMENT ON TABLE analytics.dim_aircrafts IS 'Dimension: Aircrafts (Includes pre-aggregated seat capacity)';
+COMMENT ON COLUMN analytics.dim_aircrafts.model IS 'Aircraft model (Extracted from JSONB)';
+COMMENT ON COLUMN analytics.dim_aircrafts.total_capacity IS 'Total number of seats available on the aircraft';
+
+CREATE TABLE IF NOT EXISTS analytics.dim_tickets
+(
+    ticket_no character(13) NOT NULL,
+    book_ref character(6) NOT NULL,
+    book_date timestamp with time zone NOT NULL,
+    total_booking_amount numeric(10, 2) NOT NULL,
+    passenger_id character varying(20) NOT NULL,
+    passenger_name text NOT NULL,
+    email text, -- Extracted from contact_data JSONB
+    phone text, -- Extracted from contact_data JSONB
+    CONSTRAINT dim_tickets_pkey PRIMARY KEY (ticket_no)
+);
+
+COMMENT ON TABLE analytics.dim_tickets IS 'Dimension: Tickets and Bookings (Consolidated passenger and booking data)';
+COMMENT ON COLUMN analytics.dim_tickets.total_booking_amount IS 'Total cost of the booking (Note: duplicated across tickets in the same booking)';
+COMMENT ON COLUMN analytics.dim_tickets.email IS 'Passenger email extracted from JSONB contact_data';
+COMMENT ON COLUMN analytics.dim_tickets.phone IS 'Passenger phone extracted from JSONB contact_data';
+
+-- ==========================================
+-- FACT TABLES
+-- ==========================================
+
+CREATE TABLE IF NOT EXISTS analytics.fact_flights
+(
+    flight_id integer NOT NULL,
+    flight_no character(6) NOT NULL,
+    scheduled_departure_date date NOT NULL, -- Derived for time-series partitioning/joins
+    departure_airport_code character(3) NOT NULL,
+    arrival_airport_code character(3) NOT NULL,
+    aircraft_code character(3) NOT NULL,
+    status character varying(20) NOT NULL,
+    scheduled_departure timestamp with time zone NOT NULL,
+    actual_departure timestamp with time zone,
+    departure_delay_mins integer, -- Derived: actual_departure - scheduled_departure
+    scheduled_arrival timestamp with time zone NOT NULL,
+    actual_arrival timestamp with time zone,
+    arrival_delay_mins integer,   -- Derived: actual_arrival - scheduled_arrival
+    CONSTRAINT fact_flights_pkey PRIMARY KEY (flight_id)
+);
+
+COMMENT ON TABLE analytics.fact_flights IS 'Fact: Flight Operations (Grain: One row per flight)';
+COMMENT ON COLUMN analytics.fact_flights.departure_delay_mins IS 'Calculated departure delay in minutes (null if not departed)';
+COMMENT ON COLUMN analytics.fact_flights.arrival_delay_mins IS 'Calculated arrival delay in minutes (null if not arrived)';
+
+CREATE TABLE IF NOT EXISTS analytics.fact_passenger_flights
+(
+    ticket_no character(13) NOT NULL,
+    flight_id integer NOT NULL,
+    scheduled_departure_date date NOT NULL,       -- Propagated from flights for direct date analysis
+    departure_airport_code character(3) NOT NULL, -- Propagated from flights to avoid joins
+    arrival_airport_code character(3) NOT NULL,   -- Propagated from flights to avoid joins
+    aircraft_code character(3) NOT NULL,          -- Propagated from flights to avoid joins
+    fare_conditions character varying(10) NOT NULL,
+    amount numeric(10, 2) NOT NULL,
+    boarding_no integer, -- Merged from boarding_passes (nullable if passenger missed flight)
+    seat_no character varying(4), -- Merged from boarding_passes
+    CONSTRAINT fact_passenger_flights_pkey PRIMARY KEY (ticket_no, flight_id)
+);
+
+COMMENT ON TABLE analytics.fact_passenger_flights IS 'Fact: Passenger Flight Segments (Grain: One row per passenger per flight segment)';
+COMMENT ON COLUMN analytics.fact_passenger_flights.amount IS 'Allocated revenue for this specific flight segment';
+COMMENT ON COLUMN analytics.fact_passenger_flights.boarding_no IS 'Boarding pass number (from boarding_passes)';
+COMMENT ON COLUMN analytics.fact_passenger_flights.seat_no IS 'Assigned seat number (from boarding_passes)';
+
+-- ==========================================
+-- FOREIGN KEYS & INDEXES (Optimized for BI)
+-- ==========================================
+
+-- Foreign Keys for fact_flights
+ALTER TABLE analytics.fact_flights
+    ADD CONSTRAINT fk_ff_departure_airport FOREIGN KEY (departure_airport_code) REFERENCES analytics.dim_airports (airport_code),
+    ADD CONSTRAINT fk_ff_arrival_airport FOREIGN KEY (arrival_airport_code) REFERENCES analytics.dim_airports (airport_code),
+    ADD CONSTRAINT fk_ff_aircraft FOREIGN KEY (aircraft_code) REFERENCES analytics.dim_aircrafts (aircraft_code);
+
+-- Foreign Keys for fact_passenger_flights
+ALTER TABLE analytics.fact_passenger_flights
+    ADD CONSTRAINT fk_fpf_ticket FOREIGN KEY (ticket_no) REFERENCES analytics.dim_tickets (ticket_no),
+    ADD CONSTRAINT fk_fpf_flight FOREIGN KEY (flight_id) REFERENCES analytics.fact_flights (flight_id),
+    ADD CONSTRAINT fk_fpf_departure_airport FOREIGN KEY (departure_airport_code) REFERENCES analytics.dim_airports (airport_code),
+    ADD CONSTRAINT fk_fpf_arrival_airport FOREIGN KEY (arrival_airport_code) REFERENCES analytics.dim_airports (airport_code),
+    ADD CONSTRAINT fk_fpf_aircraft FOREIGN KEY (aircraft_code) REFERENCES analytics.dim_aircrafts (aircraft_code);
+
+-- Indexes on high-cardinality foreign keys and common filtering columns to speed up aggregations
+CREATE INDEX IF NOT EXISTS idx_fact_flights_date ON analytics.fact_flights(scheduled_departure_date);
+CREATE INDEX IF NOT EXISTS idx_fact_flights_airports ON analytics.fact_flights(departure_airport_code, arrival_airport_code);
+
+CREATE INDEX IF NOT EXISTS idx_fact_passenger_flights_date ON analytics.fact_passenger_flights(scheduled_departure_date);
+CREATE INDEX IF NOT EXISTS idx_fact_passenger_flights_airports ON analytics.fact_passenger_flights(departure_airport_code, arrival_airport_code);
+CREATE INDEX IF NOT EXISTS idx_fact_passenger_flights_aircraft ON analytics.fact_passenger_flights(aircraft_code);
+CREATE INDEX IF NOT EXISTS idx_fact_passenger_flights_flight_id ON analytics.fact_passenger_flights(flight_id);
+```

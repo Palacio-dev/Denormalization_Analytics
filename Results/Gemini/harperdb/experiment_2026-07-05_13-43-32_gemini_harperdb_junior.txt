@@ -1,0 +1,87 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-43-32
+Model: gemini
+Prompt: junior
+Schema: harperdb
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on flattening the many-to-many relationship between users and entitlements into a single analytical table. In the original schema, resolving a user's entitlement details required joining three tables ('users', 'user_entitlements', and 'entitlements'). By merging these into a single wide table, we eliminate the need for joins during reporting. Each row in the new schema represents a unique user-entitlement pair, enriched with all entitlement attributes and derived analytical metrics to optimize read-heavy analytics.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge the 'users', 'user_entitlements', and 'entitlements' tables into a single flat table named 'denorm_user_entitlements'."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Migrated all attributes from the 'entitlements' table (activeDate, inactiveDate, useLimit, useCount, featureType, packageType, activeFlag) directly into the target table alongside user_id."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added a derived attribute 'remaining_uses' (calculated as useLimit - useCount) to prevent the need for on-the-fly calculations during reporting."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Removed the standalone 'users' table structure from the analytical model, as it only contained an ID which is now fully captured as part of the composite primary key in the denormalized table."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy and Storage: Entitlement details (like packageType, activeDate, useLimit) are duplicated for every user holding that entitlement, increasing overall storage requirements."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If an entitlement's base properties change (e.g., the useLimit is globally increased for a specific entitlement_id), multiple rows in the denormalized table must be updated instead of a single row in a normalized dimension table."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregating total useCount and remaining_uses per user across different packageTypes or featureTypes without requiring multi-table joins."
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Filtering and grouping active users by featureType or activeFlag for daily active entitlement reporting."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Creation Script
+
+```sql
+-- Create the denormalized table for analytics and reporting
+CREATE TABLE denorm_user_entitlements (
+    user_id INT,
+    entitlement_id INT,
+    
+    -- Attributes merged from the 'entitlements' table
+    activeDate DATE,
+    inactiveDate DATE,
+    useLimit INT,
+    useCount INT,
+    featureType VARCHAR(4),
+    packageType VARCHAR(4),
+    activeFlag INT,
+    
+    -- Derived analytical attributes
+    remaining_uses INT, -- Pre-calculated: (useLimit - useCount)
+    
+    -- The combination of user and entitlement remains the unique identifier for a row
+    PRIMARY KEY (user_id, entitlement_id)
+);
+
+-- Optional: Create indexes to further optimize inferred analytical query patterns
+CREATE INDEX idx_denorm_user_package ON denorm_user_entitlements(user_id, packageType);
+CREATE INDEX idx_denorm_active_features ON denorm_user_entitlements(activeFlag, featureType);
+```

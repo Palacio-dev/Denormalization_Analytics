@@ -1,0 +1,258 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 9
+  - Total Attributes: 45
+    * UF: 4 columns
+    * MUNICIPIO: 9 columns
+    * IDEB: 7 columns
+    * ENADE: 9 columns
+    * SAEB: 4 columns
+    * IES: 6 columns
+    * ESCOLA: 5 columns
+    * CURSO: 3 columns
+    * ANO: 6 columns
+
+Denormalized Model:
+  - Tables: 6
+  - Total Attributes: 40
+    * DIMENSAO_MUNICIPIO: 12 columns
+    * DIMENSAO_UF: 4 columns
+    * FATO_METRICAS: 16 columns
+    * DIMENSAO_CURSO: 5 columns
+    * DIMENSAO_ANO: 3 columns
+    * DIMENSAO_IES: 6 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Normalized model has MORE attributes (40 vs 45)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: id_ideb (INT) -> sigla_uf (VARCHAR(2))
+  - Type mismatch: rend_1 (REAL) -> nome_uf (VARCHAR(100))
+  - Type mismatch: id_enade (INT) -> sigla_curso (VARCHAR(50))
+  - Type mismatch: nota_enade_continua (REAL) -> sigla_ies_referencia (VARCHAR(20))
+  - Type mismatch: nome_escola (VARCHAR(100)) -> nome_ano (VARCHAR(10))
+  - Type mismatch: cod_escola (INTEGER) -> qtd_escolas_total (INT)
+  - Type mismatch: nome_curso (VARCHAR(100)) -> nome_curso (VARCHAR(200))
+--------------------------------------------------------------------------------
+Completeness Ratio:        0.89
+Data Type Preservation:    0.82
+Avg Levenshtein Distance:  3.75
+BLEU Score:                0.38
+ROUGE-1:                   0.77
+METEOR Score:              0.31
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: FATO_METRICAS
+Dimension Tables Detected: DIMENSAO_MUNICIPIO, DIMENSAO_UF, DIMENSAO_CURSO, DIMENSAO_ANO, DIMENSAO_IES
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected exactly 1 Fact table. Evaluating as a standard STAR SCHEMA.
+  - SNOWFLAKE VIOLATION: Dimension 'DIMENSAO_MUNICIPIO' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'rede_maioria' in 'DIMENSAO_MUNICIPIO' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'media_ideb' in 'DIMENSAO_MUNICIPIO' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'media_saeb' in 'DIMENSAO_MUNICIPIO' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'media_enade' in 'DIMENSAO_MUNICIPIO' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'total_participantes' in 'DIMENSAO_MUNICIPIO' allows NULLs. Consider demanding default values.
+  - SNOWFLAKE VIOLATION: Dimension 'DIMENSAO_CURSO' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'sigla_curso' in 'DIMENSAO_CURSO' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'sigla_ies_referencia' in 'DIMENSAO_CURSO' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'id_ies_referencia' in 'DIMENSAO_CURSO' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nome_ano' in 'DIMENSAO_ANO' allows NULLs. Consider demanding default values.
+  - SNOWFLAKE VIOLATION: Dimension 'DIMENSAO_IES' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'id_municipio_referencia' in 'DIMENSAO_IES' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * FATO_METRICAS: 12 Numeric, 0 Text
+  * DIMENSAO_MUNICIPIO: 7 Numeric, 4 Text
+  * DIMENSAO_UF: 1 Numeric, 2 Text
+  * DIMENSAO_CURSO: 1 Numeric, 3 Text
+  * DIMENSAO_ANO: 1 Numeric, 1 Text
+  * DIMENSAO_IES: 2 Numeric, 3 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  ano cod_escola codigo_ies id id_ano id_curso id_enade id_escola id_ideb id_ies id_municipio id_saeb ind_rend media_enade media_ideb media_saeb nome nome_curso nome_escola nome_ies nome_municipio nota_bruta_ce nota_bruta_fg nota_enade_continua nota_enade_faixa nota_ideb nota_mat nota_padrao nota_padronizada_ce nota_padronizada_fg nota_port qtd_ESCOLAS qtd_IES qtd_habitantes rede rede rend_1 rend_2 rend_3 rend_4 sigla_ies sigla_uf total_concluintes total_inscritos total_participantes
+
+Denormalized Model (Combined Text):
+  ano codigo_ies id_ano id_curso id_fato id_ies id_municipio id_uf ind_rend_ideb media_enade media_ideb media_saeb nome_ano nome_curso nome_ies nome_municipio nome_uf nome_uf nota_bruta_ce_enade nota_bruta_fg_enade nota_ideb_real nota_mat_saeb nota_padrao_saeb nota_padronizada_ce_enade nota_padronizada_fg_enade nota_port_saeb qtd_escolas_total qtd_habitantes qtd_ies_total rede rede_maioria sigla_curso sigla_ies sigla_ies_referencia sigla_uf sigla_uf taxa_participacao total_concluintes_enade total_inscritos_enade total_participantes
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 40 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id INT
+  Denormalized:  id_uf INT
+
+Pair 2:
+  Relational:    sigla_uf VARCHAR(2)
+  Denormalized:  sigla_uf VARCHAR(2)
+
+Pair 3:
+  Relational:    nome VARCHAR(100)
+  Denormalized:  nome_uf VARCHAR(100)
+
+Pair 4:
+  Relational:    qtd_habitantes INT
+  Denormalized:  qtd_habitantes INT
+
+Pair 5:
+  Relational:    id_municipio INT
+  Denormalized:  id_municipio INT
+
+Pair 6:
+  Relational:    nome_municipio VARCHAR(100)
+  Denormalized:  nome_municipio VARCHAR(100)
+
+Pair 7:
+  Relational:    media_ideb REAL
+  Denormalized:  media_ideb REAL
+
+Pair 8:
+  Relational:    media_saeb REAL
+  Denormalized:  media_saeb REAL
+
+Pair 9:
+  Relational:    media_enade REAL
+  Denormalized:  media_enade REAL
+
+Pair 10:
+  Relational:    total_participantes INT
+  Denormalized:  total_participantes INT
+
+Pair 11:
+  Relational:    id_ideb INT
+  Denormalized:  sigla_uf VARCHAR(2)
+
+Pair 12:
+  Relational:    rend_1 REAL
+  Denormalized:  nome_uf VARCHAR(100)
+
+Pair 13:
+  Relational:    ind_rend REAL
+  Denormalized:  ind_rend_ideb REAL
+
+Pair 14:
+  Relational:    nota_ideb REAL
+  Denormalized:  nota_ideb_real REAL
+
+Pair 15:
+  Relational:    id_enade INT
+  Denormalized:  sigla_curso VARCHAR(50)
+
+Pair 16:
+  Relational:    total_inscritos INT
+  Denormalized:  total_inscritos_enade INT
+
+Pair 17:
+  Relational:    total_concluintes INT
+  Denormalized:  total_concluintes_enade INT
+
+Pair 18:
+  Relational:    nota_bruta_ce REAL
+  Denormalized:  nota_bruta_ce_enade REAL
+
+Pair 19:
+  Relational:    nota_padronizada_ce REAL
+  Denormalized:  nota_padronizada_ce_enade REAL
+
+Pair 20:
+  Relational:    nota_bruta_fg REAL
+  Denormalized:  nota_bruta_fg_enade REAL
+
+Pair 21:
+  Relational:    nota_padronizada_fg REAL
+  Denormalized:  nota_padronizada_fg_enade REAL
+
+Pair 22:
+  Relational:    nota_enade_continua REAL
+  Denormalized:  sigla_ies_referencia VARCHAR(20)
+
+Pair 23:
+  Relational:    nota_enade_faixa REAL
+  Denormalized:  taxa_participacao REAL
+
+Pair 24:
+  Relational:    id_saeb INT
+  Denormalized:  id_fato INT
+
+Pair 25:
+  Relational:    nota_mat REAL
+  Denormalized:  nota_mat_saeb REAL
+
+Pair 26:
+  Relational:    nota_port REAL
+  Denormalized:  nota_port_saeb REAL
+
+Pair 27:
+  Relational:    nota_padrao REAL
+  Denormalized:  nota_padrao_saeb REAL
+
+Pair 28:
+  Relational:    id_ies INT
+  Denormalized:  id_ies INT
+
+Pair 29:
+  Relational:    nome_ies VARCHAR(100)
+  Denormalized:  nome_ies VARCHAR(100)
+
+Pair 30:
+  Relational:    sigla_ies VARCHAR(20)
+  Denormalized:  sigla_ies VARCHAR(20)
+
+Pair 31:
+  Relational:    codigo_ies INT
+  Denormalized:  codigo_ies INT
+
+Pair 32:
+  Relational:    rede VARCHAR(100)
+  Denormalized:  rede_maioria VARCHAR(100)
+
+Pair 33:
+  Relational:    id_escola INT
+  Denormalized:  qtd_ies_total INT
+
+Pair 34:
+  Relational:    nome_escola VARCHAR(100)
+  Denormalized:  nome_ano VARCHAR(10)
+
+Pair 35:
+  Relational:    cod_escola INTEGER
+  Denormalized:  qtd_escolas_total INT
+
+Pair 36:
+  Relational:    rede VARCHAR(100)
+  Denormalized:  rede VARCHAR(100)
+
+Pair 37:
+  Relational:    id_curso INT
+  Denormalized:  id_curso INT
+
+Pair 38:
+  Relational:    nome_curso VARCHAR(100)
+  Denormalized:  nome_curso VARCHAR(200)
+
+Pair 39:
+  Relational:    id_ano INT
+  Denormalized:  id_ano INT
+
+Pair 40:
+  Relational:    ano INT
+  Denormalized:  ano INT
+
+
+================================================================================

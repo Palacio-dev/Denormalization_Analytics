@@ -1,0 +1,312 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_16-26-39
+Model: ollama_local
+Prompt: mid-level
+Schema: HFC
+==================================================
+
+### Analysis and Redesign Strategy
+
+The provided schema represents a classic "Transaction-Oriented Normalized" design typical of relational databases (like PostgreSQL) used for CRUD operations. It relies heavily on foreign keys to maintain referential integrity and reduces data redundancy to ensure ACID compliance. However, for an analytical environment (BI dashboards, reporting), this structure suffers from:
+1.  **High Join Complexity:** Queries to calculate statistics (e.g., "Total specimens per family per year") require joining 5-7 tables, leading to performance bottlenecks on large datasets.
+2.  **Fragmented Dimensions:** Information about a specimen is scattered across `tombos`, `especies`, `familias`, `generos`, `solos`, `relevos`, etc.
+3.  **Lack of Aggregability:** Aggregating measures (counts, sums, averages) requires complex subqueries or window functions to reconstruct dimensions.
+
+To optimize for read-heavy workloads, we will adopt a **Star Schema** approach with significant denormalization of dimensions. We will create a central `fact_specimen` table and a set of denormalized dimension tables that include necessary attributes from multiple normalized tables.
+
+#### Section 1: Structural Decisions and Trade-offs
+
+```json
+{
+  "section_1": {
+    "summary": "The schema is redesigned from a normalized relational model into a denormalized Star Schema. The core transactional entity `tombos` is promoted to a Fact table, while related entities (Species, Family, Genus, User, Herbarium, Location) are transformed into Denormalized Dimension tables. Foreign keys are replaced with direct column inclusion to eliminate joins during analytical queries.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidated `especies`, `sub_especies`, `variedades`, `familias`, `generos`, `sub_familias` into a single `dim_taxon` table. This unifies taxonomic hierarchy and avoids joining multiple taxon tables per specimen.",
+        "source_tables": ["especies", "sub_especies", "variedades", "familias", "generos", "sub_familias"],
+        "target_tables": ["dim_taxon"]
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merged `locais_coleta`, `enderecos`, `estados`, `paises`, `solos`, `relevos`, `vegetacoes` into a `dim_location` table. This allows spatial and geographic analysis without joining address and region tables.",
+        "source_tables": ["locais_coleta", "enderecos", "estados", "paises", "solos", "relevos", "vegetacoes"],
+        "target_tables": ["dim_location"]
+      },
+      {
+        "decision_id": "D3",
+        "description": "Created `dim_taxonomy` (or kept within dim_taxon) to store `nome_cientifico` and `taxon` directly in the fact table or dimension, removing the need to join `tombos` to `especies` just for the name.",
+        "source_tables": ["tombos", "especies"],
+        "target_tables": ["fact_specimen"]
+      },
+      {
+        "decision_id": "D4",
+        "description": "Expanded `dim_user` and `dim_herbario` tables to include `email`, `nome`, `ra`, `telefone` and `caminho_logotipo` directly, removing the need to join `usuarios` and `herbarios`.",
+        "source_tables": ["usuarios", "herbarios"],
+        "target_tables": ["dim_user", "dim_herbario"]
+      },
+      {
+        "decision_id": "D5",
+        "description": "Created `fact_specimen` as the central fact table containing primary measures (count, date, coordinates) and key dimension keys.",
+        "source_tables": ["tombos"],
+        "target_tables": ["fact_specimen"]
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added `latitude`, `longitude`, `altitude` to `dim_location` (or kept in fact but denormalized in dimension for filtering). Added `nome_cientifico` and `nome_populares` to `fact_specimen` or `dim_taxon` to avoid joining `tombos` for basic info.",
+        "action": "Attribute duplication for join elimination"
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added `data_coleta_ano`, `data_coleta_mes`, `data_coleta_dia` to `fact_specimen` to enable time-based slicing without joining `tombos`.",
+        "action": "Attribute duplication for time-series analysis"
+      },
+      {
+        "decision_id": "A3",
+        "description": "Removed `autor_id` from `fact_specimen` and replaced with `autor_nome` in `dim_taxon` or `fact_specimen` for reporting.",
+        "action": "Attribute duplication for reporting"
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy: Attributes like `nome`, `email`, and coordinates are repeated for every fact record. This increases storage requirements but improves query speed.",
+        "impact": "Increased storage cost, reduced data consistency (requires application-level or trigger-level sync)"
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Complexity: Changing a user's email now requires updating the `dim_user` table (and potentially the fact table if the user is linked to a fact). The original FK approach handles this automatically via the database engine.",
+        "impact": "Higher risk of stale data if ETL logic is not robust; requires careful change management."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Complexity of Schema Design: The initial design is harder to maintain due to the need to keep denormalized columns in sync with source systems.",
+        "impact": "Increased maintenance overhead for data engineers."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+      "decision_id": "D1",
+      "query_pattern_type": "inferred",
+      "query_pattern_description": "Taxonomic Distribution Report: 'Count specimens per Family and Genus per Year'. Previously required joining 4 tables (tombos, especie, familia, genero). Now requires only fact_specimen and dim_taxon."
+    },
+    {
+      "decision_id": "D2",
+      "query_pattern_type": "inferred",
+      "query_pattern_description": "Geospatial Analysis: 'Map collection locations by State'. Previously required joining tombos, locais_coleta, enderecos, estados, paises. Now uses dim_location."
+    },
+    {
+      "decision_id": "D3",
+      "query_pattern_type": "inferred",
+      "query_pattern_description": "User Performance: 'Total specimens collected by Herbarium in 2023'. Previously required joining tombos, usuarios, herbarios. Now uses fact_specimen and dim_user."
+    }
+  ]
+}
+```
+
+---
+
+### Complete SQL DDL Creation Script
+
+This script creates the denormalized schema optimized for analytics. It uses `CREATE TABLE` statements to define the Star Schema structure.
+
+```sql
+-- Drop existing tables if they exist to ensure clean state for the new schema
+DROP TABLE IF EXISTS public.dim_location CASCADE;
+DROP TABLE IF EXISTS public.dim_taxon CASCADE;
+DROP TABLE IF EXISTS public.dim_user CASCADE;
+DROP TABLE IF EXISTS public.dim_herbario CASCADE;
+DROP TABLE IF EXISTS public.fact_specimen CASCADE;
+
+-- ==========================================
+-- DIMENSION TABLES (Denormalized)
+-- ==========================================
+
+-- Dimension: Location (Consolidates locations, addresses, states, cities, soil, relief, vegetation)
+CREATE TABLE IF NOT EXISTS public.dim_location (
+    id bigserial NOT NULL,
+    nome character varying(300) COLLATE pg_catalog."default" NOT NULL,
+    cidade_id bigint,
+    estado_id bigint,
+    pais_id integer,
+    cidade_nome character varying(200) COLLATE pg_catalog."default",
+    estado_nome character varying(255) COLLATE pg_catalog."default",
+    pais_nome character varying(255) COLLATE pg_catalog."default",
+    sigla_estado character(4) COLLATE pg_catalog."default",
+    sigla_pais character(4) COLLATE pg_catalog."default",
+    logradouro character varying(200) COLLATE pg_catalog."default",
+    numero character varying(10) COLLATE pg_catalog."default",
+    complemento text COLLATE pg_catalog."default",
+    solo_nome character varying(300) COLLATE pg_catalog."default",
+    relevo_nome character varying(300) COLLATE pg_catalog."default",
+    vegetacao_nome character varying(300) COLLATE pg_catalog."default",
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT idx_dim_location_id PRIMARY KEY (id)
+);
+
+-- Dimension: Taxonomy (Consolidates species, sub-species, varieties, families, genera)
+CREATE TABLE IF NOT EXISTS public.dim_taxon (
+    id bigserial NOT NULL,
+    especie_nome character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    sub_especie_nome character varying(255) COLLATE pg_catalog."default",
+    genero_nome character varying(200) COLLATE pg_catalog."default",
+    familia_nome character varying(200) COLLATE pg_catalog."default",
+    sub_familia_nome character varying(300) COLLATE pg_catalog."default",
+    nome_cientifico text COLLATE pg_catalog."default",
+    nome_populares text COLLATE pg_catalog."default",
+    taxon character varying(45) COLLATE pg_catalog."default",
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT idx_dim_taxon_id PRIMARY KEY (id)
+);
+
+-- Dimension: User (Denormalized user details)
+CREATE TABLE IF NOT EXISTS public.dim_user (
+    id bigserial NOT NULL,
+    nome character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    ra character varying(45) COLLATE pg_catalog."default",
+    email character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    telefone character varying(45) COLLATE pg_catalog."default",
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT idx_dim_user_id PRIMARY KEY (id)
+);
+
+-- Dimension: Herbarium (Denormalized herbarium details)
+CREATE TABLE IF NOT EXISTS public.dim_herbario (
+    id bigserial NOT NULL,
+    nome character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    sigla character varying(80) COLLATE pg_catalog."default" NOT NULL,
+    email character varying(200) COLLATE pg_catalog."default",
+    caminho_logotipo text COLLATE pg_catalog."default",
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT idx_dim_herbario_id PRIMARY KEY (id)
+);
+
+-- ==========================================
+-- FACT TABLE (Denormalized Specimen)
+-- ==========================================
+
+-- Fact Table: Consolidates specimen data with direct attribute references
+CREATE TABLE IF NOT EXISTS public.fact_specimen (
+    id bigserial NOT NULL,
+    hcf bigint NOT NULL,
+    data_coleta timestamp with time zone NOT NULL,
+    data_coleta_ano integer,
+    data_coleta_mes bigint,
+    data_coleta_dia bigint,
+    latitude double precision,
+    longitude double precision,
+    altitude double precision,
+    situacao character varying(20) COLLATE pg_catalog."default",
+    especie_id bigint,
+    genero_id bigint,
+    familia_id bigint,
+    sub_especie_id bigint,
+    sub_familia_id bigint,
+    solo_id bigint,
+    relevo_id bigint,
+    vegetacao_id bigint,
+    tipo_id bigint,
+    especie_nome character varying(200) COLLATE pg_catalog."default",
+    genero_nome character varying(200) COLLATE pg_catalog."default",
+    familia_nome character varying(200) COLLATE pg_catalog."default",
+    sub_especie_nome character varying(255) COLLATE pg_catalog."default",
+    sub_familia_nome character varying(300) COLLATE pg_catalog."default",
+    nome_cientifico text COLLATE pg_catalog."default",
+    nome_populares text COLLATE pg_catalog."default",
+    observacao text COLLATE pg_catalog."default",
+    latitude_location double precision, -- Denormalized for easy filtering
+    longitude_location double precision, -- Denormalized for easy filtering
+    
+    -- User Relations
+    usuario_id bigint,
+    usuario_nome character varying(200) COLLATE pg_catalog."default",
+    usuario_ra character varying(45) COLLATE pg_catalog."default",
+    usuario_email character varying(200) COLLATE pg_catalog."default",
+    
+    -- Herbarium Relations
+    herbario_id bigint,
+    herbario_nome character varying(200) COLLATE pg_catalog."default",
+    herbario_sigla character varying(80) COLLATE pg_catalog."default",
+    
+    -- Location Relations
+    local_coleta_id bigint,
+    local_coleta_nome character varying(300) COLLATE pg_catalog."default",
+    cidade_nome character varying(200) COLLATE pg_catalog."default",
+    estado_nome character varying(255) COLLATE pg_catalog."default",
+    pais_nome character varying(255) COLLATE pg_catalog."default",
+    
+    -- Creation Timestamps
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    CONSTRAINT idx_fact_specimen_id PRIMARY KEY (id),
+    CONSTRAINT idx_fact_specimen_hcf PRIMARY KEY (hcf)
+);
+
+-- ==========================================
+-- INDEXES
+-- ==========================================
+
+-- Indexes on Fact Table for common analytical queries
+CREATE INDEX IF NOT EXISTS idx_fact_specimen_data_coleta_ano ON public.fact_specimen(data_coleta_ano);
+CREATE INDEX IF NOT EXISTS idx_fact_specimen_data_coleta_mes ON public.fact_specimen(data_coleta_mes);
+CREATE INDEX IF NOT EXISTS idx_fact_specimen_especie_nome ON public.fact_specimen(especie_nome);
+CREATE INDEX IF NOT EXISTS idx_fact_specimen_familia_nome ON public.fact_specimen(familia_nome);
+CREATE INDEX IF NOT EXISTS idx_fact_specimen_genero_nome ON public.fact_specimen(genero_nome);
+CREATE INDEX IF NOT EXISTS idx_fact_specimen_situacao ON public.fact_specimen(situacao);
+CREATE INDEX IF NOT EXISTS idx_fact_specimen_latitude ON public.fact_specimen(latitude);
+CREATE INDEX IF NOT EXISTS idx_fact_specimen_longitude ON public.fact_specimen(longitude);
+
+-- Indexes on Dimension Tables
+CREATE INDEX IF NOT EXISTS idx_dim_location_id ON public.dim_location(id);
+CREATE INDEX IF NOT EXISTS idx_dim_taxon_id ON public.dim_taxon(id);
+CREATE INDEX IF NOT EXISTS idx_dim_user_id ON public.dim_user(id);
+CREATE INDEX IF NOT EXISTS idx_dim_herbario_id ON public.dim_herbario(id);
+
+-- ==========================================
+-- VIEWS (Optional but recommended for quick access)
+-- ==========================================
+
+-- View to join fact and dimensions without writing complex joins in application code
+CREATE OR REPLACE VIEW public.view_analytical_specimen AS
+SELECT 
+    fs.id,
+    fs.hcf,
+    fs.data_coleta,
+    fs.data_coleta_ano,
+    fs.data_coleta_mes,
+    fs.data_coleta_dia,
+    fs.latitude,
+    fs.longitude,
+    fs.altitude,
+    fs.situacao,
+    fs.espécie_nome,
+    fs.genero_nome,
+    fs.familia_nome,
+    fs.sub_especie_nome,
+    fs.sub_familia_nome,
+    fs.nome_cientifico,
+    fs.nome_populares,
+    fs.observacao,
+    fs.usuario_id,
+    fs.usuario_nome,
+    fs.usuario_ra,
+    fs.usuario_email,
+    fs.herbario_id,
+    fs.herbario_nome,
+    fs.herbario_sigla,
+    fs.local_coleta_id,
+    fs.cidade_nome,
+    fs.estado_nome,
+    fs.pais_nome
+FROM public.fact_specimen fs;
+
+```

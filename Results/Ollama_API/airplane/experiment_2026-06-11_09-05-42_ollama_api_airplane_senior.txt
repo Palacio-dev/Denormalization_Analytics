@@ -1,0 +1,202 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-05-42
+Model: ollama_api
+Prompt: senior
+Schema: airplane
+==================================================
+
+{
+  "section_1": {
+    "summary": "The normalized schema is transformed into a star schema model optimized for OLAP workloads. Key dimensions include time (date/hour), aircraft, airports, passengers, bookings, and seats. Fact tables include flight performance and ticket sales. The model denormalizes frequently joined lookup data (e.g., aircraft model, airport city/timezone) into dimension tables to reduce joins and improve query performance. Partitioning is recommended on time-based columns for large fact tables.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Convert the normalized schema into a star schema with two main fact tables: fact_flight_performance and fact_ticket_sales, joined to conformed dimensions."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge aircrafts_data into dim_aircraft to centralize aircraft-related attributes."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge airports_data into dim_airport to centralize airport-related attributes."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Denormalize booking and ticket data into dim_booking and dim_passenger."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Absorb seat class into fact_ticket_sales to avoid joins with seats table."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Introduce surrogate keys for time-based partitioning and easier joins."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added surrogate keys to dimension tables (e.g., sk_aircraft_id, sk_airport_id)."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added derived time attributes (e.g., scheduled_departure_date, scheduled_departure_hour) to fact tables for easier aggregation."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Flattened JSON fields (model, city, airport_name) into scalar fields for better query performance."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added timezone-aware departure/arrival timestamps to fact tables to support time zone-aware analysis."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Denormalization increases storage usage but significantly reduces join complexity and improves analytical query performance."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Embedding reference data in dimensions introduces redundancy but avoids costly joins during aggregation."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Surrogate keys add ETL complexity but enable better partitioning and historical tracking."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregation of total revenue by departure city, arrival city, and month."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Flight delay analysis by aircraft type and departure airport."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Top-performing routes by number of passengers and revenue."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Occupancy rate analysis by aircraft type and fare class."
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Passenger booking trends by booking date and travel class."
+      }
+    ]
+  }
+}
+
+---
+
+```sql
+-- Denormalized Analytical Schema for OLAP Workloads
+
+-- Dimension: Aircraft
+CREATE TABLE IF NOT EXISTS analytics.dim_aircraft (
+    sk_aircraft_id SERIAL PRIMARY KEY,
+    aircraft_code CHAR(3) NOT NULL,
+    model_name TEXT NOT NULL,
+    range_km INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Dimension: Airport
+CREATE TABLE IF NOT EXISTS analytics.dim_airport (
+    sk_airport_id SERIAL PRIMARY KEY,
+    airport_code CHAR(3) NOT NULL,
+    airport_name TEXT NOT NULL,
+    city TEXT NOT NULL,
+    timezone TEXT NOT NULL,
+    longitude FLOAT NOT NULL,
+    latitude FLOAT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Dimension: Passenger
+CREATE TABLE IF NOT EXISTS analytics.dim_passenger (
+    sk_passenger_id SERIAL PRIMARY KEY,
+    passenger_id VARCHAR(20) NOT NULL,
+    passenger_name TEXT NOT NULL,
+    contact_data JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Dimension: Booking
+CREATE TABLE IF NOT EXISTS analytics.dim_booking (
+    sk_booking_id SERIAL PRIMARY KEY,
+    book_ref CHAR(6) NOT NULL,
+    book_date TIMESTAMP WITH TIME ZONE NOT NULL,
+    total_amount NUMERIC(10,2) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Dimension: Time (Optional, for advanced time hierarchies)
+-- Not materialized here, but can be used in BI tools or as a view
+
+-- Fact: Flight Performance
+CREATE TABLE IF NOT EXISTS analytics.fact_flight_performance (
+    flight_id INTEGER NOT NULL,
+    flight_no CHAR(6) NOT NULL,
+    sk_departure_airport_id INTEGER REFERENCES analytics.dim_airport(sk_airport_id),
+    sk_arrival_airport_id INTEGER REFERENCES analytics.dim_airport(sk_airport_id),
+    sk_aircraft_id INTEGER REFERENCES analytics.dim_aircraft(sk_aircraft_id),
+    scheduled_departure TIMESTAMP WITH TIME ZONE NOT NULL,
+    scheduled_arrival TIMESTAMP WITH TIME ZONE NOT NULL,
+    actual_departure TIMESTAMP WITH TIME ZONE,
+    actual_arrival TIMESTAMP WITH TIME ZONE,
+    status VARCHAR(20) NOT NULL,
+    scheduled_departure_date DATE NOT NULL,
+    scheduled_departure_hour SMALLINT NOT NULL,
+    scheduled_arrival_date DATE NOT NULL,
+    scheduled_arrival_hour SMALLINT NOT NULL,
+    delay_minutes INTEGER,
+    is_delayed BOOLEAN GENERATED ALWAYS AS (
+        CASE WHEN delay_minutes > 0 THEN TRUE ELSE FALSE END
+    ) STORED,
+    PRIMARY KEY (flight_id)
+) PARTITION BY RANGE (scheduled_departure_date);
+
+-- Indexes for fact_flight_performance
+CREATE INDEX idx_fact_flight_perf_departure_date ON analytics.fact_flight_performance(scheduled_departure_date);
+CREATE INDEX idx_fact_flight_perf_departure_airport ON analytics.fact_flight_performance(sk_departure_airport_id);
+CREATE INDEX idx_fact_flight_perf_aircraft ON analytics.fact_flight_performance(sk_aircraft_id);
+
+-- Fact: Ticket Sales
+CREATE TABLE IF NOT EXISTS analytics.fact_ticket_sales (
+    ticket_no CHAR(13) NOT NULL,
+    sk_booking_id INTEGER REFERENCES analytics.dim_booking(sk_booking_id),
+    sk_passenger_id INTEGER REFERENCES analytics.dim_passenger(sk_passenger_id),
+    flight_id INTEGER NOT NULL,
+    sk_departure_airport_id INTEGER REFERENCES analytics.dim_airport(sk_airport_id),
+    sk_arrival_airport_id INTEGER REFERENCES analytics.dim_airport(sk_airport_id),
+    sk_aircraft_id INTEGER REFERENCES analytics.dim_aircraft(sk_aircraft_id),
+    fare_conditions VARCHAR(10) NOT NULL,
+    amount NUMERIC(10,2) NOT NULL,
+    seat_no VARCHAR(4),
+    scheduled_departure TIMESTAMP WITH TIME ZONE NOT NULL,
+    scheduled_departure_date DATE NOT NULL,
+    scheduled_departure_hour SMALLINT NOT NULL,
+    PRIMARY KEY (ticket_no, flight_id)
+) PARTITION BY RANGE (scheduled_departure_date);
+
+-- Indexes for fact_ticket_sales
+CREATE INDEX idx_fact_ticket_sales_departure_date ON analytics.fact_ticket_sales(scheduled_departure_date);
+CREATE INDEX idx_fact_ticket_sales_passenger ON analytics.fact_ticket_sales(sk_passenger_id);
+CREATE INDEX idx_fact_ticket_sales_booking ON analytics.fact_ticket_sales(sk_booking_id);
+CREATE INDEX idx_fact_ticket_sales_fare_class ON analytics.fact_ticket_sales(fare_conditions);
+
+-- Optional: Aggregated Flight Summary Table (Materialized View or Batch Table)
+-- CREATE TABLE analytics.flight_summary_daily (...);
+```

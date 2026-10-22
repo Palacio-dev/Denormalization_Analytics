@@ -1,0 +1,215 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-41-56
+Model: gemini
+Prompt: senior
+Schema: ex06
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The strategy transitions a highly normalized, snowflake-like OLTP schema into a denormalized Star Schema optimized for OLAP workloads. The primary objective is to reduce query latency for large-scale aggregations by flattening hierarchical dimensions (Geography, Institution/Course) and consolidating disparate, 1-to-1 metric tables (ENADE, SAEB, IDEB, ANO) into a single, wide fact table. This design minimizes join complexity, maximizes compatibility with BI tools, and provides direct paths for slicing and dicing data.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Flatten Geography Hierarchy: Combine source tables 'UF' and 'MUNICIPIO' into a single denormalized dimension 'dim_geography'."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Flatten Higher Education Hierarchy: Combine source tables 'IES' and 'CURSO' into a single denormalized dimension 'dim_course'."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Consolidate Fact Tables: Merge source tables 'ANO', 'ENADE', 'SAEB', and 'IDEB' into a single wide fact table 'fact_education_assessment'."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Create Isolated School Dimension: Transform 'ESCOLA' into 'dim_school' and embed geographic foreign keys, preparing it for future basic education fact tables."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Introduced Surrogate Keys (SKs) (e.g., sk_geography, sk_course) to all dimensions to decouple the analytical model from source system natural keys and support Slowly Changing Dimensions (SCDs) in the future."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Converted 'ano' from the source 'ANO' table into a degenerate dimension directly within the fact table, avoiding the need for a separate Date dimension for yearly grains."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added 'sk_geography' directly to the fact table (derived via Course -> IES -> Municipio). This allows geographic aggregations without forcing a join through 'dim_course'."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Storage vs. Compute: Wide fact tables and denormalized dimensions introduce data redundancy (e.g., repeating UF names in the geography dimension and potentially sparse NULLs in the fact table if a course lacks SAEB/IDEB scores). This trades increased storage footprint for significant reductions in CPU-intensive joins during read operations."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomaly Risk: Denormalizing pre-aggregated metrics (like media_ideb in MUNICIPIO) into dim_geography means updates to these averages require updating multiple rows if SCD Type 2 is implemented. In an OLAP context, this is acceptable as data is typically loaded in bulk (ETL/ELT)."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Calculate the average ENADE, SAEB, and IDEB scores per course and year. Consolidating these into a single fact table prevents a costly 5-way join (ANO + ENADE + SAEB + IDEB + CURSO)."
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregate total inhabitants and average institutional scores by State (UF). Flattening Geography avoids joining MUNICIPIO and UF, allowing direct grouping on the geography dimension."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Compare course performance across different IES networks (rede). Flattening Course and IES allows direct filtering and grouping on the Course dimension without traversing the hierarchy."
+      },
+      {
+        "decision_id": "A3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze average ENADE scores by State (UF) across all years. Having sk_geography directly in the fact table allows joining only fact_education_assessment and dim_geography, bypassing dim_course entirely."
+      }
+    ]
+  }
+}
+```
+
+### Analytical Physical Model (SQL DDL)
+
+The following DDL script is designed for a modern analytical data warehouse (e.g., PostgreSQL, Redshift, Snowflake). It implements the star schema, utilizes surrogate keys, defines clustering/indexing strategies, and applies partitioning for large-scale query optimization.
+
+```sql
+-- ==============================================================================
+-- DIMENSIONAL MODEL: STAR SCHEMA
+-- ==============================================================================
+
+DROP TABLE IF EXISTS fact_education_assessment CASCADE;
+DROP TABLE IF EXISTS dim_course CASCADE;
+DROP TABLE IF EXISTS dim_school CASCADE;
+DROP TABLE IF EXISTS dim_geography CASCADE;
+
+-- ------------------------------------------------------------------------------
+-- 1. DIMENSION: GEOGRAPHY (Flattened UF + MUNICIPIO)
+-- ------------------------------------------------------------------------------
+CREATE TABLE dim_geography (
+    sk_geography INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    
+    -- Natural Keys
+    nk_id_municipio INT NOT NULL,
+    nk_id_uf INT NOT NULL,
+    
+    -- UF Attributes
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    qtd_habitantes_uf INT,
+    
+    -- Municipio Attributes
+    nome_municipio VARCHAR(100) NOT NULL,
+    qtd_ies_municipio INT,
+    qtd_escolas_municipio INT,
+    media_ideb_municipio REAL,
+    media_saeb_municipio REAL,
+    media_enade_municipio REAL,
+    total_participantes_municipio INT
+);
+
+-- Indexing for lookup and filtering
+CREATE INDEX idx_dim_geography_uf ON dim_geography(sigla_uf);
+CREATE INDEX idx_dim_geography_nk ON dim_geography(nk_id_municipio);
+
+-- ------------------------------------------------------------------------------
+-- 2. DIMENSION: COURSE (Flattened IES + CURSO)
+-- ------------------------------------------------------------------------------
+CREATE TABLE dim_course (
+    sk_course INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    
+    -- Natural Keys
+    nk_id_curso INT NOT NULL,
+    nk_id_ies INT NOT NULL,
+    
+    -- Course Attributes
+    nome_curso VARCHAR(100) NOT NULL,
+    
+    -- IES Attributes
+    nome_ies VARCHAR(100) NOT NULL,
+    sigla_ies VARCHAR(20),
+    codigo_ies INT NOT NULL,
+    rede_ies VARCHAR(100) NOT NULL
+);
+
+-- Indexing for filtering
+CREATE INDEX idx_dim_course_rede ON dim_course(rede_ies);
+CREATE INDEX idx_dim_course_nk ON dim_course(nk_id_curso);
+
+-- ------------------------------------------------------------------------------
+-- 3. DIMENSION: SCHOOL (Enriched with Geography for future Basic Ed Facts)
+-- ------------------------------------------------------------------------------
+CREATE TABLE dim_school (
+    sk_school INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    sk_geography INT NOT NULL REFERENCES dim_geography(sk_geography),
+    
+    -- Natural Keys
+    nk_id_escola INT NOT NULL,
+    
+    -- School Attributes
+    nome_escola VARCHAR(100) NOT NULL,
+    cod_escola INTEGER NOT NULL,
+    rede_escola VARCHAR(100) NOT NULL
+);
+
+CREATE INDEX idx_dim_school_rede ON dim_school(rede_escola);
+
+-- ------------------------------------------------------------------------------
+-- 4. FACT: EDUCATION ASSESSMENT (Consolidated ANO + ENADE + SAEB + IDEB)
+-- ------------------------------------------------------------------------------
+-- Partitioning by 'ano' is recommended for OLAP workloads to support time-based 
+-- data pruning during large-scale aggregations.
+CREATE TABLE fact_education_assessment (
+    -- Surrogate Keys
+    sk_course INT NOT NULL REFERENCES dim_course(sk_course),
+    sk_geography INT NOT NULL REFERENCES dim_geography(sk_geography),
+    
+    -- Degenerate Dimension
+    ano INT NOT NULL,
+    
+    -- ENADE Metrics
+    enade_total_inscritos INT,
+    enade_total_concluintes INT,
+    enade_nota_bruta_ce REAL,
+    enade_nota_padronizada_ce REAL,
+    enade_nota_bruta_fg REAL,
+    enade_nota_padronizada_fg REAL,
+    enade_nota_continua REAL,
+    enade_nota_faixa REAL,
+    
+    -- SAEB Metrics
+    saeb_nota_mat REAL,
+    saeb_nota_port REAL,
+    saeb_nota_padrao REAL,
+    
+    -- IDEB Metrics
+    ideb_rend_1 REAL,
+    ideb_rend_2 REAL,
+    ideb_rend_3 REAL,
+    ideb_rend_4 REAL,
+    ideb_ind_rend REAL,
+    ideb_nota REAL
+) PARTITION BY RANGE (ano);
+
+-- Create partitions for expected years (Example)
+CREATE TABLE fact_education_assessment_2021 PARTITION OF fact_education_assessment FOR VALUES FROM (2021) TO (2022);
+CREATE TABLE fact_education_assessment_2022 PARTITION OF fact_education_assessment FOR VALUES FROM (2022) TO (2023);
+CREATE TABLE fact_education_assessment_2023 PARTITION OF fact_education_assessment FOR VALUES FROM (2023) TO (2024);
+
+-- Clustering / Indexing recommendations for the Fact Table
+-- In columnar DBs (Redshift/Snowflake), these would be Sort Keys or Cluster Keys.
+-- For Postgres-based DWs, composite indexes serve a similar purpose for joins.
+CREATE INDEX idx_fact_assessment_course ON fact_education_assessment(sk_course);
+CREATE INDEX idx_fact_assessment_geo ON fact_education_assessment(sk_geography);
+CREATE INDEX idx_fact_assessment_ano ON fact_education_assessment(ano);
+```

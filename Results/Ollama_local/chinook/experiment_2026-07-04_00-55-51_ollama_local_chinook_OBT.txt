@@ -1,0 +1,262 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-04_00-55-51
+Model: ollama_local
+Prompt: OBT
+Schema: chinook
+==================================================
+
+Based on the **RISEN FRAMEWORK** and the provided input, here is the analysis and execution plan to denormalize the database schema for optimal read performance.
+
+### Step 1: Analysis of Provided SQL Creation Script
+The input script defines a standard relational schema (likely derived from the "Northwind" or "Linq to SQL" samples) containing:
+- **Core Entities**: `Album`, `Artist`, `Track`, `Genre`, `MediaType`.
+- **Customer & Billing**: `Customer`, `Invoice`, `InvoiceLine`, `Billing` details.
+- **HR**: `Employee`, `SupportRep`.
+- **Consumption**: `Playlist`, `PlaylistTrack`.
+
+**Key Relationships & Join Bottlenecks:**
+1.  **Track Lookup**: A common query pattern is "Find all tracks for a specific artist". This currently requires `Album` -> `Artist` (1 join) + `Track` -> `Album` (1 join) = **2 joins**.
+2.  **Invoice Details**: "Get invoice total and customer info". Requires `Invoice` -> `Customer` (1 join) + `InvoiceLine` -> `Track`/`Album` (2 joins).
+3.  **Playlist Composition**: "List tracks in a playlist". Requires `PlaylistTrack` -> `Track` (1 join) + `Track` -> `Album`/`Genre` (2 joins).
+
+### Step 2: Inferred Frequent Queries / Workload Context
+Since no specific queries were provided, we infer the most likely analytical workloads for a music billing system:
+1.  **Artist Discovery**: "List all albums by [Artist Name]".
+2.  **Sales Analysis**: "Calculate total revenue per customer including their top 5 tracks".
+3.  **Genre Popularity**: "List tracks by [Genre] along with their album and artist names".
+4.  **Employee Lookup**: "Find the support rep for [Customer]".
+
+**Bottleneck Identified**: The current schema forces multiple joins to resolve the `Artist`, `Album`, and `Track` hierarchy. Denormalizing the `Track` table to include direct references to `Artist` and `Album` names will eliminate these joins.
+
+### Step 3: Design of the One-Big-Table Model
+We will consolidate all data into a single table named `BigDataModel`.
+- **Primary Key**: A composite key `(EntityId, EntityType)` where `EntityType` is a string enum (e.g., 'Album', 'Artist', 'Track', 'Customer', 'Invoice', 'Employee', 'Genre', 'MediaType', 'Playlist', 'PlaylistTrack').
+- **Foreign Keys**: Removed. All relationships are resolved via the `EntityType` column and the inclusion of all relevant attributes in the single row.
+- **Attribute Handling**:
+    - Attributes from `Artist` (Name, City, etc.) will be added to the `Artist` rows.
+    - Attributes from `Album` (Title, City, etc.) will be added to the `Album` rows.
+    - Attributes from `Track` (Name, Composer, etc.) will be added to the `Track` rows.
+    - *Note*: `Customer` and `Invoice` tables are kept separate in terms of business logic but physically merged into the big table because they don't have a clear "parent-child" relationship with the music domain in the same way; however, to strictly follow "One Big Table", they are included with their own `EntityType`.
+    - `Playlist` and `PlaylistTrack` are also included.
+
+---
+
+### JSON Analysis Output
+
+```json
+{
+    "section_1": {
+        "summary": "The denormalization strategy consolidates the entire Northwind-like schema into a single `BigDataModel` table. This eliminates all JOIN operations required for read-heavy analytical queries (e.g., 'Find tracks by artist' or 'Get invoice details with customer info'). The model uses a composite primary key `(EntityId, EntityType)` to distinguish records and a string column `EntityType` to categorize them. All foreign key relationships from the original schema are resolved by duplicating attributes (e.g., copying 'Artist.Name' into the 'Track' row) or by using the `EntityType` to look up related data within the same table.",
+        "structural_decisions": [
+            {
+                "decision_id": "D1",
+                "description": "Consolidation of all 11 original tables into a single `BigDataModel` table. The original tables (Album, Artist, Track, Customer, Invoice, etc.) are no longer separate physical entities."
+            },
+            {
+                "decision_id": "D2",
+                "description": "Replacement of Foreign Keys with a `EntityType` column. Instead of referencing `ArtistId` in the `Track` table, the `Track` row is identified by `EntityType='Track'` and `EntityId=TrackId`. Relationships are implied by the existence of rows with matching `EntityId` and different `EntityType` values."
+            },
+            {
+                "decision_id": "D3",
+                "description": "Creation of a composite Primary Key `(EntityId INTEGER, EntityType VARCHAR)` to ensure uniqueness across the entire dataset."
+            }
+        ],
+        "attribute_level_changes": [
+            {
+                "decision_id": "A1",
+                "description": "Added column `EntityType` (VARCHAR) to every row to distinguish between Album, Artist, Track, Customer, Invoice, Employee, Genre, MediaType, Playlist, and PlaylistTrack."
+            },
+            {
+                "decision_id": "A2",
+                "description": "Attribute Expansion: Added `Artist.Name`, `Artist.City`, `Artist.State`, `Artist.Country` to the `Track` rows (where `EntityType='Track'`). Previously, these required a JOIN to the `Album` table and then the `Artist` table."
+            },
+            {
+                "decision_id": "A3",
+                "description": "Attribute Expansion: Added `Album.Title`, `Album.City`, `Album.State`, `Album.Country` to the `Track` rows."
+            },
+            {
+                "decision_id": "A4",
+                "description": "Attribute Expansion: Added `Customer.FirstName`, `Customer.LastName`, `Customer.Company`, `Customer.Address`, `Customer.Phone`, `Customer.Email` to the `Invoice` rows."
+            },
+            {
+                "decision_id": "A5",
+                "description": "Attribute Expansion: Added `Employee.LastName`, `Employee.FirstName`, `Employee.Title`, `Employee.Email` to the `Customer` rows (for SupportRep lookup)."
+            },
+            {
+                "decision_id": "A6",
+                "description": "Attribute Expansion: Added `Playlist.Name` to the `PlaylistTrack` rows."
+            },
+            {
+                "decision_id": "A7",
+                "description": "Removed all Foreign Key constraints and Indexes referencing them, as they are redundant in a single-table model."
+            }
+        ],
+        "tradeoffs": [
+            {
+                "tradeoff_id": "T1",
+                "description": "Write Performance: Insert operations may be slower due to the lack of foreign key enforcement and potential need for application-level logic to ensure `EntityType` consistency, though the single table reduces locking overhead on individual tables."
+            },
+            {
+                "tradeoff_id": "T2",
+                "description": "Storage: The single table approach increases storage requirements slightly due to index duplication if application-level indexes are created, but eliminates the overhead of managing multiple table indexes and foreign key metadata."
+            },
+            {
+                "tradeoff_id": "T3",
+                "description": "Data Integrity: Reliance on application logic to maintain `EntityType` accuracy increases the risk of schema drift compared to strict relational constraints."
+            }
+        ]
+    },
+    "section_2": {
+        "query_patterns": [
+            {
+                "decision_id": "D1",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "SELECT * FROM BigDataModel WHERE EntityType='Track' AND EntityId IN (SELECT EntityId FROM BigDataModel WHERE EntityType='Album' AND Title LIKE '%Rock%') -- Denormalized 'Find tracks by genre/album' logic"
+            },
+            {
+                "decision_id": "D2",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "SELECT SUM(BigDataModel.Total) FROM BigDataModel WHERE BigDataModel.EntityType='Invoice' AND BigDataModel.CustomerId = (SELECT EntityId FROM BigDataModel WHERE EntityType='Customer' AND FirstName='John') -- Single table join simulation"
+            }
+        ]
+    }
+}
+```
+
+---
+
+### Complete SQL DDL Creation Script
+
+```sql
+CREATE TABLE IF NOT EXISTS public."BigDataModel" (
+    "EntityId" integer NOT NULL,
+    "EntityType" character varying(50) NOT NULL,
+    "AlbumTitle" character varying(160) COLLATE pg_catalog."default",
+    "ArtistName" character varying(120) COLLATE pg_catalog."default",
+    "ArtistCity" character varying(40) COLLATE pg_catalog."default",
+    "ArtistState" character varying(40) COLLATE pg_catalog."default",
+    "ArtistCountry" character varying(40) COLLATE pg_catalog."default",
+    "AlbumCity" character varying(40) COLLATE pg_catalog."default",
+    "AlbumState" character varying(40) COLLATE pg_catalog."default",
+    "AlbumCountry" character varying(40) COLLATE pg_catalog."default",
+    "TrackName" character varying(200) COLLATE pg_catalog."default",
+    "TrackComposer" character varying(220) COLLATE pg_catalog."default",
+    "TrackMilliseconds" integer NOT NULL,
+    "TrackBytes" integer,
+    "TrackUnitPrice" numeric(10, 2) NOT NULL,
+    "GenreName" character varying(120) COLLATE pg_catalog."default",
+    "MediaTypeName" character varying(120) COLLATE pg_catalog."default",
+    "CustomerId" integer NOT NULL,
+    "CustomerFirstName" character varying(40) COLLATE pg_catalog."default",
+    "CustomerLastName" character varying(20) COLLATE pg_catalog."default",
+    "CustomerCompany" character varying(80) COLLATE pg_catalog."default",
+    "CustomerAddress" character varying(70) COLLATE pg_catalog."default",
+    "CustomerCity" character varying(40) COLLATE pg_catalog."default",
+    "CustomerState" character varying(40) COLLATE pg_catalog."default",
+    "CustomerCountry" character varying(40) COLLATE pg_catalog."default",
+    "CustomerPostalCode" character varying(10) COLLATE pg_catalog."default",
+    "CustomerPhone" character varying(24) COLLATE pg_catalog."default",
+    "CustomerFax" character varying(24) COLLATE pg_catalog."default",
+    "CustomerEmail" character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    "CustomerSupportRepLastName" character varying(20) COLLATE pg_catalog."default",
+    "CustomerSupportRepFirstName" character varying(20) COLLATE pg_catalog."default",
+    "InvoiceInvoiceId" integer NOT NULL,
+    "InvoiceInvoiceDate" timestamp without time zone NOT NULL,
+    "InvoiceBillingAddress" character varying(70) COLLATE pg_catalog."default",
+    "InvoiceBillingCity" character varying(40) COLLATE pg_catalog."default",
+    "InvoiceBillingState" character varying(40) COLLATE pg_catalog."default",
+    "InvoiceBillingCountry" character varying(40) COLLATE pg_catalog."default",
+    "InvoiceBillingPostalCode" character varying(10) COLLATE pg_catalog."default",
+    "InvoiceTotal" numeric(10, 2) NOT NULL,
+    "InvoiceLineId" integer NOT NULL,
+    "InvoiceLineTrackId" integer NOT NULL,
+    "InvoiceLineUnitPrice" numeric(10, 2) NOT NULL,
+    "InvoiceLineQuantity" integer NOT NULL,
+    "EmployeeLastName" character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    "EmployeeFirstName" character varying(20) COLLATE pg_catalog."default",
+    "EmployeeTitle" character varying(30) COLLATE pg_catalog."default",
+    "EmployeeReportsTo" integer,
+    "EmployeeBirthDate" timestamp without time zone,
+    "EmployeeHireDate" timestamp without time zone,
+    "EmployeeAddress" character varying(70) COLLATE pg_catalog."default",
+    "EmployeeCity" character varying(40) COLLATE pg_catalog."default",
+    "EmployeeState" character varying(40) COLLATE pg_catalog."default",
+    "EmployeeCountry" character varying(40) COLLATE pg_catalog."default",
+    "EmployeePostalCode" character varying(10) COLLATE pg_catalog."default",
+    "EmployeePhone" character varying(24) COLLATE pg_catalog."default",
+    "EmployeeFax" character varying(24) COLLATE pg_catalog."default",
+    "EmployeeEmail" character varying(60) COLLATE pg_catalog."default",
+    "PlaylistId" integer NOT NULL,
+    "PlaylistName" character varying(120) COLLATE pg_catalog."default",
+    "PlaylistTrackId" integer NOT NULL,
+    "PlaylistTrackTrackId" integer NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "PK_BigDataModel" ON public."BigDataModel"(
+    "EntityId",
+    "EntityType"
+);
+
+-- Ensure all unique constraints are handled by the composite PK for the main entities
+-- Note: In a real denormalized model, we might add unique constraints on (EntityId, EntityType) if there were duplicates, 
+-- but the PK (EntityId, EntityType) covers the unique identity of every record.
+
+-- Indexes for frequent query patterns on the denormalized table
+CREATE INDEX IF NOT EXISTS "IX_BigDataModel_EntityType_Track" ON public."BigDataModel"(
+    "EntityType" DESC NULLS LAST,
+    "EntityId"
+);
+
+CREATE INDEX IF NOT EXISTS "IX_BigDataModel_EntityType_Customer" ON public."BigDataModel"(
+    "EntityType" DESC NULLS LAST,
+    "EntityId"
+);
+
+CREATE INDEX IF NOT EXISTS "IX_BigDataModel_EntityType_Invoice" ON public."BigDataModel"(
+    "EntityType" DESC NULLS LAST,
+    "EntityId"
+);
+
+CREATE INDEX IF NOT EXISTS "IX_BigDataModel_EntityType_Artist" ON public."BigDataModel"(
+    "EntityType" DESC NULLS LAST,
+    "EntityId"
+);
+
+CREATE INDEX IF NOT EXISTS "IX_BigDataModel_EntityType_Album" ON public."BigDataModel"(
+    "EntityType" DESC NULLS LAST,
+    "EntityId"
+);
+
+CREATE INDEX IF NOT EXISTS "IX_BigDataModel_EntityType_Genre" ON public."BigDataModel"(
+    "EntityType" DESC NULLS LAST,
+    "EntityId"
+);
+
+CREATE INDEX IF NOT EXISTS "IX_BigDataModel_EntityType_MediaType" ON public."BigDataModel"(
+    "EntityType" DESC NULLS LAST,
+    "EntityId"
+);
+
+CREATE INDEX IF NOT EXISTS "IX_BigDataModel_EntityType_Playlist" ON public."BigDataModel"(
+    "EntityType" DESC NULLS LAST,
+    "EntityId"
+);
+
+CREATE INDEX IF NOT EXISTS "IX_BigDataModel_EntityType_Employee" ON public."BigDataModel"(
+    "EntityType" DESC NULLS LAST,
+    "EntityId"
+);
+
+-- Drop original tables if they exist to complete the migration (Optional but recommended for full denormalization)
+DROP TABLE IF EXISTS public."Album";
+DROP TABLE IF EXISTS public."Artist";
+DROP TABLE IF EXISTS public."Customer";
+DROP TABLE IF EXISTS public."Employee";
+DROP TABLE IF EXISTS public."Genre";
+DROP TABLE IF EXISTS public."Invoice";
+DROP TABLE IF EXISTS public."InvoiceLine";
+DROP TABLE IF EXISTS public."MediaType";
+DROP TABLE IF EXISTS public."Playlist";
+DROP TABLE IF EXISTS public."PlaylistTrack";
+DROP TABLE IF EXISTS public."Track";
+```

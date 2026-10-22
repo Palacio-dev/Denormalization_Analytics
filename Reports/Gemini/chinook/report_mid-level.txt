@@ -1,0 +1,320 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 11
+  - Total Attributes: 62
+    * Album: 3 columns
+    * Artist: 2 columns
+    * Customer: 13 columns
+    * Employee: 15 columns
+    * Genre: 2 columns
+    * Invoice: 9 columns
+    * InvoiceLine: 5 columns
+    * MediaType: 2 columns
+    * Playlist: 2 columns
+    * PlaylistTrack: 2 columns (junction table - excluded from attribute analysis)
+    * Track: 9 columns
+
+  Note: 1 junction table(s) detected and excluded from attribute analysis:
+    - PlaylistTrack
+
+Denormalized Model:
+  - Tables: 6
+  - Total Attributes: 51
+    * DimDate: 10 columns
+    * DimCustomer: 13 columns
+    * DimTrack: 11 columns
+    * DimPlaylist: 3 columns
+    * BridgePlaylistTrack: 2 columns
+    * FactSales: 14 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Normalized model has MORE attributes (51 vs 62)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: "AlbumId" (INTEGER) -> "AlbumName" (CHARACTER)
+  - Type mismatch: "Title" (CHARACTER) -> "DateKey" (INTEGER)
+  - Type mismatch: "ArtistId" (INTEGER) -> "ArtistName" (CHARACTER)
+  - Type mismatch: "Name" (CHARACTER) -> "DayOfWeek" (INTEGER)
+  - Type mismatch: "City" (CHARACTER) -> "Month" (INTEGER)
+  - Type mismatch: "State" (CHARACTER) -> "Quarter" (INTEGER)
+  - Type mismatch: "Phone" (CHARACTER) -> "DayOfMonth" (INTEGER)
+  - Type mismatch: "Fax" (CHARACTER) -> "Year" (INTEGER)
+  - Type mismatch: "BirthDate" (TIMESTAMP) -> "MonthName" (CHARACTER)
+  - Type mismatch: "HireDate" (TIMESTAMP) -> "FullDate" (DATE)
+  - Type mismatch: "Country" (CHARACTER) -> "CustomerKey" (INTEGER)
+  - Type mismatch: "GenreId" (INTEGER) -> "IsWeekend" (BOOLEAN)
+  - Type mismatch: "MediaTypeId" (INTEGER) -> "MediaTypeName" (CHARACTER)
+  - Type mismatch: "Name" (CHARACTER) -> "TrackKey" (INTEGER)
+  - Type mismatch: "Name" (CHARACTER) -> "SalesKey" (INTEGER)
+  - Type mismatch: "Name" (CHARACTER) -> "DateKey" (INTEGER)
+  - Type mismatch: "GenreId" (INTEGER) -> "GenreName" (CHARACTER)
+--------------------------------------------------------------------------------
+Completeness Ratio:        0.82
+Data Type Preservation:    0.67
+Avg Levenshtein Distance:  2.78
+BLEU Score:                0.38
+ROUGE-1:                   0.42
+METEOR Score:              0.61
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: BridgePlaylistTrack, FactSales
+Dimension Tables Detected: DimDate, DimCustomer, DimTrack, DimPlaylist
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected 2 Fact tables. Evaluating as a GALAXY SCHEMA.
+  - DIMENSION NULL WARNING: Attribute '"Company"' in 'DimCustomer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute '"Address"' in 'DimCustomer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute '"City"' in 'DimCustomer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute '"State"' in 'DimCustomer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute '"Country"' in 'DimCustomer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute '"PostalCode"' in 'DimCustomer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute '"SupportRepId"' in 'DimCustomer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute '"SupportRepName"' in 'DimCustomer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute '"SupportRepTitle"' in 'DimCustomer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute '"AlbumName"' in 'DimTrack' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute '"ArtistName"' in 'DimTrack' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute '"GenreName"' in 'DimTrack' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute '"MediaTypeName"' in 'DimTrack' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute '"Composer"' in 'DimTrack' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute '"Bytes"' in 'DimTrack' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute '"PlaylistName"' in 'DimPlaylist' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * BridgePlaylistTrack: 2 Numeric, 0 Text
+  * FactSales: 9 Numeric, 5 Text
+  * DimDate: 6 Numeric, 4 Text
+  * DimCustomer: 3 Numeric, 10 Text
+  * DimTrack: 5 Numeric, 6 Text
+  * DimPlaylist: 2 Numeric, 1 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  "Address" "Address" "AlbumId" "AlbumId" "ArtistId" "ArtistId" "BillingAddress" "BillingCity" "BillingCountry" "BillingPostalCode" "BillingState" "BirthDate" "Bytes" "City" "City" "Company" "Composer" "Country" "Country" "CustomerId" "CustomerId" "Email" "Email" "EmployeeId" "Fax" "Fax" "FirstName" "FirstName" "GenreId" "GenreId" "HireDate" "InvoiceDate" "InvoiceId" "InvoiceId" "InvoiceLineId" "LastName" "LastName" "MediaTypeId" "MediaTypeId" "Milliseconds" "Name" "Name" "Name" "Name" "Name" "Phone" "Phone" "PlaylistId" "PostalCode" "PostalCode" "Quantity" "ReportsTo" "State" "State" "SupportRepId" "Title" "Title" "Total" "TrackId" "TrackId" "UnitPrice" "UnitPrice"
+
+Denormalized Model (Combined Text):
+  "Address" "AlbumName" "ArtistName" "BillingAddress" "BillingCity" "BillingCountry" "BillingPostalCode" "BillingState" "Bytes" "City" "Company" "Composer" "Country" "CustomerId" "CustomerKey" "CustomerKey" "CustomerName" "DateKey" "DateKey" "DayName" "DayOfMonth" "DayOfWeek" "Email" "FullDate" "GenreName" "InvoiceId" "InvoiceLineId" "IsWeekend" "LineTotal" "MediaTypeName" "Milliseconds" "Month" "MonthName" "PlaylistId" "PlaylistKey" "PlaylistName" "PostalCode" "Quantity" "Quarter" "SalesKey" "State" "SupportRepId" "SupportRepName" "SupportRepTitle" "TrackId" "TrackKey" "TrackKey" "TrackName" "UnitPrice" "UnitPrice" "Year"
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 51 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    "AlbumId" INTEGER
+  Denormalized:  "AlbumName" CHARACTER
+
+Pair 2:
+  Relational:    "Title" CHARACTER
+  Denormalized:  "DateKey" INTEGER
+
+Pair 3:
+  Relational:    "ArtistId" INTEGER
+  Denormalized:  "ArtistName" CHARACTER
+
+Pair 4:
+  Relational:    "ArtistId" INTEGER
+  Denormalized:  "PlaylistKey" INTEGER
+
+Pair 5:
+  Relational:    "Name" CHARACTER
+  Denormalized:  "DayOfWeek" INTEGER
+
+Pair 6:
+  Relational:    "CustomerId" INTEGER
+  Denormalized:  "CustomerKey" INTEGER
+
+Pair 7:
+  Relational:    "FirstName" CHARACTER
+  Denormalized:  "SupportRepName" CHARACTER
+
+Pair 8:
+  Relational:    "LastName" CHARACTER
+  Denormalized:  "TrackName" CHARACTER
+
+Pair 9:
+  Relational:    "Company" CHARACTER
+  Denormalized:  "Company" CHARACTER
+
+Pair 10:
+  Relational:    "Address" CHARACTER
+  Denormalized:  "Address" CHARACTER
+
+Pair 11:
+  Relational:    "City" CHARACTER
+  Denormalized:  "Month" INTEGER
+
+Pair 12:
+  Relational:    "State" CHARACTER
+  Denormalized:  "Quarter" INTEGER
+
+Pair 13:
+  Relational:    "Country" CHARACTER
+  Denormalized:  "Country" CHARACTER
+
+Pair 14:
+  Relational:    "PostalCode" CHARACTER
+  Denormalized:  "PostalCode" CHARACTER
+
+Pair 15:
+  Relational:    "Phone" CHARACTER
+  Denormalized:  "DayOfMonth" INTEGER
+
+Pair 16:
+  Relational:    "Fax" CHARACTER
+  Denormalized:  "Year" INTEGER
+
+Pair 17:
+  Relational:    "Email" CHARACTER
+  Denormalized:  "Email" CHARACTER
+
+Pair 18:
+  Relational:    "SupportRepId" INTEGER
+  Denormalized:  "SupportRepId" INTEGER
+
+Pair 19:
+  Relational:    "LastName" CHARACTER
+  Denormalized:  "CustomerName" CHARACTER
+
+Pair 20:
+  Relational:    "FirstName" CHARACTER
+  Denormalized:  "PlaylistName" CHARACTER
+
+Pair 21:
+  Relational:    "Title" CHARACTER
+  Denormalized:  "SupportRepTitle" CHARACTER
+
+Pair 22:
+  Relational:    "BirthDate" TIMESTAMP
+  Denormalized:  "MonthName" CHARACTER
+
+Pair 23:
+  Relational:    "HireDate" TIMESTAMP
+  Denormalized:  "FullDate" DATE
+
+Pair 24:
+  Relational:    "City" CHARACTER
+  Denormalized:  "City" CHARACTER
+
+Pair 25:
+  Relational:    "State" CHARACTER
+  Denormalized:  "State" CHARACTER
+
+Pair 26:
+  Relational:    "Country" CHARACTER
+  Denormalized:  "CustomerKey" INTEGER
+
+Pair 27:
+  Relational:    "GenreId" INTEGER
+  Denormalized:  "IsWeekend" BOOLEAN
+
+Pair 28:
+  Relational:    "Name" CHARACTER
+  Denormalized:  "DayName" CHARACTER
+
+Pair 29:
+  Relational:    "InvoiceId" INTEGER
+  Denormalized:  "InvoiceId" INTEGER
+
+Pair 30:
+  Relational:    "CustomerId" INTEGER
+  Denormalized:  "CustomerId" INTEGER
+
+Pair 31:
+  Relational:    "BillingAddress" CHARACTER
+  Denormalized:  "BillingAddress" CHARACTER
+
+Pair 32:
+  Relational:    "BillingCity" CHARACTER
+  Denormalized:  "BillingCity" CHARACTER
+
+Pair 33:
+  Relational:    "BillingState" CHARACTER
+  Denormalized:  "BillingState" CHARACTER
+
+Pair 34:
+  Relational:    "BillingCountry" CHARACTER
+  Denormalized:  "BillingCountry" CHARACTER
+
+Pair 35:
+  Relational:    "BillingPostalCode" CHARACTER
+  Denormalized:  "BillingPostalCode" CHARACTER
+
+Pair 36:
+  Relational:    "Total" NUMERIC(10, 2)
+  Denormalized:  "LineTotal" NUMERIC(10, 2)
+
+Pair 37:
+  Relational:    "InvoiceLineId" INTEGER
+  Denormalized:  "InvoiceLineId" INTEGER
+
+Pair 38:
+  Relational:    "TrackId" INTEGER
+  Denormalized:  "TrackKey" INTEGER
+
+Pair 39:
+  Relational:    "UnitPrice" NUMERIC(10, 2)
+  Denormalized:  "UnitPrice" NUMERIC(10, 2)
+
+Pair 40:
+  Relational:    "Quantity" INTEGER
+  Denormalized:  "Quantity" INTEGER
+
+Pair 41:
+  Relational:    "MediaTypeId" INTEGER
+  Denormalized:  "MediaTypeName" CHARACTER
+
+Pair 42:
+  Relational:    "Name" CHARACTER
+  Denormalized:  "TrackKey" INTEGER
+
+Pair 43:
+  Relational:    "PlaylistId" INTEGER
+  Denormalized:  "PlaylistId" INTEGER
+
+Pair 44:
+  Relational:    "Name" CHARACTER
+  Denormalized:  "SalesKey" INTEGER
+
+Pair 45:
+  Relational:    "TrackId" INTEGER
+  Denormalized:  "TrackId" INTEGER
+
+Pair 46:
+  Relational:    "Name" CHARACTER
+  Denormalized:  "DateKey" INTEGER
+
+Pair 47:
+  Relational:    "GenreId" INTEGER
+  Denormalized:  "GenreName" CHARACTER
+
+Pair 48:
+  Relational:    "Composer" CHARACTER
+  Denormalized:  "Composer" CHARACTER
+
+Pair 49:
+  Relational:    "Milliseconds" INTEGER
+  Denormalized:  "Milliseconds" INTEGER
+
+Pair 50:
+  Relational:    "Bytes" INTEGER
+  Denormalized:  "Bytes" INTEGER
+
+Pair 51:
+  Relational:    "UnitPrice" NUMERIC(10, 2)
+  Denormalized:  "UnitPrice" NUMERIC(10, 2)
+
+
+================================================================================

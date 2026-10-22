@@ -1,0 +1,258 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-51-35
+Model: gemini
+Prompt: senior
+Schema: northwind
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The analytical modeling strategy transitions the highly normalized Northwind OLTP schema (3NF) into a Kimball-style Star Schema optimized for OLAP workloads. The core approach involves dimension flattening (snowflakes to stars), reference data absorption, and the creation of a central line-item grain fact table. This denormalization minimizes runtime joins, maximizes BI tool compatibility, and significantly improves large-scale aggregation performance. M:N relationships (e.g., employee territories, customer demographics) are absorbed as array/delimited strings to maintain a strict star topology, prioritizing read performance and analytical simplicity over storage efficiency.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge 'orders' and 'order_details' into a single 'fact_sales' table at the order-line grain. This eliminates the most frequent and expensive join in the database, reducing join count by 1 per query while capturing exact transaction metrics."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Flatten 'products', 'categories', and 'suppliers' into a single wide 'dim_product' dimension. This snowflake-to-star conversion reduces join count by 2, absorbing lookup tables into the product dimension."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Flatten 'employees', resolve the 'reports_to' hierarchy into a flat attribute (manager_name), and absorb 'employee_territories', 'territories', and 'region' into 'dim_employee'. Reduces join count by 4+."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Flatten 'customers', 'customer_customer_demo', and 'customer_demographics' into 'dim_customer'. The M:N demographics are aggregated into a single descriptive text field to avoid bridge tables that complicate BI reporting. Reduces join count by 2."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Introduce a centralized 'dim_date' table to act as a role-playing dimension for order_date, required_date, and shipped_date, enabling standardized time-series analysis."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Introduced integer Surrogate Keys (SKs) for all dimensions (e.g., customer_key, product_key) to insulate the data warehouse from source system key changes and improve join performance compared to string-based natural keys."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added derived additive measures in 'fact_sales': 'gross_sales_amount' (quantity * unit_price) and 'net_sales_amount' (quantity * unit_price * (1 - discount))."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Removed BLOB/bytea columns ('picture' from categories, 'photo' from employees) as they are incompatible with analytical aggregations and consume unnecessary columnar storage."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Converted 'freight' from the header level to an allocated line-level measure ('allocated_freight') in 'fact_sales' based on the line's percentage of the total order value."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Storage Redundancy vs. Read Performance: Flattening suppliers and categories into the product dimension introduces data duplication (e.g., repeating supplier names). This increases storage footprint but drastically reduces CPU overhead during query execution."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "ETL Complexity vs. BI Simplicity: Aggregating M:N relationships (territories, demographics) into delimited strings/arrays simplifies the BI semantic layer by avoiding bridge tables, but pushes complexity into the ETL pipeline which must now handle string aggregations and updates."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Update Anomalies vs. Historical Tracking: Denormalized dimensions are susceptible to update anomalies. This is mitigated by treating them as Slowly Changing Dimensions (SCD Type 2), which requires more complex ETL logic to track historical changes over time."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Revenue and margin analysis by product and time. Requires aggregating net_sales_amount across millions of rows, grouped by product category and financial quarter."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Supplier performance analysis. Analyzing which suppliers provide the highest volume of discontinued products or generate the most revenue, necessitating supplier attributes directly alongside product attributes."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Sales team performance and regional rollup. Comparing sales figures between employees and their managers, or across geographical regions, without traversing recursive hierarchical joins at runtime."
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Fulfillment SLA analysis. Calculating the lag between order_date, required_date, and shipped_date to identify late shipments, requiring a robust role-playing date dimension."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Creation Script
+
+```sql
+-- ==============================================================================
+-- Analytical Physical Model (Star Schema)
+-- Target RDBMS: PostgreSQL (Analytics Optimized)
+-- ==============================================================================
+
+-- 1. DIMENSION: DATE
+-- Role-playing dimension for Order, Required, and Shipped dates.
+CREATE TABLE IF NOT EXISTS public.dim_date (
+    date_key integer NOT NULL, -- Format: YYYYMMDD
+    full_date date NOT NULL,
+    day_of_week smallint NOT NULL,
+    day_name character varying(10) NOT NULL,
+    day_of_month smallint NOT NULL,
+    day_of_year smallint NOT NULL,
+    week_of_year smallint NOT NULL,
+    month_number smallint NOT NULL,
+    month_name character varying(10) NOT NULL,
+    quarter smallint NOT NULL,
+    year integer NOT NULL,
+    is_weekend boolean NOT NULL,
+    is_holiday boolean NOT NULL DEFAULT false,
+    CONSTRAINT pk_dim_date PRIMARY KEY (date_key)
+);
+
+-- 2. DIMENSION: CUSTOMER
+-- Flattens customers, customer_customer_demo, and customer_demographics.
+CREATE TABLE IF NOT EXISTS public.dim_customer (
+    customer_key serial NOT NULL, -- Surrogate Key
+    customer_id character varying(5) NOT NULL, -- Natural Key
+    company_name character varying(40) NOT NULL,
+    contact_name character varying(30),
+    contact_title character varying(30),
+    address character varying(60),
+    city character varying(15),
+    region character varying(15),
+    postal_code character varying(10),
+    country character varying(15),
+    customer_demographics text, -- Absorbed M:N relationship (comma-separated or JSON array)
+    -- SCD Type 2 tracking columns
+    valid_from timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    valid_to timestamp without time zone DEFAULT '9999-12-31',
+    is_current boolean DEFAULT true,
+    CONSTRAINT pk_dim_customer PRIMARY KEY (customer_key)
+);
+
+-- 3. DIMENSION: EMPLOYEE
+-- Flattens employees, self-referencing hierarchy, employee_territories, territories, and region.
+CREATE TABLE IF NOT EXISTS public.dim_employee (
+    employee_key serial NOT NULL, -- Surrogate Key
+    employee_id smallint NOT NULL, -- Natural Key
+    full_name character varying(50) NOT NULL,
+    title character varying(30),
+    hire_date date,
+    manager_name character varying(50), -- Flattened hierarchy
+    city character varying(15),
+    region character varying(15),
+    country character varying(15),
+    assigned_territories text, -- Absorbed M:N relationship
+    assigned_regions text,     -- Absorbed M:N relationship
+    -- SCD Type 2 tracking columns
+    valid_from timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    valid_to timestamp without time zone DEFAULT '9999-12-31',
+    is_current boolean DEFAULT true,
+    CONSTRAINT pk_dim_employee PRIMARY KEY (employee_key)
+);
+
+-- 4. DIMENSION: PRODUCT
+-- Flattens products, categories, and suppliers.
+CREATE TABLE IF NOT EXISTS public.dim_product (
+    product_key serial NOT NULL, -- Surrogate Key
+    product_id smallint NOT NULL, -- Natural Key
+    product_name character varying(40) NOT NULL,
+    quantity_per_unit character varying(20),
+    unit_price numeric(10,2), -- Casted from REAL for financial accuracy
+    is_discontinued boolean NOT NULL,
+    -- Category attributes
+    category_name character varying(15),
+    category_description text,
+    -- Supplier attributes
+    supplier_name character varying(40),
+    supplier_country character varying(15),
+    supplier_region character varying(15),
+    -- SCD Type 2 tracking columns
+    valid_from timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    valid_to timestamp without time zone DEFAULT '9999-12-31',
+    is_current boolean DEFAULT true,
+    CONSTRAINT pk_dim_product PRIMARY KEY (product_key)
+);
+
+-- 5. DIMENSION: SHIPPER
+CREATE TABLE IF NOT EXISTS public.dim_shipper (
+    shipper_key serial NOT NULL, -- Surrogate Key
+    shipper_id smallint NOT NULL, -- Natural Key
+    company_name character varying(40) NOT NULL,
+    CONSTRAINT pk_dim_shipper PRIMARY KEY (shipper_key)
+);
+
+-- 6. FACT: SALES
+-- Line-item grain fact table combining orders and order_details.
+-- Partitioned by order_date_key for query pruning on time-series analysis.
+CREATE TABLE IF NOT EXISTS public.fact_sales (
+    sales_key bigserial NOT NULL,
+    order_id smallint NOT NULL, -- Degenerate Dimension
+    
+    -- Foreign Keys to Dimensions
+    order_date_key integer NOT NULL,
+    required_date_key integer,
+    shipped_date_key integer,
+    customer_key integer NOT NULL,
+    employee_key integer NOT NULL,
+    product_key integer NOT NULL,
+    shipper_key integer,
+    
+    -- Degenerate Order Header Attributes
+    ship_city character varying(15),
+    ship_region character varying(15),
+    ship_country character varying(15),
+    
+    -- Measures
+    quantity smallint NOT NULL,
+    unit_price numeric(10,2) NOT NULL,
+    discount numeric(5,4) NOT NULL,
+    
+    -- Derived Additive Measures
+    gross_sales_amount numeric(12,2) NOT NULL, -- quantity * unit_price
+    net_sales_amount numeric(12,2) NOT NULL,   -- quantity * unit_price * (1 - discount)
+    allocated_freight numeric(10,2),           -- Freight distributed proportionally by line item value
+    
+    CONSTRAINT pk_fact_sales PRIMARY KEY (order_date_key, sales_key)
+) PARTITION BY RANGE (order_date_key);
+
+-- Create default partition (Required for PostgreSQL partitioning)
+CREATE TABLE public.fact_sales_default PARTITION OF public.fact_sales DEFAULT;
+
+-- Example partitions (In a real scenario, these would be generated dynamically or via script)
+CREATE TABLE public.fact_sales_1996 PARTITION OF public.fact_sales FOR VALUES FROM (19960101) TO (19970101);
+CREATE TABLE public.fact_sales_1997 PARTITION OF public.fact_sales FOR VALUES FROM (19970101) TO (19980101);
+CREATE TABLE public.fact_sales_1998 PARTITION OF public.fact_sales FOR VALUES FROM (19980101) TO (19990101);
+
+-- ==============================================================================
+-- Foreign Key Constraints (Logical enforcement, often disabled in pure OLAP, 
+-- but included here for architectural completeness)
+-- ==============================================================================
+ALTER TABLE public.fact_sales ADD CONSTRAINT fk_fact_sales_order_date FOREIGN KEY (order_date_key) REFERENCES public.dim_date(date_key);
+ALTER TABLE public.fact_sales ADD CONSTRAINT fk_fact_sales_required_date FOREIGN KEY (required_date_key) REFERENCES public.dim_date(date_key);
+ALTER TABLE public.fact_sales ADD CONSTRAINT fk_fact_sales_shipped_date FOREIGN KEY (shipped_date_key) REFERENCES public.dim_date(date_key);
+ALTER TABLE public.fact_sales ADD CONSTRAINT fk_fact_sales_customer FOREIGN KEY (customer_key) REFERENCES public.dim_customer(customer_key);
+ALTER TABLE public.fact_sales ADD CONSTRAINT fk_fact_sales_employee FOREIGN KEY (employee_key) REFERENCES public.dim_employee(employee_key);
+ALTER TABLE public.fact_sales ADD CONSTRAINT fk_fact_sales_product FOREIGN KEY (product_key) REFERENCES public.dim_product(product_key);
+ALTER TABLE public.fact_sales ADD CONSTRAINT fk_fact_sales_shipper FOREIGN KEY (shipper_key) REFERENCES public.dim_shipper(shipper_key);
+
+-- ==============================================================================
+-- Performance Optimization: Indexes for Star Schema Joins
+-- ==============================================================================
+-- Bitmap indexes are ideal for OLAP, but PostgreSQL uses B-Trees. 
+-- Creating indexes on all foreign keys in the fact table to optimize Star Joins.
+CREATE INDEX idx_fact_sales_customer_key ON public.fact_sales(customer_key);
+CREATE INDEX idx_fact_sales_employee_key ON public.fact_sales(employee_key);
+CREATE INDEX idx_fact_sales_product_key ON public.fact_sales(product_key);
+CREATE INDEX idx_fact_sales_shipper_key ON public.fact_sales(shipper_key);
+CREATE INDEX idx_fact_sales_order_date_key ON public.fact_sales(order_date_key);
+```

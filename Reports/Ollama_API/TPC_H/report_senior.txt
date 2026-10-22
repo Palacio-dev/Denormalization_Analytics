@@ -1,0 +1,340 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 8
+  - Total Attributes: 61
+    * NATION: 4 columns
+    * REGION: 3 columns
+    * PART: 9 columns
+    * SUPPLIER: 7 columns
+    * PARTSUPP: 5 columns
+    * CUSTOMER: 8 columns
+    * ORDERS: 9 columns
+    * LINEITEM: 16 columns
+
+Denormalized Model:
+  - Tables: 6
+  - Total Attributes: 87
+    * GEOGRAPHY_DIM: 7 columns
+    * SUPPLIER_DIM: 11 columns
+    * PRODUCT_DIM: 14 columns
+    * CUSTOMER_DIM: 12 columns
+    * DATE_DIM: 9 columns
+    * FACT_LINEITEM: 39 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Denormalized model has MORE attributes (61 vs 87)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: R_NAME (CHAR(25)) -> PART_NAME (VARCHAR(55))
+  - Type mismatch: R_COMMENT (VARCHAR(152)) -> ORDER_COMMENT (VARCHAR(79))
+  - Type mismatch: S_NAME (CHAR(25)) -> YEAR (INTEGER)
+  - Type mismatch: PS_PARTKEY (INTEGER) -> PRODUCT_SK (BIGINT)
+  - Type mismatch: PS_AVAILQTY (INTEGER) -> PARTITION (P2021)
+  - Type mismatch: PS_COMMENT (VARCHAR(199)) -> IS_WEEKEND (BOOLEAN)
+  - Type mismatch: C_NAME (VARCHAR(25)) -> DAY (INTEGER)
+  - Type mismatch: C_PHONE (CHAR(15)) -> MONTH (INTEGER)
+  - Type mismatch: O_CUSTKEY (INTEGER) -> GEO_SK (BIGINT)
+  - Type mismatch: O_COMMENT (VARCHAR(79)) -> REGION_COMMENT (VARCHAR(152))
+  - Type mismatch: L_SUPPKEY (INTEGER) -> SUPPLIER_SK (BIGINT)
+--------------------------------------------------------------------------------
+Completeness Ratio:        1.43
+Data Type Preservation:    0.82
+Avg Levenshtein Distance:  4.36
+BLEU Score:                0.00
+ROUGE-1:                   0.19
+METEOR Score:              0.00
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: FACT_LINEITEM
+Dimension Tables Detected: GEOGRAPHY_DIM, SUPPLIER_DIM, PRODUCT_DIM, CUSTOMER_DIM, DATE_DIM
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected exactly 1 Fact table. Evaluating as a standard STAR SCHEMA.
+  - FACT FK VIOLATION: Foreign Key 'GEO_SK' in Fact 'FACT_LINEITEM' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'SUPPLIER_SK' in Fact 'FACT_LINEITEM' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'PRODUCT_SK' in Fact 'FACT_LINEITEM' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'CUSTOMER_SK' in Fact 'FACT_LINEITEM' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'DATE_SK' in Fact 'FACT_LINEITEM' allows NULL values.
+  - PAYLOAD WARNING: Fact table 'FACT_LINEITEM' contains more text attributes (23) than numeric measures (10).
+  - DIMENSION NULL WARNING: Attribute 'NATION_COMMENT' in 'GEOGRAPHY_DIM' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'REGION_COMMENT' in 'GEOGRAPHY_DIM' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * FACT_LINEITEM: 10 Numeric, 23 Text
+  * GEOGRAPHY_DIM: 2 Numeric, 4 Text
+  * SUPPLIER_DIM: 4 Numeric, 6 Text
+  * PRODUCT_DIM: 6 Numeric, 7 Text
+  * CUSTOMER_DIM: 4 Numeric, 7 Text
+  * DATE_DIM: 6 Numeric, 2 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  C_ACCTBAL C_ADDRESS C_COMMENT C_CUSTKEY C_MKTSEGMENT C_NAME C_NATIONKEY C_PHONE L_COMMENT L_COMMITDATE L_DISCOUNT L_EXTENDEDPRICE L_LINENUMBER L_LINESTATUS L_ORDERKEY L_PARTKEY L_QUANTITY L_RECEIPTDATE L_RETURNFLAG L_SHIPDATE L_SHIPINSTRUCT L_SHIPMODE L_SUPPKEY L_TAX N_COMMENT N_NAME N_NATIONKEY N_REGIONKEY O_CLERK O_COMMENT O_CUSTKEY O_ORDERDATE O_ORDERKEY O_ORDERPRIORITY O_ORDERSTATUS O_SHIPPRIORITY O_TOTALPRICE PS_AVAILQTY PS_COMMENT PS_PARTKEY PS_SUPPKEY PS_SUPPLYCOST P_BRAND P_COMMENT P_CONTAINER P_MFGR P_NAME P_PARTKEY P_RETAILPRICE P_SIZE P_TYPE R_COMMENT R_NAME R_REGIONKEY S_ACCTBAL S_ADDRESS S_COMMENT S_NAME S_NATIONKEY S_PHONE S_SUPPKEY
+
+Denormalized Model (Combined Text):
+  COMMIT_DATE CUSTOMER_ACCTBAL CUSTOMER_ADDRESS CUSTOMER_COMMENT CUSTOMER_KEY CUSTOMER_NAME CUSTOMER_NAME CUSTOMER_PHONE CUSTOMER_SEGMENT CUSTOMER_SK DATE_SK DATE_VALUE DAY DAY_OF_WEEK DISCOUNT EXTENDED_PRICE GEO_SK IS_WEEKEND LINEITEM_SK LINE_COMMENT LINE_DISCOUNTED_AMOUNT LINE_EXTENDED_AMOUNT LINE_NUMBER LINE_STATUS MKT_SEGMENT MONTH NATION_COMMENT NATION_KEY NATION_KEY NATION_KEY NATION_NAME NATION_NAME NATION_NAME NATION_NAME ORDER_CLERK ORDER_COMMENT ORDER_DATE ORDER_KEY ORDER_PRIORITY ORDER_STATUS ORDER_TOTAL_PRICE PARTITION PARTITION PARTITION PARTITION PART_BRAND PART_COMMENT PART_CONTAINER PART_KEY PART_MFGR PART_NAME PART_NAME PART_SIZE PART_TYPE PRODUCT_SK QUANTITY QUARTER RECEIPT_DATE REGION_COMMENT REGION_KEY REGION_KEY REGION_KEY REGION_NAME REGION_NAME REGION_NAME REGION_NAME RETAIL_PRICE RETURN_FLAG SHIP_DATE SHIP_INSTRUCT SHIP_MODE SHIP_PRIORITY SUPPLIER_ACCTBAL SUPPLIER_ADDRESS SUPPLIER_AVAILABLE_QTY SUPPLIER_COMMENT SUPPLIER_COMMENT SUPPLIER_KEY SUPPLIER_KEY SUPPLIER_NAME SUPPLIER_NAME SUPPLIER_PHONE SUPPLIER_SK SUPPLY_COST TAX WEEK_OF_YEAR YEAR
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 61 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    N_NATIONKEY INTEGER
+  Denormalized:  NATION_KEY INTEGER
+
+Pair 2:
+  Relational:    N_NAME CHAR(25)
+  Denormalized:  NATION_NAME CHAR(25)
+
+Pair 3:
+  Relational:    N_REGIONKEY INTEGER
+  Denormalized:  REGION_KEY INTEGER
+
+Pair 4:
+  Relational:    N_COMMENT VARCHAR(152)
+  Denormalized:  NATION_COMMENT VARCHAR(152)
+
+Pair 5:
+  Relational:    R_REGIONKEY INTEGER
+  Denormalized:  REGION_KEY INTEGER
+
+Pair 6:
+  Relational:    R_NAME CHAR(25)
+  Denormalized:  PART_NAME VARCHAR(55)
+
+Pair 7:
+  Relational:    R_COMMENT VARCHAR(152)
+  Denormalized:  ORDER_COMMENT VARCHAR(79)
+
+Pair 8:
+  Relational:    P_PARTKEY INTEGER
+  Denormalized:  PART_KEY INTEGER
+
+Pair 9:
+  Relational:    P_NAME VARCHAR(55)
+  Denormalized:  PART_NAME VARCHAR(55)
+
+Pair 10:
+  Relational:    P_MFGR CHAR(25)
+  Denormalized:  PART_MFGR CHAR(25)
+
+Pair 11:
+  Relational:    P_BRAND CHAR(10)
+  Denormalized:  PART_BRAND CHAR(10)
+
+Pair 12:
+  Relational:    P_TYPE VARCHAR(25)
+  Denormalized:  PART_TYPE VARCHAR(25)
+
+Pair 13:
+  Relational:    P_SIZE INTEGER
+  Denormalized:  PART_SIZE INTEGER
+
+Pair 14:
+  Relational:    P_CONTAINER CHAR(10)
+  Denormalized:  PART_CONTAINER CHAR(10)
+
+Pair 15:
+  Relational:    P_RETAILPRICE DECIMAL(15, 2)
+  Denormalized:  RETAIL_PRICE DECIMAL(15, 2)
+
+Pair 16:
+  Relational:    P_COMMENT VARCHAR(23)
+  Denormalized:  PART_COMMENT VARCHAR(23)
+
+Pair 17:
+  Relational:    S_SUPPKEY INTEGER
+  Denormalized:  SUPPLIER_KEY INTEGER
+
+Pair 18:
+  Relational:    S_NAME CHAR(25)
+  Denormalized:  YEAR INTEGER
+
+Pair 19:
+  Relational:    S_ADDRESS VARCHAR(40)
+  Denormalized:  SUPPLIER_ADDRESS VARCHAR(40)
+
+Pair 20:
+  Relational:    S_NATIONKEY INTEGER
+  Denormalized:  NATION_KEY INTEGER
+
+Pair 21:
+  Relational:    S_PHONE CHAR(15)
+  Denormalized:  SUPPLIER_PHONE CHAR(15)
+
+Pair 22:
+  Relational:    S_ACCTBAL DECIMAL(15, 2)
+  Denormalized:  SUPPLIER_ACCTBAL DECIMAL(15, 2)
+
+Pair 23:
+  Relational:    S_COMMENT VARCHAR(101)
+  Denormalized:  SUPPLIER_COMMENT VARCHAR(101)
+
+Pair 24:
+  Relational:    PS_PARTKEY INTEGER
+  Denormalized:  PRODUCT_SK BIGINT
+
+Pair 25:
+  Relational:    PS_SUPPKEY INTEGER
+  Denormalized:  REGION_KEY INTEGER
+
+Pair 26:
+  Relational:    PS_AVAILQTY INTEGER
+  Denormalized:  PARTITION P2021
+
+Pair 27:
+  Relational:    PS_SUPPLYCOST DECIMAL(15, 2)
+  Denormalized:  SUPPLY_COST DECIMAL(15, 2)
+
+Pair 28:
+  Relational:    PS_COMMENT VARCHAR(199)
+  Denormalized:  IS_WEEKEND BOOLEAN
+
+Pair 29:
+  Relational:    C_CUSTKEY INTEGER
+  Denormalized:  CUSTOMER_KEY INTEGER
+
+Pair 30:
+  Relational:    C_NAME VARCHAR(25)
+  Denormalized:  DAY INTEGER
+
+Pair 31:
+  Relational:    C_ADDRESS VARCHAR(40)
+  Denormalized:  CUSTOMER_ADDRESS VARCHAR(40)
+
+Pair 32:
+  Relational:    C_NATIONKEY INTEGER
+  Denormalized:  NATION_KEY INTEGER
+
+Pair 33:
+  Relational:    C_PHONE CHAR(15)
+  Denormalized:  MONTH INTEGER
+
+Pair 34:
+  Relational:    C_ACCTBAL DECIMAL(15, 2)
+  Denormalized:  CUSTOMER_ACCTBAL DECIMAL(15, 2)
+
+Pair 35:
+  Relational:    C_MKTSEGMENT CHAR(10)
+  Denormalized:  MKT_SEGMENT CHAR(10)
+
+Pair 36:
+  Relational:    C_COMMENT VARCHAR(117)
+  Denormalized:  CUSTOMER_COMMENT VARCHAR(117)
+
+Pair 37:
+  Relational:    O_ORDERKEY INTEGER
+  Denormalized:  ORDER_KEY INTEGER
+
+Pair 38:
+  Relational:    O_CUSTKEY INTEGER
+  Denormalized:  GEO_SK BIGINT
+
+Pair 39:
+  Relational:    O_ORDERSTATUS CHAR(1)
+  Denormalized:  ORDER_STATUS CHAR(1)
+
+Pair 40:
+  Relational:    O_TOTALPRICE DECIMAL(15, 2)
+  Denormalized:  ORDER_TOTAL_PRICE DECIMAL(15, 2)
+
+Pair 41:
+  Relational:    O_ORDERDATE DATE
+  Denormalized:  ORDER_DATE DATE
+
+Pair 42:
+  Relational:    O_ORDERPRIORITY CHAR(15)
+  Denormalized:  ORDER_PRIORITY CHAR(15)
+
+Pair 43:
+  Relational:    O_CLERK CHAR(15)
+  Denormalized:  ORDER_CLERK CHAR(15)
+
+Pair 44:
+  Relational:    O_SHIPPRIORITY INTEGER
+  Denormalized:  SHIP_PRIORITY INTEGER
+
+Pair 45:
+  Relational:    O_COMMENT VARCHAR(79)
+  Denormalized:  REGION_COMMENT VARCHAR(152)
+
+Pair 46:
+  Relational:    L_ORDERKEY INTEGER
+  Denormalized:  SUPPLIER_KEY INTEGER
+
+Pair 47:
+  Relational:    L_PARTKEY INTEGER
+  Denormalized:  QUARTER INTEGER
+
+Pair 48:
+  Relational:    L_SUPPKEY INTEGER
+  Denormalized:  SUPPLIER_SK BIGINT
+
+Pair 49:
+  Relational:    L_LINENUMBER INTEGER
+  Denormalized:  LINE_NUMBER INTEGER
+
+Pair 50:
+  Relational:    L_QUANTITY DECIMAL(15, 2)
+  Denormalized:  QUANTITY DECIMAL(15, 2)
+
+Pair 51:
+  Relational:    L_EXTENDEDPRICE DECIMAL(15, 2)
+  Denormalized:  EXTENDED_PRICE DECIMAL(15, 2)
+
+Pair 52:
+  Relational:    L_DISCOUNT DECIMAL(15, 2)
+  Denormalized:  DISCOUNT DECIMAL(15, 2)
+
+Pair 53:
+  Relational:    L_TAX DECIMAL(15, 2)
+  Denormalized:  TAX DECIMAL(15, 2)
+
+Pair 54:
+  Relational:    L_RETURNFLAG CHAR(1)
+  Denormalized:  RETURN_FLAG CHAR(1)
+
+Pair 55:
+  Relational:    L_LINESTATUS CHAR(1)
+  Denormalized:  LINE_STATUS CHAR(1)
+
+Pair 56:
+  Relational:    L_SHIPDATE DATE
+  Denormalized:  SHIP_DATE DATE
+
+Pair 57:
+  Relational:    L_COMMITDATE DATE
+  Denormalized:  COMMIT_DATE DATE
+
+Pair 58:
+  Relational:    L_RECEIPTDATE DATE
+  Denormalized:  RECEIPT_DATE DATE
+
+Pair 59:
+  Relational:    L_SHIPINSTRUCT CHAR(25)
+  Denormalized:  SHIP_INSTRUCT CHAR(25)
+
+Pair 60:
+  Relational:    L_SHIPMODE CHAR(10)
+  Denormalized:  SHIP_MODE CHAR(10)
+
+Pair 61:
+  Relational:    L_COMMENT VARCHAR(44)
+  Denormalized:  LINE_COMMENT VARCHAR(44)
+
+
+================================================================================

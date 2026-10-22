@@ -1,0 +1,154 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-15-29
+Model: gemini
+Prompt: junior
+Schema: employees
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy shifts the highly normalized OLTP model (3NF) into an analytical model designed to minimize complex joins, particularly those involving overlapping date ranges. The original schema tracks independent historical changes for salaries, titles, and departments. To optimize for reporting, we will consolidate these into two analytical tables: a 'Current Snapshot' table for real-time state reporting, and a 'One Big Table' (OBT) Historical Fact table that pre-calculates contiguous time slices for all employee changes.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge 'employee', 'department', 'department_employee', 'title', and 'salary' into a single wide table 'denorm_employee_history'. This acts as a Type 2 Slowly Changing Dimension (SCD) / Fact table combination."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Create a 'denorm_employee_current' table. This merges the latest active records from 'salary', 'title', and 'department_employee' with the 'employee' and 'department' tables to provide a 0-join snapshot of the current workforce."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Consolidate the 'department_manager' table into the main denormalized tables rather than keeping it as a separate relationship table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added 'is_manager' boolean flag. Derived from the presence of a record in the 'department_manager' table for the given time period."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added 'dept_name' directly alongside 'department_id' in the employee tables to eliminate the need to join the 'department' dimension."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Unified the independent 'from_date' and 'to_date' columns from salary, title, and department_employee into a single 'effective_from' and 'effective_to' range that represents the validity period of the entire combined row."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy: Employee personal details (name, gender, birth_date) and department names are repeated for every historical change in salary, title, or department, increasing storage requirements."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "ETL Complexity: Generating the 'denorm_employee_history' table requires complex overlapping date logic during the ETL process to accurately slice the time intervals whenever any single attribute (salary, title, dept) changes."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Update Anomalies: If an employee's static historical data changes (e.g., a correction to their birth_date), multiple rows must be updated in the history table instead of a single row in the OLTP employee table."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Current Workforce Reporting: 'What is the current salary, title, and department of a specific employee?' Served by 'denorm_employee_current' with 0 joins."
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Historical Aggregations: 'What was the average salary by department and title in a specific historical year?' Served by 'denorm_employee_history' with 0 joins using a simple date filter."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Management Analytics: 'How many managers are currently employed per department?' Served by 'denorm_employee_current' filtering by 'is_manager = true'."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Creation Script
+
+```sql
+BEGIN;
+
+-- Create a schema for the analytical models
+CREATE SCHEMA IF NOT EXISTS analytics;
+
+-- ==============================================================================
+-- Table 1: Current Employee Snapshot
+-- Purpose: 0-join table for all current state reporting (active employees only)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS analytics.denorm_employee_current
+(
+    employee_id bigint NOT NULL,
+    first_name character varying(14) COLLATE pg_catalog."default" NOT NULL,
+    last_name character varying(16) COLLATE pg_catalog."default" NOT NULL,
+    birth_date date NOT NULL,
+    gender employees.employee_gender NOT NULL,
+    hire_date date NOT NULL,
+    
+    -- Current Department Info
+    department_id character(4) COLLATE pg_catalog."default",
+    dept_name character varying(40) COLLATE pg_catalog."default",
+    
+    -- Current Role & Compensation
+    title character varying(50) COLLATE pg_catalog."default",
+    salary bigint,
+    is_manager boolean NOT NULL DEFAULT false,
+    
+    CONSTRAINT pk_denorm_employee_current PRIMARY KEY (employee_id)
+);
+
+-- Indexes for common current-state analytical slices
+CREATE INDEX IF NOT EXISTS idx_curr_dept ON analytics.denorm_employee_current(dept_name);
+CREATE INDEX IF NOT EXISTS idx_curr_title ON analytics.denorm_employee_current(title);
+CREATE INDEX IF NOT EXISTS idx_curr_manager ON analytics.denorm_employee_current(is_manager);
+
+
+-- ==============================================================================
+-- Table 2: Employee History (One Big Table)
+-- Purpose: 0-join table for historical reporting, point-in-time analysis, 
+--          and tracking changes over time (SCD Type 2).
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS analytics.denorm_employee_history
+(
+    history_id bigserial NOT NULL,
+    employee_id bigint NOT NULL,
+    first_name character varying(14) COLLATE pg_catalog."default" NOT NULL,
+    last_name character varying(16) COLLATE pg_catalog."default" NOT NULL,
+    birth_date date NOT NULL,
+    gender employees.employee_gender NOT NULL,
+    hire_date date NOT NULL,
+    
+    -- Historical Department Info
+    department_id character(4) COLLATE pg_catalog."default",
+    dept_name character varying(40) COLLATE pg_catalog."default",
+    
+    -- Historical Role & Compensation
+    title character varying(50) COLLATE pg_catalog."default",
+    salary bigint,
+    is_manager boolean NOT NULL DEFAULT false,
+    
+    -- Unified Contiguous Time Slices
+    effective_from date NOT NULL,
+    effective_to date NOT NULL,
+    
+    CONSTRAINT pk_denorm_employee_history PRIMARY KEY (history_id)
+);
+
+-- Indexes for historical lookups and time-series aggregations
+CREATE INDEX IF NOT EXISTS idx_hist_emp_id ON analytics.denorm_employee_history(employee_id);
+CREATE INDEX IF NOT EXISTS idx_hist_dept ON analytics.denorm_employee_history(dept_name);
+CREATE INDEX IF NOT EXISTS idx_hist_title ON analytics.denorm_employee_history(title);
+CREATE INDEX IF NOT EXISTS idx_hist_dates ON analytics.denorm_employee_history(effective_from, effective_to);
+
+END;
+```

@@ -1,0 +1,292 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_10-00-21
+Model: gemini
+Prompt: senior
+Schema: HFC
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The proposed analytical modeling strategy transitions the highly normalized, snowflake-heavy OLTP schema into a Star Schema optimized for OLAP workloads. The core objective is to reduce the massive join complexity (often requiring 10-15 joins for a single query) by flattening hierarchical data into wide dimensions and consolidating transactional data into focused fact tables. We will implement a central `fact_tombos` (specimens) supported by flattened dimensions for Taxonomy, Geography, Ecology, and Entities. Secondary fact tables will handle specimen loans (`fact_remessas`) and audit trails (`fact_alteracoes`). Array/String aggregation will be used to handle many-to-many relationships (like secondary collectors and identifiers) directly within the fact table or dimensions to avoid bridge tables where possible, maximizing BI tool compatibility.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Flatten Taxonomy Snowflake: Consolidate `reinos`, `familias`, `sub_familias`, `generos`, `especies`, `sub_especies`, `variedades`, and `autores` into a single `dim_taxonomy` table. Reduces 8 joins to 1."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Flatten Geography/Location: Consolidate `locais_coleta`, `cidades` (inferred), `estados`, and `paises` into a single `dim_geography` table. Reduces 4 joins to 1."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Consolidate Ecological Context: Merge `solos`, `relevos`, `vegetacoes`, and `fase_sucessional` into a single `dim_ecology` table. These low-cardinality attributes are often queried together."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Flatten Entities: Merge `herbarios` and their `enderecos` into `dim_herbarium`."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Core Fact Creation: Create `fact_tombos` at the grain of one row per specimen (hcf). Integrate 1:1 external integration flags (`reflora`, `specieslink`) directly into the fact table."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Secondary Fact Creation: Create `fact_loans` combining `remessas` and `retirada_exsiccata_tombos` to track the movement and return of specimens."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Date Reconstruction: The OLTP `tombos` table splits collection and identification dates into day, month, and year columns. These will be derived into standard `DATE` types (`collection_date`, `identification_date`) in the ETL process to join with a standard `dim_date`."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Many-to-Many Aggregation: `coletores_complementares` and `tombos_identificadores` will be aggregated into delimited strings or arrays (e.g., `additional_collectors_list`) within `fact_tombos` to avoid complex bridge tables in BI tools."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Photo Metrics: Instead of joining the `tombos_fotos` table at query time, derive `has_photo` (boolean) and `photo_count` (integer) attributes and store them directly in `fact_tombos`."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Surrogate Keys: Introduce `sk_` integer surrogate keys for all dimensions to insulate the analytical model from source system key changes and improve join performance."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Storage vs. Compute: Flattening taxonomy and geography introduces significant data redundancy (e.g., the string 'Plantae' will be repeated millions of times). This increases storage costs but drastically reduces CPU compute costs and memory usage during query execution by eliminating joins."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "ETL Complexity vs. Query Simplicity: Maintaining flattened dimensions (especially handling updates to a genus name that affects thousands of species) requires complex ETL logic (SCD Type 1 or 2). However, this complexity is shifted to the data engineering phase, making self-service BI extremely simple for end-users."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of M:N Granularity: Aggregating secondary collectors into a delimited string makes it slightly harder to filter by a specific secondary collector. If this becomes a primary access pattern, a bridge table will need to be reintroduced."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Botanists frequently aggregate specimen counts by Family and Genus across different regions. Flattening the taxonomy allows `GROUP BY dim_taxonomy.family_name` without traversing 4 levels of hierarchy."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Geospatial heatmaps of specimen collections. Analysts need to filter by Country/State and plot coordinates. Flattening geography allows immediate filtering, while keeping lat/long in the fact table allows fast plotting."
+      },
+      {
+        "decision_id": "D6",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Herbarium managers need to track overdue specimen loans. The `fact_loans` table allows quick calculation of days overdue by joining with `dim_date` and filtering on `devolvido = false`."
+      },
+      {
+        "decision_id": "A3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Digital integration dashboards tracking how many specimens have been digitized (photos attached) and synced to external databases (Reflora/SpeciesLink). Merging these flags into the fact table makes this a simple `COUNT(1) WHERE has_photo = true`."
+      }
+    ]
+  }
+}
+```
+
+### Analytical Physical Model (Data Warehouse DDL)
+
+The following SQL script defines the target Star Schema optimized for OLAP workloads (e.g., Amazon Redshift, Snowflake, PostgreSQL with columnar extensions). 
+
+```sql
+-- ==============================================================================
+-- DIMENSIONAL MODEL DDL (OLAP)
+-- ==============================================================================
+
+-- 1. DIMENSION: DATE (Standard Date Dimension)
+CREATE TABLE dim_date (
+    sk_date INT NOT NULL, -- Format: YYYYMMDD
+    full_date DATE NOT NULL,
+    year INT NOT NULL,
+    month INT NOT NULL,
+    month_name VARCHAR(20) NOT NULL,
+    day_of_month INT NOT NULL,
+    day_of_week INT NOT NULL,
+    day_name VARCHAR(20) NOT NULL,
+    quarter INT NOT NULL,
+    is_weekend BOOLEAN NOT NULL,
+    CONSTRAINT pk_dim_date PRIMARY KEY (sk_date)
+);
+
+-- 2. DIMENSION: TAXONOMY (Flattened Hierarchy)
+CREATE TABLE dim_taxonomy (
+    sk_taxonomy BIGSERIAL NOT NULL,
+    -- Natural Keys (for ETL mapping)
+    nk_especie_id BIGINT,
+    nk_genero_id BIGINT,
+    nk_familia_id BIGINT,
+    nk_reino_id BIGINT,
+    -- Flattened Attributes
+    kingdom_name VARCHAR(200),
+    family_name VARCHAR(200),
+    sub_family_name VARCHAR(300),
+    genus_name VARCHAR(200),
+    species_name VARCHAR(200),
+    sub_species_name VARCHAR(255),
+    variety_name VARCHAR(200),
+    scientific_name TEXT,
+    -- Author Information (Aggregated/Flattened)
+    species_author_name VARCHAR(200),
+    -- SCD Metadata
+    dw_valid_from TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    dw_valid_to TIMESTAMP WITH TIME ZONE,
+    dw_is_current BOOLEAN DEFAULT TRUE,
+    CONSTRAINT pk_dim_taxonomy PRIMARY KEY (sk_taxonomy)
+);
+
+-- 3. DIMENSION: GEOGRAPHY (Flattened Location Hierarchy)
+CREATE TABLE dim_geography (
+    sk_geography BIGSERIAL NOT NULL,
+    nk_local_coleta_id BIGINT,
+    local_description TEXT,
+    city_name VARCHAR(255),
+    state_name VARCHAR(255),
+    state_abbreviation CHAR(4),
+    country_name VARCHAR(255),
+    country_abbreviation CHAR(4),
+    CONSTRAINT pk_dim_geography PRIMARY KEY (sk_geography)
+);
+
+-- 4. DIMENSION: ECOLOGY (Flattened Environmental Context)
+-- Creates a Cartesian product of unique combinations found in source data
+CREATE TABLE dim_ecology (
+    sk_ecology BIGSERIAL NOT NULL,
+    nk_solo_id BIGINT,
+    nk_relevo_id BIGINT,
+    nk_vegetacao_id BIGINT,
+    nk_fase_sucessional_id BIGINT,
+    soil_type VARCHAR(300),
+    relief_type VARCHAR(300),
+    vegetation_type VARCHAR(300),
+    successional_phase VARCHAR(200),
+    CONSTRAINT pk_dim_ecology PRIMARY KEY (sk_ecology)
+);
+
+-- 5. DIMENSION: HERBARIUM (Flattened Entity/Institution)
+CREATE TABLE dim_herbarium (
+    sk_herbarium BIGSERIAL NOT NULL,
+    nk_herbario_id BIGINT NOT NULL,
+    herbarium_name VARCHAR(200),
+    herbarium_acronym VARCHAR(80),
+    contact_email VARCHAR(200),
+    -- Flattened Address
+    address_street VARCHAR(200),
+    address_number VARCHAR(10),
+    address_city VARCHAR(255),
+    CONSTRAINT pk_dim_herbarium PRIMARY KEY (sk_herbarium)
+);
+
+-- 6. DIMENSION: COLLECTOR
+CREATE TABLE dim_collector (
+    sk_collector BIGSERIAL NOT NULL,
+    nk_coletor_id BIGINT NOT NULL,
+    collector_name VARCHAR(255),
+    collector_email VARCHAR(200),
+    CONSTRAINT pk_dim_collector PRIMARY KEY (sk_collector)
+);
+
+-- 7. FACT: TOMBOS (Core Specimen Fact Table)
+CREATE TABLE fact_tombos (
+    -- Primary Key / Degenerate Dimension
+    tombo_hcf BIGINT NOT NULL,
+    
+    -- Surrogate Keys for Dimensions
+    sk_collection_date INT, -- FK to dim_date
+    sk_identification_date INT, -- FK to dim_date
+    sk_tombo_date INT, -- FK to dim_date
+    sk_taxonomy BIGINT NOT NULL,
+    sk_geography BIGINT NOT NULL,
+    sk_ecology BIGINT NOT NULL,
+    sk_herbarium BIGINT NOT NULL,
+    sk_collector BIGINT NOT NULL,
+    
+    -- Measures & Spatial Data
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    altitude DOUBLE PRECISION,
+    collection_number BIGINT,
+    
+    -- Attributes & Flags (Denormalized)
+    specimen_status VARCHAR(50), -- from tombos_situacao
+    is_active BOOLEAN,
+    is_draft BOOLEAN,
+    is_unicata BOOLEAN,
+    popular_names TEXT,
+    observation TEXT,
+    
+    -- Many-to-Many Aggregations (Avoids bridge tables in BI)
+    additional_collectors_list TEXT, -- Comma separated names
+    identifiers_list TEXT, -- Comma separated names
+    
+    -- External Integrations (Denormalized from reflora/specieslink)
+    reflora_barcode VARCHAR(12),
+    reflora_is_synced BOOLEAN DEFAULT FALSE,
+    specieslink_barcode VARCHAR(12),
+    specieslink_is_synced BOOLEAN DEFAULT FALSE,
+    
+    -- Photo Metrics (Denormalized from tombos_fotos)
+    has_photo BOOLEAN DEFAULT FALSE,
+    photo_count INT DEFAULT 0,
+    
+    -- Audit
+    dw_created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    dw_updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    
+    CONSTRAINT pk_fact_tombos PRIMARY KEY (tombo_hcf)
+) PARTITION BY RANGE (sk_collection_date); 
+-- Partitioning recommendation: Partition by collection date or tombo date depending on the most common time-series query pattern.
+
+-- 8. FACT: LOANS / REMESSAS (Secondary Fact for Specimen Movement)
+CREATE TABLE fact_loans (
+    sk_loan BIGSERIAL NOT NULL,
+    nk_remessa_id BIGINT NOT NULL,
+    tombo_hcf BIGINT NOT NULL, -- FK to fact_tombos
+    
+    -- Dimensions
+    sk_dispatch_date INT, -- FK to dim_date
+    sk_due_date INT, -- FK to dim_date
+    sk_origin_herbarium BIGINT NOT NULL, -- FK to dim_herbarium
+    sk_destination_herbarium BIGINT NOT NULL, -- FK to dim_herbarium
+    
+    -- Attributes
+    loan_type VARCHAR(50), -- from retirada_exsiccata_tombos_tipo
+    is_returned BOOLEAN DEFAULT FALSE,
+    observation TEXT,
+    
+    -- Measures
+    days_overdue INT, -- Calculated during ETL or via View
+    
+    dw_created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_fact_loans PRIMARY KEY (sk_loan)
+);
+
+-- ==============================================================================
+-- INDEXING & CLUSTERING RECOMMENDATIONS
+-- ==============================================================================
+
+-- Fact table foreign keys should be indexed for fast Star Joins
+CREATE INDEX idx_fact_tombos_taxonomy ON fact_tombos(sk_taxonomy);
+CREATE INDEX idx_fact_tombos_geography ON fact_tombos(sk_geography);
+CREATE INDEX idx_fact_tombos_ecology ON fact_tombos(sk_ecology);
+CREATE INDEX idx_fact_tombos_herbarium ON fact_tombos(sk_herbarium);
+CREATE INDEX idx_fact_tombos_collector ON fact_tombos(sk_collector);
+
+-- Spatial indexing (if using PostGIS, convert lat/long to GEOMETRY and use GIST)
+-- For standard B-Tree:
+CREATE INDEX idx_fact_tombos_spatial ON fact_tombos(latitude, longitude);
+
+-- Secondary Fact indexes
+CREATE INDEX idx_fact_loans_tombo ON fact_loans(tombo_hcf);
+CREATE INDEX idx_fact_loans_dates ON fact_loans(sk_dispatch_date, sk_due_date);
+```

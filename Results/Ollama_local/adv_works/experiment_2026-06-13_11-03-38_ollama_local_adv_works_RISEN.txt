@@ -1,0 +1,442 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-14_13-03-38
+Model: ollama_local
+Prompt: RISEN
+Schema: adv_works
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on the high-volume analytical workloads typical of the AdventureWorks dataset,
+     specifically targeting the Sales and Production domains. The primary bottleneck identified is the frequent joining of the 
+     `sales.salesorderdetail` with multiple lookup tables (`Product`, `ProductCategory`, `ProductSubcategory`, `ProductModel`, 
+     `SpecialOfferProduct`, `CurrencyRate`, `ShipMethod`, `Territory`, `SalesTerritory`). By collapsing these relations and adding 
+     derived attributes (totals, counts), we can eliminate complex multi-table joins in favor of single-table scans, significantly 
+     improving read performance.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Created `denormalized.salesorder` table by collapsing `sales.salesorderheader`, `sales.salesorderdetail`, 
+        `production.product`, `production.productcategory`, `production.productsubcategory`, `production.productmodel`, 
+        `sales.specialofferproduct`, `sales.specialoffer`, `sales.currencyrate`, `purchasing.shipmethod`, `sales.salesterritory`,
+         and `sales.salesterritoryhistory`. This table contains all attributes from the original 12 related tables plus 
+         pre-calculated aggregates.",
+        "source_tables": [
+          "sales.salesorderheader",
+          "sales.salesorderdetail",
+          "production.product",
+          "production.productcategory",
+          "production.productsubcategory",
+          "production.productmodel",
+          "sales.specialofferproduct",
+          "sales.specialoffer",
+          "sales.currencyrate",
+          "purchasing.shipmethod",
+          "sales.salesterritory",
+          "sales.salesterritoryhistory"
+        ],
+        "target_tables": [
+          "denormalized.salesorder"
+        ]
+      },
+      {
+        "decision_id": "D2",
+        "description": "Created `denormalized.productinventory` table by collapsing `production.productinventory`, 
+        `production.product`, `production.location`, and `production.productmodel`. This consolidates inventory levels with 
+        product details and model information.",
+        "source_tables": [
+          "production.productinventory",
+          "production.product",
+          "production.location",
+          "production.productmodel"
+        ],
+        "target_tables": [
+          "denormalized.productinventory"
+        ]
+      },
+      {
+        "decision_id": "D3",
+        "description": "Created `denormalized.productdetails` table by collapsing `production.product`, `production.productcategory`, `production.productsubcategory`, `production.productmodel`, `production.productdescription`, and `production.productphoto`. This serves as a comprehensive product catalog for analytical reporting.",
+        "source_tables": [
+          "production.product",
+          "production.productcategory",
+          "production.productsubcategory",
+          "production.productmodel",
+          "production.productdescription",
+          "production.productphoto"
+        ],
+        "target_tables": [
+          "denormalized.productdetails"
+        ]
+      },
+      {
+        "decision_id": "D4",
+        "description": "Created `denormalized.employee_departments` table by collapsing `humanresources.employee`, `humanresources.employeedepartmenthistory`, and `humanresources.department`. This allows quick retrieval of an employee's current and historical department structure without joins.",
+        "source_tables": [
+          "humanresources.employee",
+          "humanresources.employeedepartmenthistory",
+          "humanresources.department"
+        ],
+        "target_tables": [
+          "denormalized.employee_departments"
+        ]
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived attribute `total_sales` (SUM of unitprice * orderqty) to `denormalized.salesorder` to avoid aggregation during read queries.",
+        "type": "Derived",
+        "table": "denormalized.salesorder"
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added derived attribute `avg_rating` (AVG of rating) to `denormalized.productdetails` to support direct product rating analysis.",
+        "type": "Derived",
+        "table": "denormalized.productdetails"
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added redundant attributes `product_category_name`, `product_subcategory_name`, `product_model_name`, and `special_offer_description` to `denormalized.salesorder` to eliminate join lookups.",
+        "type": "Redundant",
+        "table": "denormalized.salesorder"
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added derived attribute `total_inventory_quantity` (SUM of quantity) to `denormalized.productinventory` to track total stock across locations.",
+        "type": "Derived",
+        "table": "denormalized.productinventory"
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Write performance and storage overhead vs. Read performance. The denormalized schema increases write complexity due to the need to update multiple redundant columns and increases storage footprint. However, this is justified for the target use case of analytical reporting where read operations dominate.",
+        "impact": "Increased Write Latency & Storage Usage"
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Data consistency maintenance. Ensuring that the redundant attributes in `denormalized.salesorder` remain synchronized with the source tables requires careful application logic or triggers, as changes to source data must propagate to the denormalized tables.",
+        "impact": "Data Consistency Maintenance Overhead"
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical query to calculate total sales revenue, average product rating, and top-selling products per territory, joined with product categories, models, and special offers. The original schema requires joining 10+ tables, whereas the denormalized schema allows a single table scan.",
+        "motivation": "Eliminate N+1 join problem in complex sales analytics reports."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Query to retrieve a comprehensive list of all products with their descriptions, images, models, and categories for a product catalog export or dashboard.",
+        "motivation": "Avoid deep JOIN chains to fetch complete product information."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Query to list all employees and their current and historical department assignments with department names.",
+        "motivation": "Simplify HR reporting queries that currently require multiple joins between Employee, History, and Department tables."
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- Denormalized Schema for AdventureWorks Cycles
+-- This schema is designed to optimize read performance for analytical queries
+-- by collapsing relations and adding redundant/derived attributes.
+
+-- ============================================================
+-- 1. Denormalized Sales Order & Product Analysis Table
+-- Combines: SalesOrderHeader, SalesOrderDetail, Product, 
+-- ProductCategory, ProductSubcategory, ProductModel, 
+-- SpecialOfferProduct, SpecialOffer, CurrencyRate, 
+-- ShipMethod, SalesTerritory, SalesTerritoryHistory
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS denormalized.salesorder (
+    salesorderid serial NOT NULL,
+    revisionnumber smallint NOT NULL DEFAULT 0,
+    orderdate timestamp without time zone NOT NULL DEFAULT now(),
+    duedate timestamp without time zone NOT NULL,
+    shipdate timestamp without time zone,
+    status smallint NOT NULL DEFAULT 1,
+    onlineorderflag "Flag" NOT NULL DEFAULT true,
+    purchaseordernumber "OrderNumber" COLLATE pg_catalog."default",
+    accountnumber "AccountNumber" COLLATE pg_catalog."default",
+    customerid integer NOT NULL,
+    salespersonid integer,
+    territoryid integer,
+    billtoaddressid integer NOT NULL,
+    shiptoaddressid integer NOT NULL,
+    shipmethodid integer NOT NULL,
+    creditcardid integer,
+    creditcardapprovalcode character varying(15) COLLATE pg_catalog."default",
+    currencyrateid integer,
+    subtotal numeric NOT NULL DEFAULT 0.00,
+    taxamt numeric NOT NULL DEFAULT 0.00,
+    freight numeric NOT NULL DEFAULT 0.00,
+    totaldue numeric,
+    comment character varying(128) COLLATE pg_catalog."default",
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- Redundant Attributes from Product (Added to avoid JOINs)
+    productid integer NOT NULL,
+    productname "Name" COLLATE pg_catalog."default",
+    productnumber character varying(25) COLLATE pg_catalog."default",
+    makeflag "Flag" NOT NULL DEFAULT true,
+    finishedgoodsflag "Flag" NOT NULL DEFAULT true,
+    color character varying(15) COLLATE pg_catalog."default",
+    safetystocklevel smallint NOT NULL,
+    reorderpoint smallint NOT NULL,
+    standardcost numeric NOT NULL,
+    listprice numeric NOT NULL,
+    size character varying(5) COLLATE pg_catalog."default",
+    sizeunitmeasurecode character(3) COLLATE pg_catalog."default",
+    weightunitmeasurecode character(3) COLLATE pg_catalog."default",
+    weight numeric(8, 2),
+    daystomanufacture integer NOT NULL,
+    productline character(2) COLLATE pg_catalog."default",
+    class character(2) COLLATE pg_catalog."default",
+    style character(2) COLLATE pg_catalog."default",
+    productsubcategoryid integer,
+    productmodelid integer,
+    sellstartdate timestamp without time zone NOT NULL,
+    sellenddate timestamp without time zone,
+    discontinueddate timestamp without time zone,
+    productcategoryid integer NOT NULL,
+    productsubcategoryid integer NOT NULL,
+    productmodelid integer NOT NULL,
+    productdescription character varying(400) COLLATE pg_catalog."default",
+    productthumbnailphoto bytea,
+    productthumbnailphotofilename character varying(50) COLLATE pg_catalog."default",
+    productlargephoto bytea,
+    productlargephotofilename character varying(50) COLLATE pg_catalog."default",
+    productcategoryname "Name" COLLATE pg_catalog."default",
+    productsubcategoryname "Name" COLLATE pg_catalog."default",
+    productmodelname "Name" COLLATE pg_catalog."default",
+    
+    -- Redundant Attributes from SpecialOffer (Added to avoid JOINs)
+    specialofferid integer NOT NULL,
+    specialofferedescription character varying(255) COLLATE pg_catalog."default",
+    specialofferdiscountpct numeric NOT NULL DEFAULT 0.00,
+    specialoffertype character varying(50) COLLATE pg_catalog."default",
+    specialoffercategory character varying(50) COLLATE pg_catalog."default",
+    specialofferstartdate timestamp without time zone NOT NULL,
+    specialofferenddate timestamp without time zone NOT NULL,
+    specialofferminqty integer NOT NULL DEFAULT 0,
+    specialoffermaxqty integer,
+    specialofferproductdescription character varying(400) COLLATE pg_catalog."default",
+    
+    -- Redundant Attributes from CurrencyRate (Added to avoid JOINs)
+    currencycode character(3) COLLATE pg_catalog."default",
+    currencyname "Name" COLLATE pg_catalog."default",
+    currencyrateaveragerate numeric NOT NULL,
+    currencyrateendofdayrate numeric NOT NULL,
+    
+    -- Redundant Attributes from ShipMethod (Added to avoid JOINs)
+    shipmethodname "Name" COLLATE pg_catalog."default",
+    shipmethodshipbase numeric NOT NULL DEFAULT 0.00,
+    shipmethodshiprate numeric NOT NULL DEFAULT 0.00,
+    
+    -- Redundant Attributes from SalesTerritory (Added to avoid JOINs)
+    territoryname "Name" COLLATE pg_catalog."default",
+    territorycountryregioncode character varying(3) COLLATE pg_catalog."default",
+    territorygroup character varying(50) COLLATE pg_catalog."default",
+    territorysalesytd numeric NOT NULL DEFAULT 0.00,
+    territorysaleslastyear numeric NOT NULL DEFAULT 0.00,
+    territorycostytd numeric NOT NULL DEFAULT 0.00,
+    territorycostlastyear numeric NOT NULL DEFAULT 0.00,
+    
+    -- Redundant Attributes from SalesTerritoryHistory (Added to avoid JOINs)
+    territoryhistorybusinessentityid integer NOT NULL,
+    territoryhistorystartdate timestamp without time zone NOT NULL,
+    territoryhistoryenddate timestamp without time zone,
+    
+    -- Derived Attributes (Pre-computed for performance)
+    total_sales numeric NOT NULL DEFAULT 0.00,
+    avg_rating numeric,
+    total_quantity_sold integer NOT NULL DEFAULT 0,
+    
+    -- Primary Key
+    CONSTRAINT "PK_SalesOrder_Denormalized" PRIMARY KEY (salesorderid)
+);
+
+-- ============================================================
+-- 2. Denormalized Product Inventory Table
+-- Combines: ProductInventory, Product, Location, ProductModel
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS denormalized.productinventory (
+    productinventoryid serial NOT NULL,
+    productid integer NOT NULL,
+    locationid smallint NOT NULL,
+    shelf character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    bin smallint NOT NULL,
+    quantity smallint NOT NULL DEFAULT 0,
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- Redundant Attributes from Product (Added to avoid JOINs)
+    productname "Name" COLLATE pg_catalog."default",
+    productnumber character varying(25) COLLATE pg_catalog."default",
+    standardcost numeric NOT NULL,
+    listprice numeric NOT NULL,
+    productmodelid integer NOT NULL,
+    productmodelname "Name" COLLATE pg_catalog."default",
+    
+    -- Derived Attributes
+    total_inventory_quantity smallint NOT NULL DEFAULT 0,
+    
+    -- Primary Key
+    CONSTRAINT "PK_ProductInventory_Denormalized" PRIMARY KEY (productinventoryid)
+);
+
+-- ============================================================
+-- 3. Denormalized Product Details Table
+-- Combines: Product, ProductCategory, ProductSubcategory, 
+-- ProductModel, ProductDescription, ProductPhoto
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS denormalized.productdetails (
+    productid serial NOT NULL,
+    productname "Name" COLLATE pg_catalog."default",
+    productnumber character varying(25) COLLATE pg_catalog."default",
+    makeflag "Flag" NOT NULL DEFAULT true,
+    finishedgoodsflag "Flag" NOT NULL DEFAULT true,
+    color character varying(15) COLLATE pg_catalog."default",
+    safetystocklevel smallint NOT NULL,
+    reorderpoint smallint NOT NULL,
+    standardcost numeric NOT NULL,
+    listprice numeric NOT NULL,
+    size character varying(5) COLLATE pg_catalog."default",
+    sizeunitmeasurecode character(3) COLLATE pg_catalog."default",
+    weightunitmeasurecode character(3) COLLATE pg_catalog."default",
+    weight numeric(8, 2),
+    daystomanufacture integer NOT NULL,
+    productline character(2) COLLATE pg_catalog."default",
+    class character(2) COLLATE pg_catalog."default",
+    style character(2) COLLATE pg_catalog."default",
+    productsubcategoryid integer,
+    productmodelid integer,
+    sellstartdate timestamp without time zone NOT NULL,
+    sellenddate timestamp without time zone,
+    discontinueddate timestamp without time zone,
+    productcategoryid integer NOT NULL,
+    productsubcategoryid integer NOT NULL,
+    productmodelid integer NOT NULL,
+    productdescription character varying(400) COLLATE pg_catalog."default",
+    productthumbnailphoto bytea,
+    productthumbnailphotofilename character varying(50) COLLATE pg_catalog."default",
+    productlargephoto bytea,
+    productlargephotofilename character varying(50) COLLATE pg_catalog."default",
+    productcategoryname "Name" COLLATE pg_catalog."default",
+    productsubcategoryname "Name" COLLATE pg_catalog."default",
+    productmodelname "Name" COLLATE pg_catalog."default",
+    avg_rating numeric,
+    
+    -- Primary Key
+    CONSTRAINT "PK_ProductDetails_Denormalized" PRIMARY KEY (productid)
+);
+
+-- ============================================================
+-- 4. Denormalized Employee & Department Table
+-- Combines: Employee, EmployeeDepartmentHistory, Department
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS denormalized.employee_departments (
+    businessentityid integer NOT NULL,
+    nationalidnumber character varying(15) COLLATE pg_catalog."default" NOT NULL,
+    jobtitle character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    birthdate date NOT NULL,
+    maritalstatus character(1) COLLATE pg_catalog."default" NOT NULL,
+    gender character(1) COLLATE pg_catalog."default" NOT NULL,
+    hiredate date NOT NULL,
+    salariedflag "Flag" NOT NULL DEFAULT true,
+    vacationhours smallint NOT NULL DEFAULT 0,
+    sickleavehours smallint NOT NULL DEFAULT 0,
+    currentflag "Flag" NOT NULL DEFAULT true,
+    organizationnode character varying COLLATE pg_catalog."default" DEFAULT '/'::character varying,
+    
+    -- Redundant Attributes from Department (Added to avoid JOINs)
+    departmentid smallint NOT NULL,
+    departmentname "Name" COLLATE pg_catalog."default" NOT NULL,
+    departmentgroupname "Name" COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Redundant Attributes from History (Added to avoid JOINs)
+    startdate date NOT NULL,
+    enddate date,
+    shiftid smallint NOT NULL,
+    shiftname "Name" COLLATE pg_catalog."default" COLLATE pg_catalog."default",
+    shiftstarttime time without time zone NOT NULL,
+    shiftendtime time without time zone NOT NULL,
+    
+    -- Derived Attributes
+    total_history_days integer NOT NULL DEFAULT 0,
+    
+    -- Primary Key
+    CONSTRAINT "PK_EmployeeDepartments_Denormalized" PRIMARY KEY (businessentityid, startdate, departmentid, shiftid)
+);
+
+-- ============================================================
+-- Foreign Keys (Optional for Denormalized Schema Integrity)
+-- Note: In a pure denormalized schema, foreign keys are often removed 
+-- to allow independent updates of the denormalized tables, 
+-- but we add them here for logical grouping if needed.
+-- ============================================================
+
+ALTER TABLE IF NOT EXISTS denormalized.salesorder
+    ADD CONSTRAINT "FK_SalesOrder_Product_ProductID" FOREIGN KEY (productid) REFERENCES production.product (productid);
+
+ALTER TABLE IF NOT EXISTS denormalized.salesorder
+    ADD CONSTRAINT "FK_SalesOrder_ProductCategory_ProductCategoryID" FOREIGN KEY (productcategoryid) REFERENCES production.productcategory (productcategoryid);
+
+ALTER TABLE IF NOT EXISTS denormalized.salesorder
+    ADD CONSTRAINT "FK_SalesOrder_ProductSubcategory_ProductSubcategoryID" FOREIGN KEY (productsubcategoryid) REFERENCES production.productsubcategory (productsubcategoryid);
+
+ALTER TABLE IF NOT EXISTS denormalized.salesorder
+    ADD CONSTRAINT "FK_SalesOrder_ProductModel_ProductModelID" FOREIGN KEY (productmodelid) REFERENCES production.productmodel (productmodelid);
+
+ALTER TABLE IF NOT EXISTS denormalized.salesorder
+    ADD CONSTRAINT "FK_SalesOrder_SpecialOfferProduct_SpecialOfferID" FOREIGN KEY (specialofferid) REFERENCES sales.specialofferproduct (specialofferid);
+
+ALTER TABLE IF NOT EXISTS denormalized.salesorder
+    ADD CONSTRAINT "FK_SalesOrder_CurrencyRate_CurrencyRateID" FOREIGN KEY (currencyrateid) REFERENCES sales.currencyrate (currencyrateid);
+
+ALTER TABLE IF NOT EXISTS denormalized.salesorder
+    ADD CONSTRAINT "FK_SalesOrder_ShipMethod_ShipMethodID" FOREIGN KEY (shipmethodid) REFERENCES purchasing.shipmethod (shipmethodid);
+
+ALTER TABLE IF NOT EXISTS denormalized.salesorder
+    ADD CONSTRAINT "FK_SalesOrder_SalesTerritory_SalesTerritoryID" FOREIGN KEY (territoryid) REFERENCES sales.salesterritory (territoryid);
+
+ALTER TABLE IF NOT EXISTS denormalized.salesorder
+    ADD CONSTRAINT "FK_SalesOrder_Customer_CustomerID" FOREIGN KEY (customerid) REFERENCES sales.customer (customerid);
+
+ALTER TABLE IF NOT EXISTS denormalized.salesorder
+    ADD CONSTRAINT "FK_SalesOrder_SalesPerson_SalesPersonID" FOREIGN KEY (salespersonid) REFERENCES sales.salesperson (businessentityid);
+
+ALTER TABLE IF NOT EXISTS denormalized.productinventory
+    ADD CONSTRAINT "FK_ProductInventory_Product_ProductID" FOREIGN KEY (productid) REFERENCES production.product (productid);
+
+ALTER TABLE IF NOT EXISTS denormalized.productinventory
+    ADD CONSTRAINT "FK_ProductInventory_Location_LocationID" FOREIGN KEY (locationid) REFERENCES production.location (locationid);
+
+ALTER TABLE IF NOT EXISTS denormalized.productinventory
+    ADD CONSTRAINT "FK_ProductInventory_ProductModel_ProductModelID" FOREIGN KEY (productmodelid) REFERENCES production.productmodel (productmodelid);
+
+ALTER TABLE IF NOT EXISTS denormalized.employee_departments
+    ADD CONSTRAINT "FK_EmployeeDepartments_Employee_BusinessEntityID" FOREIGN KEY (businessentityid) REFERENCES humanresources.employee (businessentityid);
+
+ALTER TABLE IF NOT EXISTS denormalized.employee_departments
+    ADD CONSTRAINT "FK_EmployeeDepartments_Department_DepartmentID" FOREIGN KEY (departmentid) REFERENCES humanresources.department (departmentid);
+
+ALTER TABLE IF NOT EXISTS denormalized.employee_departments
+    ADD CONSTRAINT "FK_EmployeeDepartments_Shift_ShiftID" FOREIGN KEY (shiftid) REFERENCES humanresources.shift (shiftid);
+```

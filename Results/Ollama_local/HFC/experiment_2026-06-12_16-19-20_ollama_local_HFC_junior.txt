@@ -1,0 +1,307 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_16-19-20
+Model: ollama_local
+Prompt: junior
+Schema: HFC
+==================================================
+
+Here is the analysis and denormalization strategy for your database schema, followed by the SQL DDL script.
+
+### Part 1: Schema Analysis and Denormalization Strategy
+
+#### 1. Analysis of Relationships and Patterns
+The schema represents a biological/herbarium management system. The core entity is `tombos` (specimens), which acts as a "hub" connecting to many other entities (Species, Genus, Family, Collector, Location, Environment, etc.).
+- **High Join Count**: Queries involving a specimen often require joining `tombos` with `especies`, `generos`, `familias`, `locais_coleta`, `estados`, `paises`, `solos`, `relevos`, `vegetacoes`, `autores`, `herbarios`, and `usuarios`.
+- **Redundant Attributes**: Many tables (e.g., `especies`, `sub_especies`, `variedades`, `sub_familias`) share identical column structures (Name, Author, Genus, Family).
+- **One-to-Many Relationships**: `tombos` has a direct `especie_id` but also references `sub_especie_id`, `variedade_id`, `sub_familia_id`. These are likely redundant for reporting if the user only needs the "highest" taxonomy level or specific attributes.
+
+#### 2. Merging Strategy
+To reduce joins and improve read performance for analytics, we will consolidate the taxonomy and location hierarchy into the main `tombos` table.
+
+**Mergers:**
+1.  **Taxonomy Consolidation**: Merge `especies`, `sub_especies`, `variedades`, `generos`, `familias`, `sub_familias`, `reinos`, `tipos` into the `tombos` table.
+    *   *Reasoning*: A specimen record should ideally contain all its taxonomic classification details in one go.
+2.  **Location Consolidation**: Merge `locais_coleta`, `enderecos`, `estados`, `paises`, `solos`, `relevos`, `vegetacoes` into `tombos`.
+    *   *Reasoning*: Location data is critical for reporting (e.g., "Show me all specimens in State X"). Storing the full address and state in the specimen table avoids complex joins.
+3.  **Entity Consolidation**: Merge `herbarios`, `usuarios`, `coletores`, `autores` into `tombos`.
+    *   *Reasoning*: To report "Who collected this?", "Who identified it?", and "Which Herbarium does it belong to?", we need these fields directly on the specimen row.
+4.  **Configuration/Logs**: Merge `alteracoes`, `configuracao`, `historico_acessos` into `tombos`.
+    *   *Reasoning*: Audit logs and configuration status are frequently queried alongside specimen data.
+
+**Resulting Structure**: The `tombos` table becomes a "Fat" table containing all relational data, while the original tables are kept only for strict data integrity or if they contain unique data not present in the specimen (though in this schema, most data is relational).
+
+#### 3. Tradeoffs
+- **Write Performance**: Writing to a massive `tombos` table is slower than writing to normalized small tables. However, for an analytics warehouse, this is usually acceptable.
+- **Data Integrity**: We lose the ability to update a single field (e.g., a City) without updating every specimen that shares that city. *Mitigation*: Use `JSONB` columns for flexible attributes if strict normalization is needed later, or accept the denormalized state as the "source of truth" for reporting.
+- **Storage**: Storage usage will increase due to repeating address and taxonomy data.
+
+---
+
+### Part 2: Query Patterns
+The denormalization is driven by the following high-frequency analytical patterns:
+
+1.  **Specimen Detail View**:
+    *   *Pattern*: `SELECT * FROM tombos WHERE hcf = ?`
+    *   *Current Need*: Requires 15+ JOINs.
+    *   *New Need*: Returns a single row with all taxonomy, location, and entity details.
+
+2.  **Geospatial Reporting**:
+    *   *Pattern*: `SELECT COUNT(*) FROM tombos WHERE latitude BETWEEN ? AND ?`
+    *   *Current Need*: Requires JOIN to `locais_coleta` -> `cidade_id` -> `estados` -> `paises`.
+    *   *New Need*: Direct filtering on `tombos.latitude` and `tombos.estado_sigla`.
+
+3.  **Taxonomic Hierarchy**:
+    *   *Pattern*: `SELECT COUNT(*) FROM tombos WHERE familia = ?`
+    *   *Current Need*: Requires JOIN to `familias` -> `reinos` (if needed).
+    *   *New Need*: Direct filtering on `tombos.familia_id` and `tombos.reino_id`.
+
+---
+
+### Part 3: JSON Output
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy consolidates the 'tombos' (specimen) table into a single, comprehensive record holder. All foreign key relationships (Taxonomy, Location, Entities, Logs) are flattened into the `tombos` table. This eliminates the need for complex multi-table joins during analytics queries, significantly reducing query latency.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge taxonomy tables (especies, sub_especies, variedades, generos, familias, sub_familias, reinos, tipos) into the tombos table. Store species_id, sub_species_id, etc., directly, or store the full hierarchy attributes (nome, autor, sigla) directly to avoid JOINs."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge location tables (locais_coleta, enderecos, estados, paises, solos, relevos, vegetacoes) into the tombos table. Store full address details and geo-coordinates directly on the specimen."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge entity tables (herbarios, usuarios, coletores, autores) into the tombos table. Store names, emails, and IDs of collectors and identifiers directly."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Merge audit and config tables (alteracoes, configuracao, historico_acessos) into the tombos table. Store observation text and status flags directly."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added columns to 'tombos' table: species_nome, species_autor, genus_nome, familia_nome, estado_sigla, pais_sigla, latitude, longitude, herbario_nome, coletor_nome, usuario_nome, observacao, status_alteracao."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed columns from 'especies', 'locais_coleta', 'herbarios', 'usuarios' that are now redundant (e.g., 'nome', 'email', 'endereco_id') as this data is now primary on 'tombos'."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Increased write complexity and storage volume due to data duplication vs. drastically improved read performance and simplified query logic."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Loss of referential integrity enforcement at the application level; if a 'City' changes in the denormalized view, it might not propagate to all historical specimens unless the source of truth is strictly managed."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Retrieve complete specimen details including taxonomy, location, and collector info in a single SELECT statement without JOINs."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Perform geospatial filtering (latitude/longitude) or state-based aggregation without joining location tables."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze taxonomic distribution (e.g., count specimens per family) without traversing the family hierarchy."
+      }
+    ]
+  }
+}
+```
+
+---
+
+### Part 4: SQL DDL Creation Script
+
+```sql
+-- Drop old tables if they exist to ensure clean denormalization
+DROP TABLE IF EXISTS public.especies CASCADE;
+DROP TABLE IF EXISTS public.sub_especies CASCADE;
+DROP TABLE IF EXISTS public.variedades CASCADE;
+DROP TABLE IF EXISTS public.generos CASCADE;
+DROP TABLE IF EXISTS public.familias CASCADE;
+DROP TABLE IF EXISTS public.sub_familias CASCADE;
+DROP TABLE IF EXISTS public.reinos CASCADE;
+DROP TABLE IF EXISTS public.tipos CASCADE;
+DROP TABLE IF EXISTS public.locais_coleta CASCADE;
+DROP TABLE IF EXISTS public.enderecos CASCADE;
+DROP TABLE IF EXISTS public.estados CASCADE;
+DROP TABLE IF EXISTS public.paises CASCADE;
+DROP TABLE IF EXISTS public.solos CASCADE;
+DROP TABLE IF EXISTS public.relevos CASCADE;
+DROP TABLE IF EXISTS public.vegetacoes CASCADE;
+DROP TABLE IF EXISTS public.herbarios CASCADE;
+DROP TABLE IF EXISTS public.usuarios CASCADE;
+DROP TABLE IF EXISTS public.coletores CASCADE;
+DROP TABLE IF EXISTS public.autores CASCADE;
+DROP TABLE IF EXISTS public.alteracoes CASCADE;
+DROP TABLE IF EXISTS public.configuracao CASCADE;
+DROP TABLE IF EXISTS public.historico_acessos CASCADE;
+
+-- Create the Denormalized 'tombos' table
+CREATE TABLE IF NOT EXISTS public.tombos_denormalized (
+    id bigserial NOT NULL,
+    -- Core Specimen Data
+    hcf bigint NOT NULL,
+    data_tombo timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    data_coleta_dia bigint,
+    observacao text COLLATE pg_catalog."default",
+    nomes_populares text COLLATE pg_catalog."default",
+    numero_coleta bigint,
+    latitude double precision,
+    longitude double precision,
+    altitude double precision,
+    -- Taxonomy Data (Flattened)
+    especie_id bigint,
+    especie_nome character varying(200) COLLATE pg_catalog."default",
+    especie_autor_id bigint,
+    especie_autor_nome character varying(200) COLLATE pg_catalog."default",
+    genero_id bigint,
+    genero_nome character varying(200) COLLATE pg_catalog."default",
+    familia_id bigint,
+    familia_nome character varying(200) COLLATE pg_catalog."default",
+    sub_familia_id bigint,
+    sub_familia_nome character varying(300) COLLATE pg_catalog."default",
+    reino_id bigint,
+    reino_nome character varying(200) COLLATE pg_catalog."default",
+    tipo_id bigint,
+    tipo_nome character varying(250) COLLATE pg_catalog."default",
+    -- Location Data (Flattened)
+    local_coleta_id bigint,
+    cidade_id bigint,
+    cidade_nome character varying(255) COLLATE pg_catalog."default",
+    estado_id bigint,
+    estado_nome character varying(255) COLLATE pg_catalog."default",
+    estado_sigla character(4) COLLATE pg_catalog."default",
+    pais_id integer,
+    pais_nome character varying(255) COLLATE pg_catalog."default",
+    pais_sigla character(4) COLLATE pg_catalog."default",
+    logradouro character varying(200) COLLATE pg_catalog."default",
+    numero character varying(10) COLLATE pg_catalog."default",
+    complemento text COLLATE pg_catalog."default",
+    solo_id bigint,
+    solo_nome character varying(300) COLLATE pg_catalog."default",
+    relevo_id bigint,
+    relevo_nome character varying(300) COLLATE pg_catalog."default",
+    vegetacao_id bigint,
+    vegetacao_nome character varying(300) COLLATE pg_catalog."default",
+    -- Entity Data (Flattened)
+    entidade_id bigint,
+    herbario_id bigint,
+    herbario_nome character varying(200) COLLATE pg_catalog."default",
+    herbario_sigla character varying(80) COLLATE pg_catalog."default",
+    coletor_id bigint,
+    coletor_nome character varying(255) COLLATE pg_catalog."default",
+    coletor_email character varying(200) COLLATE pg_catalog."default",
+    usuario_id bigint,
+    usuario_nome character varying(200) COLLATE pg_catalog."default",
+    usuario_ra character varying(45) COLLATE pg_catalog."default",
+    usuario_email character varying(200) COLLATE pg_catalog."default",
+    -- Audit & Config Data (Flattened)
+    tombo_json text COLLATE pg_catalog."default",
+    ativo boolean DEFAULT true,
+    status_alteracoes_status alteracoes_status NOT NULL,
+    observacao_alteracao text COLLATE pg_catalog."default",
+    configuracao_periodicidade configuracao_periodicidade,
+    data_proxima_atualizacao character varying(10) COLLATE pg_catalog."default",
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT idx_41012_primary PRIMARY KEY (id)
+);
+
+-- Create Indexes for common analytics queries
+CREATE INDEX IF NOT EXISTS idx_41012_hcf ON public.tombos_denormalized(hcf);
+CREATE INDEX IF NOT EXISTS idx_41012_taxonomia ON public.tombos_denormalized(familia_id, genero_id, especie_id);
+CREATE INDEX IF NOT EXISTS idx_41012_localizacao ON public.tombos_denormalized(latitude, longitude, estado_sigla);
+CREATE INDEX IF NOT EXISTS idx_41012_entidade ON public.tombos_denormalized(herbario_id, coletor_id, usuario_id);
+
+-- Create the supporting tables only if they are truly unique or for strict data integrity (optional, but kept for schema completeness)
+-- Note: In a full denormalization, these might be dropped entirely. We keep them minimal.
+
+CREATE TABLE IF NOT EXISTS public.colecoes_anexas (
+    id bigserial NOT NULL,
+    tipo colecoes_anexas_tipo NOT NULL,
+    observacoes text COLLATE pg_catalog."default",
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT idx_41038_primary PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS public.remessas (
+    id bigserial NOT NULL,
+    observacao text COLLATE pg_catalog."default",
+    data_envio timestamp with time zone,
+    entidade_destino_id bigint NOT NULL,
+    herbario_id bigint NOT NULL,
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT idx_41182_primary PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS public.retirada_exsiccata_tombos (
+    id bigserial NOT NULL,
+    retirada_exsiccata_id bigint NOT NULL,
+    tombo_hcf bigint NOT NULL,
+    tipo retirada_exsiccata_tombos_tipo NOT NULL,
+    data_vencimento timestamp with time zone,
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    devolvido boolean DEFAULT false,
+    CONSTRAINT idx_41190_primary PRIMARY KEY (id)
+);
+
+-- Add Foreign Keys to the Denormalized Tombos Table (Optional: Usually denormalized tables don't have FKs to other denormalized tables, 
+-- but we link back to the original IDs if needed for consistency checks, or just leave as is for speed)
+-- For this script, we assume the denormalized table is the source of truth for reporting.
+
+-- If you need to maintain referential integrity to the original tables for updates:
+-- ALTER TABLE public.tombos_denormalized 
+-- ADD CONSTRAINT fk_tombos_denormalizado_especie FOREIGN KEY (especie_id) REFERENCES public.especies(id);
+-- ... (Repeat for other tables if strict integrity is required)
+
+-- However, for maximum performance in an analytics context, we treat the columns as immutable or managed via application logic.
+
+-- Create a view to map the new schema to the old logic if needed for migration
+CREATE OR REPLACE VIEW public.tombos_view AS
+SELECT 
+    t.id,
+    t.hcf,
+    t.latitude,
+    t.genero_nome,
+    t.familia_nome,
+    t.estado_sigla,
+    t.herbario_nome
+FROM public.tombos_denormalized t;
+
+-- Trigger to update timestamps (Standard pattern)
+CREATE OR REPLACE FUNCTION update_tombos_timestamps()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_update_tombos_timestamps
+    BEFORE UPDATE ON public.tombos_denormalized
+    FOR EACH ROW EXECUTE FUNCTION update_tombos_timestamps();
+
+-- Note: The original script had many FK constraints. In a denormalized schema, 
+-- these are often removed to prevent cascading update issues across a massive table.
+-- If you must keep the original tables, ensure the FKs point to the new table's columns.
+```

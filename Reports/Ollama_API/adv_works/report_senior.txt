@@ -1,0 +1,755 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 68
+  - Total Attributes: 279
+    * department: 4 columns
+    * employee: 15 columns
+    * employeedepartmenthistory: 6 columns
+    * employeepayhistory: 5 columns
+    * jobcandidate: 4 columns
+    * shift: 5 columns
+    * address: 9 columns
+    * addresstype: 4 columns
+    * businessentity: 3 columns
+    * businessentityaddress: 5 columns
+    * businessentitycontact: 5 columns
+    * contacttype: 3 columns
+    * countryregion: 3 columns
+    * emailaddress: 5 columns
+    * password: 5 columns
+    * person: 13 columns
+    * personphone: 4 columns
+    * phonenumbertype: 3 columns
+    * stateprovince: 8 columns
+    * billofmaterials: 9 columns
+    * culture: 3 columns
+    * document: 13 columns
+    * illustration: 3 columns
+    * location: 5 columns
+    * product: 25 columns
+    * productcategory: 4 columns
+    * productcosthistory: 5 columns
+    * productdescription: 4 columns
+    * productdocument: 3 columns
+    * productinventory: 7 columns
+    * productlistpricehistory: 5 columns
+    * productmodel: 6 columns
+    * productmodelillustration: 3 columns
+    * productmodelproductdescriptionculture: 4 columns
+    * productphoto: 6 columns
+    * productproductphoto: 4 columns
+    * productreview: 8 columns
+    * productsubcategory: 5 columns
+    * scrapreason: 3 columns
+    * transactionhistory: 9 columns
+    * transactionhistoryarchive: 9 columns
+    * unitmeasure: 3 columns
+    * workorder: 9 columns
+    * workorderrouting: 12 columns
+    * productvendor: 11 columns
+    * purchaseorderdetail: 9 columns
+    * purchaseorderheader: 12 columns
+    * shipmethod: 6 columns
+    * vendor: 8 columns
+    * countryregioncurrency: 3 columns (junction table - excluded from attribute analysis)
+    * creditcard: 6 columns
+    * currency: 3 columns
+    * currencyrate: 7 columns
+    * customer: 6 columns
+    * personcreditcard: 3 columns
+    * salesorderdetail: 10 columns
+    * salesorderheader: 25 columns
+    * salesorderheadersalesreason: 3 columns (junction table - excluded from attribute analysis)
+    * salesperson: 9 columns
+    * salespersonquotahistory: 5 columns
+    * salesreason: 4 columns
+    * salestaxrate: 7 columns
+    * salesterritory: 10 columns
+    * salesterritoryhistory: 6 columns
+    * shoppingcartitem: 6 columns
+    * specialoffer: 11 columns
+    * specialofferproduct: 4 columns
+    * store: 6 columns
+
+  Note: 2 junction table(s) detected and excluded from attribute analysis:
+    - countryregioncurrency
+    - salesorderheadersalesreason
+
+Denormalized Model:
+  - Tables: 9
+  - Total Attributes: 122
+    * DimDate: 22 columns
+    * DimEmployee: 26 columns
+    * DimProduct: 25 columns
+    * DimGeography: 11 columns
+    * DimCustomer: 6 columns
+    * DimVendor: 7 columns
+    * FactSales: 17 columns
+    * FactPurchases: 18 columns
+    * FactInventory: 5 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Normalized model has MORE attributes (122 vs 279)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: departmentid (SERIAL) -> DepartmentID (INTEGER)
+  - Type mismatch: name ("NAME") -> Day (INTEGER)
+  - Type mismatch: groupname ("NAME") -> DepartmentGroupName (VARCHAR(50))
+  - Type mismatch: nationalidnumber (CHARACTER) -> NationalIDNumber (VARCHAR(15))
+  - Type mismatch: loginid (CHARACTER) -> LoginID (VARCHAR(256))
+  - Type mismatch: jobtitle (CHARACTER) -> JobTitle (VARCHAR(50))
+  - Type mismatch: maritalstatus (CHARACTER(1)) -> MaritalStatus (CHAR(1))
+  - Type mismatch: gender (CHARACTER(1)) -> Gender (CHAR(1))
+  - Type mismatch: salariedflag ("FLAG") -> SalariedFlag (BOOLEAN)
+  - Type mismatch: currentflag ("FLAG") -> CurrentFlag (BOOLEAN)
+  - Type mismatch: organizationnode (CHARACTER) -> WeightUnitMeasureCode (CHAR(3))
+  - Type mismatch: startdate (DATE) -> QuarterName (VARCHAR(6))
+  - Type mismatch: enddate (DATE) -> DOWInMonth (INTEGER)
+  - Type mismatch: ratechangedate (TIMESTAMP) -> StateProvinceName (VARCHAR(50))
+  - Type mismatch: rate (NUMERIC) -> Date (DATE)
+  - Type mismatch: resume (XML) -> MMYYYY (VARCHAR(6))
+  - Type mismatch: shiftid (SERIAL) -> ShiftID (SMALLINT)
+  - Type mismatch: name ("NAME") -> MonthName_Short (VARCHAR(3))
+  - Type mismatch: addressid (SERIAL) -> AddressID (INTEGER)
+  - Type mismatch: addressline1 (CHARACTER) -> AddressLine1 (VARCHAR(60))
+  - Type mismatch: addressline2 (CHARACTER) -> AddressLine2 (VARCHAR(60))
+  - Type mismatch: city (CHARACTER) -> City (VARCHAR(30))
+  - Type mismatch: postalcode (CHARACTER) -> PostalCode (VARCHAR(15))
+  - Type mismatch: name ("NAME") -> Quarter (INTEGER)
+  - Type mismatch: name ("NAME") -> MonthName (VARCHAR(10))
+  - Type mismatch: countryregioncode (CHARACTER) -> CountryRegionCode (VARCHAR(3))
+  - Type mismatch: name ("NAME") -> WeekDayName (VARCHAR(10))
+  - Type mismatch: persontype (CHARACTER(2)) -> CustomerType (VARCHAR(20))
+  - Type mismatch: namestyle ("NAMESTYLE") -> MonthName_FirstLetter (VARCHAR(1))
+  - Type mismatch: title (CHARACTER) -> EmployeeID (INTEGER)
+  - Type mismatch: firstname ("NAME") -> ShiftName (VARCHAR(50))
+  - Type mismatch: middlename ("NAME") -> EmployeeFullName (VARCHAR(150))
+  - Type mismatch: lastname ("NAME") -> DepartmentName (VARCHAR(50))
+  - Type mismatch: suffix (CHARACTER) -> DaySuffix (VARCHAR(4))
+  - Type mismatch: demographics (XML) -> GeographyKey (SERIAL)
+  - Type mismatch: name ("NAME") -> MonthYear (VARCHAR(8))
+  - Type mismatch: stateprovinceid (SERIAL) -> StateProvinceID (INTEGER)
+  - Type mismatch: stateprovincecode (CHARACTER(3)) -> StateProvinceCode (CHAR(3))
+  - Type mismatch: name ("NAME") -> DayOfYear (INTEGER)
+  - Type mismatch: startdate (TIMESTAMP) -> StartDate (DATE)
+  - Type mismatch: enddate (TIMESTAMP) -> Weekday (INTEGER)
+  - Type mismatch: bomlevel (SMALLINT) -> EmployeeKey (SERIAL)
+  - Type mismatch: cultureid (CHARACTER(6)) -> CustomerID (INTEGER)
+  - Type mismatch: name ("NAME") -> DateKey (INTEGER)
+  - Type mismatch: title (CHARACTER) -> IsActive (BOOLEAN)
+  - Type mismatch: filename (CHARACTER) -> EmployeeAge (INTEGER)
+  - Type mismatch: status (SMALLINT) -> TotalDue (NUMERIC)
+  - Type mismatch: name ("NAME") -> Year (INTEGER)
+  - Type mismatch: productnumber (CHARACTER) -> ProductNumber (VARCHAR(25))
+  - Type mismatch: makeflag ("FLAG") -> MakeFlag (BOOLEAN)
+  - Type mismatch: finishedgoodsflag ("FLAG") -> FinishedGoodsFlag (BOOLEAN)
+  - Type mismatch: color (CHARACTER) -> Color (VARCHAR(15))
+  - Type mismatch: standardcost (NUMERIC) -> WeekDayName_Short (VARCHAR(3))
+  - Type mismatch: listprice (NUMERIC) -> YearsOfService (INTEGER)
+  - Type mismatch: size (CHARACTER) -> Size (VARCHAR(5))
+  - Type mismatch: productline (CHARACTER(2)) -> ProductLine (CHAR(2))
+  - Type mismatch: class (CHARACTER(2)) -> Class (CHAR(2))
+  - Type mismatch: style (CHARACTER(2)) -> Style (CHAR(2))
+  - Type mismatch: productmodelid (INTEGER) -> ProductCategoryName (VARCHAR(50))
+  - Type mismatch: sellstartdate (TIMESTAMP) -> SellStartDate (DATE)
+  - Type mismatch: sellenddate (TIMESTAMP) -> SellEndDate (DATE)
+  - Type mismatch: productcategoryid (SERIAL) -> ProductSubcategoryName (VARCHAR(50))
+  - Type mismatch: enddate (TIMESTAMP) -> EndDate (DATE)
+  - Type mismatch: shelf (CHARACTER) -> Shelf (VARCHAR(10))
+  - Type mismatch: enddate (TIMESTAMP) -> VendorKey (SERIAL)
+  - Type mismatch: productsubcategoryid (SERIAL) -> ProductSubcategoryID (INTEGER)
+  - Type mismatch: transactiondate (TIMESTAMP) -> CountryRegionName (VARCHAR(50))
+  - Type mismatch: unitmeasurecode (CHARACTER(3)) -> SizeUnitMeasureCode (CHAR(3))
+  - Type mismatch: orderqty (INTEGER) -> OrderQty (SMALLINT)
+  - Type mismatch: enddate (TIMESTAMP) -> VendorID (INTEGER)
+  - Type mismatch: productid (INTEGER) -> ProductName (VARCHAR(50))
+  - Type mismatch: lastreceiptdate (TIMESTAMP) -> WeekDayName_FirstLetter (VARCHAR(1))
+  - Type mismatch: onorderqty (INTEGER) -> StockedQty (NUMERIC(9, 2))
+  - Type mismatch: purchaseorderdetailid (SERIAL) -> PurchaseOrderDetailID (INTEGER)
+  - Type mismatch: purchaseorderid (SERIAL) -> PurchaseOrderID (INTEGER)
+  - Type mismatch: accountnumber ("ACCOUNTNUMBER") -> AccountNumber (VARCHAR(15))
+  - Type mismatch: preferredvendorstatus ("FLAG") -> PreferredVendorStatus (BOOLEAN)
+  - Type mismatch: activeflag ("FLAG") -> ActiveFlag (BOOLEAN)
+  - Type mismatch: expmonth (SMALLINT) -> WeekOfMonth (INTEGER)
+  - Type mismatch: expyear (SMALLINT) -> WeekOfYear (INTEGER)
+  - Type mismatch: salesorderdetailid (SERIAL) -> SalesOrderDetailID (INTEGER)
+  - Type mismatch: salesorderid (SERIAL) -> SalesOrderID (INTEGER)
+  - Type mismatch: bonus (NUMERIC) -> Month (INTEGER)
+  - Type mismatch: salesytd (NUMERIC) -> IsWeekend (BOOLEAN)
+  - Type mismatch: territoryid (SERIAL) -> TerritoryID (INTEGER)
+  - Type mismatch: enddate (TIMESTAMP) -> VendorName (VARCHAR(50))
+  - Type mismatch: category (CHARACTER) -> ProductCategoryID (INTEGER)
+  - Type mismatch: minqty (INTEGER) -> LineTotal (NUMERIC)
+--------------------------------------------------------------------------------
+Completeness Ratio:        0.44
+Data Type Preservation:    0.28
+Avg Levenshtein Distance:  4.47
+BLEU Score:                0.00
+ROUGE-1:                   0.35
+METEOR Score:              0.23
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: FactSales, FactPurchases, FactInventory
+Dimension Tables Detected: DimDate, DimEmployee, DimProduct, DimGeography, DimCustomer, DimVendor
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected 3 Fact tables. Evaluating as a GALAXY SCHEMA.
+  - FACT FK VIOLATION: Foreign Key 'ShipDateKey' in Fact 'FactSales' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'ShipDateKey' in Fact 'FactPurchases' allows NULL values.
+  - DIMENSION NULL WARNING: Attribute 'DepartmentID' in 'DimEmployee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'DepartmentName' in 'DimEmployee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'DepartmentGroupName' in 'DimEmployee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'ShiftID' in 'DimEmployee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'ShiftName' in 'DimEmployee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'ShiftStartTime' in 'DimEmployee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'ShiftEndTime' in 'DimEmployee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'StartDate' in 'DimEmployee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'EndDate' in 'DimEmployee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'IsActive' in 'DimEmployee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'EmployeeAge' in 'DimEmployee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'YearsOfService' in 'DimEmployee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'Color' in 'DimProduct' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'Size' in 'DimProduct' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'SizeUnitMeasureCode' in 'DimProduct' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'WeightUnitMeasureCode' in 'DimProduct' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'Weight' in 'DimProduct' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'ProductLine' in 'DimProduct' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'Class' in 'DimProduct' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'Style' in 'DimProduct' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'ProductSubcategoryID' in 'DimProduct' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'ProductSubcategoryName' in 'DimProduct' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'ProductCategoryID' in 'DimProduct' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'ProductCategoryName' in 'DimProduct' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'SellEndDate' in 'DimProduct' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'AddressLine2' in 'DimGeography' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'PersonID' in 'DimCustomer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'StoreID' in 'DimCustomer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'TerritoryID' in 'DimCustomer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'CustomerType' in 'DimCustomer' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * FactSales: 10 Numeric, 0 Text
+  * FactPurchases: 12 Numeric, 0 Text
+  * FactInventory: 2 Numeric, 1 Text
+  * DimDate: 9 Numeric, 12 Text
+  * DimEmployee: 7 Numeric, 18 Text
+  * DimProduct: 9 Numeric, 15 Text
+  * DimGeography: 2 Numeric, 8 Text
+  * DimCustomer: 4 Numeric, 1 Text
+  * DimVendor: 2 Numeric, 4 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  "group" "primary" accountnumber accountnumber activeflag actualcost actualcost actualcost actualenddate actualresourcehrs actualstartdate additionalcontactinfo addressid addressline1 addressline2 addresstypeid availability averageleadtime averagerate billofmaterialsid bin birthdate bomlevel bonus businessentityid businessentityid businessentityid businessentityid cardnumber cardtype carriertrackingnumber catalogdescription category changenumber city class color comment comments commissionpct contacttypeid costlastyear costrate costytd countryregioncode creditcardapprovalcode creditcardid creditrating cultureid currencycode currencyratedate currencyrateid currentflag customerid daystomanufacture demographics demographics departmentid description description diagram discontinueddate discountpct document documentnode documentnode documentsummary duedate duedate duedate emailaddress emailaddress emailaddressid emailpromotion enddate enddate enddate enddate enddate enddate enddate endofdayrate endtime expmonth expyear fileextension filename finishedgoodsflag firstname folderflag freight freight gender groupname hiredate illustrationid illustrationid instructions isonlystateprovinceflag jobcandidateid jobtitle largephoto largephotofilename lastname lastreceiptcost lastreceiptdate listprice listprice locationid loginid makeflag maritalstatus maxorderqty maxqty middlename minorderqty minqty name name name name name name name name name name name name name name name name name name name name name name namestyle nationalidnumber onlineorderflag onorderqty operationsequence orderdate orderdate orderqty orderqty orderqty organizationnode passwordhash passwordsalt payfrequency perassemblyqty personid persontype phonenumber phonenumbertypeid plannedcost postalcode preferredvendorstatus productcategoryid productdescriptionid productdescriptionid productid productid productid productline productmodelid productmodelid productmodelid productmodelid productnumber productphotoid productphotoid productreviewid productsubcategoryid purchaseorderdetailid purchaseorderid purchaseordernumber purchasingwebserviceurl quantity quantity quantity quantity quotadate rate ratechangedate rating reasontype receivedqty referenceorderid referenceorderid referenceorderlineid referenceorderlineid rejectedqty reorderpoint resume reviewdate reviewername revision revisionnumber revisionnumber safetystocklevel salariedflag saleslastyear saleslastyear salesorderdetailid salesorderid salesquota salesquota salesreasonid salestaxrateid salesytd salesytd scheduledenddate scheduledstartdate scrappedqty scrapreasonid sellenddate sellstartdate shelf shiftid shipbase shipdate shipdate shipmethodid shiprate shoppingcartid shoppingcartitemid sickleavehours size spatiallocation specialofferid standardcost standardcost standardprice startdate startdate startdate startdate startdate startdate startdate starttime stateprovincecode stateprovinceid status status status storeid style subtotal subtotal suffix taxamt taxamt taxrate taxtype territoryid thumbnailphoto thumbnailphotofilename title title totaldue transactiondate transactiondate transactionid transactionid transactiontype transactiontype type unitmeasurecode unitprice unitprice unitpricediscount vacationhours weight workorderid
+
+Denormalized Model (Combined Text):
+  AccountNumber ActiveFlag AddressID AddressLine1 AddressLine2 Bin BirthDate City Class Color CountryRegionCode CountryRegionName CreditRating CurrentFlag CustomerID CustomerKey CustomerType DOWInMonth Date DateKey Day DayOfYear DaySuffix DaysToManufacture DepartmentGroupName DepartmentID DepartmentName DiscountAmount EmployeeAge EmployeeFullName EmployeeID EmployeeKey EndDate FinishedGoodsFlag Freight Freight Gender GeographyKey HireDate IsActive IsWeekend JobTitle LineTotal LineTotal ListPrice LoginID MMYYYY MakeFlag MaritalStatus Month MonthName MonthName_FirstLetter MonthName_Short MonthYear NationalIDNumber OrderQty OrderQty PersonID PostalCode PreferredVendorStatus ProductCategoryID ProductCategoryName ProductID ProductKey ProductLine ProductName ProductNumber ProductSubcategoryID ProductSubcategoryName PurchaseOrderDetailID PurchaseOrderID Quantity Quarter QuarterName ReceivedQty RejectedQty ReorderPoint SafetyStockLevel SalariedFlag SalesOrderDetailID SalesOrderID SellEndDate SellStartDate Shelf ShiftEndTime ShiftID ShiftName ShiftStartTime SickLeaveHours Size SizeUnitMeasureCode StandardCost StartDate StateProvinceCode StateProvinceID StateProvinceName StockedQty StoreID Style SubTotal TaxAmt TaxAmt TerritoryID TotalDue TotalDue UnitPrice UnitPrice UnitPriceDiscount VacationHours VendorID VendorKey VendorName WeekDayName WeekDayName_FirstLetter WeekDayName_Short WeekOfMonth WeekOfYear Weekday Weight WeightUnitMeasureCode Year YearsOfService
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 122 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    departmentid SERIAL
+  Denormalized:  DepartmentID INTEGER
+
+Pair 2:
+  Relational:    name "NAME"
+  Denormalized:  Day INTEGER
+
+Pair 3:
+  Relational:    groupname "NAME"
+  Denormalized:  DepartmentGroupName VARCHAR(50)
+
+Pair 4:
+  Relational:    nationalidnumber CHARACTER
+  Denormalized:  NationalIDNumber VARCHAR(15)
+
+Pair 5:
+  Relational:    loginid CHARACTER
+  Denormalized:  LoginID VARCHAR(256)
+
+Pair 6:
+  Relational:    jobtitle CHARACTER
+  Denormalized:  JobTitle VARCHAR(50)
+
+Pair 7:
+  Relational:    birthdate DATE
+  Denormalized:  BirthDate DATE
+
+Pair 8:
+  Relational:    maritalstatus CHARACTER(1)
+  Denormalized:  MaritalStatus CHAR(1)
+
+Pair 9:
+  Relational:    gender CHARACTER(1)
+  Denormalized:  Gender CHAR(1)
+
+Pair 10:
+  Relational:    hiredate DATE
+  Denormalized:  HireDate DATE
+
+Pair 11:
+  Relational:    salariedflag "FLAG"
+  Denormalized:  SalariedFlag BOOLEAN
+
+Pair 12:
+  Relational:    vacationhours SMALLINT
+  Denormalized:  VacationHours SMALLINT
+
+Pair 13:
+  Relational:    sickleavehours SMALLINT
+  Denormalized:  SickLeaveHours SMALLINT
+
+Pair 14:
+  Relational:    currentflag "FLAG"
+  Denormalized:  CurrentFlag BOOLEAN
+
+Pair 15:
+  Relational:    organizationnode CHARACTER
+  Denormalized:  WeightUnitMeasureCode CHAR(3)
+
+Pair 16:
+  Relational:    startdate DATE
+  Denormalized:  QuarterName VARCHAR(6)
+
+Pair 17:
+  Relational:    enddate DATE
+  Denormalized:  DOWInMonth INTEGER
+
+Pair 18:
+  Relational:    ratechangedate TIMESTAMP
+  Denormalized:  StateProvinceName VARCHAR(50)
+
+Pair 19:
+  Relational:    rate NUMERIC
+  Denormalized:  Date DATE
+
+Pair 20:
+  Relational:    resume XML
+  Denormalized:  MMYYYY VARCHAR(6)
+
+Pair 21:
+  Relational:    shiftid SERIAL
+  Denormalized:  ShiftID SMALLINT
+
+Pair 22:
+  Relational:    name "NAME"
+  Denormalized:  MonthName_Short VARCHAR(3)
+
+Pair 23:
+  Relational:    starttime TIME
+  Denormalized:  ShiftStartTime TIME
+
+Pair 24:
+  Relational:    endtime TIME
+  Denormalized:  ShiftEndTime TIME
+
+Pair 25:
+  Relational:    addressid SERIAL
+  Denormalized:  AddressID INTEGER
+
+Pair 26:
+  Relational:    addressline1 CHARACTER
+  Denormalized:  AddressLine1 VARCHAR(60)
+
+Pair 27:
+  Relational:    addressline2 CHARACTER
+  Denormalized:  AddressLine2 VARCHAR(60)
+
+Pair 28:
+  Relational:    city CHARACTER
+  Denormalized:  City VARCHAR(30)
+
+Pair 29:
+  Relational:    postalcode CHARACTER
+  Denormalized:  PostalCode VARCHAR(15)
+
+Pair 30:
+  Relational:    name "NAME"
+  Denormalized:  Quarter INTEGER
+
+Pair 31:
+  Relational:    name "NAME"
+  Denormalized:  MonthName VARCHAR(10)
+
+Pair 32:
+  Relational:    countryregioncode CHARACTER
+  Denormalized:  CountryRegionCode VARCHAR(3)
+
+Pair 33:
+  Relational:    name "NAME"
+  Denormalized:  WeekDayName VARCHAR(10)
+
+Pair 34:
+  Relational:    persontype CHARACTER(2)
+  Denormalized:  CustomerType VARCHAR(20)
+
+Pair 35:
+  Relational:    namestyle "NAMESTYLE"
+  Denormalized:  MonthName_FirstLetter VARCHAR(1)
+
+Pair 36:
+  Relational:    title CHARACTER
+  Denormalized:  EmployeeID INTEGER
+
+Pair 37:
+  Relational:    firstname "NAME"
+  Denormalized:  ShiftName VARCHAR(50)
+
+Pair 38:
+  Relational:    middlename "NAME"
+  Denormalized:  EmployeeFullName VARCHAR(150)
+
+Pair 39:
+  Relational:    lastname "NAME"
+  Denormalized:  DepartmentName VARCHAR(50)
+
+Pair 40:
+  Relational:    suffix CHARACTER
+  Denormalized:  DaySuffix VARCHAR(4)
+
+Pair 41:
+  Relational:    demographics XML
+  Denormalized:  GeographyKey SERIAL
+
+Pair 42:
+  Relational:    name "NAME"
+  Denormalized:  MonthYear VARCHAR(8)
+
+Pair 43:
+  Relational:    stateprovinceid SERIAL
+  Denormalized:  StateProvinceID INTEGER
+
+Pair 44:
+  Relational:    stateprovincecode CHARACTER(3)
+  Denormalized:  StateProvinceCode CHAR(3)
+
+Pair 45:
+  Relational:    name "NAME"
+  Denormalized:  DayOfYear INTEGER
+
+Pair 46:
+  Relational:    startdate TIMESTAMP
+  Denormalized:  StartDate DATE
+
+Pair 47:
+  Relational:    enddate TIMESTAMP
+  Denormalized:  Weekday INTEGER
+
+Pair 48:
+  Relational:    bomlevel SMALLINT
+  Denormalized:  EmployeeKey SERIAL
+
+Pair 49:
+  Relational:    cultureid CHARACTER(6)
+  Denormalized:  CustomerID INTEGER
+
+Pair 50:
+  Relational:    name "NAME"
+  Denormalized:  DateKey INTEGER
+
+Pair 51:
+  Relational:    title CHARACTER
+  Denormalized:  IsActive BOOLEAN
+
+Pair 52:
+  Relational:    filename CHARACTER
+  Denormalized:  EmployeeAge INTEGER
+
+Pair 53:
+  Relational:    status SMALLINT
+  Denormalized:  TotalDue NUMERIC
+
+Pair 54:
+  Relational:    name "NAME"
+  Denormalized:  Year INTEGER
+
+Pair 55:
+  Relational:    productid SERIAL
+  Denormalized:  ProductKey SERIAL
+
+Pair 56:
+  Relational:    productnumber CHARACTER
+  Denormalized:  ProductNumber VARCHAR(25)
+
+Pair 57:
+  Relational:    makeflag "FLAG"
+  Denormalized:  MakeFlag BOOLEAN
+
+Pair 58:
+  Relational:    finishedgoodsflag "FLAG"
+  Denormalized:  FinishedGoodsFlag BOOLEAN
+
+Pair 59:
+  Relational:    color CHARACTER
+  Denormalized:  Color VARCHAR(15)
+
+Pair 60:
+  Relational:    safetystocklevel SMALLINT
+  Denormalized:  SafetyStockLevel SMALLINT
+
+Pair 61:
+  Relational:    reorderpoint SMALLINT
+  Denormalized:  ReorderPoint SMALLINT
+
+Pair 62:
+  Relational:    standardcost NUMERIC
+  Denormalized:  WeekDayName_Short VARCHAR(3)
+
+Pair 63:
+  Relational:    listprice NUMERIC
+  Denormalized:  YearsOfService INTEGER
+
+Pair 64:
+  Relational:    size CHARACTER
+  Denormalized:  Size VARCHAR(5)
+
+Pair 65:
+  Relational:    weight NUMERIC(8, 2)
+  Denormalized:  Weight NUMERIC(8, 2)
+
+Pair 66:
+  Relational:    daystomanufacture INTEGER
+  Denormalized:  DaysToManufacture INTEGER
+
+Pair 67:
+  Relational:    productline CHARACTER(2)
+  Denormalized:  ProductLine CHAR(2)
+
+Pair 68:
+  Relational:    class CHARACTER(2)
+  Denormalized:  Class CHAR(2)
+
+Pair 69:
+  Relational:    style CHARACTER(2)
+  Denormalized:  Style CHAR(2)
+
+Pair 70:
+  Relational:    productmodelid INTEGER
+  Denormalized:  ProductCategoryName VARCHAR(50)
+
+Pair 71:
+  Relational:    sellstartdate TIMESTAMP
+  Denormalized:  SellStartDate DATE
+
+Pair 72:
+  Relational:    sellenddate TIMESTAMP
+  Denormalized:  SellEndDate DATE
+
+Pair 73:
+  Relational:    productcategoryid SERIAL
+  Denormalized:  ProductSubcategoryName VARCHAR(50)
+
+Pair 74:
+  Relational:    enddate TIMESTAMP
+  Denormalized:  EndDate DATE
+
+Pair 75:
+  Relational:    standardcost NUMERIC
+  Denormalized:  StandardCost NUMERIC
+
+Pair 76:
+  Relational:    shelf CHARACTER
+  Denormalized:  Shelf VARCHAR(10)
+
+Pair 77:
+  Relational:    bin SMALLINT
+  Denormalized:  Bin SMALLINT
+
+Pair 78:
+  Relational:    quantity SMALLINT
+  Denormalized:  Quantity SMALLINT
+
+Pair 79:
+  Relational:    enddate TIMESTAMP
+  Denormalized:  VendorKey SERIAL
+
+Pair 80:
+  Relational:    listprice NUMERIC
+  Denormalized:  ListPrice NUMERIC
+
+Pair 81:
+  Relational:    productsubcategoryid SERIAL
+  Denormalized:  ProductSubcategoryID INTEGER
+
+Pair 82:
+  Relational:    transactiondate TIMESTAMP
+  Denormalized:  CountryRegionName VARCHAR(50)
+
+Pair 83:
+  Relational:    productid INTEGER
+  Denormalized:  ProductID INTEGER
+
+Pair 84:
+  Relational:    unitmeasurecode CHARACTER(3)
+  Denormalized:  SizeUnitMeasureCode CHAR(3)
+
+Pair 85:
+  Relational:    orderqty INTEGER
+  Denormalized:  OrderQty SMALLINT
+
+Pair 86:
+  Relational:    enddate TIMESTAMP
+  Denormalized:  VendorID INTEGER
+
+Pair 87:
+  Relational:    productid INTEGER
+  Denormalized:  ProductName VARCHAR(50)
+
+Pair 88:
+  Relational:    lastreceiptdate TIMESTAMP
+  Denormalized:  WeekDayName_FirstLetter VARCHAR(1)
+
+Pair 89:
+  Relational:    onorderqty INTEGER
+  Denormalized:  StockedQty NUMERIC(9, 2)
+
+Pair 90:
+  Relational:    purchaseorderdetailid SERIAL
+  Denormalized:  PurchaseOrderDetailID INTEGER
+
+Pair 91:
+  Relational:    orderqty SMALLINT
+  Denormalized:  OrderQty SMALLINT
+
+Pair 92:
+  Relational:    unitprice NUMERIC
+  Denormalized:  UnitPrice NUMERIC
+
+Pair 93:
+  Relational:    receivedqty NUMERIC(8, 2)
+  Denormalized:  ReceivedQty NUMERIC(8, 2)
+
+Pair 94:
+  Relational:    rejectedqty NUMERIC(8, 2)
+  Denormalized:  RejectedQty NUMERIC(8, 2)
+
+Pair 95:
+  Relational:    purchaseorderid SERIAL
+  Denormalized:  PurchaseOrderID INTEGER
+
+Pair 96:
+  Relational:    subtotal NUMERIC
+  Denormalized:  LineTotal NUMERIC
+
+Pair 97:
+  Relational:    taxamt NUMERIC
+  Denormalized:  TaxAmt NUMERIC
+
+Pair 98:
+  Relational:    freight NUMERIC
+  Denormalized:  Freight NUMERIC
+
+Pair 99:
+  Relational:    accountnumber "ACCOUNTNUMBER"
+  Denormalized:  AccountNumber VARCHAR(15)
+
+Pair 100:
+  Relational:    creditrating SMALLINT
+  Denormalized:  CreditRating SMALLINT
+
+Pair 101:
+  Relational:    preferredvendorstatus "FLAG"
+  Denormalized:  PreferredVendorStatus BOOLEAN
+
+Pair 102:
+  Relational:    activeflag "FLAG"
+  Denormalized:  ActiveFlag BOOLEAN
+
+Pair 103:
+  Relational:    expmonth SMALLINT
+  Denormalized:  WeekOfMonth INTEGER
+
+Pair 104:
+  Relational:    expyear SMALLINT
+  Denormalized:  WeekOfYear INTEGER
+
+Pair 105:
+  Relational:    customerid SERIAL
+  Denormalized:  CustomerKey SERIAL
+
+Pair 106:
+  Relational:    personid INTEGER
+  Denormalized:  PersonID INTEGER
+
+Pair 107:
+  Relational:    storeid INTEGER
+  Denormalized:  StoreID INTEGER
+
+Pair 108:
+  Relational:    salesorderdetailid SERIAL
+  Denormalized:  SalesOrderDetailID INTEGER
+
+Pair 109:
+  Relational:    unitprice NUMERIC
+  Denormalized:  UnitPrice NUMERIC
+
+Pair 110:
+  Relational:    unitpricediscount NUMERIC
+  Denormalized:  UnitPriceDiscount NUMERIC
+
+Pair 111:
+  Relational:    salesorderid SERIAL
+  Denormalized:  SalesOrderID INTEGER
+
+Pair 112:
+  Relational:    subtotal NUMERIC
+  Denormalized:  SubTotal NUMERIC
+
+Pair 113:
+  Relational:    taxamt NUMERIC
+  Denormalized:  TaxAmt NUMERIC
+
+Pair 114:
+  Relational:    freight NUMERIC
+  Denormalized:  Freight NUMERIC
+
+Pair 115:
+  Relational:    totaldue NUMERIC
+  Denormalized:  TotalDue NUMERIC
+
+Pair 116:
+  Relational:    bonus NUMERIC
+  Denormalized:  Month INTEGER
+
+Pair 117:
+  Relational:    salesytd NUMERIC
+  Denormalized:  IsWeekend BOOLEAN
+
+Pair 118:
+  Relational:    territoryid SERIAL
+  Denormalized:  TerritoryID INTEGER
+
+Pair 119:
+  Relational:    enddate TIMESTAMP
+  Denormalized:  VendorName VARCHAR(50)
+
+Pair 120:
+  Relational:    discountpct NUMERIC
+  Denormalized:  DiscountAmount NUMERIC
+
+Pair 121:
+  Relational:    category CHARACTER
+  Denormalized:  ProductCategoryID INTEGER
+
+Pair 122:
+  Relational:    minqty INTEGER
+  Denormalized:  LineTotal NUMERIC
+
+
+================================================================================

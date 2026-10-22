@@ -1,0 +1,292 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-03_22-53-40
+Model: ollama_api
+Prompt: OBT
+Schema: HFC
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy consolidates all related tables into a single table named 'tombos_denormalized'. This approach eliminates the need for JOIN operations by including all relevant attributes directly in one table. The primary key remains 'hcf' from the original 'tombos' table, ensuring each record is uniquely identifiable. All foreign key relationships are resolved by incorporating the referenced data directly into the new schema.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged 'tombos' with related dimension tables like 'especies', 'generos', 'familias', 'autores', 'sub_especies', 'variedades', 'sub_familias', 'tipos', 'solos', 'relevos', 'vegetacoes', 'locais_coleta', 'cidades', 'estados', 'paises', 'fase_sucessional', 'colecoes_anexas', 'herbarios', 'enderecos', 'coletores', 'identificadores' to eliminate JOINs during read operations."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Included related data from 'tombo_alteracoes_antigas', 'alteracoes', 'tombo_fotos', 'tombo_identificadores', and 'coletores_complementares' to provide a complete view of each tombo record without requiring additional lookups."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Removed all foreign key constraints and replaced them with actual values from the referenced tables to achieve a fully denormalized structure."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added prefixed column names for attributes that existed in multiple tables to avoid naming conflicts (e.g., 'especie_nome', 'genero_nome', 'familia_nome')."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Preserved all original data types and semantics from the normalized schema to ensure full reconstructibility of the original data."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Flattened hierarchical data such as taxonomic classifications (reino, familia, genero, especie, sub_especie, variedade, sub_familia) into individual columns."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved read performance at the cost of increased storage space due to data duplication across the denormalized structure."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified query complexity but increased maintenance overhead when updating data, as changes must be propagated to multiple places."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Reduced normalization which may lead to potential data integrity issues if not managed carefully during write operations."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "Q1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Frequent analytical queries that require detailed information about tombos along with their associated species, location, collectors, and identification details. These queries often involve multiple JOINs in the normalized schema."
+      },
+      {
+        "decision_id": "Q2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting queries that aggregate data based on taxonomic hierarchy, geographic location, and collection details. Denormalization avoids expensive JOIN operations and improves aggregation performance."
+      },
+      {
+        "decision_id": "Q3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Search queries filtering by specific attributes like species name, collector, or location details. A single-table scan is more efficient than joining multiple tables."
+      }
+    ]
+  }
+}
+
+CREATE TABLE IF NOT EXISTS public.tombos_denormalized
+(
+    -- Primary key from tombos
+    hcf bigserial NOT NULL,
+    
+    -- Tombos attributes
+    data_tombo timestamp with time zone,
+    data_coleta_dia bigint,
+    observacao text COLLATE pg_catalog."default",
+    nomes_populares text COLLATE pg_catalog."default",
+    numero_coleta bigint,
+    latitude double precision,
+    longitude double precision,
+    altitude double precision,
+    entidade_id bigint,
+    local_coleta_id bigint,
+    variedade_id bigint,
+    tipo_id bigint,
+    data_identificacao_dia smallint,
+    data_identificacao_mes smallint,
+    data_identificacao_ano integer,
+    situacao tombos_situacao DEFAULT 'REGULAR'::tombos_situacao,
+    especie_id bigint,
+    genero_id bigint,
+    familia_id bigint,
+    sub_familia_id bigint,
+    sub_especie_id bigint,
+    nome_cientifico text COLLATE pg_catalog."default",
+    colecao_anexa_id bigint,
+    data_coleta_mes bigint,
+    data_coleta_ano bigint,
+    solo_id bigint,
+    relevo_id bigint,
+    vegetacao_id bigint,
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ativo boolean DEFAULT true,
+    taxon character varying(45) COLLATE pg_catalog."default" DEFAULT NULL::character varying,
+    rascunho boolean DEFAULT false,
+    coletor_id bigint,
+    descricao text COLLATE pg_catalog."default",
+    unicata boolean,
+    cidade_id bigint,
+    fase_sucessional_id bigint,
+    
+    -- Related data from especies
+    especie_nome character varying(200) COLLATE pg_catalog."default",
+    especie_autor_id bigint,
+    especie_genero_id bigint,
+    especie_familia_id bigint,
+    especie_created_at timestamp with time zone,
+    especie_updated_at timestamp with time zone,
+    
+    -- Related data from generos
+    genero_nome character varying(200) COLLATE pg_catalog."default",
+    genero_familia_id bigint,
+    genero_created_at timestamp with time zone,
+    genero_updated_at timestamp with time zone,
+    
+    -- Related data from familias
+    familia_nome character varying(200) COLLATE pg_catalog."default",
+    familia_reino_id bigint,
+    familia_created_at timestamp with time zone,
+    familia_updated_at timestamp with time zone,
+    
+    -- Related data from autores (for especies)
+    especie_autor_nome character varying(200) COLLATE pg_catalog."default",
+    especie_autor_observacao character varying(500) COLLATE pg_catalog."default",
+    especie_autor_created_at timestamp with time zone,
+    especie_autor_updated_at timestamp with time zone,
+    
+    -- Related data from sub_especies
+    sub_especie_nome character varying(255) COLLATE pg_catalog."default",
+    sub_especie_especie_id bigint,
+    sub_especie_genero_id bigint,
+    sub_especie_familia_id bigint,
+    sub_especie_autor_id bigint,
+    sub_especie_created_at timestamp with time zone,
+    sub_especie_updated_at timestamp with time zone,
+    
+    -- Related data from variedades
+    variedade_nome character varying(200) COLLATE pg_catalog."default",
+    variedade_autor_id bigint,
+    variedade_especie_id bigint,
+    variedade_genero_id bigint,
+    variedade_familia_id bigint,
+    variedade_created_at timestamp with time zone,
+    variedade_updated_at timestamp with time zone,
+    
+    -- Related data from sub_familias
+    sub_familia_nome character varying(300) COLLATE pg_catalog."default",
+    sub_familia_familia_id bigint,
+    sub_familia_autor_id bigint,
+    sub_familia_created_at timestamp with time zone,
+    sub_familia_updated_at timestamp with time zone,
+    
+    -- Related data from tipos
+    tipo_nome character varying(250) COLLATE pg_catalog."default",
+    tipo_created_at timestamp with time zone,
+    tipo_updated_at timestamp with time zone,
+    
+    -- Related data from solos
+    solo_nome character varying(300) COLLATE pg_catalog."default",
+    solo_created_at timestamp with time zone,
+    solo_updated_at timestamp with time zone,
+    
+    -- Related data from relevos
+    relevo_nome character varying(300) COLLATE pg_catalog."default",
+    relevo_created_at timestamp with time zone,
+    relevo_updated_at timestamp with time zone,
+    
+    -- Related data from vegetacoes
+    vegetacao_nome character varying(300) COLLATE pg_catalog."default",
+    vegetacao_created_at timestamp with time zone,
+    vegetacao_updated_at timestamp with time zone,
+    
+    -- Related data from locais_coleta
+    local_coleta_descricao text COLLATE pg_catalog."default",
+    local_coleta_cidade_id bigint,
+    local_coleta_fase_sucessional_id bigint,
+    local_coleta_created_at timestamp with time zone,
+    local_coleta_updated_at timestamp with time zone,
+    local_coleta_fase_numero bigint,
+    
+    -- Related data from cidades (assuming this table exists)
+    cidade_nome character varying(255) COLLATE pg_catalog."default",
+    cidade_estado_id bigint,
+    cidade_created_at timestamp with time zone,
+    cidade_updated_at timestamp with time zone,
+    
+    -- Related data from estados
+    estado_nome character varying(255) COLLATE pg_catalog."default",
+    estado_sigla character(4) COLLATE pg_catalog."default",
+    estado_pais_id integer,
+    estado_created_at timestamp with time zone,
+    estado_updated_at timestamp with time zone,
+    
+    -- Related data from paises
+    pais_nome character varying(255) COLLATE pg_catalog."default",
+    pais_sigla character(4) COLLATE pg_catalog."default",
+    pais_created_at timestamp with time zone,
+    pais_updated_at timestamp with time zone,
+    
+    -- Related data from fase_sucessional
+    fase_sucessional_nome character varying(200) COLLATE pg_catalog."default",
+    fase_sucessional_created_at timestamp with time zone,
+    fase_sucessional_updated_at timestamp with time zone,
+    
+    -- Related data from colecoes_anexas
+    colecao_anexa_tipo colecoes_anexas_tipo,
+    colecao_anexa_observacoes text COLLATE pg_catalog."default",
+    colecao_anexa_created_at timestamp with time zone,
+    colecao_anexa_updated_at timestamp with time zone,
+    
+    -- Related data from herbarios (entidade)
+    entidade_nome character varying(200) COLLATE pg_catalog."default",
+    entidade_caminho_logotipo text COLLATE pg_catalog."default",
+    entidade_sigla character varying(80) COLLATE pg_catalog."default",
+    entidade_email character varying(200) COLLATE pg_catalog."default",
+    entidade_endereco_id bigint,
+    entidade_created_at timestamp with time zone,
+    entidade_updated_at timestamp with time zone,
+    
+    -- Related data from enderecos
+    endereco_logradouro character varying(200) COLLATE pg_catalog."default",
+    endereco_numero character varying(10) COLLATE pg_catalog."default",
+    endereco_complemento text COLLATE pg_catalog."default",
+    endereco_cidade_id bigint,
+    endereco_created_at timestamp with time zone,
+    endereco_updated_at timestamp with time zone,
+    
+    -- Related data from coletores
+    coletor_nome character varying(255) COLLATE pg_catalog."default",
+    coletor_email character varying(200) COLLATE pg_catalog."default",
+    coletor_created_at timestamp with time zone,
+    coletor_updated_at timestamp with time zone,
+    
+    -- Related data from identificadores
+    identificador_nome character varying(255) COLLATE pg_catalog."default",
+    identificador_created_at timestamp with time zone,
+    identificador_updated_at timestamp with time zone,
+    
+    -- Related data from tombo_alteracoes_antigas
+    alteracoes_antigas_sequencia bigint,
+    alteracoes_antigas_data date,
+    alteracoes_antigas_descricao text COLLATE pg_catalog."default",
+    
+    -- Related data from alteracoes
+    alteracao_id bigserial,
+    alteracao_usuario_id bigint,
+    alteracao_status alteracoes_status,
+    alteracao_observacao text COLLATE pg_catalog."default",
+    alteracao_created_at timestamp with time zone,
+    alteracao_updated_at timestamp with time zone,
+    alteracao_tombo_json text COLLATE pg_catalog."default",
+    alteracao_ativo boolean,
+    alteracao_identificacao boolean,
+    
+    -- Related data from tombo_fotos
+    foto_id bigserial,
+    foto_codigo_barra character varying(45) COLLATE pg_catalog."default",
+    foto_num_barra character varying(45) COLLATE pg_catalog."default",
+    foto_caminho_foto text COLLATE pg_catalog."default",
+    foto_em_vivo boolean,
+    foto_sequencia bigint,
+    foto_created_at timestamp with time zone,
+    foto_updated_at timestamp with time zone,
+    
+    -- Related data from tombo_identificadores
+    identificador_ordem smallint,
+    
+    -- Related data from coletores_complementares
+    coletor_complementar character varying(1000) COLLATE pg_catalog."default",
+    coletor_complementar_created_at timestamp with time zone,
+    coletor_complementar_updated_at timestamp with time zone,
+    
+    CONSTRAINT tombos_denormalized_pkey PRIMARY KEY (hcf)
+);

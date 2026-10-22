@@ -1,0 +1,189 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_08-58-28
+Model: ollama_api
+Prompt: mid-level
+Schema: TPC_H
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalized schema consolidates the normalized TPC-H-like model into a star schema optimized for analytical queries. The central fact table, FACT_LINEITEM, is built from the LINEITEM table and enriched with dimensional data from related entities like ORDERS, CUSTOMER, NATION, REGION, PART, SUPPLIER, and PARTSUPP. Dimensions such as DIM_CUSTOMER, DIM_PART, DIM_SUPPLIER, DIM_DATE, and DIM_GEOGRAPHY are created to support efficient joins and aggregations. This approach reduces the need for complex multi-table joins at query time and optimizes read-heavy analytical workloads.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Create a central fact table FACT_LINEITEM by denormalizing LINEITEM with relevant fields from ORDERS, CUSTOMER, PART, SUPPLIER, and PARTSUPP to reduce join complexity."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Consolidate CUSTOMER, NATION, and REGION into a single DIM_CUSTOMER dimension table to reduce join hops and improve query performance."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Consolidate SUPPLIER and NATION into DIM_SUPPLIER to simplify supplier-related analytics."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Consolidate PART and PARTSUPP into DIM_PART to enrich part information with supplier-specific details."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Introduce a DIM_DATE dimension to support time-based analysis using the O_ORDERDATE field."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Create a DIM_GEOGRAPHY dimension from NATION and REGION to support regional analytics."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added calculated fields such as L_DISCOUNTED_PRICE = L_EXTENDEDPRICE * (1 - L_DISCOUNT) and L_FINAL_PRICE = L_DISCOUNTED_PRICE * (1 + L_TAX) to support revenue analytics without runtime computation."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added date hierarchy fields (year, quarter, month, day of week) in DIM_DATE for better time-based aggregations."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added surrogate keys for all dimension tables to support better indexing and avoid reliance on natural keys."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Duplicated descriptive fields (e.g., region name, nation name, customer name) into relevant fact-adjacent tables to reduce joins."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage usage due to duplication of dimensional data across fact and dimension tables."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Slight increase in ETL complexity to maintain consistency of duplicated data across tables."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Reduced flexibility in schema changes; altering a dimension may require cascading updates to multiple tables."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregating total sales and revenue by customer segment, region, and order date to support dashboards and executive reporting."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyzing part performance by supplier, including availability and supply cost, to support supply chain analytics."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Tracking order fulfillment efficiency by comparing ship date, commit date, and receipt date."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Time-based trend analysis of sales and returns using order date and return flag."
+      }
+    ]
+  }
+}
+
+---
+
+```sql
+-- DIM_DATE: Time dimension for order date analytics
+CREATE TABLE DIM_DATE (
+    DATE_KEY        DATE NOT NULL PRIMARY KEY,
+    YEAR            INTEGER,
+    QUARTER         INTEGER,
+    MONTH           INTEGER,
+    DAY_OF_MONTH    INTEGER,
+    DAY_OF_WEEK     INTEGER,
+    WEEK_OF_YEAR    INTEGER,
+    IS_WEEKEND      BOOLEAN
+);
+
+-- DIM_GEOGRAPHY: Consolidated geography info from NATION and REGION
+CREATE TABLE DIM_GEOGRAPHY (
+    GEO_KEY         INTEGER NOT NULL PRIMARY KEY,
+    NATION_KEY      INTEGER,
+    NATION_NAME     CHAR(25),
+    REGION_KEY      INTEGER,
+    REGION_NAME     CHAR(25)
+);
+
+-- DIM_CUSTOMER: Denormalized customer info including nation and region
+CREATE TABLE DIM_CUSTOMER (
+    CUST_KEY            INTEGER NOT NULL PRIMARY KEY,
+    CUST_NAME           VARCHAR(25),
+    CUST_ADDRESS        VARCHAR(40),
+    CUST_PHONE          CHAR(15),
+    CUST_ACCTBAL        DECIMAL(15,2),
+    CUST_MKTSEGMENT     CHAR(10),
+    NATION_KEY          INTEGER,
+    NATION_NAME         CHAR(25),
+    REGION_KEY          INTEGER,
+    REGION_NAME         CHAR(25)
+);
+
+-- DIM_SUPPLIER: Denormalized supplier info including nation
+CREATE TABLE DIM_SUPPLIER (
+    SUPP_KEY            INTEGER NOT NULL PRIMARY KEY,
+    SUPP_NAME           CHAR(25),
+    SUPP_ADDRESS        VARCHAR(40),
+    SUPP_PHONE          CHAR(15),
+    SUPP_ACCTBAL        DECIMAL(15,2),
+    NATION_KEY          INTEGER,
+    NATION_NAME         CHAR(25),
+    REGION_KEY          INTEGER,
+    REGION_NAME         CHAR(25)
+);
+
+-- DIM_PART: Enriched part info with supplier-specific data
+CREATE TABLE DIM_PART (
+    PART_KEY            INTEGER NOT NULL PRIMARY KEY,
+    PART_NAME           VARCHAR(55),
+    PART_MFGR           CHAR(25),
+    PART_BRAND          CHAR(10),
+    PART_TYPE           VARCHAR(25),
+    PART_SIZE           INTEGER,
+    PART_CONTAINER      CHAR(10),
+    PART_RETAILPRICE    DECIMAL(15,2),
+    SUPP_KEY            INTEGER,
+    SUPP_AVAILQTY       INTEGER,
+    SUPP_SUPPLYCOST     DECIMAL(15,2)
+);
+
+-- FACT_LINEITEM: Central fact table with enriched dimensions
+CREATE TABLE FACT_LINEITEM (
+    ORDER_KEY           INTEGER NOT NULL,
+    LINE_NUMBER         INTEGER NOT NULL,
+    CUST_KEY            INTEGER,
+    PART_KEY            INTEGER,
+    SUPP_KEY            INTEGER,
+    DATE_KEY            DATE,
+    GEO_KEY             INTEGER,
+    QUANTITY            DECIMAL(15,2),
+    EXTENDED_PRICE      DECIMAL(15,2),
+    DISCOUNT            DECIMAL(15,2),
+    TAX                 DECIMAL(15,2),
+    DISCOUNTED_PRICE    DECIMAL(15,2), -- Calculated: EXTENDED_PRICE * (1 - DISCOUNT)
+    FINAL_PRICE         DECIMAL(15,2), -- Calculated: DISCOUNTED_PRICE * (1 + TAX)
+    RETURN_FLAG         CHAR(1),
+    LINE_STATUS         CHAR(1),
+    SHIP_DATE           DATE,
+    COMMIT_DATE         DATE,
+    RECEIPT_DATE        DATE,
+    SHIP_MODE           CHAR(10),
+    ORDER_STATUS        CHAR(1),
+    ORDER_PRIORITY      CHAR(15),
+    CLERK               CHAR(15),
+    SHIP_PRIORITY       INTEGER,
+    PRIMARY KEY (ORDER_KEY, LINE_NUMBER)
+);
+```

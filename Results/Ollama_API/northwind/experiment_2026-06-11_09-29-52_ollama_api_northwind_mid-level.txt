@@ -1,0 +1,236 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-29-52
+Model: ollama_api
+Prompt: mid-level
+Schema: northwind
+==================================================
+
+{
+  "section_1": {
+    "summary": "The schema has been denormalized into a star schema optimized for analytical workloads. The central fact table 'fact_orders' captures transactional order details, while supporting dimension tables provide descriptive context. This reduces join complexity and improves query performance for aggregations and reporting.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidated order and order_details into a single fact table fact_orders to centralize transactional data for analytical queries."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Created a denormalized dimension table dim_customers by merging customers, customer_customer_demo, and customer_demographics tables."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Created a denormalized dimension table dim_products by merging products, categories, and suppliers tables."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Created a denormalized dimension table dim_employees by merging employees and employee_territories tables."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Created a denormalized dimension table dim_territories by merging territories and region tables."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Created a denormalized dimension table dim_shippers to store shipping company details."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added calculated field total_price in fact_orders as (unit_price * quantity * (1 - discount))."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added calculated field order_year, order_month, order_day in fact_orders derived from order_date."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added calculated field shipped_year, shipped_month, shipped_day in fact_orders derived from shipped_date."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Removed picture and photo_path fields from dim_employees due to low analytical value."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Removed picture field from dim_categories due to low analytical value."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Denormalization increases data redundancy, leading to higher storage requirements and potential data inconsistency if not properly maintained."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Improved read performance comes at the cost of increased write complexity, as updates may need to propagate to multiple tables."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of granularity in some dimensions (e.g., employee_territories flattened into dim_employees) may limit certain detailed analytical queries."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregate sales by product, category, or supplier to analyze revenue and performance."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze customer purchasing behavior by demographics, region, or company size."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Track order trends over time, including seasonal patterns and shipping performance."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Evaluate employee performance based on order volume, revenue, or customer satisfaction metrics."
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Monitor shipping efficiency and cost analysis by shipper and delivery region."
+      }
+    ]
+  }
+}
+
+```sql
+-- Denormalized Analytical Schema DDL
+
+-- Dimension Tables
+
+CREATE TABLE IF NOT EXISTS public.dim_customers (
+    customer_id character varying(5) NOT NULL,
+    company_name character varying(40) NOT NULL,
+    contact_name character varying(30),
+    contact_title character varying(30),
+    address character varying(60),
+    city character varying(15),
+    region character varying(15),
+    postal_code character varying(10),
+    country character varying(15),
+    phone character varying(24),
+    fax character varying(24),
+    customer_type_id character varying(5),
+    customer_desc text,
+    CONSTRAINT pk_dim_customers PRIMARY KEY (customer_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.dim_products (
+    product_id smallint NOT NULL,
+    product_name character varying(40) NOT NULL,
+    quantity_per_unit character varying(20),
+    unit_price real,
+    units_in_stock smallint,
+    units_on_order smallint,
+    reorder_level smallint,
+    discontinued integer NOT NULL,
+    category_id smallint,
+    category_name character varying(15),
+    description text,
+    supplier_id smallint,
+    supplier_company_name character varying(40),
+    supplier_contact_name character varying(30),
+    supplier_contact_title character varying(30),
+    supplier_address character varying(60),
+    supplier_city character varying(15),
+    supplier_region character varying(15),
+    supplier_postal_code character varying(10),
+    supplier_country character varying(15),
+    supplier_phone character varying(24),
+    supplier_fax character varying(24),
+    supplier_homepage text,
+    CONSTRAINT pk_dim_products PRIMARY KEY (product_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.dim_employees (
+    employee_id smallint NOT NULL,
+    last_name character varying(20) NOT NULL,
+    first_name character varying(10) NOT NULL,
+    title character varying(30),
+    title_of_courtesy character varying(25),
+    birth_date date,
+    hire_date date,
+    address character varying(60),
+    city character varying(15),
+    region character varying(15),
+    postal_code character varying(10),
+    country character varying(15),
+    home_phone character varying(24),
+    extension character varying(4),
+    notes text,
+    reports_to smallint,
+    territory_ids character varying(500),
+    CONSTRAINT pk_dim_employees PRIMARY KEY (employee_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.dim_territories (
+    territory_id character varying(20) NOT NULL,
+    territory_description character varying(60) NOT NULL,
+    region_id smallint NOT NULL,
+    region_description character varying(60) NOT NULL,
+    CONSTRAINT pk_dim_territories PRIMARY KEY (territory_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.dim_shippers (
+    shipper_id smallint NOT NULL,
+    company_name character varying(40) NOT NULL,
+    phone character varying(24),
+    CONSTRAINT pk_dim_shippers PRIMARY KEY (shipper_id)
+);
+
+-- Fact Table
+
+CREATE TABLE IF NOT EXISTS public.fact_orders (
+    order_id smallint NOT NULL,
+    customer_id character varying(5) NOT NULL,
+    employee_id smallint NOT NULL,
+    product_id smallint NOT NULL,
+    shipper_id smallint,
+    order_date date,
+    required_date date,
+    shipped_date date,
+    order_year smallint,
+    order_month smallint,
+    order_day smallint,
+    shipped_year smallint,
+    shipped_month smallint,
+    shipped_day smallint,
+    unit_price real NOT NULL,
+    quantity smallint NOT NULL,
+    discount real NOT NULL,
+    total_price real,
+    freight real,
+    ship_name character varying(40),
+    ship_address character varying(60),
+    ship_city character varying(15),
+    ship_region character varying(15),
+    ship_postal_code character varying(10),
+    ship_country character varying(15),
+    CONSTRAINT pk_fact_orders PRIMARY KEY (order_id, product_id)
+);
+
+-- Indexes for Performance
+
+CREATE INDEX idx_fact_orders_customer_id ON public.fact_orders(customer_id);
+CREATE INDEX idx_fact_orders_employee_id ON public.fact_orders(employee_id);
+CREATE INDEX idx_fact_orders_product_id ON public.fact_orders(product_id);
+CREATE INDEX idx_fact_orders_order_date ON public.fact_orders(order_date);
+CREATE INDEX idx_fact_orders_shipper_id ON public.fact_orders(shipper_id);
+
+CREATE INDEX idx_dim_customers_country ON public.dim_customers(country);
+CREATE INDEX idx_dim_customers_city ON public.dim_customers(city);
+
+CREATE INDEX idx_dim_products_category_id ON public.dim_products(category_id);
+CREATE INDEX idx_dim_products_supplier_id ON public.dim_products(supplier_id);
+
+CREATE INDEX idx_dim_employees_reports_to ON public.dim_employees(reports_to);
+```

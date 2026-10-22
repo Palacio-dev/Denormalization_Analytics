@@ -1,0 +1,262 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_08-55-28
+Model: ollama_api
+Prompt: mid-level
+Schema: TPC_DS
+==================================================
+
+{
+  "section_1": {
+    "summary": "The current schema is normalized with separate tables for different sales channels (store, catalog, web) and 
+    their line items, returns, and inventory. To optimize for read-heavy analytical workloads, we denormalize into a unified 
+    fact table for sales and returns, and create dimension tables for common entities like customers, items, dates, promotions, etc. 
+    We merge the three order/purchase types into a single fact_sales table and consolidate returns into fact_returns. 
+    This reduces join complexity and simplifies querying across channels.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge s_purchase, s_catalog_order, and s_web_order into a single fact_sales table with a sales_channel indicator to distinguish the source."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge s_purchase_lineitem, s_catalog_order_lineitem, and s_web_order_lineitem into fact_sales to create a single line-item grain fact table."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge s_store_returns, s_catalog_returns into a unified fact_returns table with a return_channel field to identify the source."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Create dimension tables for commonly joined entities: dim_customer, dim_item, dim_date, dim_promotion, dim_store, dim_warehouse, dim_ship_mode, dim_web_site, dim_call_center, dim_reason to reduce redundancy and join complexity."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Retain s_inventory as a separate fact_inventory table since it represents a different analytical context (stock levels over time)."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added sales_channel column to fact_sales to distinguish between store, catalog, and web sales."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added return_channel column to fact_returns to distinguish between store, catalog, and web returns."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Converted date fields (e.g., purc_purchase_date) into a single date_id foreign key referencing dim_date."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Pre-aggregated total_sales_amount in fact_sales as (quantity * sales_price) - coupon_amt for faster querying."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Removed redundant comment fields (e.g., purc_comment, cord_order_comments) to reduce row size unless explicitly needed."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Denormalization increases data redundancy but significantly reduces query complexity and join overhead, improving read performance."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Fact tables will have wider rows due to inclusion of dimensional attributes, increasing storage but reducing need for joins."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "ETL complexity increases as multiple source tables must be unified, but this is offset by simplified downstream querying."
+      },
+      {
+        "tradeoff_id": "T4",
+        "description": "Some loss of granularity in comments and free-text fields may occur to reduce row size, but can be mitigated with optional extended tables if needed."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Business users often want to compare sales across channels (store, catalog, web) by date, item, or customer. A unified fact_sales table enables such aggregations without complex unions or joins."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting on total sales, units sold, discounts, and coupon usage across all channels benefits from a unified line-item grain fact table."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Returns analysis (e.g., return rates by item, customer, or reason) is simplified by consolidating all return data into a single fact_returns table."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Joining with dimensional data (e.g., customer demographics, item categories) is frequent in dashboards; separate dimension tables support efficient star schema queries."
+      }
+    ]
+  }
+}
+
+-- Denormalized Schema DDL
+
+-- Dimension Tables
+
+create table dim_customer (
+    customer_id         char(16)      not null,
+    customer_name       varchar(100),
+    customer_address    varchar(255),
+    customer_city       varchar(50),
+    customer_state      char(2),
+    customer_zip        char(10),
+    primary key (customer_id)
+);
+
+create table dim_item (
+    item_id             char(16)      not null,
+    item_name           varchar(100),
+    item_category       varchar(50),
+    item_brand          varchar(50),
+    item_price          numeric(7,2),
+    primary key (item_id)
+);
+
+create table dim_date (
+    date_id             integer       not null,
+    full_date           char(10),
+    day_of_week         integer,
+    month               integer,
+    quarter             integer,
+    year                integer,
+    primary key (date_id)
+);
+
+create table dim_promotion (
+    promotion_id        char(16)      not null,
+    promotion_name      varchar(100),
+    discount_pct        numeric(5,2),
+    primary key (promotion_id)
+);
+
+create table dim_store (
+    store_id            char(16)      not null,
+    store_name          varchar(100),
+    store_city          varchar(50),
+    store_state         char(2),
+    primary key (store_id)
+);
+
+create table dim_warehouse (
+    warehouse_id        char(16)      not null,
+    warehouse_name      varchar(100),
+    warehouse_city      varchar(50),
+    warehouse_state     char(2),
+    primary key (warehouse_id)
+);
+
+create table dim_ship_mode (
+    ship_mode_id        char(16)      not null,
+    ship_mode_name      varchar(50),
+    primary key (ship_mode_id)
+);
+
+create table dim_web_site (
+    web_site_id         char(16)      not null,
+    web_site_name       varchar(100),
+    primary key (web_site_id)
+);
+
+create table dim_call_center (
+    call_center_id      char(16)      not null,
+    call_center_name    varchar(100),
+    primary key (call_center_id)
+);
+
+create table dim_reason (
+    reason_id           char(16)      not null,
+    reason_description  varchar(100),
+    primary key (reason_id)
+);
+
+-- Fact Tables
+
+create table fact_sales (
+    sales_id            integer       not null,
+    sales_channel       char(10)      not null, -- 'store', 'catalog', 'web'
+    date_id             integer       not null,
+    customer_id         char(16),
+    item_id             char(16),
+    store_id            char(16),
+    promotion_id        char(16),
+    ship_mode_id        char(16),
+    call_center_id      char(16),
+    web_site_id         char(16),
+    quantity            integer,
+    sales_price         numeric(7,2),
+    coupon_amt          numeric(7,2),
+    total_sales_amount  numeric(10,2), -- derived: (quantity * sales_price) - coupon_amt
+    line_number         integer,
+    register_id         integer,
+    clerk_id            integer,
+    warehouse_id        char(16),
+    catalog_page_number integer,
+    web_page_id         char(16),
+    primary key (sales_id, line_number),
+    foreign key (date_id) references dim_date(date_id),
+    foreign key (customer_id) references dim_customer(customer_id),
+    foreign key (item_id) references dim_item(item_id),
+    foreign key (store_id) references dim_store(store_id),
+    foreign key (promotion_id) references dim_promotion(promotion_id),
+    foreign key (ship_mode_id) references dim_ship_mode(ship_mode_id),
+    foreign key (call_center_id) references dim_call_center(call_center_id),
+    foreign key (web_site_id) references dim_web_site(web_site_id),
+    foreign key (warehouse_id) references dim_warehouse(warehouse_id)
+);
+
+create table fact_returns (
+    return_id           integer       not null,
+    return_channel      char(10)      not null, -- 'store', 'catalog', 'web'
+    date_id             integer       not null,
+    item_id             char(16),
+    customer_id         char(16),
+    return_reason_id    char(16),
+    store_id            char(16),
+    call_center_id      char(16),
+    ship_mode_id        char(16),
+    warehouse_id        char(16),
+    web_page_id         char(16),
+    return_quantity     integer,
+    return_amount       numeric(7,2),
+    return_tax          numeric(7,2),
+    return_fee          numeric(7,2),
+    ship_cost           numeric(7,2),
+    refunded_cash       numeric(7,2),
+    reversed_charge     numeric(7,2),
+    store_credit        numeric(7,2),
+    merchant_credit     numeric(7,2),
+    line_number         integer,
+    primary key (return_id, line_number),
+    foreign key (date_id) references dim_date(date_id),
+    foreign key (item_id) references dim_item(item_id),
+    foreign key (customer_id) references dim_customer(customer_id),
+    foreign key (return_reason_id) references dim_reason(reason_id),
+    foreign key (store_id) references dim_store(store_id),
+    foreign key (call_center_id) references dim_call_center(call_center_id),
+    foreign key (ship_mode_id) references dim_ship_mode(ship_mode_id),
+    foreign key (warehouse_id) references dim_warehouse(warehouse_id),
+    foreign key (web_page_id) references dim_web_site(web_site_id)
+);
+
+create table fact_inventory (
+    warehouse_id        char(16)      not null,
+    item_id             char(16)      not null,
+    date_id             integer       not null,
+    quantity_on_hand    integer,
+    primary key (warehouse_id, item_id, date_id),
+    foreign key (warehouse_id) references dim_warehouse(warehouse_id),
+    foreign key (item_id) references dim_item(item_id),
+    foreign key (date_id) references dim_date(date_id)
+);

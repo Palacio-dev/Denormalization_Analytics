@@ -1,0 +1,119 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 4
+  - Total Attributes: 11
+    * customers: 4 columns
+    * orders: 3 columns
+    * products: 3 columns
+    * order_details: 4 columns
+
+Denormalized Model:
+  - Tables: 3
+  - Total Attributes: 15
+    * dim_customers: 4 columns
+    * dim_products: 3 columns
+    * fact_sales: 10 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Denormalized model has MORE attributes (11 vs 15)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: order_id (SERIAL) -> order_id (INT)
+--------------------------------------------------------------------------------
+Completeness Ratio:        1.36
+Data Type Preservation:    0.91
+Avg Levenshtein Distance:  0.00
+BLEU Score:                0.73
+ROUGE-1:                   0.82
+METEOR Score:              0.92
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: fact_sales
+Dimension Tables Detected: dim_customers, dim_products
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected exactly 1 Fact table. Evaluating as a standard STAR SCHEMA.
+  - FACT FK VIOLATION: Foreign Key 'customer_id' in Fact 'fact_sales' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'product_id' in Fact 'fact_sales' allows NULL values.
+  - DIMENSION NULL WARNING: Attribute 'customer_name' in 'dim_customers' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'customer_email' in 'dim_customers' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'customer_address' in 'dim_customers' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'product_name' in 'dim_products' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'price' in 'dim_products' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * fact_sales: 4 Numeric, 3 Text
+  * dim_customers: 0 Numeric, 3 Text
+  * dim_products: 1 Numeric, 1 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  customer_address customer_email customer_id customer_name order_date order_detail_id order_id price product_id product_name quantity
+
+Denormalized Model (Combined Text):
+  customer_address customer_email customer_id customer_name customer_name line_total_amount order_date order_detail_id order_id price product_id product_name product_name product_price quantity
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 11 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    customer_id SERIAL
+  Denormalized:  customer_id SERIAL
+
+Pair 2:
+  Relational:    customer_name VARCHAR(100)
+  Denormalized:  customer_name VARCHAR(100)
+
+Pair 3:
+  Relational:    customer_email VARCHAR(100)
+  Denormalized:  customer_email VARCHAR(100)
+
+Pair 4:
+  Relational:    customer_address TEXT
+  Denormalized:  customer_address TEXT
+
+Pair 5:
+  Relational:    order_id SERIAL
+  Denormalized:  order_id INT
+
+Pair 6:
+  Relational:    order_date DATE
+  Denormalized:  order_date DATE
+
+Pair 7:
+  Relational:    product_id SERIAL
+  Denormalized:  product_id SERIAL
+
+Pair 8:
+  Relational:    product_name VARCHAR(100)
+  Denormalized:  product_name VARCHAR(100)
+
+Pair 9:
+  Relational:    price DECIMAL(10, 2)
+  Denormalized:  price DECIMAL(10, 2)
+
+Pair 10:
+  Relational:    order_detail_id SERIAL
+  Denormalized:  order_detail_id SERIAL
+
+Pair 11:
+  Relational:    quantity INT
+  Denormalized:  quantity INT
+
+
+================================================================================

@@ -1,0 +1,294 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_10-35-18
+Model: gemini
+Prompt: senior
+Schema: TPC_DS
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions the provided 3NF OLTP schema into a Kimball-style dimensional model optimized for OLAP workloads. The primary focus is merging Header and Line-Item tables into single, grain-specific Fact tables (Line-item grain). This eliminates the most expensive and frequent 1:N joins required for sales analysis. Additionally, natural keys (char/varchar) are replaced with integer-based surrogate keys to accelerate join performance and reduce storage footprint. Date and time fields are standardized to support time-series analysis, and analytical metrics are pre-calculated where beneficial.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge 's_purchase' (Header) and 's_purchase_lineitem' (Line) into a single denormalized fact table 'fact_store_sales' at the line-item grain."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge 's_catalog_order' (Header) and 's_catalog_order_lineitem' (Line) into a single denormalized fact table 'fact_catalog_sales' at the line-item grain."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge 's_web_order' (Header) and 's_web_order_lineitem' (Line) into a single denormalized fact table 'fact_web_sales' at the line-item grain."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Transform 's_store_returns' and 's_catalog_returns' into 'fact_store_returns' and 'fact_catalog_returns', aligning their schemas with the sales facts for drill-across capabilities."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Transform 's_inventory' into 'fact_inventory_snapshot', a periodic snapshot fact table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Introduced integer Surrogate Keys (e.g., item_sk, customer_sk, date_sk) to replace char(16) natural keys, optimizing join speed and compression."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Converted char(10) date strings into standard DATE types and INT date_sk (YYYYMMDD) to enable robust time-based partitioning and time-intelligence functions."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added derived measure 'net_sales_amt' (quantity * sales_price - coupon_amt) to fact tables to prevent repetitive calculations during query execution."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy: Header attributes (e.g., customer_id, order_date, store_id) are repeated for every line item in the fact tables. This increases storage requirements but drastically reduces CPU and memory overhead by eliminating Header-to-Line joins."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: Denormalizing header data means updating a customer ID on an order requires updating multiple rows. In an OLAP context, this is acceptable as data is typically append-only or batch-merged."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Market Basket Analysis: Analyzing which items are frequently bought together in stores requires scanning massive amounts of line items and grouping by purchase_id and date. Merging header and line tables avoids a massive hash join."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Channel Performance Aggregation: Comparing total revenue, shipping costs, and coupon usage across Catalog and Web channels by month. Pre-calculating 'net_sales_amt' and partitioning by 'date_sk' allows the engine to prune partitions and sum metrics instantly."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Return Rate Analysis: Calculating the ratio of returned items to sold items by customer and store. Conforming the keys between 'fact_store_sales' and 'fact_store_returns' enables seamless drill-across queries."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Script for Denormalized OLAP Schema
+
+```sql
+-- ============================================================================
+-- Target Architecture: Kimball Dimensional Model (Star Schema)
+-- Workload Focus: Large-scale OLAP Aggregations, BI Tool Compatibility
+-- Note: Dimension tables (dim_item, dim_customer, etc.) are implied and 
+--       would be joined via the _sk (Surrogate Key) columns defined below.
+-- ============================================================================
+
+-- ============================================================
+--   Table: fact_store_sales                                   
+--   Source: s_purchase + s_purchase_lineitem
+-- ============================================================
+CREATE TABLE fact_store_sales
+(
+    -- Surrogate Keys
+    store_sales_sk              BIGINT          NOT NULL, -- Primary Key
+    date_sk                     INTEGER         NOT NULL, -- FK to dim_date (Format: YYYYMMDD)
+    time_sk                     INTEGER                 , -- FK to dim_time
+    item_sk                     BIGINT          NOT NULL, -- FK to dim_item
+    customer_sk                 BIGINT                  , -- FK to dim_customer
+    store_sk                    BIGINT                  , -- FK to dim_store
+    promotion_sk                BIGINT                  , -- FK to dim_promotion
+    
+    -- Degenerate Dimensions (Natural Keys for traceability)
+    purchase_id                 INTEGER         NOT NULL,
+    line_number                 INTEGER         NOT NULL,
+    register_id                 INTEGER                 ,
+    clerk_id                    INTEGER                 ,
+    
+    -- Facts / Measures
+    quantity                    INTEGER                 ,
+    sale_price                  NUMERIC(9,2)            ,
+    coupon_amt                  NUMERIC(9,2)            ,
+    net_sales_amt               NUMERIC(11,2)           , -- Derived: (quantity * sale_price) - coupon_amt
+    
+    -- Metadata
+    header_comment              VARCHAR(100)            ,
+    line_comment                VARCHAR(100)            
+)
+-- PARTITION BY RANGE (date_sk)
+-- CLUSTER BY (store_sk, item_sk);
+;
+
+-- ============================================================
+--   Table: fact_catalog_sales                                 
+--   Source: s_catalog_order + s_catalog_order_lineitem
+-- ============================================================
+CREATE TABLE fact_catalog_sales
+(
+    -- Surrogate Keys
+    catalog_sales_sk            BIGINT          NOT NULL,
+    order_date_sk               INTEGER         NOT NULL,
+    order_time_sk               INTEGER                 ,
+    ship_date_sk                INTEGER                 ,
+    item_sk                     BIGINT          NOT NULL,
+    bill_customer_sk            BIGINT                  ,
+    ship_customer_sk            BIGINT                  ,
+    call_center_sk              BIGINT                  ,
+    ship_mode_sk                BIGINT                  ,
+    warehouse_sk                BIGINT                  ,
+    promotion_sk                BIGINT                  ,
+    
+    -- Degenerate Dimensions
+    order_id                    INTEGER         NOT NULL,
+    line_number                 INTEGER         NOT NULL,
+    catalog_number              INTEGER                 ,
+    catalog_page_number         INTEGER                 ,
+    
+    -- Facts / Measures
+    quantity                    INTEGER                 ,
+    sales_price                 NUMERIC(9,2)            ,
+    coupon_amt                  NUMERIC(9,2)            ,
+    ship_cost                   NUMERIC(9,2)            ,
+    net_sales_amt               NUMERIC(11,2)           , -- Derived
+    
+    -- Metadata
+    order_comments              VARCHAR(100)            
+)
+-- PARTITION BY RANGE (order_date_sk)
+-- CLUSTER BY (call_center_sk, item_sk);
+;
+
+-- ============================================================
+--   Table: fact_web_sales                                     
+--   Source: s_web_order + s_web_order_lineitem
+-- ============================================================
+CREATE TABLE fact_web_sales
+(
+    -- Surrogate Keys
+    web_sales_sk                BIGINT          NOT NULL,
+    order_date_sk               INTEGER         NOT NULL,
+    order_time_sk               INTEGER                 ,
+    ship_date_sk                INTEGER                 ,
+    item_sk                     BIGINT          NOT NULL,
+    bill_customer_sk            BIGINT                  ,
+    ship_customer_sk            BIGINT                  ,
+    web_site_sk                 BIGINT                  ,
+    web_page_sk                 BIGINT                  ,
+    ship_mode_sk                BIGINT                  ,
+    warehouse_sk                BIGINT                  ,
+    promotion_sk                BIGINT                  ,
+    
+    -- Degenerate Dimensions
+    order_id                    INTEGER         NOT NULL,
+    line_number                 INTEGER         NOT NULL,
+    
+    -- Facts / Measures
+    quantity                    INTEGER                 ,
+    sales_price                 NUMERIC(9,2)            ,
+    coupon_amt                  NUMERIC(9,2)            ,
+    ship_cost                   NUMERIC(9,2)            ,
+    net_sales_amt               NUMERIC(11,2)           , -- Derived
+    
+    -- Metadata
+    order_comments              VARCHAR(100)            
+)
+-- PARTITION BY RANGE (order_date_sk)
+-- CLUSTER BY (web_site_sk, item_sk);
+;
+
+-- ============================================================
+--   Table: fact_store_returns                                 
+--   Source: s_store_returns
+-- ============================================================
+CREATE TABLE fact_store_returns
+(
+    -- Surrogate Keys
+    store_return_sk             BIGINT          NOT NULL,
+    return_date_sk              INTEGER         NOT NULL,
+    return_time_sk              INTEGER                 ,
+    item_sk                     BIGINT          NOT NULL,
+    customer_sk                 BIGINT                  ,
+    store_sk                    BIGINT                  ,
+    reason_sk                   BIGINT                  ,
+    
+    -- Degenerate Dimensions
+    purchase_id                 VARCHAR(16)     NOT NULL, -- Links back to fact_store_sales
+    line_number                 INTEGER         NOT NULL,
+    ticket_number               VARCHAR(20)             ,
+    
+    -- Facts / Measures
+    return_qty                  INTEGER                 ,
+    return_amt                  NUMERIC(9,2)            ,
+    return_tax                  NUMERIC(9,2)            ,
+    return_fee                  NUMERIC(9,2)            ,
+    return_ship_cost            NUMERIC(9,2)            ,
+    refunded_cash               NUMERIC(9,2)            ,
+    reversed_charge             NUMERIC(9,2)            ,
+    store_credit                NUMERIC(9,2)            
+);
+-- PARTITION BY RANGE (return_date_sk)
+-- CLUSTER BY (store_sk, item_sk);
+
+
+-- ============================================================
+--   Table: fact_catalog_returns                               
+--   Source: s_catalog_returns
+-- ============================================================
+CREATE TABLE fact_catalog_returns
+(
+    -- Surrogate Keys
+    catalog_return_sk           BIGINT          NOT NULL,
+    return_date_sk              INTEGER         NOT NULL,
+    return_time_sk              INTEGER                 ,
+    item_sk                     BIGINT          NOT NULL,
+    return_customer_sk          BIGINT                  ,
+    refund_customer_sk          BIGINT                  ,
+    call_center_sk              BIGINT                  ,
+    warehouse_sk                BIGINT                  ,
+    reason_sk                   BIGINT                  ,
+    ship_mode_sk                BIGINT                  ,
+    catalog_page_sk             BIGINT                  ,
+    
+    -- Degenerate Dimensions
+    order_id                    INTEGER         NOT NULL, -- Links back to fact_catalog_sales
+    line_number                 INTEGER         NOT NULL,
+    
+    -- Facts / Measures
+    return_qty                  INTEGER                 ,
+    return_amt                  NUMERIC(9,2)            ,
+    return_tax                  NUMERIC(9,2)            ,
+    return_fee                  NUMERIC(9,2)            ,
+    return_ship_cost            NUMERIC(9,2)            ,
+    refunded_cash               NUMERIC(9,2)            ,
+    reversed_charge             NUMERIC(9,2)            ,
+    merchant_credit             NUMERIC(9,2)            
+);
+-- PARTITION BY RANGE (return_date_sk)
+-- CLUSTER BY (call_center_sk, item_sk);
+
+
+-- ============================================================
+--   Table: fact_inventory_snapshot                            
+--   Source: s_inventory
+-- ============================================================
+CREATE TABLE fact_inventory_snapshot
+(
+    -- Surrogate Keys
+    inventory_date_sk           INTEGER         NOT NULL,
+    item_sk                     BIGINT          NOT NULL,
+    warehouse_sk                BIGINT          NOT NULL,
+    
+    -- Facts / Measures
+    qty_on_hand                 INTEGER                 ,
+    
+    -- Constraints
+    PRIMARY KEY (inventory_date_sk, item_sk, warehouse_sk)
+);
+-- PARTITION BY RANGE (inventory_date_sk)
+-- CLUSTER BY (warehouse_sk, item_sk);
+
+```

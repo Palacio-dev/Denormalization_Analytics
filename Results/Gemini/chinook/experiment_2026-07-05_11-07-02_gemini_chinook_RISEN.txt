@@ -1,0 +1,208 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-07-02
+Model: gemini
+Prompt: RISEN
+Schema: chinook
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions the highly normalized 3NF transactional schema into an analytical Star Schema. The primary goal is to optimize heavy read workloads and complex aggregations (e.g., sales by artist, genre, or support rep) by drastically reducing the number of JOIN operations. This is achieved by collapsing snowflake dimensions (Artist, Album, Genre, MediaType) into a single wide 'Dim_Track' dimension, and merging transactional headers and lines ('Invoice', 'InvoiceLine') into a single 'Fact_Sales' table. Additionally, redundant attributes are added to customer and employee dimensions to flatten hierarchies and avoid self-joins.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapsing Relations: Merged the 'Invoice' and 'InvoiceLine' tables into a single 'Fact_Sales' table to eliminate the mandatory JOIN between sales headers and lines during revenue analysis."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapsing Relations: Merged 'Album', 'Artist', 'Genre', and 'MediaType' into the 'Track' table to create a single, denormalized 'Dim_Track' dimension. This eliminates up to 4 JOINs for catalog and sales queries."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Retained 'Customer', 'Employee', 'Playlist', and 'PlaylistTrack' as 'Dim_Customer', 'Dim_Employee', 'Dim_Playlist', and 'Bridge_PlaylistTrack'. This ensures full semantic preservation of entities that might not have direct sales or track associations."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Adding Derived Attributes: Added 'LineTotal' (calculated as UnitPrice * Quantity) to 'Fact_Sales' to precompute line-item revenue, avoiding repetitive mathematical operations during aggregation."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Adding Redundant Attributes: Added 'SupportRepFirstName' and 'SupportRepLastName' to 'Dim_Customer' (sourced from 'Employee') to allow customer-representative analysis without joining the Employee table."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Adding Redundant Attributes: Added 'ManagerFirstName' and 'ManagerLastName' to 'Dim_Employee' to flatten the recursive 'ReportsTo' hierarchy, eliminating the need for self-joins."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Attribute Renaming for Disambiguation: Renamed 'Name' and 'Title' attributes from source tables to 'TrackName', 'AlbumTitle', 'ArtistName', 'GenreName', 'MediaTypeName', and 'PlaylistName' to prevent column ambiguity in the denormalized tables."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy vs. Join Elimination: 'Fact_Sales' duplicates Invoice-level attributes (InvoiceDate, BillingAddress, InvoiceTotal) for every line item. This increases storage requirements but significantly accelerates time-series and geographical sales queries."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies vs. Read Performance: Storing Artist, Album, and Genre names directly in 'Dim_Track' means that a name change (e.g., an Artist changing their name) requires updating multiple rows instead of one. This is an acceptable tradeoff for an analytical (OLAP) workload where reads heavily outnumber writes."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1_D2_A1",
+        "query": "SELECT t.\"ArtistName\", t.\"GenreName\", SUM(f.\"LineTotal\") AS TotalRevenue FROM public.\"Fact_Sales\" f JOIN public.\"Dim_Track\" t ON f.\"TrackId\" = t.\"TrackId\" GROUP BY t.\"ArtistName\", t.\"GenreName\" ORDER BY TotalRevenue DESC;"
+      },
+      {
+        "decision_id": "A2",
+        "query": "SELECT c.\"SupportRepFirstName\", c.\"SupportRepLastName\", COUNT(DISTINCT f.\"InvoiceId\") AS TotalInvoices, SUM(f.\"LineTotal\") AS TotalSales FROM public.\"Fact_Sales\" f JOIN public.\"Dim_Customer\" c ON f.\"CustomerId\" = c.\"CustomerId\" GROUP BY c.\"SupportRepFirstName\", c.\"SupportRepLastName\";"
+      }
+    ]
+  }
+}
+```
+
+CREATE TABLE IF NOT EXISTS public."Dim_Employee"
+(
+    "EmployeeId" integer NOT NULL,
+    "LastName" character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    "FirstName" character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    "Title" character varying(30) COLLATE pg_catalog."default",
+    "ReportsTo" integer,
+    "ManagerFirstName" character varying(20) COLLATE pg_catalog."default",
+    "ManagerLastName" character varying(20) COLLATE pg_catalog."default",
+    "BirthDate" timestamp without time zone,
+    "HireDate" timestamp without time zone,
+    "Address" character varying(70) COLLATE pg_catalog."default",
+    "City" character varying(40) COLLATE pg_catalog."default",
+    "State" character varying(40) COLLATE pg_catalog."default",
+    "Country" character varying(40) COLLATE pg_catalog."default",
+    "PostalCode" character varying(10) COLLATE pg_catalog."default",
+    "Phone" character varying(24) COLLATE pg_catalog."default",
+    "Fax" character varying(24) COLLATE pg_catalog."default",
+    "Email" character varying(60) COLLATE pg_catalog."default",
+    CONSTRAINT "PK_Dim_Employee" PRIMARY KEY ("EmployeeId")
+);
+
+CREATE TABLE IF NOT EXISTS public."Dim_Customer"
+(
+    "CustomerId" integer NOT NULL,
+    "FirstName" character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    "LastName" character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    "Company" character varying(80) COLLATE pg_catalog."default",
+    "Address" character varying(70) COLLATE pg_catalog."default",
+    "City" character varying(40) COLLATE pg_catalog."default",
+    "State" character varying(40) COLLATE pg_catalog."default",
+    "Country" character varying(40) COLLATE pg_catalog."default",
+    "PostalCode" character varying(10) COLLATE pg_catalog."default",
+    "Phone" character varying(24) COLLATE pg_catalog."default",
+    "Fax" character varying(24) COLLATE pg_catalog."default",
+    "Email" character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    "SupportRepId" integer,
+    "SupportRepFirstName" character varying(20) COLLATE pg_catalog."default",
+    "SupportRepLastName" character varying(20) COLLATE pg_catalog."default",
+    CONSTRAINT "PK_Dim_Customer" PRIMARY KEY ("CustomerId")
+);
+
+CREATE TABLE IF NOT EXISTS public."Dim_Track"
+(
+    "TrackId" integer NOT NULL,
+    "TrackName" character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    "AlbumId" integer,
+    "AlbumTitle" character varying(160) COLLATE pg_catalog."default",
+    "ArtistId" integer,
+    "ArtistName" character varying(120) COLLATE pg_catalog."default",
+    "MediaTypeId" integer NOT NULL,
+    "MediaTypeName" character varying(120) COLLATE pg_catalog."default",
+    "GenreId" integer,
+    "GenreName" character varying(120) COLLATE pg_catalog."default",
+    "Composer" character varying(220) COLLATE pg_catalog."default",
+    "Milliseconds" integer NOT NULL,
+    "Bytes" integer,
+    "UnitPrice" numeric(10, 2) NOT NULL,
+    CONSTRAINT "PK_Dim_Track" PRIMARY KEY ("TrackId")
+);
+
+CREATE TABLE IF NOT EXISTS public."Fact_Sales"
+(
+    "InvoiceLineId" integer NOT NULL,
+    "InvoiceId" integer NOT NULL,
+    "CustomerId" integer NOT NULL,
+    "TrackId" integer NOT NULL,
+    "InvoiceDate" timestamp without time zone NOT NULL,
+    "BillingAddress" character varying(70) COLLATE pg_catalog."default",
+    "BillingCity" character varying(40) COLLATE pg_catalog."default",
+    "BillingState" character varying(40) COLLATE pg_catalog."default",
+    "BillingCountry" character varying(40) COLLATE pg_catalog."default",
+    "BillingPostalCode" character varying(10) COLLATE pg_catalog."default",
+    "InvoiceTotal" numeric(10, 2) NOT NULL,
+    "UnitPrice" numeric(10, 2) NOT NULL,
+    "Quantity" integer NOT NULL,
+    "LineTotal" numeric(10, 2) NOT NULL,
+    CONSTRAINT "PK_Fact_Sales" PRIMARY KEY ("InvoiceLineId")
+);
+
+CREATE TABLE IF NOT EXISTS public."Dim_Playlist"
+(
+    "PlaylistId" integer NOT NULL,
+    "PlaylistName" character varying(120) COLLATE pg_catalog."default",
+    CONSTRAINT "PK_Dim_Playlist" PRIMARY KEY ("PlaylistId")
+);
+
+CREATE TABLE IF NOT EXISTS public."Bridge_PlaylistTrack"
+(
+    "PlaylistId" integer NOT NULL,
+    "TrackId" integer NOT NULL,
+    CONSTRAINT "PK_Bridge_PlaylistTrack" PRIMARY KEY ("PlaylistId", "TrackId")
+);
+
+ALTER TABLE IF EXISTS public."Dim_Employee"
+    ADD CONSTRAINT "FK_Dim_Employee_ReportsTo" FOREIGN KEY ("ReportsTo")
+    REFERENCES public."Dim_Employee" ("EmployeeId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+CREATE INDEX IF NOT EXISTS "IFK_Dim_Employee_ReportsTo"
+    ON public."Dim_Employee"("ReportsTo");
+
+ALTER TABLE IF EXISTS public."Dim_Customer"
+    ADD CONSTRAINT "FK_Dim_Customer_SupportRepId" FOREIGN KEY ("SupportRepId")
+    REFERENCES public."Dim_Employee" ("EmployeeId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+CREATE INDEX IF NOT EXISTS "IFK_Dim_Customer_SupportRepId"
+    ON public."Dim_Customer"("SupportRepId");
+
+ALTER TABLE IF EXISTS public."Fact_Sales"
+    ADD CONSTRAINT "FK_Fact_Sales_CustomerId" FOREIGN KEY ("CustomerId")
+    REFERENCES public."Dim_Customer" ("CustomerId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+CREATE INDEX IF NOT EXISTS "IFK_Fact_Sales_CustomerId"
+    ON public."Fact_Sales"("CustomerId");
+
+ALTER TABLE IF EXISTS public."Fact_Sales"
+    ADD CONSTRAINT "FK_Fact_Sales_TrackId" FOREIGN KEY ("TrackId")
+    REFERENCES public."Dim_Track" ("TrackId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+CREATE INDEX IF NOT EXISTS "IFK_Fact_Sales_TrackId"
+    ON public."Fact_Sales"("TrackId");
+
+ALTER TABLE IF EXISTS public."Bridge_PlaylistTrack"
+    ADD CONSTRAINT "FK_Bridge_PlaylistTrack_PlaylistId" FOREIGN KEY ("PlaylistId")
+    REFERENCES public."Dim_Playlist" ("PlaylistId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public."Bridge_PlaylistTrack"
+    ADD CONSTRAINT "FK_Bridge_PlaylistTrack_TrackId" FOREIGN KEY ("TrackId")
+    REFERENCES public."Dim_Track" ("TrackId") MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+CREATE INDEX IF NOT EXISTS "IFK_Bridge_PlaylistTrack_TrackId"
+    ON public."Bridge_PlaylistTrack"("TrackId");

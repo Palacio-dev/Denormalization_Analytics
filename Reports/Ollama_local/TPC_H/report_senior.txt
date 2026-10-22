@@ -1,0 +1,339 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 8
+  - Total Attributes: 61
+    * NATION: 4 columns
+    * REGION: 3 columns
+    * PART: 9 columns
+    * SUPPLIER: 7 columns
+    * PARTSUPP: 5 columns
+    * CUSTOMER: 8 columns
+    * ORDERS: 9 columns
+    * LINEITEM: 16 columns
+
+Denormalized Model:
+  - Tables: 7
+  - Total Attributes: 74
+    * FACT_LINEITEM: 29 columns
+    * ORDERS_ANALYTICS: 14 columns
+    * NATION_ANALYTICS: 4 columns
+    * REGION_ANALYTICS: 3 columns
+    * PART_ANALYTICS: 9 columns
+    * SUPPLIER_ANALYTICS: 7 columns
+    * CUSTOMER_ANALYTICS: 8 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Denormalized model has MORE attributes (61 vs 74)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: N_NATIONKEY (INTEGER) -> N_NATIONKEY (INT)
+  - Type mismatch: N_NAME (CHAR(25)) -> N_NAME (VARCHAR(25))
+  - Type mismatch: N_REGIONKEY (INTEGER) -> N_REGIONKEY (INT)
+  - Type mismatch: R_REGIONKEY (INTEGER) -> R_REGIONKEY (INT)
+  - Type mismatch: R_NAME (CHAR(25)) -> R_NAME (VARCHAR(25))
+  - Type mismatch: P_PARTKEY (INTEGER) -> P_PARTKEY (INT)
+  - Type mismatch: P_MFGR (CHAR(25)) -> P_MFGR (VARCHAR(25))
+  - Type mismatch: P_BRAND (CHAR(10)) -> P_BRAND (VARCHAR(10))
+  - Type mismatch: P_SIZE (INTEGER) -> P_SIZE (INT)
+  - Type mismatch: P_CONTAINER (CHAR(10)) -> P_CONTAINER (VARCHAR(10))
+  - Type mismatch: S_SUPPKEY (INTEGER) -> S_SUPPKEY (INT)
+  - Type mismatch: S_NAME (CHAR(25)) -> S_NAME (VARCHAR(25))
+  - Type mismatch: S_NATIONKEY (INTEGER) -> S_NATIONKEY (INT)
+  - Type mismatch: S_PHONE (CHAR(15)) -> S_PHONE (VARCHAR(15))
+  - Type mismatch: PS_PARTKEY (INTEGER) -> L_PARTKEY (INT)
+  - Type mismatch: PS_SUPPKEY (INTEGER) -> O_ORDERKEY_ID (BIGINT)
+  - Type mismatch: PS_AVAILQTY (INTEGER) -> L_PART_NAME (VARCHAR(55))
+  - Type mismatch: PS_COMMENT (VARCHAR(199)) -> L_PART_BRAND (VARCHAR(10))
+  - Type mismatch: C_CUSTKEY (INTEGER) -> C_CUSTKEY (INT)
+  - Type mismatch: C_NATIONKEY (INTEGER) -> C_NATIONKEY (INT)
+  - Type mismatch: C_PHONE (CHAR(15)) -> C_PHONE (VARCHAR(15))
+  - Type mismatch: C_MKTSEGMENT (CHAR(10)) -> C_MKTSEGMENT (VARCHAR(10))
+  - Type mismatch: O_ORDERKEY (INTEGER) -> O_ORDERKEY (INT)
+  - Type mismatch: O_CUSTKEY (INTEGER) -> O_CUSTKEY (INT)
+  - Type mismatch: O_ORDERPRIORITY (CHAR(15)) -> O_ORDERPRIORITY (VARCHAR(15))
+  - Type mismatch: O_CLERK (CHAR(15)) -> O_CLERK (VARCHAR(15))
+  - Type mismatch: O_SHIPPRIORITY (INTEGER) -> O_SHIPPRIORITY (INT)
+  - Type mismatch: L_ORDERKEY (INTEGER) -> L_ORDERKEY (INT)
+  - Type mismatch: L_PARTKEY (INTEGER) -> L_PART_TYPE (VARCHAR(25))
+  - Type mismatch: L_SUPPKEY (INTEGER) -> L_SUPPKEY (INT)
+  - Type mismatch: L_LINENUMBER (INTEGER) -> L_LINENUMBER (INT)
+  - Type mismatch: L_SHIPINSTRUCT (CHAR(25)) -> L_SHIPINSTRUCT (VARCHAR(25))
+  - Type mismatch: L_SHIPMODE (CHAR(10)) -> L_SHIPMODE (VARCHAR(10))
+--------------------------------------------------------------------------------
+Completeness Ratio:        1.21
+Data Type Preservation:    0.46
+Avg Levenshtein Distance:  0.74
+BLEU Score:                0.76
+ROUGE-1:                   0.77
+METEOR Score:              0.89
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  C_ACCTBAL C_ADDRESS C_COMMENT C_CUSTKEY C_MKTSEGMENT C_NAME C_NATIONKEY C_PHONE L_COMMENT L_COMMITDATE L_DISCOUNT L_EXTENDEDPRICE L_LINENUMBER L_LINESTATUS L_ORDERKEY L_PARTKEY L_QUANTITY L_RECEIPTDATE L_RETURNFLAG L_SHIPDATE L_SHIPINSTRUCT L_SHIPMODE L_SUPPKEY L_TAX N_COMMENT N_NAME N_NATIONKEY N_REGIONKEY O_CLERK O_COMMENT O_CUSTKEY O_ORDERDATE O_ORDERKEY O_ORDERPRIORITY O_ORDERSTATUS O_SHIPPRIORITY O_TOTALPRICE PS_AVAILQTY PS_COMMENT PS_PARTKEY PS_SUPPKEY PS_SUPPLYCOST P_BRAND P_COMMENT P_CONTAINER P_MFGR P_NAME P_PARTKEY P_RETAILPRICE P_SIZE P_TYPE R_COMMENT R_NAME R_REGIONKEY S_ACCTBAL S_ADDRESS S_COMMENT S_NAME S_NATIONKEY S_PHONE S_SUPPKEY
+
+Denormalized Model (Combined Text):
+  C_ACCTBAL C_ADDRESS C_COMMENT C_CUSTKEY C_MKTSEGMENT C_NAME C_NATIONKEY C_PHONE L_CLUSTER_KEY_NATION L_CLUSTER_KEY_REGION L_COMMENT L_COMMITDATE L_CUST_MKTSEGMENT L_DISCOUNT L_EXTENDEDPRICE L_LINEITEM_ID L_LINENUMBER L_LINESTATUS L_NATION_NAME L_ORDERKEY L_PARTITION_KEY L_PARTKEY L_PART_BRAND L_PART_CONTAINER L_PART_NAME L_PART_RETAIL_PRICE L_PART_TYPE L_QUANTITY L_RECEIPTDATE L_REGION_NAME L_RETURNFLAG L_SHIPDATE L_SHIPINSTRUCT L_SHIPMODE L_SUPPKEY L_SUPP_ACCTBAL L_TAX N_COMMENT N_NAME N_NATIONKEY N_REGIONKEY O_CALC_REVENUE O_CLERK O_COMMENT O_CUSTKEY O_CUST_MKTSEGMENT O_ORDERDATE O_ORDERKEY O_ORDERKEY_ID O_ORDERPRIORITY O_ORDERSTATUS O_PARTITION_KEY O_SHIPPRIORITY O_SUPP_ACCTBAL O_TOTALPRICE P_BRAND P_COMMENT P_CONTAINER P_MFGR P_NAME P_PARTKEY P_RETAILPRICE P_SIZE P_TYPE R_COMMENT R_NAME R_REGIONKEY S_ACCTBAL S_ADDRESS S_COMMENT S_NAME S_NATIONKEY S_PHONE S_SUPPKEY
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 61 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    N_NATIONKEY INTEGER
+  Denormalized:  N_NATIONKEY INT
+
+Pair 2:
+  Relational:    N_NAME CHAR(25)
+  Denormalized:  N_NAME VARCHAR(25)
+
+Pair 3:
+  Relational:    N_REGIONKEY INTEGER
+  Denormalized:  N_REGIONKEY INT
+
+Pair 4:
+  Relational:    N_COMMENT VARCHAR(152)
+  Denormalized:  N_COMMENT VARCHAR(152)
+
+Pair 5:
+  Relational:    R_REGIONKEY INTEGER
+  Denormalized:  R_REGIONKEY INT
+
+Pair 6:
+  Relational:    R_NAME CHAR(25)
+  Denormalized:  R_NAME VARCHAR(25)
+
+Pair 7:
+  Relational:    R_COMMENT VARCHAR(152)
+  Denormalized:  R_COMMENT VARCHAR(152)
+
+Pair 8:
+  Relational:    P_PARTKEY INTEGER
+  Denormalized:  P_PARTKEY INT
+
+Pair 9:
+  Relational:    P_NAME VARCHAR(55)
+  Denormalized:  P_NAME VARCHAR(55)
+
+Pair 10:
+  Relational:    P_MFGR CHAR(25)
+  Denormalized:  P_MFGR VARCHAR(25)
+
+Pair 11:
+  Relational:    P_BRAND CHAR(10)
+  Denormalized:  P_BRAND VARCHAR(10)
+
+Pair 12:
+  Relational:    P_TYPE VARCHAR(25)
+  Denormalized:  P_TYPE VARCHAR(25)
+
+Pair 13:
+  Relational:    P_SIZE INTEGER
+  Denormalized:  P_SIZE INT
+
+Pair 14:
+  Relational:    P_CONTAINER CHAR(10)
+  Denormalized:  P_CONTAINER VARCHAR(10)
+
+Pair 15:
+  Relational:    P_RETAILPRICE DECIMAL(15, 2)
+  Denormalized:  P_RETAILPRICE DECIMAL(15, 2)
+
+Pair 16:
+  Relational:    P_COMMENT VARCHAR(23)
+  Denormalized:  P_COMMENT VARCHAR(23)
+
+Pair 17:
+  Relational:    S_SUPPKEY INTEGER
+  Denormalized:  S_SUPPKEY INT
+
+Pair 18:
+  Relational:    S_NAME CHAR(25)
+  Denormalized:  S_NAME VARCHAR(25)
+
+Pair 19:
+  Relational:    S_ADDRESS VARCHAR(40)
+  Denormalized:  S_ADDRESS VARCHAR(40)
+
+Pair 20:
+  Relational:    S_NATIONKEY INTEGER
+  Denormalized:  S_NATIONKEY INT
+
+Pair 21:
+  Relational:    S_PHONE CHAR(15)
+  Denormalized:  S_PHONE VARCHAR(15)
+
+Pair 22:
+  Relational:    S_ACCTBAL DECIMAL(15, 2)
+  Denormalized:  S_ACCTBAL DECIMAL(15, 2)
+
+Pair 23:
+  Relational:    S_COMMENT VARCHAR(101)
+  Denormalized:  S_COMMENT VARCHAR(101)
+
+Pair 24:
+  Relational:    PS_PARTKEY INTEGER
+  Denormalized:  L_PARTKEY INT
+
+Pair 25:
+  Relational:    PS_SUPPKEY INTEGER
+  Denormalized:  O_ORDERKEY_ID BIGINT
+
+Pair 26:
+  Relational:    PS_AVAILQTY INTEGER
+  Denormalized:  L_PART_NAME VARCHAR(55)
+
+Pair 27:
+  Relational:    PS_SUPPLYCOST DECIMAL(15, 2)
+  Denormalized:  L_SUPP_ACCTBAL DECIMAL(15, 2)
+
+Pair 28:
+  Relational:    PS_COMMENT VARCHAR(199)
+  Denormalized:  L_PART_BRAND VARCHAR(10)
+
+Pair 29:
+  Relational:    C_CUSTKEY INTEGER
+  Denormalized:  C_CUSTKEY INT
+
+Pair 30:
+  Relational:    C_NAME VARCHAR(25)
+  Denormalized:  C_NAME VARCHAR(25)
+
+Pair 31:
+  Relational:    C_ADDRESS VARCHAR(40)
+  Denormalized:  C_ADDRESS VARCHAR(40)
+
+Pair 32:
+  Relational:    C_NATIONKEY INTEGER
+  Denormalized:  C_NATIONKEY INT
+
+Pair 33:
+  Relational:    C_PHONE CHAR(15)
+  Denormalized:  C_PHONE VARCHAR(15)
+
+Pair 34:
+  Relational:    C_ACCTBAL DECIMAL(15, 2)
+  Denormalized:  C_ACCTBAL DECIMAL(15, 2)
+
+Pair 35:
+  Relational:    C_MKTSEGMENT CHAR(10)
+  Denormalized:  C_MKTSEGMENT VARCHAR(10)
+
+Pair 36:
+  Relational:    C_COMMENT VARCHAR(117)
+  Denormalized:  C_COMMENT VARCHAR(117)
+
+Pair 37:
+  Relational:    O_ORDERKEY INTEGER
+  Denormalized:  O_ORDERKEY INT
+
+Pair 38:
+  Relational:    O_CUSTKEY INTEGER
+  Denormalized:  O_CUSTKEY INT
+
+Pair 39:
+  Relational:    O_ORDERSTATUS CHAR(1)
+  Denormalized:  O_ORDERSTATUS CHAR(1)
+
+Pair 40:
+  Relational:    O_TOTALPRICE DECIMAL(15, 2)
+  Denormalized:  O_TOTALPRICE DECIMAL(15, 2)
+
+Pair 41:
+  Relational:    O_ORDERDATE DATE
+  Denormalized:  O_ORDERDATE DATE
+
+Pair 42:
+  Relational:    O_ORDERPRIORITY CHAR(15)
+  Denormalized:  O_ORDERPRIORITY VARCHAR(15)
+
+Pair 43:
+  Relational:    O_CLERK CHAR(15)
+  Denormalized:  O_CLERK VARCHAR(15)
+
+Pair 44:
+  Relational:    O_SHIPPRIORITY INTEGER
+  Denormalized:  O_SHIPPRIORITY INT
+
+Pair 45:
+  Relational:    O_COMMENT VARCHAR(79)
+  Denormalized:  O_COMMENT VARCHAR(79)
+
+Pair 46:
+  Relational:    L_ORDERKEY INTEGER
+  Denormalized:  L_ORDERKEY INT
+
+Pair 47:
+  Relational:    L_PARTKEY INTEGER
+  Denormalized:  L_PART_TYPE VARCHAR(25)
+
+Pair 48:
+  Relational:    L_SUPPKEY INTEGER
+  Denormalized:  L_SUPPKEY INT
+
+Pair 49:
+  Relational:    L_LINENUMBER INTEGER
+  Denormalized:  L_LINENUMBER INT
+
+Pair 50:
+  Relational:    L_QUANTITY DECIMAL(15, 2)
+  Denormalized:  L_QUANTITY DECIMAL(15, 2)
+
+Pair 51:
+  Relational:    L_EXTENDEDPRICE DECIMAL(15, 2)
+  Denormalized:  L_EXTENDEDPRICE DECIMAL(15, 2)
+
+Pair 52:
+  Relational:    L_DISCOUNT DECIMAL(15, 2)
+  Denormalized:  L_DISCOUNT DECIMAL(15, 2)
+
+Pair 53:
+  Relational:    L_TAX DECIMAL(15, 2)
+  Denormalized:  L_TAX DECIMAL(15, 2)
+
+Pair 54:
+  Relational:    L_RETURNFLAG CHAR(1)
+  Denormalized:  L_RETURNFLAG CHAR(1)
+
+Pair 55:
+  Relational:    L_LINESTATUS CHAR(1)
+  Denormalized:  L_LINESTATUS CHAR(1)
+
+Pair 56:
+  Relational:    L_SHIPDATE DATE
+  Denormalized:  L_SHIPDATE DATE
+
+Pair 57:
+  Relational:    L_COMMITDATE DATE
+  Denormalized:  L_COMMITDATE DATE
+
+Pair 58:
+  Relational:    L_RECEIPTDATE DATE
+  Denormalized:  L_RECEIPTDATE DATE
+
+Pair 59:
+  Relational:    L_SHIPINSTRUCT CHAR(25)
+  Denormalized:  L_SHIPINSTRUCT VARCHAR(25)
+
+Pair 60:
+  Relational:    L_SHIPMODE CHAR(10)
+  Denormalized:  L_SHIPMODE VARCHAR(10)
+
+Pair 61:
+  Relational:    L_COMMENT VARCHAR(44)
+  Denormalized:  L_COMMENT VARCHAR(44)
+
+
+================================================================================

@@ -1,0 +1,207 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-20-36
+Model: ollama_api
+Prompt: RISEN-few-shot
+Schema: ex08
+==================================================
+
+{
+"section_1": {
+"summary": "The denormalization strategy focuses on collapsing relations and adding redundant attributes to reduce the number of joins required for common analytical queries. The main goal is to improve read performance by pre-joining frequently accessed related data. Key decisions include merging school-related information (escola, localizacao, desempenho_enem, indicadores_escolares, participacao_enem) into a single school table, combining student information with their enrollment and employment data, and integrating course details directly into enrollment records.",
+"structural_decisions": [
+{
+"decision_id": "D1",
+"description": "Collapse school-related tables (escola, localizacao, desempenho_enem, indicadores_escolares, participacao_enem) into a single denormalized 'escola_d' table to eliminate multiple joins when querying school performance and characteristics"
+},
+{
+"decision_id": "D2",
+"description": "Merge aluno_ifb and matricula_ifb into 'aluno_matricula_d' to create a student-enrollment centric table, reducing the need to join these tables for student analytics"
+},
+{
+"decision_id": "D3",
+"description": "Integrate vinculo_empregaticio and remuneracao into 'aluno_emprego_d' to provide a comprehensive view of student employment outcomes without requiring joins"
+},
+{
+"decision_id": "D4",
+"description": "Add curso_ifb attributes directly to matricula_ifb in 'aluno_matricula_d' to avoid joining with curso_ifb for course-related analytics"
+}
+],
+"attribute_level_changes": [
+{
+"decision_id": "A1",
+"description": "Added redundant attributes from localizacao (uf, municipio) to escola_d table"
+},
+{
+"decision_id": "A2",
+"description": "Added derived/redundant attributes from desempenho_enem, indicadores_escolares, and participacao_enem to escola_d table, including performance metrics and participation rates"
+},
+{
+"decision_id": "A3",
+"description": "Added curso_ifb attributes (no_curso, tipo_curso, ds_tipo_nivel, ds_eixo_tecnologico, modalidade_ensino) to aluno_matricula_d table"
+},
+{
+"decision_id": "A4",
+"description": "Added remuneracao attributes (vl_remun_media_nom, vl_remun_media_sm, vl_remun_dezembro_nom, vl_remun_dezembro_sm) to aluno_emprego_d table"
+}
+],
+"tradeoffs": [
+{
+"decision_id": "T1",
+"description": "Increased storage requirements due to data duplication in exchange for improved query performance"
+},
+{
+"decision_id": "T2",
+"description": "Simplified read queries at the cost of increased complexity in data maintenance (updates need to be applied to multiple places)"
+},
+{
+"decision_id": "T3",
+"description": "Loss of normalization benefits like data consistency enforcement through foreign keys, requiring application-level consistency management"
+}
+]
+},
+
+"section_2": {
+"query_patterns": [
+{
+"decision_id": "D1",
+"query_pattern_type": "inferred",
+"query_pattern_description": "Analytical queries about school performance metrics that require joining escola with localizacao, desempenho_enem, indicadores_escolares, and participacao_enem to get a complete picture of a school's characteristics and outcomes"
+},
+{
+"decision_id": "D2",
+"query_pattern_type": "inferred",
+"query_pattern_description": "Student lifecycle analysis queries that track students from enrollment through employment, requiring joins between aluno_ifb, matricula_ifb, and potentially vinculo_empregaticio"
+},
+{
+"decision_id": "D3",
+"query_pattern_type": "inferred",
+"query_pattern_description": "Course performance analysis that requires joining matricula_ifb with curso_ifb to analyze enrollment patterns by course characteristics"
+},
+{
+"decision_id": "D4",
+"query_pattern_type": "inferred",
+"query_pattern_description": "Employment outcome analysis for students that requires joining vinculo_empregaticio with remuneracao to understand salary and job characteristics"
+}
+]
+}
+}
+
+```sql
+CREATE TABLE IF NOT EXISTS public.escola_d
+(
+    co_escola_educacenso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    no_escola_educacenso character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    tp_dependencia_adm_escola smallint,
+    tp_localizacao_escola smallint,
+    inse character varying(10) COLLATE pg_catalog."default",
+    uf character varying(2) COLLATE pg_catalog."default" NOT NULL,
+    municipio character varying(100) COLLATE pg_catalog."default" NOT NULL,
+    nu_ano_desempenho integer,
+    nu_media_cn numeric(6, 2),
+    nu_media_ch numeric(6, 2),
+    nu_media_lp numeric(6, 2),
+    nu_media_mt numeric(6, 2),
+    nu_media_red numeric(6, 2),
+    nu_ano_indicadores integer,
+    nu_taxa_permanencia numeric(6, 2),
+    nu_taxa_aprovacao numeric(5, 2),
+    nu_taxa_reprovacao numeric(5, 2),
+    nu_taxa_abandono numeric(5, 2),
+    porte_escola character varying(50) COLLATE pg_catalog."default",
+    pc_formacao_docente numeric(5, 2),
+    nu_ano_participacao integer,
+    nu_matriculas integer,
+    nu_participantes_nec_esp integer,
+    nu_participantes integer,
+    nu_taxa_participacao numeric(5, 2),
+    CONSTRAINT escola_d_pkey PRIMARY KEY (co_escola_educacenso)
+);
+
+CREATE TABLE IF NOT EXISTS public.aluno_matricula_d
+(
+    id_matricula serial NOT NULL,
+    co_ciclo_matricula character varying(50) COLLATE pg_catalog."default",
+    periodo character varying(30) COLLATE pg_catalog."default",
+    situacao_matricula character varying(50) COLLATE pg_catalog."default",
+    tipo_cota character varying(50) COLLATE pg_catalog."default",
+    atestado_baixarenda character varying(20) COLLATE pg_catalog."default",
+    ano character varying(20) COLLATE pg_catalog."default",
+    id_aluno integer,
+    co_curso character varying(50) COLLATE pg_catalog."default",
+    unidade_ensino character varying(100) COLLATE pg_catalog."default",
+    co_escola_educacenso character varying(20) COLLATE pg_catalog."default",
+    data_nascimento date,
+    idade integer,
+    sexo character(1) COLLATE pg_catalog."default",
+    nacionalidade character varying(50) COLLATE pg_catalog."default",
+    raca character varying(50) COLLATE pg_catalog."default",
+    portador_deficiencia boolean,
+    no_curso character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    co_tipo_curso character varying(10) COLLATE pg_catalog."default",
+    tipo_curso character varying(100) COLLATE pg_catalog."default",
+    co_tipo_nivel character varying(10) COLLATE pg_catalog."default",
+    ds_tipo_nivel character varying(100) COLLATE pg_catalog."default",
+    ds_eixo_tecnologico character varying(200) COLLATE pg_catalog."default",
+    modalidade_ensino character varying(100) COLLATE pg_catalog."default",
+    carga_horaria integer,
+    CONSTRAINT aluno_matricula_d_pkey PRIMARY KEY (id_matricula)
+);
+
+CREATE TABLE IF NOT EXISTS public.aluno_emprego_d
+(
+    id_vinculo serial NOT NULL,
+    ano_rais integer,
+    razao_social character varying(200) COLLATE pg_catalog."default",
+    tipo_vinculo_empregaticio character varying(200) COLLATE pg_catalog."default",
+    data_admissao_declarada date,
+    tempo_emprego integer,
+    motivo_desligamento character varying(200) COLLATE pg_catalog."default",
+    mes_desligamento character varying(20) COLLATE pg_catalog."default",
+    indicador_vinculo_ativo boolean,
+    id_aluno integer,
+    id_loc integer,
+    vl_remun_media_nom numeric(10, 2),
+    vl_remun_media_sm numeric(10, 2),
+    vl_remun_dezembro_nom numeric(10, 2),
+    vl_remun_dezembro_sm numeric(10, 2),
+    qtd_hora_contr integer,
+    vl_ultima_remuneracao_ano numeric(10, 2),
+    vl_salario_contratual numeric(10, 2),
+    CONSTRAINT aluno_emprego_d_pkey PRIMARY KEY (id_vinculo)
+);
+
+CREATE TABLE IF NOT EXISTS public.curso_ifb_d
+(
+    co_curso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    no_curso character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    co_tipo_curso character varying(10) COLLATE pg_catalog."default",
+    tipo_curso character varying(100) COLLATE pg_catalog."default",
+    co_tipo_nivel character varying(10) COLLATE pg_catalog."default",
+    ds_tipo_nivel character varying(100) COLLATE pg_catalog."default",
+    ds_eixo_tecnologico character varying(200) COLLATE pg_catalog."default",
+    modalidade_ensino character varying(100) COLLATE pg_catalog."default",
+    carga_horaria integer,
+    CONSTRAINT curso_ifb_d_pkey PRIMARY KEY (co_curso)
+);
+
+CREATE TABLE IF NOT EXISTS public.localizacao_d
+(
+    id_loc serial NOT NULL,
+    uf character varying(2) COLLATE pg_catalog."default" NOT NULL,
+    municipio character varying(100) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT localizacao_d_pkey PRIMARY KEY (id_loc)
+);
+
+CREATE TABLE IF NOT EXISTS public.remuneracao_d
+(
+    id_remuneracao serial NOT NULL,
+    vl_remun_media_nom numeric(10, 2),
+    vl_remun_media_sm numeric(10, 2),
+    vl_remun_dezembro_nom numeric(10, 2),
+    vl_remun_dezembro_sm numeric(10, 2),
+    qtd_hora_contr integer,
+    vl_ultima_remuneracao_ano numeric(10, 2),
+    vl_salario_contratual numeric(10, 2),
+    CONSTRAINT remuneracao_d_pkey PRIMARY KEY (id_remuneracao)
+);
+```

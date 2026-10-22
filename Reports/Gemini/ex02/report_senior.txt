@@ -1,0 +1,236 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 9
+  - Total Attributes: 35
+    * bioma: 2 columns
+    * categoria_manejo: 4 columns
+    * coleta_de_lixo: 10 columns
+    * esfera_administrativa: 2 columns
+    * instituicao_organizadora: 3 columns
+    * local_de_coleta: 2 columns
+    * mutirao_de_limpeza: 7 columns
+    * regiao: 3 columns
+    * unidade_de_conservacao: 10 columns
+
+Denormalized Model:
+  - Tables: 5
+  - Total Attributes: 45
+    * dim_data: 9 columns
+    * dim_geografia: 4 columns
+    * dim_instituicao: 4 columns
+    * dim_unidade_conservacao: 13 columns
+    * fact_mutirao_coleta: 19 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Denormalized model has MORE attributes (35 vs 45)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: id_bioma (INTEGER) -> nome_bioma (TEXT)
+  - Type mismatch: nome (TEXT) -> mes (INTEGER)
+  - Type mismatch: id_manejo (INTEGER) -> plano_manejo (TEXT)
+  - Type mismatch: plano (TEXT) -> ano (INTEGER)
+  - Type mismatch: id_esfera (INTEGER) -> fim_de_semana (BOOLEAN)
+  - Type mismatch: tipo (TEXT) -> sk_mutirao (INTEGER)
+  - Type mismatch: carater (TEXT) -> sk_data (INTEGER)
+  - Type mismatch: nome (TEXT) -> sk_uc (INTEGER)
+  - Type mismatch: nome (TEXT) -> trimestre (INTEGER)
+--------------------------------------------------------------------------------
+Completeness Ratio:        1.29
+Data Type Preservation:    0.74
+Avg Levenshtein Distance:  2.03
+BLEU Score:                0.49
+ROUGE-1:                   0.73
+METEOR Score:              0.57
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: fact_mutirao_coleta
+Dimension Tables Detected: dim_data, dim_geografia, dim_instituicao, dim_unidade_conservacao
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected exactly 1 Fact table. Evaluating as a standard STAR SCHEMA.
+  - SNOWFLAKE VIOLATION: Dimension 'dim_unidade_conservacao' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'ano_de_criacao' in 'dim_unidade_conservacao' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'area_soma_biomas' in 'dim_unidade_conservacao' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'area_soma_biomas_continentais' in 'dim_unidade_conservacao' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'area_marinha' in 'dim_unidade_conservacao' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nome_bioma' in 'dim_unidade_conservacao' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'categoria_manejo' in 'dim_unidade_conservacao' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'categoria_iucn' in 'dim_unidade_conservacao' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'plano_manejo' in 'dim_unidade_conservacao' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'esfera_administrativa' in 'dim_unidade_conservacao' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'sk_geografia' in 'dim_unidade_conservacao' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * fact_mutirao_coleta: 13 Numeric, 3 Text
+  * dim_data: 5 Numeric, 4 Text
+  * dim_geografia: 2 Numeric, 2 Text
+  * dim_instituicao: 2 Numeric, 2 Text
+  * dim_unidade_conservacao: 7 Numeric, 6 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  ano_de_criacao area_marinha area_soma_biomas area_soma_biomas_continentais borracha carater categoria categoria_iucn data_do_ocorrido duracao_total estado horario_de_inicio id_bioma id_esfera id_instituicao_organizadora id_manejo id_municipio id_mutirao id_uc madeira materiais_de_pesca metal nome nome nome nome nome numero_aproximado_de_participantes outros_residuos papel plano plastico produtos_texteis tipo vidro
+
+Denormalized Model (Combined Text):
+  ano ano_de_criacao area_marinha area_soma_biomas area_soma_biomas_continentais borracha carater_instituicao categoria_iucn categoria_manejo data_completa dia_da_semana duracao_total esfera_administrativa estado fim_de_semana horario_de_inicio id_instituicao_organizadora id_municipio id_mutirao id_uc madeira materiais_de_pesca mes metal nome_bioma nome_dia_semana nome_instituicao nome_local_coleta nome_mes nome_municipio nome_uc numero_aproximado_de_participantes outros_residuos papel plano_manejo plastico produtos_texteis sk_data sk_geografia sk_instituicao sk_mutirao sk_uc total_residuos_coletados trimestre vidro
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 35 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id_bioma INTEGER
+  Denormalized:  nome_bioma TEXT
+
+Pair 2:
+  Relational:    nome TEXT
+  Denormalized:  mes INTEGER
+
+Pair 3:
+  Relational:    id_manejo INTEGER
+  Denormalized:  plano_manejo TEXT
+
+Pair 4:
+  Relational:    categoria TEXT
+  Denormalized:  categoria_manejo TEXT
+
+Pair 5:
+  Relational:    categoria_iucn TEXT
+  Denormalized:  categoria_iucn TEXT
+
+Pair 6:
+  Relational:    plano TEXT
+  Denormalized:  ano INTEGER
+
+Pair 7:
+  Relational:    plastico INTEGER
+  Denormalized:  plastico INTEGER
+
+Pair 8:
+  Relational:    borracha INTEGER
+  Denormalized:  borracha INTEGER
+
+Pair 9:
+  Relational:    madeira INTEGER
+  Denormalized:  madeira INTEGER
+
+Pair 10:
+  Relational:    produtos_texteis INTEGER
+  Denormalized:  produtos_texteis INTEGER
+
+Pair 11:
+  Relational:    papel INTEGER
+  Denormalized:  papel INTEGER
+
+Pair 12:
+  Relational:    metal INTEGER
+  Denormalized:  metal INTEGER
+
+Pair 13:
+  Relational:    vidro INTEGER
+  Denormalized:  vidro INTEGER
+
+Pair 14:
+  Relational:    materiais_de_pesca INTEGER
+  Denormalized:  materiais_de_pesca INTEGER
+
+Pair 15:
+  Relational:    outros_residuos INTEGER
+  Denormalized:  outros_residuos INTEGER
+
+Pair 16:
+  Relational:    id_esfera INTEGER
+  Denormalized:  fim_de_semana BOOLEAN
+
+Pair 17:
+  Relational:    tipo TEXT
+  Denormalized:  sk_mutirao INTEGER
+
+Pair 18:
+  Relational:    id_instituicao_organizadora INTEGER
+  Denormalized:  id_instituicao_organizadora INTEGER
+
+Pair 19:
+  Relational:    nome TEXT
+  Denormalized:  nome_uc TEXT
+
+Pair 20:
+  Relational:    carater TEXT
+  Denormalized:  sk_data INTEGER
+
+Pair 21:
+  Relational:    nome TEXT
+  Denormalized:  nome_mes TEXT
+
+Pair 22:
+  Relational:    id_mutirao INTEGER
+  Denormalized:  id_mutirao INTEGER
+
+Pair 23:
+  Relational:    data_do_ocorrido DATE
+  Denormalized:  data_completa DATE
+
+Pair 24:
+  Relational:    horario_de_inicio TIME
+  Denormalized:  horario_de_inicio TIME
+
+Pair 25:
+  Relational:    numero_aproximado_de_participantes INTEGER
+  Denormalized:  numero_aproximado_de_participantes INTEGER
+
+Pair 26:
+  Relational:    duracao_total TIME
+  Denormalized:  duracao_total TIME
+
+Pair 27:
+  Relational:    id_municipio INTEGER
+  Denormalized:  id_municipio INTEGER
+
+Pair 28:
+  Relational:    nome TEXT
+  Denormalized:  sk_uc INTEGER
+
+Pair 29:
+  Relational:    estado TEXT
+  Denormalized:  estado TEXT
+
+Pair 30:
+  Relational:    id_uc INTEGER
+  Denormalized:  id_uc INTEGER
+
+Pair 31:
+  Relational:    nome TEXT
+  Denormalized:  trimestre INTEGER
+
+Pair 32:
+  Relational:    ano_de_criacao INTEGER
+  Denormalized:  ano_de_criacao INTEGER
+
+Pair 33:
+  Relational:    area_soma_biomas DOUBLE
+  Denormalized:  area_soma_biomas DOUBLE
+
+Pair 34:
+  Relational:    area_soma_biomas_continentais DOUBLE
+  Denormalized:  area_soma_biomas_continentais DOUBLE
+
+Pair 35:
+  Relational:    area_marinha DOUBLE
+  Denormalized:  area_marinha DOUBLE
+
+
+================================================================================

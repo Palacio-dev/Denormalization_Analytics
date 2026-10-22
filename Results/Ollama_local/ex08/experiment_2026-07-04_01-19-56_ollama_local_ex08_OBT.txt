@@ -1,0 +1,256 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-04_01-19-56
+Model: ollama_local
+Prompt: OBT
+Schema: ex08
+==================================================
+
+Here is the analysis and the denormalized schema based on the **RISEN FRAMEWORK** and the **ONE-BIG-TABLE MODEL** strategy.
+
+### <Analysis>
+
+#### <Role>
+Senior Data Engineer specializing in relational/non-relational databases, SQL, and analytical performance tuning.
+</Role>
+
+#### <Input>
+The provided SQL script defines a relational schema for an educational institution dataset (`IFB` - Instituto Federal Brasileiro). It includes tables for Students (`aluno_ifb`), Courses (`curso_ifb`), Enrollment (`matricula_ifb`), Schools (`escola`), Locations (`localizacao`), and various performance indicators (`desempenho_enem`, `indicadores_escolares`, `participacao_enem`, `vinculo_empregaticio`, `remuneracao`).
+</Input>
+
+#### <Steps>
+1.  **Analyze the provided SQL creation script**: The schema is normalized (3NF), with distinct tables for entities and their relationships. Foreign keys link `aluno` to `matricula`, `matricula` to `curso` and `escola`, `escola` to `localizacao`, and various performance tables to `escola` or `aluno`.
+2.  **Analyze the 'Frequent Queries / Workload Context'**:
+    *   *Inferred Workload*: This is a classic **Business Intelligence (BI)** or **Data Warehouse** scenario. The primary queries will likely be ad-hoc analytical reports (e.g., "Show average ENEM scores by course," "Enrollment trends per location," "Teacher salary vs. student count").
+    *   *Bottlenecks*: In a read-heavy analytical environment, joining multiple tables (e.g., `JOIN aluno JOIN matricula JOIN curso JOIN escola`) introduces overhead due to:
+        *   Multiple Index Lookups (one per join condition).
+        *   Shuffle operations if data volumes are large.
+        *   Complex `GROUP BY` aggregations across many tables.
+    *   *Optimization Strategy*: Denormalizing into a single wide table eliminates join overhead. The "Star" or "Snowflake" pattern is replaced by a "Fact Table" approach where dimensions are embedded.
+3.  **Design the new denormalized schema**:
+    *   **Strategy**: ONE-BIG-TABLE MODEL.
+    *   **Primary Key**: `id_snapshot` (Serial, auto-incrementing) to represent a unique record for every combination of `aluno` + `periodo` + `ano` (or similar granularity). *Correction*: Looking at the data, `aluno` is static, `curso` is static, but `matricula` and `indicadores` are time-series.
+    *   **Refined Granularity**: To make the single table useful for analytics, the row granularity should be the **Student-Course-Year** intersection, enriched with all available attributes.
+    *   **Handling Time-Series**: Since `desempenho_enem`, `indicadores_escolares`, and `participacao_enem` are school-level time series, and `vinculo_empregaticio` is person-level time series, we must flatten these.
+    *   **Primary Key Selection**: `id_snapshot` (Serial) will serve as the global row ID.
+    *   **Foreign Keys Removal**: All FKs are removed. Relationships are implied by column names and values.
+    *   **Attribute Merging**:
+        *   `aluno_ifb` attributes are added to every row (or repeated per student-year).
+        *   `curso_ifb` attributes are added per student-year (assuming a student takes one course per year).
+        *   `matricula_ifb` attributes (periodo, ano, situacao) define the row's context.
+        *   School attributes (`escola`, `localizacao`) are joined into the row.
+        *   Performance indicators (`desempenho_enem`, `indicadores_escolares`, `participacao_enem`) are flattened into the row (repeated per student if the school indicator applies to the student's school).
+        *   Employment (`vinculo_empregaticio`, `remuneracao`) are flattened (repeated per student-year).
+    *   **Data Types**: Preserved exactly. Prefixes used for columns with same names from different entities (e.g., `nu_ano` becomes `nu_ano_escola`, `nu_ano_aluno` - though in this specific schema, `nu_ano` appears in many places, we will prefix them clearly: `nu_ano_escola`, `nu_ano_matricula`, `nu_ano_enem`, `nu_ano_indicador`, `nu_ano_vinculo`).
+
+#### <One-Big-Table Model Implementation>
+*   **Table Name**: `denormalized_ifb_data`
+*   **Primary Key**: `id_snapshot` (Serial)
+*   **Columns**: All attributes from source tables, prefixed to avoid ambiguity.
+    *   *Student Base*: `id_aluno`, `data_nascimento`, `idade`, `sexo`, `nacionalidade`, `raca`, `portador_deficiencia`.
+    *   *Course Base*: `co_curso`, `no_curso`, `co_tipo_curso`, `tipo_curso`, `co_tipo_nivel`, `ds_tipo_nivel`, `ds_eixo_tecnologico`, `modalidade_ensino`, `carga_horaria`.
+    *   *Matriculation Context*: `id_matricula`, `co_ciclo_matricula`, `periodo`, `situacao_matricula`, `tipo_cota`, `atestado_baixarenda`, `ano_matricula`.
+    *   *School Context*: `co_escola_educacenso`, `no_escola_educacenso`, `tp_dependencia_adm_escola`, `tp_localizacao_escola`, `inse`, `id_loc`.
+    *   *Location Context*: `uf`, `municipio`.
+    *   *Performance Metrics (School Level)*: `nu_ano_escola`, `nu_taxa_permanencia_escola`, `nu_taxa_aprovacao_escola`, `nu_taxa_reprovacao_escola`, `nu_taxa_abandono_escola`, `porte_escola_escola`, `pc_formacao_docente_escola`.
+    *   *Performance Metrics (ENEM Level)*: `nu_ano_enem`, `nu_media_cn_enem`, `nu_media_ch_enem`, `nu_media_lp_enem`, `nu_media_mt_enem`, `nu_media_red_enem`, `nu_matriculas_enem`, `nu_participantes_nec_esp_enem`, `nu_participantes_enem`, `nu_taxa_participacao_enem`.
+    *   *Indicators (School Level)*: `nu_ano_indicador`, `nu_taxa_permanencia_indicador`, `nu_taxa_aprovacao_indicador`, `nu_taxa_reprovacao_indicador`, `nu_taxa_abandono_indicador`.
+    *   *Employment (Person Level)*: `id_vinculo`, `ano_rais`, `razao_social`, `tipo_vinculo_empregaticio`, `data_admissao_declarada`, `tempo_emprego`, `motivo_desligamento`, `mes_desligamento`, `indicador_vinculo_ativo`, `vl_remun_media_nom`, `vl_remun_media_sm`, `vl_remun_dezembro_nom`, `vl_remun_dezembro_sm`, `qtd_hora_contr`, `vl_ultima_remuneracao_ano`, `vl_salario_contratual`.
+
+*Note*: In a true "One Big Table" for analytics, we often repeat the "School" and "Student" attributes for every row in the fact dimension to avoid complex joins during queries. The `nu_ano` fields are prefixed to distinguish between the school census year, the matriculation year, the ENEM year, etc.
+
+#### <Tradeoffs>
+*   **Storage Overhead**: The single table will be significantly larger than the sum of the normalized tables due to the repetition of dimension data (School info repeated for every student-year, Student info repeated for every year they are tracked).
+*   **Write Complexity**: Inserting a new student or a new year of performance data requires inserting multiple rows into the single table, whereas in the normalized model, it might only require one insert per entity update.
+*   **Query Speed**: Read performance (especially `GROUP BY` and aggregations) will improve drastically as there are no joins to execute.
+*   **Data Integrity**: Relies on application logic to ensure consistency (e.g., ensuring the `co_escola_educacenso` matches the actual school data), as there are no foreign key constraints to enforce referential integrity.
+
+### <Output JSON>
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transforms the provided 10-table relational schema into a single, wide 'denormalized_ifb_data' table. This follows the ONE-BIG-TABLE MODEL strategy, where all attributes from `aluno`, `curso`, `matricula`, `escola`, `localizacao`, `desempenho_enem`, `indicadores_escolares`, `participacao_enem`, `vinculo_empregaticio`, and `remuneracao` are merged into one table. Foreign keys are removed to eliminate join overhead. To handle time-series data and multiple years, the schema uses a global `id_snapshot` primary key and prefixes time-related attributes (e.g., `nu_ano_escola`, `nu_ano_enem`) to distinguish between different contexts.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidation of all 10 source tables (`aluno_ifb`, `curso_ifb`, `desempenho_enem`, `escola`, `indicadores_escolares`, `localizacao`, `matricula_ifb`, `participacao_enem`, `remuneracao`, `vinculo_empregaticio`) into a single table named `denormalized_ifb_data`."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Removal of all Foreign Key constraints. Relationships are now implicit through column names and data values. For example, the relationship between `aluno` and `matricula` is represented by including both sets of attributes in the same row, rather than a FK column."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Creation of a single Primary Key `id_snapshot` (Serial) to uniquely identify every analytical record (snapshot of a student's profile at a specific point in time)."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Flattening of time-series data. Attributes like `nu_ano` from `desempenho_enem`, `indicadores_escolares`, and `vinculo_empregaticio` are renamed with prefixes (`nu_ano_enem`, `nu_ano_indicador`, `ano_rais`) to prevent naming collisions, while `nu_ano` (from `matricula` and `escola`) is kept as `nu_ano_matricula` or `nu_ano_escola`."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Prefixing of all attributes originating from `desempenho_enem`, `indicadores_escolares`, `participacao_enem`, `vinculo_empregaticio`, and `remuneracao` to distinguish them from attributes in `aluno_ifb`, `curso_ifb`, `matricula_ifb`, `escola`, and `localizacao`."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Repetition of `aluno_ifb` attributes in every row corresponding to a student's matriculation/year to enable direct analysis of student performance without joining back to the student table."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Repetition of `escola` and `localizacao` attributes in every row to allow filtering and aggregation by school location without joining the `escola` table."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Repetition of `curso_ifb` attributes to allow analysis of specific course outcomes per student."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Trade-off: Increased storage size and write volume (one row per student-year) vs. Drastically reduced read latency and query complexity (zero joins required for complex analytical reports)."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Trade-off: Loss of referential integrity enforcement (no Foreign Keys) vs. Gain in flexibility for ad-hoc queries and easier schema evolution without altering table structures."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical report: 'Average ENEM score (media_cn_enem) per student grouped by course and school location, excluding students with missing data.' (Previously required: JOIN aluno, matricula, curso, escola, desempenho_enem)."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Trend analysis: 'Growth in school permanence rate (nu_taxa_permanencia_indicador) over time, grouped by municipality (municipio) and school type (porte_escola_escola).' (Previously required: JOIN escola, localizacao, indicadores_escolares)."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Employment statistics: 'Average salary (vl_salario_contratual) for students currently employed (indicador_vinculo_ativo) in the public sector (tipo_vinculo_empregaticio), grouped by year (ano_rais).' (Previously required: JOIN aluno, vinculo_empregaticio, remuneracao)."
+      }
+    ]
+  }
+}
+```
+
+### <SQL DDL Script>
+
+```sql
+-- Denormalized Schema: ONE-BIG-TABLE MODEL
+-- Strategy: All attributes from the normalized IFB schema are merged into a single table
+-- to optimize read performance for analytical queries by eliminating JOINs.
+-- Primary Key: id_snapshot (Serial)
+-- Foreign Keys: Removed
+
+CREATE TABLE IF NOT EXISTS public.denormalized_ifb_data (
+    id_snapshot serial NOT NULL,
+    
+    -- Student Attributes (from aluno_ifb)
+    id_aluno integer,
+    data_nascimento date,
+    idade integer,
+    sexo character(1) COLLATE pg_catalog."default",
+    nacionalidade character varying(50) COLLATE pg_catalog."default",
+    raca character varying(50) COLLATE pg_catalog."default",
+    portador_deficiencia boolean,
+    
+    -- Course Attributes (from curso_ifb)
+    co_curso character varying(50) COLLATE pg_catalog."default",
+    no_curso character varying(200) COLLATE pg_catalog."default",
+    co_tipo_curso character varying(10) COLLATE pg_catalog."default",
+    tipo_curso character varying(100) COLLATE pg_catalog."default",
+    co_tipo_nivel character varying(10) COLLATE pg_catalog."default",
+    ds_tipo_nivel character varying(100) COLLATE pg_catalog."default",
+    ds_eixo_tecnologico character varying(200) COLLATE pg_catalog."default",
+    modalidade_ensino character varying(100) COLLATE pg_catalog."default",
+    carga_horaria integer,
+    
+    -- Matriculation Attributes (from matricula_ifb)
+    id_matricula integer,
+    co_ciclo_matricula character varying(50) COLLATE pg_catalog."default",
+    periodo character varying(30) COLLATE pg_catalog."default",
+    situacao_matricula character varying(50) COLLATE pg_catalog."default",
+    tipo_cota character varying(50) COLLATE pg_catalog."default",
+    atestado_baixarenda character varying(20) COLLATE pg_catalog."default",
+    ano_matricula character varying(20) COLLATE pg_catalog."default",
+    
+    -- School Attributes (from escola)
+    co_escola_educacenso character varying(50) COLLATE pg_catalog."default",
+    no_escola_educacenso character varying(200) COLLATE pg_catalog."default",
+    tp_dependencia_adm_escola smallint,
+    tp_localizacao_escola smallint,
+    inse character varying(10) COLLATE pg_catalog."default",
+    id_loc integer,
+    
+    -- Location Attributes (from localizacao)
+    uf character varying(2) COLLATE pg_catalog."default",
+    municipio character varying(100) COLLATE pg_catalog."default",
+    
+    -- Performance Metrics: ENEM (from desempenho_enem)
+    nu_ano_enem integer NOT NULL,
+    nu_media_cn_enem numeric(6, 2),
+    nu_media_ch_enem numeric(6, 2),
+    nu_media_lp_enem numeric(6, 2),
+    nu_media_mt_enem numeric(6, 2),
+    nu_media_red_enem numeric(6, 2),
+    nu_matriculas_enem integer,
+    nu_participantes_nec_esp_enem integer,
+    nu_participantes_enem integer,
+    nu_taxa_participacao_enem numeric(5, 2),
+    
+    -- Performance Metrics: School Indicators (from indicadores_escolares)
+    nu_ano_indicador integer NOT NULL,
+    nu_taxa_permanencia_indicador numeric(6, 2),
+    nu_taxa_aprovacao_indicador numeric(5, 2),
+    nu_taxa_reprovacao_indicador numeric(5, 2),
+    nu_taxa_abandono_indicador numeric(5, 2),
+    porte_escola_escola character varying(50) COLLATE pg_catalog."default",
+    pc_formacao_docente_escola numeric(5, 2),
+    
+    -- Participation Metrics (from participacao_enem)
+    nu_ano_participacao integer NOT NULL,
+    nu_taxa_participacao_participacao numeric(5, 2),
+    
+    -- Employment Attributes (from vinculo_empregaticio)
+    id_vinculo integer,
+    ano_rais integer,
+    razao_social character varying(200) COLLATE pg_catalog."default",
+    tipo_vinculo_empregaticio character varying(200) COLLATE pg_catalog."default",
+    data_admissao_declarada date,
+    tempo_emprego integer,
+    motivo_desligamento character varying(200) COLLATE pg_catalog."default",
+    mes_desligamento character varying(20) COLLATE pg_catalog."default",
+    indicador_vinculo_ativo boolean,
+    
+    -- Remuneration Attributes (from remuneracao)
+    vl_remun_media_nom numeric(10, 2),
+    vl_remun_media_sm numeric(10, 2),
+    vl_remun_dezembro_nom numeric(10, 2),
+    vl_remun_dezembro_sm numeric(10, 2),
+    qtd_hora_contr integer,
+    vl_ultima_remuneracao_ano numeric(10, 2),
+    vl_salario_contratual numeric(10, 2)
+);
+
+-- Indexes for common analytical filters
+CREATE INDEX IF NOT EXISTS idx_denormalizado_escola
+    ON public.denormalized_ifb_data(co_escola_educacenso);
+
+CREATE INDEX IF NOT EXISTS idx_denormalizado_aluno
+    ON public.denormalized_ifb_data(id_aluno);
+
+CREATE INDEX IF NOT EXISTS idx_denormalizado_municipio
+    ON public.denormalized_ifb_data(municipio);
+
+CREATE INDEX IF NOT EXISTS idx_denormalizado_ano
+    ON public.denormalized_ifb_data(nu_ano_enem, nu_ano_indicador, ano_rais);
+
+CREATE INDEX IF NOT EXISTS idx_denormalizado_situacao
+    ON public.denormalized_ifb_data(situacao_matricula, indicador_vinculo_ativo);
+```

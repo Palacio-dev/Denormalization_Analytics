@@ -1,0 +1,221 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 8
+  - Total Attributes: 28
+    * aircrafts_data: 3 columns
+    * airports_data: 5 columns
+    * boarding_passes: 4 columns
+    * bookings: 3 columns
+    * flights: 10 columns
+    * seats: 3 columns
+    * ticket_flights: 4 columns
+    * tickets: 5 columns
+
+Denormalized Model:
+  - Tables: 6
+  - Total Attributes: 58
+    * dim_date: 9 columns
+    * dim_aircrafts: 12 columns
+    * dim_airports: 9 columns
+    * dim_passengers: 5 columns
+    * fact_flights: 16 columns
+    * fact_ticket_flights: 13 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Denormalized model has MORE attributes (28 vs 58)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: aircraft_code (CHARACTER(3)) -> aircraft_code (CHAR(3))
+  - Type mismatch: model (JSONB) -> model_en (VARCHAR(100))
+  - Type mismatch: range (INTEGER) -> range_km (INT)
+  - Type mismatch: airport_code (CHARACTER(3)) -> airport_code (CHAR(3))
+  - Type mismatch: airport_name (JSONB) -> airport_name_en (VARCHAR(150))
+  - Type mismatch: city (JSONB) -> city_en (VARCHAR(100))
+  - Type mismatch: coordinates (POINT) -> quarter (INT)
+  - Type mismatch: timezone (TEXT) -> timezone (VARCHAR(50))
+  - Type mismatch: boarding_no (INTEGER) -> boarding_no (INT)
+  - Type mismatch: seat_no (CHARACTER) -> seat_no (VARCHAR(4))
+  - Type mismatch: book_ref (CHARACTER(6)) -> book_ref (CHAR(6))
+  - Type mismatch: total_amount (NUMERIC(10, 2)) -> total_seats (INT)
+  - Type mismatch: flight_id (SERIAL) -> flight_id (INT)
+  - Type mismatch: flight_no (CHARACTER(6)) -> flight_no (CHAR(6))
+  - Type mismatch: status (CHARACTER) -> status (VARCHAR(20))
+  - Type mismatch: seat_no (CHARACTER) -> year (INT)
+  - Type mismatch: fare_conditions (CHARACTER) -> fare_conditions (VARCHAR(10))
+  - Type mismatch: fare_conditions (CHARACTER) -> full_date (DATE)
+  - Type mismatch: ticket_no (CHARACTER(13)) -> ticket_no (CHAR(13))
+  - Type mismatch: passenger_id (CHARACTER) -> passenger_id (VARCHAR(20))
+  - Type mismatch: passenger_name (TEXT) -> passenger_name (VARCHAR(150))
+  - Type mismatch: contact_data (JSONB) -> month_name (VARCHAR(10))
+--------------------------------------------------------------------------------
+Completeness Ratio:        2.07
+Data Type Preservation:    0.21
+Avg Levenshtein Distance:  1.75
+BLEU Score:                0.33
+ROUGE-1:                   0.52
+METEOR Score:              0.55
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: fact_flights, fact_ticket_flights
+Dimension Tables Detected: dim_date, dim_aircrafts, dim_airports, dim_passengers
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected 2 Fact tables. Evaluating as a GALAXY SCHEMA.
+  - PAYLOAD WARNING: Fact table 'fact_flights' contains more text attributes (7) than numeric measures (5).
+  - PAYLOAD WARNING: Fact table 'fact_ticket_flights' contains more text attributes (6) than numeric measures (5).
+  - DIMENSION NULL WARNING: Attribute 'model_ru' in 'dim_aircrafts' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'valid_from' in 'dim_aircrafts' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'valid_to' in 'dim_aircrafts' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'is_current' in 'dim_aircrafts' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'airport_name_ru' in 'dim_airports' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'city_ru' in 'dim_airports' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'email' in 'dim_passengers' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'phone' in 'dim_passengers' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * fact_flights: 5 Numeric, 7 Text
+  * fact_ticket_flights: 5 Numeric, 6 Text
+  * dim_date: 5 Numeric, 4 Text
+  * dim_aircrafts: 6 Numeric, 6 Text
+  * dim_airports: 3 Numeric, 6 Text
+  * dim_passengers: 1 Numeric, 4 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  actual_arrival actual_departure aircraft_code airport_code airport_name amount boarding_no book_date book_ref city contact_data coordinates fare_conditions fare_conditions flight_id flight_no model passenger_id passenger_name range scheduled_arrival scheduled_departure seat_no seat_no status ticket_no timezone total_amount
+
+Denormalized Model (Combined Text):
+  actual_arrival actual_departure aircraft_code aircraft_sk airport_code airport_name_en airport_name_ru airport_sk amount arrival_delay_mins boarding_no book_date book_ref booking_total_amount business_seats city_en city_ru date_sk day_name day_of_week departure_delay_mins economy_seats email fare_conditions first_class_seats flight_id flight_no flight_sk flight_sk full_date has_boarded is_cancelled is_current is_weekend latitude longitude model_en model_ru month_name month_num passenger_id passenger_name passenger_sk phone quarter range_km scheduled_arrival scheduled_arrival_date_sk scheduled_departure seat_no status ticket_flight_sk ticket_no timezone total_seats valid_from valid_to year
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 28 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    aircraft_code CHARACTER(3)
+  Denormalized:  aircraft_code CHAR(3)
+
+Pair 2:
+  Relational:    model JSONB
+  Denormalized:  model_en VARCHAR(100)
+
+Pair 3:
+  Relational:    range INTEGER
+  Denormalized:  range_km INT
+
+Pair 4:
+  Relational:    airport_code CHARACTER(3)
+  Denormalized:  airport_code CHAR(3)
+
+Pair 5:
+  Relational:    airport_name JSONB
+  Denormalized:  airport_name_en VARCHAR(150)
+
+Pair 6:
+  Relational:    city JSONB
+  Denormalized:  city_en VARCHAR(100)
+
+Pair 7:
+  Relational:    coordinates POINT
+  Denormalized:  quarter INT
+
+Pair 8:
+  Relational:    timezone TEXT
+  Denormalized:  timezone VARCHAR(50)
+
+Pair 9:
+  Relational:    boarding_no INTEGER
+  Denormalized:  boarding_no INT
+
+Pair 10:
+  Relational:    seat_no CHARACTER
+  Denormalized:  seat_no VARCHAR(4)
+
+Pair 11:
+  Relational:    book_ref CHARACTER(6)
+  Denormalized:  book_ref CHAR(6)
+
+Pair 12:
+  Relational:    book_date TIMESTAMP
+  Denormalized:  book_date TIMESTAMP
+
+Pair 13:
+  Relational:    total_amount NUMERIC(10, 2)
+  Denormalized:  total_seats INT
+
+Pair 14:
+  Relational:    flight_id SERIAL
+  Denormalized:  flight_id INT
+
+Pair 15:
+  Relational:    flight_no CHARACTER(6)
+  Denormalized:  flight_no CHAR(6)
+
+Pair 16:
+  Relational:    scheduled_departure TIMESTAMP
+  Denormalized:  scheduled_departure TIMESTAMP
+
+Pair 17:
+  Relational:    scheduled_arrival TIMESTAMP
+  Denormalized:  scheduled_arrival TIMESTAMP
+
+Pair 18:
+  Relational:    status CHARACTER
+  Denormalized:  status VARCHAR(20)
+
+Pair 19:
+  Relational:    actual_departure TIMESTAMP
+  Denormalized:  actual_departure TIMESTAMP
+
+Pair 20:
+  Relational:    actual_arrival TIMESTAMP
+  Denormalized:  actual_arrival TIMESTAMP
+
+Pair 21:
+  Relational:    seat_no CHARACTER
+  Denormalized:  year INT
+
+Pair 22:
+  Relational:    fare_conditions CHARACTER
+  Denormalized:  fare_conditions VARCHAR(10)
+
+Pair 23:
+  Relational:    fare_conditions CHARACTER
+  Denormalized:  full_date DATE
+
+Pair 24:
+  Relational:    amount NUMERIC(10, 2)
+  Denormalized:  amount NUMERIC(10, 2)
+
+Pair 25:
+  Relational:    ticket_no CHARACTER(13)
+  Denormalized:  ticket_no CHAR(13)
+
+Pair 26:
+  Relational:    passenger_id CHARACTER
+  Denormalized:  passenger_id VARCHAR(20)
+
+Pair 27:
+  Relational:    passenger_name TEXT
+  Denormalized:  passenger_name VARCHAR(150)
+
+Pair 28:
+  Relational:    contact_data JSONB
+  Denormalized:  month_name VARCHAR(10)
+
+
+================================================================================

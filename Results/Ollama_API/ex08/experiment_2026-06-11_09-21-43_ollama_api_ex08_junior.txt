@@ -1,0 +1,199 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-21-43
+Model: ollama_api
+Prompt: junior
+Schema: ex08
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on reducing the number of joins required for analytical queries by merging related tables. The main approach is to create star-schema-like structures where fact tables (like student enrollments or employment) are enriched with dimensions (like course info, school data, demographics). This improves query performance at the cost of some data redundancy.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge aluno_ifb and matricula_ifb into a single denormalized table 'matricula_aluno_denorm' to avoid joining student demographics with their enrollments."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge curso_ifb into matricula_aluno_denorm to include course details directly in the enrollment record."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge escola, localizacao, and indicadores_escolares into a new 'escola_denorm' table to provide a complete school profile with location and performance indicators."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Merge desempenho_enem and participacao_enem into escola_denorm to consolidate all school-level ENEM data."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Merge aluno_ifb and vinculo_empregaticio into a new 'vinculo_aluno_denorm' table, including student demographics with their employment records."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Merge remuneracao into vinculo_aluno_denorm to include salary details directly in the employment record."
+      },
+      {
+        "decision_id": "D7",
+        "description": "Merge localizacao into vinculo_aluno_denorm to include employment location details."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added descriptive fields from curso_ifb (no_curso, tipo_curso, ds_tipo_nivel, ds_eixo_tecnologico) to matricula_aluno_denorm."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added descriptive fields from escola (no_escola_educacenso, tp_dependencia_adm_escola, tp_localizacao_escola, inse) and localizacao (uf, municipio) to escola_denorm."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added descriptive fields from localizacao (uf, municipio) to vinculo_aluno_denorm."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Renamed co_escola_educacenso to escola_co_escola_educacenso in matricula_aluno_denorm for clarity and consistency."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage space due to data duplication (e.g., student demographics repeated for each enrollment)."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified queries with fewer joins but more complex ETL process to maintain consistency."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Improved read performance for analytics at the cost of slower write/update operations."
+      },
+      {
+        "tradeoff_id": "T4",
+        "description": "Potential for data inconsistencies if updates are not properly propagated across denormalized tables."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries analyzing student demographics by enrollment status, course, or school (e.g., 'Show dropout rates by gender and course type')."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries comparing school performance, location, and student outcomes (e.g., 'Analyze ENEM scores by school location and administrative dependency')."
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries tracking student employment outcomes by demographics (e.g., 'Show employment rates and salaries by student gender and course')."
+      }
+    ]
+  }
+}
+
+-- SQL DDL Creation Script for Denormalized Schema
+
+-- Table: public.matricula_aluno_denorm
+CREATE TABLE IF NOT EXISTS public.matricula_aluno_denorm
+(
+    id_matricula serial NOT NULL,
+    co_ciclo_matricula character varying(50) COLLATE pg_catalog."default",
+    periodo character varying(30) COLLATE pg_catalog."default",
+    situacao_matricula character varying(50) COLLATE pg_catalog."default",
+    tipo_cota character varying(50) COLLATE pg_catalog."default",
+    atestado_baixarenda character varying(20) COLLATE pg_catalog."default",
+    ano character varying(20) COLLATE pg_catalog."default",
+    unidade_ensino character varying(100) COLLATE pg_catalog."default",
+    escola_co_escola_educacenso character varying(20) COLLATE pg_catalog."default",
+    -- Aluno columns
+    id_aluno integer,
+    data_nascimento date,
+    idade integer,
+    sexo character(1) COLLATE pg_catalog."default",
+    nacionalidade character varying(50) COLLATE pg_catalog."default",
+    raca character varying(50) COLLATE pg_catalog."default",
+    portador_deficiencia boolean,
+    -- Curso columns
+    co_curso character varying(50) COLLATE pg_catalog."default",
+    no_curso character varying(200) COLLATE pg_catalog."default",
+    co_tipo_curso character varying(10) COLLATE pg_catalog."default",
+    tipo_curso character varying(100) COLLATE pg_catalog."default",
+    co_tipo_nivel character varying(10) COLLATE pg_catalog."default",
+    ds_tipo_nivel character varying(100) COLLATE pg_catalog."default",
+    ds_eixo_tecnologico character varying(200) COLLATE pg_catalog."default",
+    modalidade_ensino character varying(100) COLLATE pg_catalog."default",
+    carga_horaria integer,
+    CONSTRAINT matricula_aluno_denorm_pkey PRIMARY KEY (id_matricula)
+);
+
+-- Table: public.escola_denorm
+CREATE TABLE IF NOT EXISTS public.escola_denorm
+(
+    co_escola_educacenso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    no_escola_educacenso character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    tp_dependencia_adm_escola smallint,
+    tp_localizacao_escola smallint,
+    inse character varying(10) COLLATE pg_catalog."default",
+    -- Localizacao columns
+    uf character varying(2) COLLATE pg_catalog."default" NOT NULL,
+    municipio character varying(100) COLLATE pg_catalog."default" NOT NULL,
+    -- Indicadores Escolares columns (for most recent year or flattened)
+    nu_taxa_permanencia numeric(6, 2),
+    nu_taxa_aprovacao numeric(5, 2),
+    nu_taxa_reprovacao numeric(5, 2),
+    nu_taxa_abandono numeric(5, 2),
+    porte_escola character varying(50) COLLATE pg_catalog."default",
+    pc_formacao_docente numeric(5, 2),
+    -- Desempenho ENEM columns (for most recent year or flattened)
+    nu_ano_enem integer,
+    nu_media_cn numeric(6, 2),
+    nu_media_ch numeric(6, 2),
+    nu_media_lp numeric(6, 2),
+    nu_media_mt numeric(6, 2),
+    nu_media_red numeric(6, 2),
+    -- Participacao ENEM columns (for most recent year or flattened)
+    nu_matriculas integer,
+    nu_participantes_nec_esp integer,
+    nu_participantes integer,
+    nu_taxa_participacao numeric(5, 2),
+    CONSTRAINT escola_denorm_pkey PRIMARY KEY (co_escola_educacenso)
+);
+
+-- Table: public.vinculo_aluno_denorm
+CREATE TABLE IF NOT EXISTS public.vinculo_aluno_denorm
+(
+    id_vinculo serial NOT NULL,
+    ano_rais integer,
+    razao_social character varying(200) COLLATE pg_catalog."default",
+    tipo_vinculo_empregaticio character varying(200) COLLATE pg_catalog."default",
+    data_admissao_declarada date,
+    tempo_emprego integer,
+    motivo_desligamento character varying(200) COLLATE pg_catalog."default",
+    mes_desligamento character varying(20) COLLATE pg_catalog."default",
+    indicador_vinculo_ativo boolean,
+    -- Aluno columns
+    id_aluno integer,
+    data_nascimento date,
+    idade integer,
+    sexo character(1) COLLATE pg_catalog."default",
+    nacionalidade character varying(50) COLLATE pg_catalog."default",
+    raca character varying(50) COLLATE pg_catalog."default",
+    portador_deficiencia boolean,
+    -- Remuneracao columns
+    vl_remun_media_nom numeric(10, 2),
+    vl_remun_media_sm numeric(10, 2),
+    vl_remun_dezembro_nom numeric(10, 2),
+    vl_remun_dezembro_sm numeric(10, 2),
+    qtd_hora_contr integer,
+    vl_ultima_remuneracao_ano numeric(10, 2),
+    vl_salario_contratual numeric(10, 2),
+    -- Localizacao columns
+    uf character varying(2) COLLATE pg_catalog."default" NOT NULL,
+    municipio character varying(100) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT vinculo_aluno_denorm_pkey PRIMARY KEY (id_vinculo)
+);

@@ -1,0 +1,508 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_15-06-02
+Model: ollama_local
+Prompt: RISEN
+Schema: airplane
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on optimizing read performance for analytical queries involving flight 
+    itineraries, passenger details, and aircraft specifications. The primary bottleneck identified is the frequent need to join 
+    `bookings.bookings`, `bookings.tickets`, `bookings.ticket_flights`, `bookings.flights`, `bookings.aircrafts_data`, and 
+    `bookings.airports_data`. To eliminate these joins, we will implement **Collapsing Relations** to create a flattened 
+    'Flight Itinerary' table and **Adding Redundant Attributes** to embed aircraft models and airport details directly into the 
+    flight record. We will also add a derived attribute for total trip cost to avoid runtime aggregation.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Created a new table `bookings.itinerary_details` by collapsing relations from `bookings.bookings`, 
+        `bookings.tickets`, `bookings.ticket_flights`, and `bookings.flights`. This table stores booking metadata, passenger info,
+         and flight details in a single row per ticket, eliminating the need to join these four tables for itinerary retrieval.",
+        "source_tables": ["bookings.bookings", "bookings.tickets", "bookings.ticket_flights", "bookings.flights"],
+        "target_tables": ["bookings.itinerary_details"]
+      },
+      {
+        "decision_id": "D2",
+        "description": "Created a new table `bookings.flight_profiles` by collapsing relations from `bookings.flights`, `bookings.aircrafts_data`, and `bookings.airports_data`. This table stores flight operational data alongside redundant aircraft and airport attributes, eliminating the need to join these three tables.",
+        "source_tables": ["bookings.flights", "bookings.aircrafts_data", "bookings.airports_data"],
+        "target_tables": ["bookings.flight_profiles"]
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant attributes to `bookings.flight_profiles`: `aircraft_model` (from `aircrafts_data.model`), `max_range` (from `aircrafts_data.range`), `airport_name` (from `airports_data.airport_name`), `city` (from `airports_data.city`), and `timezone` (from `airports_data.timezone`).",
+        "affected_table": "bookings.flight_profiles"
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added a derived attribute `total_trip_amount` to `bookings.itinerary_details`. This column is calculated as the sum of `amount` values from the associated ticket segments, precomputed to avoid aggregation during reads.",
+        "affected_table": "bookings.itinerary_details"
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Write Performance vs. Read Performance. The denormalized schema introduces data duplication (aircraft specs, airport info, seat counts per flight). This increases storage footprint and write latency due to potential conflicts if data is updated frequently, but it drastically reduces read latency and CPU usage for complex JOIN queries."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "User requests a complete list of bookings including passenger names, booking dates, total costs, and full flight details (flight number, times, status, aircraft model, and airport names). Original query required 4+ table joins; new query uses only `bookings.itinerary_details`."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "User queries specific flight operations requiring the flight number, scheduled times, current status, and detailed aircraft capabilities (model, range) and destination airport info (name, city, timezone). Original query required 3 table joins; new query uses only `bookings.flight_profiles`."
+      },
+      {
+        "decision_id": "A2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "User calculates the total cost of a specific ticket or itinerary. Instead of summing `amount` from `ticket_flights` (requiring a join and aggregation), the system retrieves the pre-calculated `total_trip_amount`."
+      }
+    ]
+  }
+}
+
+-- ==========================================
+-- DENORMALIZED SCHEMA: ANALYTICAL READ OPTIMIZED
+-- ==========================================
+-- This schema preserves full semantic equivalence with the original normalized model.
+-- All original attributes are present across the new tables.
+-- Join-heavy analytical queries are optimized by materializing redundant attributes.
+
+-- --------------------------------------------------------
+-- TABLE: bookings.itinerary_details
+-- Purpose: Collapsed view of Booking -> Ticket -> Ticket_Flights -> Flights.
+-- Eliminates joins between bookings, tickets, ticket_flights, and flights.
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS bookings.itinerary_details
+(
+    book_ref character(6) COLLATE pg_catalog."default" NOT NULL,
+    book_date timestamp with time zone NOT NULL,
+    total_amount numeric(10, 2) NOT NULL, -- Derived attribute: Sum of ticket amounts
+    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL,
+    passenger_id character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    passenger_name text COLLATE pg_catalog."default" NOT NULL,
+    contact_data jsonb COLLATE pg_catalog."default",
+    flight_id integer NOT NULL,
+    flight_no character(6) COLLATE pg_catalog."default" NOT NULL,
+    scheduled_departure timestamp with time zone NOT NULL,
+    scheduled_arrival timestamp with time zone NOT NULL,
+    status character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT itinerary_details_pkey PRIMARY KEY (ticket_no, book_ref)
+);
+
+COMMENT ON TABLE bookings.itinerary_details
+    IS 'Denormalized itinerary details (Bookings, Tickets, Flights collapsed)';
+
+COMMENT ON COLUMN bookings.itinerary_details.book_ref
+    IS 'Booking number';
+
+COMMENT ON COLUMN bookings.itinerary_details.book_date
+    IS 'Booking date';
+
+COMMENT ON COLUMN bookings.itinerary_details.total_amount
+    IS 'Total trip cost (Sum of ticket amounts)';
+
+COMMENT ON COLUMN bookings.itinerary_details.ticket_no
+    IS 'Ticket number';
+
+COMMENT ON COLUMN bookings.itinerary_details.passenger_id
+    IS 'Passenger ID';
+
+COMMENT ON COLUMN bookings.itinerary_details.passenger_name
+    IS 'Passenger name';
+
+COMMENT ON COLUMN bookings.itinerary_details.contact_data
+    IS 'Passenger contact information';
+
+COMMENT ON COLUMN bookings.itinerary_details.flight_id
+    IS 'Flight ID';
+
+COMMENT ON COLUMN bookings.itinerary_details.flight_no
+    IS 'Flight number';
+
+COMMENT ON COLUMN bookings.itinerary_details.scheduled_departure
+    IS 'Scheduled departure time';
+
+COMMENT ON COLUMN bookings.itinerary_details.scheduled_arrival
+    IS 'Scheduled arrival time';
+
+COMMENT ON COLUMN bookings.itinerary_details.status
+    IS 'Flight status';
+
+-- --------------------------------------------------------
+-- TABLE: bookings.flight_profiles
+-- Purpose: Collapsed view of Flights -> Aircrafts -> Airports.
+-- Eliminates joins between flights, aircrafts_data, and airports_data.
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS bookings.flight_profiles
+(
+    flight_id integer NOT NULL,
+    flight_no character(6) COLLATE pg_catalog."default" NOT NULL,
+    scheduled_departure timestamp with time zone NOT NULL,
+    scheduled_arrival timestamp with time zone NOT NULL,
+    status character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    -- Redundant Attributes (Aircraft)
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    aircraft_model jsonb COLLATE pg_catalog."default" NOT NULL,
+    max_range integer COLLATE pg_catalog."default" NOT NULL,
+    -- Redundant Attributes (Departure Airport)
+    departure_airport character(3) COLLATE pg_catalog."default" NOT NULL,
+    departure_airport_name jsonb COLLATE pg_catalog."default" NOT NULL,
+    departure_city jsonb COLLATE pg_catalog."default" NOT NULL,
+    departure_timezone text COLLATE pg_catalog."default" NOT NULL,
+    -- Redundant Attributes (Arrival Airport)
+    arrival_airport character(3) COLLATE pg_catalog."default" NOT NULL,
+    arrival_airport_name jsonb COLLATE pg_catalog."default" NOT NULL,
+    arrival_city jsonb COLLATE pg_catalog."default" NOT NULL,
+    arrival_timezone text COLLATE pg_catalog."default" NOT NULL,
+    -- Original Attributes
+    actual_departure timestamp with time zone,
+    actual_arrival timestamp with time zone,
+    CONSTRAINT flight_profiles_pkey PRIMARY KEY (flight_id)
+);
+
+COMMENT ON TABLE bookings.flight_profiles
+    IS 'Denormalized flight profiles (Flights, Aircrafts, Airports collapsed)';
+
+COMMENT ON COLUMN bookings.flight_profiles.flight_id
+    IS 'Flight ID';
+
+COMMENT ON COLUMN bookings.flight_profiles.flight_no
+    IS 'Flight number';
+
+COMMENT ON COLUMN bookings.flight_profiles.scheduled_departure
+    IS 'Scheduled departure time';
+
+COMMENT ON COLUMN bookings.flight_profiles.scheduled_arrival
+    IS 'Scheduled arrival time';
+
+COMMENT ON COLUMN bookings.flight_profiles.status
+    IS 'Flight status';
+
+COMMENT ON COLUMN bookings.flight_profiles.aircraft_code
+    IS 'Aircraft code, IATA';
+
+COMMENT ON COLUMN bookings.flight_profiles.aircraft_model
+    IS 'Aircraft model';
+
+COMMENT ON COLUMN bookings.flight_profiles.max_range
+    IS 'Maximal flying distance, km';
+
+COMMENT ON COLUMN bookings.flight_profiles.departure_airport
+    IS 'Airport of departure';
+
+COMMENT ON COLUMN bookings.flight_profiles.departure_airport_name
+    IS 'Airport of departure name';
+
+COMMENT ON COLUMN bookings.flight_profiles.departure_city
+    IS 'City of departure';
+
+COMMENT ON COLUMN bookings.flight_profiles.departure_timezone
+    IS 'Airport departure time zone';
+
+COMMENT ON COLUMN bookings.flight_profiles.arrival_airport
+    IS 'Airport of arrival';
+
+COMMENT ON COLUMN bookings.flight_profiles.arrival_airport_name
+    IS 'Airport of arrival name';
+
+COMMENT ON COLUMN bookings.flight_profiles.arrival_city
+    IS 'City of arrival';
+
+COMMENT ON COLUMN bookings.flight_profiles.arrival_timezone
+    IS 'Airport arrival time zone';
+
+COMMENT ON COLUMN bookings.flight_profiles.actual_departure
+    IS 'Actual departure time';
+
+COMMENT ON COLUMN bookings.flight_profiles.actual_arrival
+    IS 'Actual arrival time';
+
+-- --------------------------------------------------------
+-- TABLE: bookings.seats
+-- Purpose: Preserved as is (or can be merged into flight_profiles if seat count is needed, 
+-- but kept separate to maintain original semantic structure for seat-level queries).
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS bookings.seats
+(
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    seat_no character varying(4) COLLATE pg_catalog."default" NOT NULL,
+    fare_conditions character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT seats_pkey PRIMARY KEY (aircraft_code, seat_no)
+);
+
+COMMENT ON TABLE bookings.seats
+    IS 'Seats';
+
+COMMENT ON COLUMN bookings.seats.aircraft_code
+    IS 'Aircraft code, IATA';
+
+COMMENT ON COLUMN bookings.seats.seat_no
+    IS 'Seat number';
+
+COMMENT ON COLUMN bookings.seats.fare_conditions
+    IS 'Travel class';
+
+-- --------------------------------------------------------
+-- TABLE: bookings.boarding_passes
+-- Purpose: Preserved as is.
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS bookings.boarding_passes
+(
+    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL,
+    flight_id integer NOT NULL,
+    boarding_no integer NOT NULL,
+    seat_no character varying(4) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT boarding_passes_pkey PRIMARY KEY (ticket_no, flight_id),
+    CONSTRAINT boarding_passes_flight_id_boarding_no_key UNIQUE (flight_id, boarding_no),
+    CONSTRAINT boarding_passes_flight_id_seat_no_key UNIQUE (flight_id, seat_no)
+);
+
+COMMENT ON TABLE bookings.boarding_passes
+    IS 'Boarding passes';
+
+COMMENT ON COLUMN bookings.boarding_passes.ticket_no
+    IS 'Ticket number';
+
+COMMENT ON COLUMN bookings.boarding_passes.flight_id
+    IS 'Flight ID';
+
+COMMENT ON COLUMN bookings.boarding_passes.boarding_no
+    IS 'Boarding pass number';
+
+COMMENT ON COLUMN bookings.boarding_passes.seat_no
+    IS 'Seat number';
+
+-- --------------------------------------------------------
+-- TABLE: bookings.bookings
+-- Purpose: Preserved as is.
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS bookings.bookings
+(
+    book_ref character(6) COLLATE pg_catalog."default" NOT NULL,
+    book_date timestamp with time zone NOT NULL,
+    total_amount numeric(10, 2) NOT NULL,
+    CONSTRAINT bookings_pkey PRIMARY KEY (book_ref)
+);
+
+COMMENT ON TABLE bookings.bookings
+    IS 'Bookings';
+
+COMMENT ON COLUMN bookings.bookings.book_ref
+    IS 'Booking number';
+
+COMMENT ON COLUMN bookings.bookings.book_date
+    IS 'Booking date';
+
+COMMENT ON COLUMN bookings.bookings.total_amount
+    IS 'Total booking cost';
+
+-- --------------------------------------------------------
+-- TABLE: bookings.tickets
+-- Purpose: Preserved as is.
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS bookings.tickets
+(
+    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL,
+    book_ref character(6) COLLATE pg_catalog."default" NOT NULL,
+    passenger_id character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    passenger_name text COLLATE pg_catalog."default" NOT NULL,
+    contact_data jsonb COLLATE pg_catalog."default",
+    CONSTRAINT tickets_pkey PRIMARY KEY (ticket_no)
+);
+
+COMMENT ON TABLE bookings.tickets
+    IS 'Tickets';
+
+COMMENT ON COLUMN bookings.tickets.ticket_no
+    IS 'Ticket number';
+
+COMMENT ON COLUMN bookings.tickets.book_ref
+    IS 'Booking number';
+
+COMMENT ON COLUMN bookings.tickets.passenger_id
+    IS 'Passenger ID';
+
+COMMENT ON COLUMN bookings.tickets.passenger_name
+    IS 'Passenger name';
+
+COMMENT ON COLUMN bookings.tickets.contact_data
+    IS 'Passenger contact information';
+
+-- --------------------------------------------------------
+-- TABLE: bookings.ticket_flights
+-- Purpose: Preserved as is.
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS bookings.ticket_flights
+(
+    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL,
+    flight_id integer NOT NULL,
+    fare_conditions character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    amount numeric(10, 2) NOT NULL,
+    CONSTRAINT ticket_flights_pkey PRIMARY KEY (ticket_no, flight_id)
+);
+
+COMMENT ON TABLE bookings.ticket_flights
+    IS 'Flight segment';
+
+COMMENT ON COLUMN bookings.ticket_flights.ticket_no
+    IS 'Ticket number';
+
+COMMENT ON COLUMN bookings.ticket_flights.flight_id
+    IS 'Flight ID';
+
+COMMENT ON COLUMN bookings.ticket_flights.fare_conditions
+    IS 'Travel class';
+
+COMMENT ON COLUMN bookings.ticket_flights.amount
+    IS 'Travel cost';
+
+-- --------------------------------------------------------
+-- TABLE: bookings.aircrafts_data
+-- Purpose: Preserved as is (redundant data now in flight_profiles).
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS bookings.aircrafts_data
+(
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    model jsonb NOT NULL,
+    range integer NOT NULL,
+    CONSTRAINT aircrafts_pkey PRIMARY KEY (aircraft_code)
+);
+
+COMMENT ON TABLE bookings.aircrafts_data
+    IS 'Aircrafts (internal data)';
+
+COMMENT ON COLUMN bookings.aircrafts_data.aircraft_code
+    IS 'Aircraft code, IATA';
+
+COMMENT ON COLUMN bookings.aircrafts_data.model
+    IS 'Aircraft model';
+
+COMMENT ON COLUMN bookings.aircrafts_data.range
+    IS 'Maximal flying distance, km';
+
+-- --------------------------------------------------------
+-- TABLE: bookings.airports_data
+-- Purpose: Preserved as is (redundant data now in flight_profiles).
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS bookings.airports_data
+(
+    airport_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    airport_name jsonb NOT NULL,
+    city jsonb NOT NULL,
+    coordinates point NOT NULL,
+    timezone text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT airports_data_pkey PRIMARY KEY (airport_code)
+);
+
+COMMENT ON TABLE bookings.airports_data
+    IS 'Airports (internal data)';
+
+COMMENT ON COLUMN bookings.airports_data.airport_code
+    IS 'Airport code';
+
+COMMENT ON COLUMN bookings.airports_data.airport_name
+    IS 'Airport name';
+
+COMMENT ON COLUMN bookings.airports_data.city
+    IS 'City';
+
+COMMENT ON COLUMN bookings.airports_data.coordinates
+    IS 'Airport coordinates (longitude and latitude)';
+
+COMMENT ON COLUMN bookings.airports_data.timezone
+    IS 'Airport time zone';
+
+-- --------------------------------------------------------
+-- FOREIGN KEY CONSTRAINTS
+-- --------------------------------------------------------
+-- Note: Foreign keys to the denormalized tables (itinerary_details, flight_profiles) 
+-- are omitted in the DDL above because the denormalized tables act as the "source of truth" 
+-- for their respective subsets. The relationships between the remaining normalized tables 
+-- (bookings, tickets, ticket_flights) are preserved as per the original script.
+
+ALTER TABLE IF EXISTS bookings.boarding_passes
+    ADD CONSTRAINT boarding_passes_ticket_no_fkey FOREIGN KEY (ticket_no, flight_id)
+    REFERENCES bookings.ticket_flights (ticket_no, flight_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS bookings.boarding_passes
+    ADD CONSTRAINT boarding_passes_seat_no_fkey FOREIGN KEY (seat_no)
+    REFERENCES bookings.seats (seat_no) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS bookings.boarding_passes
+    ADD CONSTRAINT boarding_passes_flight_id_fkey FOREIGN KEY (flight_id)
+    REFERENCES bookings.flight_profiles (flight_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS bookings.flights
+    ADD CONSTRAINT flights_aircraft_code_fkey FOREIGN KEY (aircraft_code)
+    REFERENCES bookings.aircrafts_data (aircraft_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS bookings.flights
+    ADD CONSTRAINT flights_arrival_airport_fkey FOREIGN KEY (arrival_airport)
+    REFERENCES bookings.airports_data (airport_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS bookings.flights
+    ADD CONSTRAINT flights_departure_airport_fkey FOREIGN KEY (departure_airport)
+    REFERENCES bookings.airports_data (airport_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS bookings.seats
+    ADD CONSTRAINT seats_aircraft_code_fkey FOREIGN KEY (aircraft_code)
+    REFERENCES bookings.aircrafts_data (aircraft_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE CASCADE;
+
+ALTER TABLE IF EXISTS bookings.ticket_flights
+    ADD CONSTRAINT ticket_flights_flight_id_fkey FOREIGN KEY (flight_id)
+    REFERENCES bookings.flight_profiles (flight_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS bookings.ticket_flights
+    ADD CONSTRAINT ticket_flights_ticket_no_fkey FOREIGN KEY (ticket_no)
+    REFERENCES bookings.tickets (ticket_no) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS bookings.tickets
+    ADD CONSTRAINT tickets_book_ref_fkey FOREIGN KEY (book_ref)
+    REFERENCES bookings.bookings (book_ref) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+-- --------------------------------------------------------
+-- INDEXES
+-- --------------------------------------------------------
+CREATE INDEX IF NOT EXISTS boarding_passes_pkey
+    ON bookings.boarding_passes(ticket_no, flight_id);
+
+CREATE INDEX IF NOT EXISTS itinerary_details_ticket_idx
+    ON bookings.itinerary_details(ticket_no);
+
+CREATE INDEX IF NOT EXISTS itinerary_details_flight_idx
+    ON bookings.itinerary_details(flight_id);
+
+CREATE INDEX IF NOT EXISTS flight_profiles_flight_no_idx
+    ON bookings.flight_profiles(flight_no);
+
+CREATE INDEX IF NOT EXISTS flight_profiles_status_idx
+    ON bookings.flight_profiles(status);

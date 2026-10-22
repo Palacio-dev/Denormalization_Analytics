@@ -1,0 +1,205 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_10-41-59
+Model: gemini
+Prompt: mid-level
+Schema: TPC_H
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions the highly normalized TPC-H relational model into a Star Schema optimized for read-heavy OLAP and BI workloads. The core approach involves collapsing snowflake dimensions (NATION and REGION) into their respective primary dimensions (CUSTOMER and SUPPLIER) to eliminate multi-hop joins. Additionally, the header-detail transactional tables (ORDERS and LINEITEM) are merged into a single highly-performant fact table (`fact_sales`). This flattens the grain to the individual order line, bringing order-level attributes down to the line level. Derived metrics are pre-calculated to reduce compute overhead during query execution.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge ORDERS and LINEITEM into a single `fact_sales` table. The grain is set to one row per order line item."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Denormalize NATION and REGION into the CUSTOMER table to create a flattened `dim_customer` table."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Denormalize NATION and REGION into the SUPPLIER table to create a flattened `dim_supplier` table."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Retain PART as a standalone dimension `dim_part`, mapping its attributes directly."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Convert PARTSUPP into a secondary fact table `fact_part_supplier` to analyze inventory and supply costs without impacting the sales fact table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived measure `NET_REVENUE` (L_EXTENDEDPRICE * (1 - L_DISCOUNT)) to `fact_sales` to prevent repetitive runtime calculations."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added derived measure `TOTAL_AMOUNT` (L_EXTENDEDPRICE * (1 - L_DISCOUNT) * (1 + L_TAX)) to `fact_sales`."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Removed `O_TOTALPRICE` from the denormalized `fact_sales` table. Since order-level attributes are repeated for every line item, keeping the order total would lead to double-counting in BI aggregations. It should be calculated dynamically by summing `TOTAL_AMOUNT`."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Dropped `N_REGIONKEY`, `C_NATIONKEY`, and `S_NATIONKEY` as they are now redundant surrogate keys consumed by the denormalization process."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Dropped all `_COMMENT` fields across all tables. In analytical models, free-text transactional comments consume massive storage and memory in columnar databases while offering minimal BI aggregation value."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage Footprint: Denormalizing NATION, REGION, and ORDERS attributes introduces significant data redundancy. Order dates and statuses are repeated for every line item, and region strings are repeated for every customer/supplier."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies (Slowly Changing Dimensions): If a region or nation name changes, or if an order's status is updated, multiple rows must be updated instead of a single normalized record. This is an acceptable tradeoff for read-heavy analytical workloads where updates are handled via batch ETL/ELT."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Time-series revenue analysis by Order Date and Ship Date. Merging ORDERS and LINEITEM allows filtering by Order Date and aggregating Lineitem Extended Price without a massive hash join."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Customer segmentation and geographic sales performance (e.g., Revenue by Region and Market Segment). Flattening Nation and Region into Customer allows BI tools to group by Region Name directly from the Customer dimension."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Supply chain efficiency (e.g., identifying shipping delays by Supplier Nation). Flattening Nation into Supplier avoids joining Supplier -> Nation -> Region just to slice fact data by supplier geography."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Creation Script
+
+```sql
+-- ==============================================================================
+-- Analytical Data Model (Star Schema)
+-- Optimized for Read-Heavy BI / OLAP Workloads
+-- ==============================================================================
+
+-- ------------------------------------------------------------------------------
+-- 1. DIMENSION: dim_customer
+-- Combines CUSTOMER, NATION, and REGION
+-- ------------------------------------------------------------------------------
+CREATE TABLE dim_customer (
+    customer_key       INTEGER NOT NULL,
+    customer_name      VARCHAR(25) NOT NULL,
+    customer_address   VARCHAR(40) NOT NULL,
+    customer_phone     CHAR(15) NOT NULL,
+    account_balance    DECIMAL(15,2) NOT NULL,
+    market_segment     CHAR(10) NOT NULL,
+    nation_name        CHAR(25) NOT NULL,
+    region_name        CHAR(25) NOT NULL,
+    PRIMARY KEY (customer_key)
+);
+
+-- ------------------------------------------------------------------------------
+-- 2. DIMENSION: dim_supplier
+-- Combines SUPPLIER, NATION, and REGION
+-- ------------------------------------------------------------------------------
+CREATE TABLE dim_supplier (
+    supplier_key       INTEGER NOT NULL,
+    supplier_name      CHAR(25) NOT NULL,
+    supplier_address   VARCHAR(40) NOT NULL,
+    supplier_phone     CHAR(15) NOT NULL,
+    account_balance    DECIMAL(15,2) NOT NULL,
+    nation_name        CHAR(25) NOT NULL,
+    region_name        CHAR(25) NOT NULL,
+    PRIMARY KEY (supplier_key)
+);
+
+-- ------------------------------------------------------------------------------
+-- 3. DIMENSION: dim_part
+-- Based directly on PART table (comments removed for analytical optimization)
+-- ------------------------------------------------------------------------------
+CREATE TABLE dim_part (
+    part_key           INTEGER NOT NULL,
+    part_name          VARCHAR(55) NOT NULL,
+    manufacturer       CHAR(25) NOT NULL,
+    brand              CHAR(10) NOT NULL,
+    part_type          VARCHAR(25) NOT NULL,
+    part_size          INTEGER NOT NULL,
+    container          CHAR(10) NOT NULL,
+    retail_price       DECIMAL(15,2) NOT NULL,
+    PRIMARY KEY (part_key)
+);
+
+-- ------------------------------------------------------------------------------
+-- 4. FACT: fact_sales
+-- Combines ORDERS and LINEITEM. 
+-- Grain: One row per order line item.
+-- ------------------------------------------------------------------------------
+CREATE TABLE fact_sales (
+    -- Degenerate Dimensions & Primary Keys
+    order_key          INTEGER NOT NULL,
+    line_number        INTEGER NOT NULL,
+    
+    -- Foreign Keys to Dimensions
+    customer_key       INTEGER NOT NULL,
+    part_key           INTEGER NOT NULL,
+    supplier_key       INTEGER NOT NULL,
+    
+    -- Dates (Can optionally link to a dim_date in a full Enterprise DW)
+    order_date         DATE NOT NULL,
+    ship_date          DATE NOT NULL,
+    commit_date        DATE NOT NULL,
+    receipt_date       DATE NOT NULL,
+    
+    -- Order Header Attributes (Denormalized)
+    order_status       CHAR(1) NOT NULL,
+    order_priority     CHAR(15) NOT NULL,
+    ship_priority      INTEGER NOT NULL,
+    clerk              CHAR(15) NOT NULL,
+    
+    -- Line Item Attributes
+    return_flag        CHAR(1) NOT NULL,
+    line_status        CHAR(1) NOT NULL,
+    ship_instruct      CHAR(25) NOT NULL,
+    ship_mode          CHAR(10) NOT NULL,
+    
+    -- Base Measures
+    quantity           DECIMAL(15,2) NOT NULL,
+    extended_price     DECIMAL(15,2) NOT NULL,
+    discount_pct       DECIMAL(15,2) NOT NULL,
+    tax_pct            DECIMAL(15,2) NOT NULL,
+    
+    -- Derived Measures (Pre-calculated for BI Performance)
+    net_revenue        DECIMAL(15,2) NOT NULL, -- extended_price * (1 - discount_pct)
+    total_amount       DECIMAL(15,2) NOT NULL, -- extended_price * (1 - discount_pct) * (1 + tax_pct)
+    
+    PRIMARY KEY (order_key, line_number)
+);
+
+-- ------------------------------------------------------------------------------
+-- 5. FACT: fact_part_supplier
+-- Based on PARTSUPP. Acts as an inventory/supply-cost snapshot fact.
+-- Grain: One row per part per supplier.
+-- ------------------------------------------------------------------------------
+CREATE TABLE fact_part_supplier (
+    part_key           INTEGER NOT NULL,
+    supplier_key       INTEGER NOT NULL,
+    
+    -- Measures
+    available_qty      INTEGER NOT NULL,
+    supply_cost        DECIMAL(15,2) NOT NULL,
+    
+    PRIMARY KEY (part_key, supplier_key)
+);
+```

@@ -1,0 +1,180 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-08-42
+Model: ollama_api
+Prompt: mid-level
+Schema: chinook
+==================================================
+
+{
+  "section_1": {
+    "summary": "The normalized schema is designed for OLTP workloads with strict normalization. For analytical use cases, we denormalize the schema into a star schema-like structure with fact and dimension tables. We consolidate related entities and precompute frequently joined attributes to reduce query complexity and improve read performance. The denormalized schema is optimized for dashboards, aggregations, and analytical queries by minimizing joins and enabling faster data retrieval.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Create a central FactInvoiceLine fact table to represent sales transactions, containing measures like quantity, unit price, and total revenue, and foreign keys to relevant dimensions."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Create a DimTrack dimension that combines Track, Album, Artist, Genre, and MediaType information to reduce joins when analyzing tracks."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Create a DimCustomer dimension that includes Customer and Employee (SupportRep) information to simplify customer analysis and support representative performance tracking."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Create a DimDate dimension to support time-based analysis by extracting date parts from InvoiceDate."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Create a DimInvoice dimension to store invoice-level details like billing address and total amount for invoice-level analysis."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added calculated field 'LineTotal' in FactInvoiceLine as UnitPrice * Quantity to avoid runtime calculations."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added descriptive fields like ArtistName, AlbumTitle, GenreName, MediaTypeName directly in DimTrack to avoid joins."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added SupportRepFirstName and SupportRepLastName in DimCustomer to include employee details."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added date hierarchy attributes (Year, Month, Day, etc.) in DimDate for efficient time-based filtering and grouping."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage usage due to denormalization and duplication of data across dimension tables."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Slight increase in ETL complexity to maintain consistency across denormalized dimensions."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Reduced flexibility in schema changes; modifications in source tables may require updates in multiple denormalized tables."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Sales analysis by track, album, artist, and genre to understand top-performing content."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Customer behavior analysis including support representative performance tracking."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Time-based sales trends and seasonality analysis using invoice dates."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Invoice-level analysis including billing geography and total invoice amounts."
+      }
+    ]
+  }
+}
+
+```sql
+-- DimDate dimension table
+CREATE TABLE IF NOT EXISTS public."DimDate"
+(
+    "DateKey" date NOT NULL,
+    "Year" integer,
+    "Quarter" integer,
+    "Month" integer,
+    "Day" integer,
+    "DayOfWeek" integer,
+    "DayOfYear" integer,
+    "WeekOfYear" integer,
+    "IsWeekend" boolean,
+    CONSTRAINT "PK_DimDate" PRIMARY KEY ("DateKey")
+);
+
+-- DimTrack dimension table
+CREATE TABLE IF NOT EXISTS public."DimTrack"
+(
+    "TrackKey" integer NOT NULL,
+    "TrackId" integer,
+    "TrackName" character varying(200),
+    "AlbumId" integer,
+    "AlbumTitle" character varying(160),
+    "ArtistId" integer,
+    "ArtistName" character varying(120),
+    "MediaTypeId" integer,
+    "MediaTypeName" character varying(120),
+    "GenreId" integer,
+    "GenreName" character varying(120),
+    "Composer" character varying(220),
+    "Milliseconds" integer,
+    "Bytes" integer,
+    "UnitPrice" numeric(10, 2),
+    CONSTRAINT "PK_DimTrack" PRIMARY KEY ("TrackKey")
+);
+
+-- DimCustomer dimension table
+CREATE TABLE IF NOT EXISTS public."DimCustomer"
+(
+    "CustomerKey" integer NOT NULL,
+    "CustomerId" integer,
+    "CustomerFirstName" character varying(40),
+    "CustomerLastName" character varying(20),
+    "CustomerCompany" character varying(80),
+    "CustomerAddress" character varying(70),
+    "CustomerCity" character varying(40),
+    "CustomerState" character varying(40),
+    "CustomerCountry" character varying(40),
+    "CustomerPostalCode" character varying(10),
+    "CustomerPhone" character varying(24),
+    "CustomerFax" character varying(24),
+    "CustomerEmail" character varying(60),
+    "SupportRepId" integer,
+    "SupportRepFirstName" character varying(20),
+    "SupportRepLastName" character varying(20),
+    CONSTRAINT "PK_DimCustomer" PRIMARY KEY ("CustomerKey")
+);
+
+-- DimInvoice dimension table
+CREATE TABLE IF NOT EXISTS public."DimInvoice"
+(
+    "InvoiceKey" integer NOT NULL,
+    "InvoiceId" integer,
+    "CustomerId" integer,
+    "InvoiceDate" timestamp without time zone,
+    "BillingAddress" character varying(70),
+    "BillingCity" character varying(40),
+    "BillingState" character varying(40),
+    "BillingCountry" character varying(40),
+    "BillingPostalCode" character varying(10),
+    "Total" numeric(10, 2),
+    CONSTRAINT "PK_DimInvoice" PRIMARY KEY ("InvoiceKey")
+);
+
+-- FactInvoiceLine fact table
+CREATE TABLE IF NOT EXISTS public."FactInvoiceLine"
+(
+    "InvoiceLineId" integer NOT NULL,
+    "InvoiceId" integer,
+    "TrackId" integer,
+    "CustomerId" integer,
+    "InvoiceDateKey" date,
+    "UnitPrice" numeric(10, 2),
+    "Quantity" integer,
+    "LineTotal" numeric(10, 2), -- Calculated field
+    CONSTRAINT "PK_FactInvoiceLine" PRIMARY KEY ("InvoiceLineId")
+);
+```

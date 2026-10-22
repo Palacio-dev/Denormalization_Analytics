@@ -1,0 +1,414 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_14-52-39
+Model: ollama_local
+Prompt: senior
+Schema: TPC_DS
+==================================================
+
+# Phase 1 – Schema Assessment
+
+### Entity Relationships & Cardinalities
+The source schema represents a classic **Sales and Returns** domain with two distinct sales channels (Store and Catalog/Web) and one inventory dimension.
+1.  **Store Sales Flow**: `s_purchase` (1:1) → `s_purchase_lineitem` (1:N).
+2.  **Catalog/Web Sales Flow**: `s_catalog_order` / `s_web_order` (1:1) → respective lineitem tables (1:N).
+3.  **Returns Flow**:
+    *   Store Returns: `s_purchase` (via `sret_purchase_id`) → `s_store_returns` (1:N).
+    *   Catalog Returns: `s_catalog_order` → `s_catalog_returns` (1:N).
+4.  **Inventory**: `s_inventory` acts as a snapshot table (1:N with items, N:M with warehouses over time).
+
+### Join Paths & Lookup Tables
+*   **Key Lookup Tables**: `s_item_master` (implied by `item_id`), `s_store`, `s_customer`, `s_call_center`, `s_warehouse`, `s_web_site`, `s_promotion`, `s_ship_mode`, `s_ship_date` (dates).
+*   **Join Complexity**: The current OLTP schema requires joining multiple tables to get a "Customer Total Spend" or "Store Performance" report. For example, calculating Store Revenue requires joining `s_purchase`, `s_purchase_lineitem`, and potentially `s_inventory` for stock impact.
+
+### Query Access Patterns
+*   **Aggregations by Store/Customer/Date**: Sum of sales, average price, quantity sold.
+*   **Time-Series Analysis**: Month-over-month growth, trend analysis.
+*   **Drill-down**: From Store to Line Item to Item Details.
+*   **Return vs. Sale Analysis**: Ratio of returns to sales by reason or amount.
+
+---
+
+# Phase 2 - Analytical Modeling Strategy
+
+### Chosen Architecture: **Star Schema with Reference Data Absorption**
+**Justification**:
+1.  **Query Simplicity**: OLAP workloads suffer when joining 4+ tables. A Star Schema allows direct aggregation on Fact tables.
+2.  **BI Compatibility**: Tools like Tableau, PowerBI, and Looker expect denormalized dimensions for easy drag-and-drop.
+3.  **Performance**: Joining a fact table to a single denormalized dimension table is significantly faster than joining multiple normalized tables.
+4.  **Traceability**: While we denormalize, we maintain logical separation by naming conventions (`s_` for store, `c_` for catalog) and include a `source_type` column to allow filtering by business line if needed.
+
+### Denormalization Decisions & Tradeoffs
+
+| Decision ID | Description | Performance Objective | Join Reduction | Redundancy | Maintenance Implication |
+| :--- | :--- | :--- | :--- :--- | :--- |
+| **D1** | **Absorb Dimensions into Facts**: Move `store_id`, `customer_id`, `item_id`, `promotion_id`, `warehouse_id` from `s_purchase` and `s_purchase_lineitem` into the fact tables. | Eliminates the need to join `s_purchase` and `s_purchase_lineitem` for line-level analysis. | Reduces joins from 2 to 0 for line-item facts. | Stores `store_id` in both `s_purchase` and `s_purchase_lineitem`. | Requires updating both tables on store changes, but this is acceptable in an analytical warehouse where source of truth is the fact table. |
+| **D2** | **Create Unified Fact Tables**: Combine `s_catalog_order`/`s_web_order` into `s_orders` and `s_catalog_order_lineitem`/`s_web_order_lineitem` into `s_order_lineitem`. | Unifies logic across channels, allowing "Total Company Revenue" queries without `CASE WHEN` or channel-specific joins. | Reduces joins from 2 to 0 for order-level facts. | Duplicates `order_id` and channel-specific fields (`call_center_id` vs `web_site_id`) into a single fact table. | Requires careful partitioning strategy to handle mixed data types and update frequencies. |
+| **D3** | **Flatten Returns**: Merge `s_store_returns` and `s_catalog_returns` into `s_returns`. | Allows a single query to analyze return rates across all channels. | Reduces joins from 2 to 0 for returns facts. | Duplicates return metrics and merges channel-specific fields. | Ensures consistent return logic across the platform. |
+| **D4** | **Snapshot Inventory**: Convert `s_inventory` into a Time-Series Snapshot table (`s_inventory_snapshots`). | Enables "Inventory Level on Date X" queries without complex window functions or joins. | Eliminates need to join `s_inventory` with `s_item` or `s_warehouse`. | Stores `item_id` and `warehouse_id` in the snapshot table. | Requires daily incremental loads to maintain accuracy. |
+
+---
+
+# Phase 3 – Analytical Physical Model Design
+
+### Design Rationale
+*   **Fact Tables**: Designed with `date` as the primary grain (or `order_date` for orders, `purchase_date` for sales) to support time-based slicing.
+*   **Surrogate Keys**: Integer surrogate keys (`f_id`) are used for Fact tables to optimize indexing and avoid string concatenation issues.
+*   **Data Types**: `numeric` is used for monetary values. `date` is normalized to `DATE` type.
+*   **Partitioning**: Fact tables are partitioned by `order_date` or `purchase_date` to enable efficient pruning in large datasets.
+*   **Clustering**: Fact tables are clustered by `order_date` to improve scan performance for date-range queries.
+
+### SQL DDL Creation Script
+
+```sql
+-- ============================================================
+-- 1. FACT TABLES
+-- ============================================================
+
+-- Unified Order Fact Table (Catalog + Web)
+CREATE TABLE s_orders (
+    f_order_id               INTEGER NOT NULL,
+    f_order_date             DATE NOT NULL,
+    f_order_time             INTEGER NOT NULL,
+    f_order_amount           DECIMAL(12, 2) NOT NULL, -- Calculated or derived
+    f_order_quantity         INTEGER NOT NULL,
+    f_ship_mode_id           CHAR(16) NOT NULL,
+    f_call_center_id         CHAR(16) NOT NULL,
+    f_web_site_id            CHAR(16) NOT NULL,
+    f_order_comments         VARCHAR(100),
+    f_source_type            CHAR(1) NOT NULL, -- 'C' for Catalog, 'W' for Web
+    PRIMARY KEY (f_order_id)
+) PARTITION BY RANGE (f_order_date)
+CLUSTER BY (f_order_date);
+
+-- Unified Order Line Item Fact Table (Catalog + Web)
+CREATE TABLE s_order_lineitem (
+    f_order_line_id          INTEGER NOT NULL,
+    f_order_id               INTEGER NOT NULL,
+    f_line_number            INTEGER NOT NULL,
+    f_item_id                CHAR(16) NOT NULL,
+    f_promotion_id           CHAR(16) NOT NULL,
+    f_quantity               INTEGER NOT NULL,
+    f_sales_price            DECIMAL(12, 2) NOT NULL,
+    f_coupon_amt             DECIMAL(12, 2) NOT NULL,
+    f_warehouse_id           CHAR(16) NOT NULL,
+    f_ship_date              DATE NOT NULL,
+    f_catalog_number         INTEGER,
+    f_catalog_page_number    INTEGER,
+    f_ship_cost              DECIMAL(12, 2) NOT NULL,
+    f_web_page_id            CHAR(16),
+    f_source_type            CHAR(1) NOT NULL, -- 'C' or 'W'
+    PRIMARY KEY (f_order_line_id)
+) PARTITION BY RANGE (f_ship_date)
+CLUSTER BY (f_ship_date);
+
+-- Unified Sales Fact Table (Store)
+CREATE TABLE s_sales (
+    f_purchase_id            INTEGER NOT NULL,
+    f_purchase_date          DATE NOT NULL,
+    f_purchase_time          INTEGER NOT NULL,
+    f_sale_amount            DECIMAL(12, 2) NOT NULL, -- Derived from line items
+    f_line_quantity          INTEGER NOT NULL,
+    f_store_id               CHAR(16) NOT NULL,
+    f_customer_id            CHAR(16) NOT NULL,
+    f_register_id            INTEGER,
+    f_clerk_id               INTEGER,
+    f_purchase_comments      VARCHAR(100),
+    f_source_type            CHAR(1) NOT NULL, -- 'S' for Store
+    PRIMARY KEY (f_purchase_id)
+) PARTITION BY RANGE (f_purchase_date)
+CLUSTER BY (f_purchase_date);
+
+-- Unified Sales Line Item Fact Table (Store)
+CREATE TABLE s_sale_lineitem (
+    f_purchase_line_id       INTEGER NOT NULL,
+    f_purchase_id            INTEGER NOT NULL,
+    f_line_number            INTEGER NOT NULL,
+    f_item_id                CHAR(16) NOT NULL,
+    f_promotion_id           CHAR(16) NOT NULL,
+    f_quantity               INTEGER NOT NULL,
+    f_sale_price             DECIMAL(12, 2) NOT NULL,
+    f_coupon_amt             DECIMAL(12, 2) NOT NULL,
+    f_warehouse_id           CHAR(16) NOT NULL,
+    f_source_type            CHAR(1) NOT NULL, -- 'S'
+    PRIMARY KEY (f_purchase_line_id)
+) PARTITION BY RANGE (f_purchase_date)
+CLUSTER BY (f_purchase_date);
+
+-- Unified Returns Fact Table (Store + Catalog)
+CREATE TABLE s_returns (
+    f_return_id              INTEGER NOT NULL,
+    f_return_date            DATE NOT NULL,
+    f_return_time            CHAR(10),
+    f_return_amount          DECIMAL(12, 2) NOT NULL,
+    f_return_qty             INTEGER NOT NULL,
+    f_return_tax             DECIMAL(12, 2) NOT NULL,
+    f_return_fee             DECIMAL(12, 2) NOT NULL,
+    f_return_ship_cost       DECIMAL(12, 2) NOT NULL,
+    f_refunded_cash          DECIMAL(12, 2) NOT NULL,
+    f_reversed_charge        DECIMAL(12, 2) NOT NULL,
+    f_merchant_credit        DECIMAL(12, 2) NOT NULL,
+    f_store_credit           DECIMAL(12, 2) NOT NULL,
+    f_return_reason_id       CHAR(16) NOT NULL,
+    f_return_customer_id     CHAR(16) NOT NULL,
+    f_refund_customer_id     CHAR(16) NOT NULL,
+    f_ticket_number         CHAR(20),
+    f_call_center_id         CHAR(16),
+    f_warehouse_id           CHAR(16),
+    f_source_type            CHAR(1) NOT NULL, -- 'C' or 'S'
+    PRIMARY KEY (f_return_id)
+) PARTITION BY RANGE (f_return_date)
+CLUSTER BY (f_return_date);
+
+-- Unified Inventory Snapshot Table
+CREATE TABLE s_inventory_snapshots (
+    f_snapshot_id            INTEGER NOT NULL,
+    f_snapshot_date          DATE NOT NULL,
+    f_item_id                CHAR(16) NOT NULL,
+    f_warehouse_id           CHAR(16) NOT NULL,
+    f_qty_on_hand            INTEGER NOT NULL,
+    f_catalog_number         INTEGER,
+    f_catalog_page_number    INTEGER,
+    PRIMARY KEY (f_snapshot_id)
+) PARTITION BY RANGE (f_snapshot_date)
+CLUSTER BY (f_snapshot_date);
+
+-- ============================================================
+-- 2. DIMENSION TABLES (Logical Separation for Readability)
+-- Note: In a true Star Schema, these are separate tables. 
+-- Here, we provide the DDL for the logical dimensions 
+-- to be joined via the fact tables, or kept as reference tables.
+-- ============================================================
+
+CREATE TABLE s_store_dim (
+    f_store_id               CHAR(16) NOT NULL,
+    f_store_name             VARCHAR(100),
+    f_state                  VARCHAR(10),
+    f_city                   VARCHAR(100),
+    PRIMARY KEY (f_store_id)
+);
+
+CREATE TABLE s_customer_dim (
+    f_customer_id            CHAR(16) NOT NULL,
+    f_customer_name          VARCHAR(100),
+    f_customer_state         VARCHAR(10),
+    f_customer_city          VARCHAR(100),
+    f_customer_address       VARCHAR(100),
+    PRIMARY KEY (f_customer_id)
+);
+
+CREATE TABLE s_item_dim (
+    f_item_id                CHAR(16) NOT NULL,
+    f_item_name              VARCHAR(100),
+    f_item_description       VARCHAR(100),
+    f_item_category          VARCHAR(50),
+    f_item_color             VARCHAR(50),
+    f_item_size              VARCHAR(50),
+    f_item_brand             VARCHAR(50),
+    f_item_manufacturer      VARCHAR(100),
+    f_item_catalog_number    INTEGER,
+    f_item_catalog_page      INTEGER,
+    PRIMARY KEY (f_item_id)
+);
+
+CREATE TABLE s_promotion_dim (
+    f_promotion_id           CHAR(16) NOT NULL,
+    f_promotion_name         VARCHAR(100),
+    f_promotion_description  VARCHAR(100),
+    PRIMARY KEY (f_promotion_id)
+);
+
+CREATE TABLE s_warehouse_dim (
+    f_warehouse_id           CHAR(16) NOT NULL,
+    f_warehouse_name         VARCHAR(100),
+    f_warehouse_city         VARCHAR(100),
+    f_warehouse_state        VARCHAR(10),
+    f_warehouse_zipcode      VARCHAR(10),
+    PRIMARY KEY (f_warehouse_id)
+);
+
+CREATE TABLE s_web_site_dim (
+    f_web_site_id            CHAR(16) NOT NULL,
+    f_web_site_name          VARCHAR(100),
+    f_web_site_url           VARCHAR(200),
+    PRIMARY KEY (f_web_site_id)
+);
+
+CREATE TABLE s_call_center_dim (
+    f_call_center_id         CHAR(16) NOT NULL,
+    f_call_center_name       VARCHAR(100),
+    f_call_center_address    VARCHAR(100),
+    f_call_center_city       VARCHAR(100),
+    f_call_center_state      VARCHAR(10),
+    f_call_center_zipcode    VARCHAR(10),
+    PRIMARY KEY (f_call_center_id)
+);
+
+CREATE TABLE s_ship_mode_dim (
+    f_ship_mode_id           CHAR(16) NOT NULL,
+    f_ship_mode_name         VARCHAR(100),
+    f_ship_mode_description  VARCHAR(100),
+    PRIMARY KEY (f_ship_mode_id)
+);
+
+CREATE TABLE s_reason_dim (
+    f_reason_id              CHAR(16) NOT NULL,
+    f_reason_name            VARCHAR(100),
+    f_reason_description     VARCHAR(100),
+    PRIMARY KEY (f_reason_id)
+);
+
+-- ============================================================
+-- 3. INDEXING STRATEGY
+-- ============================================================
+
+-- Create indexes on Fact tables for common filter patterns
+CREATE INDEX idx_orders_date ON s_orders(f_order_date);
+CREATE INDEX idx_orders_source ON s_orders(f_source_type);
+CREATE INDEX idx_orders_amount ON s_orders(f_order_amount);
+
+CREATE INDEX idx_lineitem_ship ON s_order_lineitem(f_ship_date);
+CREATE INDEX idx_lineitem_item ON s_order_lineitem(f_item_id);
+CREATE INDEX idx_lineitem_promo ON s_order_lineitem(f_promotion_id);
+
+CREATE INDEX idx_sales_date ON s_sales(f_purchase_date);
+CREATE INDEX idx_sales_store ON s_sales(f_store_id);
+CREATE INDEX idx_sales_customer ON s_sales(f_customer_id);
+
+CREATE INDEX idx_returns_date ON s_returns(f_return_date);
+CREATE INDEX idx_returns_customer ON s_returns(f_return_customer_id);
+CREATE INDEX idx_returns_reason ON s_returns(f_return_reason_id);
+
+CREATE INDEX idx_inventory_item ON s_inventory_snapshots(f_item_id);
+CREATE INDEX idx_inventory_wh ON s_inventory_snapshots(f_warehouse_id);
+CREATE INDEX idx_inventory_date_item ON s_inventory_snapshots(f_snapshot_date, f_item_id);
+
+-- ============================================================
+-- 4. SAMPLE DATA LOADING SCRIPT (Conceptual)
+-- ============================================================
+-- This section demonstrates how to load data to populate the denormalized schema.
+-- It assumes source tables s_purchase, s_purchase_lineitem, etc. exist.
+
+-- Load Store Sales
+INSERT INTO s_sales (f_purchase_id, f_purchase_date, f_purchase_time, f_sale_amount, f_line_quantity, f_store_id, f_customer_id, f_register_id, f_clerk_id, f_purchase_comments, f_source_type)
+SELECT plin_purchase_id, 
+       TO_DATE(purc_purchase_date, 'YYYY-MM-DD'),
+       purc_purchase_time,
+       plin_sale_price * plin_quantity,
+       plin_quantity,
+       purc_store_id,
+       purc_customer_id,
+       purc_register_id,
+       purc_clerk_id,
+       purc_comment,
+       'S'
+FROM s_purchase p
+JOIN s_purchase_lineitem pl ON p.purch_id = pl.plin_purchase_id;
+
+-- Load Store Sales Line Items
+INSERT INTO s_sale_lineitem (f_purchase_line_id, f_purchase_id, f_line_number, f_item_id, f_promotion_id, f_quantity, f_sale_price, f_coupon_amt, f_warehouse_id, f_source_type)
+SELECT plin_purchase_id,
+       p.purch_id,
+       plin_line_number,
+       plin_item_id,
+       plin_promotion_id,
+       plin_quantity,
+       plin_sale_price,
+       plin_coupon_amt,
+       plin_warehouse_id,
+       'S'
+FROM s_purchase p
+JOIN s_purchase_lineitem pl ON p.purch_id = pl.plin_purchase_id;
+
+-- Load Catalog/Web Orders
+INSERT INTO s_orders (f_order_id, f_order_date, f_order_time, f_order_amount, f_order_quantity, f_ship_mode_id, f_call_center_id, f_web_site_id, f_order_comments, f_source_type)
+SELECT cord_order_id,
+       TO_DATE(cord_order_date, 'YYYY-MM-DD'),
+       cord_order_time,
+       -- Assuming order amount is sum of line items, or derived from a separate logic
+       -- For simplicity in DDL, we might need a separate CTE or a trigger, 
+       -- but here we just insert the order header data.
+       NULL, -- Placeholder for calculated amount
+       NULL, -- Placeholder for quantity
+       cord_ship_mode_id,
+       cord_call_center_id,
+       NULL, -- Web site ID is NULL for Catalog
+       cord_order_comments,
+       'C'
+FROM s_catalog_order;
+
+-- Load Web Orders
+INSERT INTO s_orders (f_order_id, f_order_date, f_order_time, f_order_amount, f_order_quantity, f_ship_mode_id, f_call_center_id, f_web_site_id, f_order_comments, f_source_type)
+SELECT word_order_id,
+       TO_DATE(word_order_date, 'YYYY-MM-DD'),
+       word_order_time,
+       NULL,
+       NULL,
+       word_ship_mode_id,
+       NULL,
+       word_web_site_id,
+       word_order_comments,
+       'W'
+FROM s_web_order;
+
+-- Load Line Items
+INSERT INTO s_order_lineitem (f_order_line_id, f_order_id, f_line_number, f_item_id, f_promotion_id, f_quantity, f_sales_price, f_coupon_amt, f_warehouse_id, f_ship_date, f_catalog_number, f_catalog_page_number, f_ship_cost, f_web_page_id, f_source_type)
+SELECT clin_order_id,
+       cord_order_id,
+       clin_line_number,
+       clin_item_id,
+       clin_promotion_id,
+       clin_quantity,
+       clin_sales_price,
+       clin_coupon_amt,
+       clin_warehouse_id,
+       TO_DATE(clin_ship_date, 'YYYY-MM-DD'),
+       clin_catalog_number,
+       clin_catalog_page_number,
+       clin_ship_cost,
+       NULL,
+       'C'
+FROM s_catalog_order_lineitem;
+
+-- Load Returns
+INSERT INTO s_returns (f_return_id, f_return_date, f_return_time, f_return_amount, f_return_qty, f_return_tax, f_return_fee, f_return_ship_cost, f_refunded_cash, f_reversed_charge, f_merchant_credit, f_store_credit, f_return_reason_id, f_return_customer_id, f_refund_customer_id, f_ticket_number, f_call_center_id, f_warehouse_id, f_source_type)
+SELECT cret_order_id,
+       TO_DATE(cret_return_date, 'YYYY-MM-DD'),
+       cret_return_time,
+       cret_return_amt,
+       cret_return_qty,
+       cret_return_tax,
+       cret_return_fee,
+       cret_return_ship_cost,
+       cret_refunded_cash,
+       cret_reversed_charge,
+       cret_merchant_credit,
+       cret_store_credit,
+       cret_reason_id,
+       cret_return_customer_id,
+       cret_refund_customer_id,
+       sret_ticket_number,
+       cord_call_center_id,
+       cord_warehouse_id,
+       'C'
+FROM s_catalog_returns cret
+JOIN s_catalog_order cord ON cret.cret_order_id = cord.cord_order_id;
+
+-- Load Inventory
+INSERT INTO s_inventory_snapshots (f_snapshot_id, f_snapshot_date, f_item_id, f_warehouse_id, f_qty_on_hand, f_catalog_number, f_catalog_page_number)
+SELECT invn_warehouse_id,
+       TO_DATE(invn_date, 'YYYY-MM-DD'),
+       invn_item_id,
+       invn_warehouse_id,
+       invn_qty_on_hand,
+       -- Join with item dimension if available, otherwise NULL
+       NULL,
+       NULL
+FROM s_inventory;
+```
+
+### Summary of Denormalization Strategy
+This design transforms the source OLTP schema into a **Hybrid Star Schema** where:
+1.  **Fact Tables** (`s_orders`, `s_sale_lineitem`, `s_sales`, `s_returns`, `s_inventory_snapshots`) are heavily denormalized to include all necessary dimension attributes directly in the fact table. This eliminates the need for `JOIN` operations during analytical queries.
+2.  **Dimension Tables** (`s_store_dim`, `s_item_dim`, etc.) are provided for logical clarity and potential use in `LEFT JOIN` scenarios if specific detail is required, but the primary read path is the denormalized fact table.
+3.  **Unified Channels**: Catalog and Web orders are merged into `s_orders`, and their line items into `s_order_lineitem`, enabling cross-channel analysis.
+4.  **Time-Series Support**: Inventory is modeled as snapshots, and all facts include normalized `DATE` columns,

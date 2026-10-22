@@ -1,0 +1,141 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-42-56
+Model: gemini
+Prompt: OBT
+Schema: ex06
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy adopts the ONE-BIG-TABLE (OBT) model to optimize for heavy analytical read workloads. By flattening the highly normalized snowflake schema into a single table, we eliminate the need for expensive multi-table JOINs (which previously spanned up to 9 tables). All non-key attributes are preserved, and foreign keys are removed. Shared column names have been prefixed with their source entity to ensure uniqueness and clarity.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidated all 9 tables (UF, MUNICIPIO, IDEB, ENADE, SAEB, IES, ESCOLA, CURSO, ANO) into a single denormalized table named EDUCACAO_OBT."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Removed all Foreign Key constraints and original Primary Keys to flatten the hierarchy and optimize for read performance."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Created a single surrogate Primary Key (id_registro) for the new OBT table."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Removed UNIQUE constraints from attributes like sigla_uf, codigo_ies, and cod_escola, as these values will naturally repeat across multiple rows in a denormalized dataset."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Renamed 'nome' from the UF table to 'uf_nome' to avoid ambiguity."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Renamed 'rede' from the IES table to 'ies_rede' to avoid ambiguity."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Renamed 'rede' from the ESCOLA table to 'escola_rede' to avoid ambiguity."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Relaxed NOT NULL constraints on branch-specific attributes (e.g., ESCOLA and IES attributes) to allow for sparse data representation without insertion errors, while preserving CHECK constraints for numeric validity."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "High data redundancy: Dimensions like UF and MUNICIPIO data will be repeated for every course, school, and year, significantly increasing storage requirements."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update anomalies: Modifying a municipality's statistics or a state's name now requires updating millions of rows instead of a single record."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Cartesian product risk: Because ESCOLA and IES are separate branches under MUNICIPIO, flattening them into the same row grain requires careful analytical querying (e.g., handling nulls or using DISTINCT) to avoid double-counting metrics."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "Q1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Time-series analysis of educational performance (ENADE, SAEB, IDEB) aggregated by Course, IES, and Municipality over the years."
+      },
+      {
+        "decision_id": "Q2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Geographical benchmarking comparing the volume of educational institutions (qtd_IES, qtd_ESCOLAS) against average municipal scores (media_ideb, media_enade) across different states (UF)."
+      }
+    ]
+  }
+}
+```
+
+```sql
+DROP TABLE IF EXISTS EDUCACAO_OBT CASCADE;
+
+CREATE TABLE EDUCACAO_OBT (
+    -- Surrogate Primary Key
+    id_registro INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    
+    -- ANO attributes
+    ano INT NOT NULL,
+    
+    -- UF attributes
+    sigla_uf VARCHAR(2) NOT NULL,
+    uf_nome VARCHAR(100) NOT NULL,
+    qtd_habitantes INT CHECK(qtd_habitantes >= 0),
+    
+    -- MUNICIPIO attributes
+    nome_municipio VARCHAR(100) NOT NULL,
+    qtd_IES INT CHECK (qtd_IES >= 0),
+    qtd_ESCOLAS INT CHECK (qtd_ESCOLAS >= 0),
+    media_ideb REAL,
+    media_saeb REAL,
+    media_enade REAL,
+    total_participantes INT CHECK (total_participantes >= 0),
+    
+    -- ESCOLA attributes
+    nome_escola VARCHAR(100),
+    cod_escola INTEGER,
+    escola_rede VARCHAR(100),
+    
+    -- IES attributes
+    nome_ies VARCHAR(100),
+    sigla_ies VARCHAR(20),
+    codigo_ies INT,
+    ies_rede VARCHAR(100),
+    
+    -- CURSO attributes
+    nome_curso VARCHAR(100),
+    
+    -- IDEB attributes
+    rend_1 REAL,
+    rend_2 REAL,
+    rend_3 REAL,
+    rend_4 REAL,
+    ind_rend REAL,
+    nota_ideb REAL,
+    
+    -- ENADE attributes
+    total_inscritos INT CHECK (total_inscritos >= 0),
+    total_concluintes INT CHECK (total_concluintes >= 0),
+    nota_bruta_ce REAL,
+    nota_padronizada_ce REAL,
+    nota_bruta_fg REAL,
+    nota_padronizada_fg REAL,
+    nota_enade_continua REAL,
+    nota_enade_faixa REAL,
+    
+    -- SAEB attributes
+    nota_mat REAL,
+    nota_port REAL,
+    nota_padrao REAL
+);
+```

@@ -1,0 +1,147 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-10-57
+Model: gemini
+Prompt: OBT
+Schema: chinook
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy adopts a One-Big-Table (OBT) approach, consolidating all 11 normalized tables (Album, Artist, Customer, Employee, Genre, Invoice, InvoiceLine, MediaType, Playlist, PlaylistTrack, Track) into a single wide table named 'Master_Sales_Data'. This eliminates the need for complex multi-way JOINs during analytical queries, significantly improving read performance for OLAP workloads by pre-joining dimensional and transactional data.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged all transactional (Invoice, InvoiceLine) and dimensional (Customer, Employee, Track, Album, Artist, Genre, MediaType, Playlist) tables into a single denormalized table."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Removed all Foreign Key constraints to avoid referential checks during bulk reads and to strictly comply with the One-Big-Table constraint."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Introduced a new surrogate primary key 'RecordId' to uniquely identify each denormalized row, replacing the composite and distributed primary keys of the normalized model."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Prefixed attributes with their source table names (e.g., 'Customer_FirstName', 'Employee_LastName', 'Track_Name') to prevent ambiguity and ensure each column name appears exactly once."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Consolidated overlapping column names by explicitly renaming them based on their entity context: 'UnitPrice' became 'Track_UnitPrice' and 'InvoiceLine_UnitPrice'; 'Total' became 'Invoice_Total'."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Dropped NOT NULL constraints on dimensional attributes to accommodate outer joins (e.g., allowing representation of tracks that haven't been sold or aren't in a playlist)."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy: High duplication of dimensional data (e.g., Customer, Employee, Artist info) across multiple rows, leading to significantly increased storage costs."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: Modifying a dimensional attribute (like a customer's address or an artist's name) now requires updating multiple rows instead of a single record."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Cartesian Product Risk: Combining InvoiceLine (sales) and PlaylistTrack (curation) at the track level may multiply rows if a track is in many playlists and sold many times, requiring careful aggregation in queries."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "Q1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Sales reporting by Artist, Genre, and MediaType over time, requiring aggregations on Invoice_Total and Quantity without needing 6-way joins."
+      },
+      {
+        "decision_id": "Q2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Customer purchase history and Support Rep performance analysis, requiring rapid filtering by Employee and Customer attributes against Invoice records."
+      },
+      {
+        "decision_id": "Q3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Playlist composition analytics, analyzing the average track length (Milliseconds), size (Bytes), and genres of tracks within specific playlists."
+      }
+    ]
+  }
+}
+```
+
+```sql
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS public."Master_Sales_Data"
+(
+    "RecordId" serial NOT NULL,
+    
+    -- Track Attributes
+    "Track_Name" character varying(200) COLLATE pg_catalog."default",
+    "Composer" character varying(220) COLLATE pg_catalog."default",
+    "Milliseconds" integer,
+    "Bytes" integer,
+    "Track_UnitPrice" numeric(10, 2),
+    
+    -- Album & Artist Attributes
+    "Album_Title" character varying(160) COLLATE pg_catalog."default",
+    "Artist_Name" character varying(120) COLLATE pg_catalog."default",
+    
+    -- Genre & Media Type Attributes
+    "Genre_Name" character varying(120) COLLATE pg_catalog."default",
+    "MediaType_Name" character varying(120) COLLATE pg_catalog."default",
+    
+    -- Playlist Attributes
+    "Playlist_Name" character varying(120) COLLATE pg_catalog."default",
+    
+    -- Invoice Attributes
+    "InvoiceDate" timestamp without time zone,
+    "BillingAddress" character varying(70) COLLATE pg_catalog."default",
+    "BillingCity" character varying(40) COLLATE pg_catalog."default",
+    "BillingState" character varying(40) COLLATE pg_catalog."default",
+    "BillingCountry" character varying(40) COLLATE pg_catalog."default",
+    "BillingPostalCode" character varying(10) COLLATE pg_catalog."default",
+    "Invoice_Total" numeric(10, 2),
+    
+    -- InvoiceLine Attributes
+    "InvoiceLine_UnitPrice" numeric(10, 2),
+    "Quantity" integer,
+    
+    -- Customer Attributes
+    "Customer_FirstName" character varying(40) COLLATE pg_catalog."default",
+    "Customer_LastName" character varying(20) COLLATE pg_catalog."default",
+    "Customer_Company" character varying(80) COLLATE pg_catalog."default",
+    "Customer_Address" character varying(70) COLLATE pg_catalog."default",
+    "Customer_City" character varying(40) COLLATE pg_catalog."default",
+    "Customer_State" character varying(40) COLLATE pg_catalog."default",
+    "Customer_Country" character varying(40) COLLATE pg_catalog."default",
+    "Customer_PostalCode" character varying(10) COLLATE pg_catalog."default",
+    "Customer_Phone" character varying(24) COLLATE pg_catalog."default",
+    "Customer_Fax" character varying(24) COLLATE pg_catalog."default",
+    "Customer_Email" character varying(60) COLLATE pg_catalog."default",
+    
+    -- Employee (Support Rep) Attributes
+    "Employee_FirstName" character varying(20) COLLATE pg_catalog."default",
+    "Employee_LastName" character varying(20) COLLATE pg_catalog."default",
+    "Employee_Title" character varying(30) COLLATE pg_catalog."default",
+    "Employee_BirthDate" timestamp without time zone,
+    "Employee_HireDate" timestamp without time zone,
+    "Employee_Address" character varying(70) COLLATE pg_catalog."default",
+    "Employee_City" character varying(40) COLLATE pg_catalog."default",
+    "Employee_State" character varying(40) COLLATE pg_catalog."default",
+    "Employee_Country" character varying(40) COLLATE pg_catalog."default",
+    "Employee_PostalCode" character varying(10) COLLATE pg_catalog."default",
+    "Employee_Phone" character varying(24) COLLATE pg_catalog."default",
+    "Employee_Fax" character varying(24) COLLATE pg_catalog."default",
+    "Employee_Email" character varying(60) COLLATE pg_catalog."default",
+    
+    CONSTRAINT "PK_Master_Sales_Data" PRIMARY KEY ("RecordId")
+);
+
+END;
+```

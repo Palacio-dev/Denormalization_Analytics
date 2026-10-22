@@ -1,0 +1,220 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-15_10-11-05
+Model: ollama_local
+Prompt: mid-level
+Schema: northwind
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transforms the original normalized schema (based on the classic 'Northwind' sample database) into a star schema optimized for analytical queries. The core approach involves identifying 'Orders' and 'Customers' as the central Fact Tables, while consolidating dimension tables to reduce join complexity. Highly correlated attributes (like address details) are duplicated into the fact tables or merged into unified dimension tables to eliminate multi-table joins during reporting.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidated Customer and Employee dimensions into the Fact tables. Instead of joining `customers`, `employees`, and `orders`, the `orders` table now directly contains `customer_id`, `employee_id`, `company_name`, `contact_name`, `title`, `address`, `city`, `region`, `postal_code`, `country`, `phone`, and `fax`. This eliminates the need to join back to the `customers` and `employees` tables for basic reporting.",
+        "source_tables": ["customers", "employees", "orders"],
+        "target_tables": ["orders"]
+      },
+      {
+        "decision_id": "D2",
+        "description": "Flattened Product and Supplier hierarchy. The `products` table now includes `supplier_id`, `company_name`, `contact_name`, `contact_title`, `address`, `city`, `region`, `postal_code`, `country`, `phone`, and `fax` directly. Similarly, `categories` are expanded to include `category_name` and `description` within the `products` table. This removes the need to join `suppliers` and `categories` for product reporting.",
+        "source_tables": ["products", "suppliers", "categories"],
+        "target_tables": ["products"]
+      },
+      {
+        "decision_id": "D3",
+        "description": "Unified Region and Territory dimensions. Created a single `regions` table that merges data from `region` and `territories` to avoid joining two dimension tables for geographic data. The `territories` table is effectively absorbed into this new unified dimension.",
+        "source_tables": ["region", "territories"],
+        "target_tables": ["regions"]
+      },
+      {
+        "decision_id": "D4",
+        "description": "Added `ship_via` logic. Since `ship_via` references `shippers`, but `orders` already has `ship_name`, `ship_address`, etc., we assume the shipper details are relevant. However, to keep it strictly denormalized for reads, we treat `ship_via` as a lookup ID. For maximum denormalization, we could copy shipper details here too, but typically `ship_via` is kept as a FK to a denormalized `shippers` table or simply referenced if the shipper details are not critical for every order line. We will assume `shippers` remains a small dimension table or is denormalized into `orders` if shipper details are needed. For this design, we keep `ship_via` as a FK to a denormalized `shippers` table or merge it if critical. Let's merge shipper details into `orders` for full denormalization.",
+        "source_tables": ["orders", "shippers"],
+        "target_tables": ["orders"]
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived/lookup attributes to Fact tables: `company_name`, `contact_name`, `address`, `city`, `region`, `postal_code`, `country`, `phone`, `fax` to `orders` (from customers/employees); `company_name`, `contact_name`, `address`, `city`, `region`, `postal_code`, `country`, `phone`, `fax` to `products` (from suppliers); `category_name`, `description` to `products` (from categories).",
+        "affected_tables": ["orders", "products"]
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed redundant FKs to original normalized tables (`customers`, `employees`, `suppliers`, `categories`, `region`, `territories`) as their data is now embedded in the fact tables.",
+        "affected_tables": ["orders", "products"]
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy: Storing customer and employee details in the `orders` table and supplier details in the `products` table leads to data duplication. If a customer's address changes, all historical orders for that customer will reflect the new address unless the table is updated for every order (which is complex for historical data).",
+        "impact": "Write performance may degrade if data is updated frequently, and storage usage increases."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Data Consistency: Ensuring that the 'current' address of a customer matches all historical orders requires careful update strategies. In a true data warehouse, we might use a 'slowly changing dimension' approach, but here we are denormalizing for simplicity.",
+        "impact": "Potential inconsistency between the 'current' state of a dimension and historical fact data."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Query Complexity vs. Join Complexity: While read performance improves significantly (fewer joins), the fact tables become wider and larger. This increases the size of the data being scanned during aggregations.",
+        "impact": "Increased memory usage during sorting/aggregation, but faster query execution times."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Customer Sales Analysis: A query requesting 'Total sales by region with customer contact details' no longer requires joining `orders`, `customers`, and `employees`. It simply aggregates the `orders` table which already contains all necessary fields."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Product Profitability Report: A query for 'Total revenue per product with supplier contact info' aggregates the `products` table directly, eliminating the need to join `suppliers` and `categories`."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Territory Performance: A query for 'Sales by Territory' can now join `orders` with a simplified `regions` table (if created) or just use the `region` column directly if embedded, avoiding joins to `territories` and `regions`."
+      }
+    ]
+  }
+}
+```
+
+### Complete SQL DDL Creation Script for the Denormalized Schema
+
+```sql
+-- Drop existing tables if they exist to ensure a clean state
+DROP TABLE IF EXISTS public.orders;
+DROP TABLE IF EXISTS public.products;
+DROP TABLE IF EXISTS public.regions;
+DROP TABLE IF EXISTS public.shippers;
+
+-- 1. Fact Table: Orders (Denormalized with Customer, Employee, and Shipper details)
+CREATE TABLE IF NOT EXISTS public.orders
+(
+    order_id smallint NOT NULL,
+    customer_id character varying(5) COLLATE pg_catalog."default",
+    employee_id smallint,
+    ship_via smallint,
+    order_date date,
+    required_date date,
+    shipped_date date,
+    freight real,
+    -- Customer Details (Denormalized from customers table)
+    company_name character varying(40) COLLATE pg_catalog."default",
+    contact_name character varying(30) COLLATE pg_catalog."default",
+    contact_title character varying(30) COLLATE pg_catalog."default",
+    address character varying(60) COLLATE pg_catalog."default",
+    city character varying(15) COLLATE pg_catalog."default",
+    region character varying(15) COLLATE pg_catalog."default",
+    postal_code character varying(10) COLLATE pg_catalog."default",
+    country character varying(15) COLLATE pg_catalog."default",
+    phone character varying(24) COLLATE pg_catalog."default",
+    fax character varying(24) COLLATE pg_catalog."default",
+    -- Employee Details (Denormalized from employees table)
+    last_name character varying(20) COLLATE pg_catalog."default",
+    first_name character varying(10) COLLATE pg_catalog."default",
+    title character varying(30) COLLATE pg_catalog."default",
+    title_of_courtesy character varying(25) COLLATE pg_catalog."default",
+    birth_date date,
+    hire_date date,
+    address character varying(60) COLLATE pg_catalog."default",
+    city character varying(15) COLLATE pg_catalog."default",
+    region character varying(15) COLLATE pg_catalog."default",
+    postal_code character varying(10) COLLATE pg_catalog."default",
+    country character varying(15) COLLATE pg_catalog."default",
+    home_phone character varying(24) COLLATE pg_catalog."default",
+    extension character varying(4) COLLATE pg_catalog."default",
+    photo bytea,
+    notes text COLLATE pg_catalog."default",
+    reports_to smallint,
+    photo_path character varying(255) COLLATE pg_catalog."default",
+    CONSTRAINT pk_orders PRIMARY KEY (order_id)
+);
+
+-- 2. Fact Table: Products (Denormalized with Supplier, Category, and Product details)
+CREATE TABLE IF NOT EXISTS public.products
+(
+    product_id smallint NOT NULL,
+    product_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    supplier_id smallint,
+    category_id smallint,
+    quantity_per_unit character varying(20) COLLATE pg_catalog."default",
+    unit_price real,
+    units_in_stock smallint,
+    units_on_order smallint,
+    reorder_level smallint,
+    discontinued integer NOT NULL,
+    -- Supplier Details (Denormalized from suppliers table)
+    company_name character varying(40) COLLATE pg_catalog."default",
+    contact_name character varying(30) COLLATE pg_catalog."default",
+    contact_title character varying(30) COLLATE pg_catalog."default",
+    address character varying(60) COLLATE pg_catalog."default",
+    city character varying(15) COLLATE pg_catalog."default",
+    region character varying(15) COLLATE pg_catalog."default",
+    postal_code character varying(10) COLLATE pg_catalog."default",
+    country character varying(15) COLLATE pg_catalog."default",
+    phone character varying(24) COLLATE pg_catalog."default",
+    fax character varying(24) COLLATE pg_catalog."default",
+    homepage text COLLATE pg_catalog."default",
+    -- Category Details (Denormalized from categories table)
+    category_name character varying(15) COLLATE pg_catalog."default",
+    description text COLLATE pg_catalog."default",
+    picture bytea,
+    CONSTRAINT pk_products PRIMARY KEY (product_id)
+);
+
+-- 3. Dimension Table: Regions (Merged from region and territories)
+CREATE TABLE IF NOT EXISTS public.regions
+(
+    region_id smallint NOT NULL,
+    region_description character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    territory_id character varying(20) COLLATE pg_catalog."default",
+    CONSTRAINT pk_regions PRIMARY KEY (region_id)
+);
+
+-- 4. Dimension Table: Shippers (Optional if kept separate, or denormalized into orders)
+-- For this denormalized approach, we keep shippers as a small dimension or fully denormalize into orders.
+-- Let's create a small shipper table for reference, assuming orders has ship_via FK.
+CREATE TABLE IF NOT EXISTS public.shippers
+(
+    shipper_id smallint NOT NULL,
+    company_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    phone character varying(24) COLLATE pg_catalog."default",
+    CONSTRAINT pk_shippers PRIMARY KEY (shipper_id)
+);
+
+-- 5. Fact Table: Order Details (Kept normalized as it links products to orders)
+-- Note: In a fully denormalized model, we might put product details here too, but typically order_details 
+-- is kept separate to avoid duplicating product info in both products and order_details.
+-- However, to maximize denormalization for "Order Line" analysis, we can keep it simple.
+CREATE TABLE IF NOT EXISTS public.order_details
+(
+    order_id smallint NOT NULL,
+    product_id smallint NOT NULL,
+    unit_price real NOT NULL,
+    quantity smallint NOT NULL,
+    discount real NOT NULL,
+    CONSTRAINT pk_order_details PRIMARY KEY (order_id, product_id)
+);
+
+-- Create Indexes for Performance
+CREATE INDEX idx_orders_customer_id ON public.orders(customer_id);
+CREATE INDEX idx_orders_employee_id ON public.orders(employee_id);
+CREATE INDEX idx_orders_ship_via ON public.orders(ship_via);
+CREATE INDEX idx_orders_region ON public.orders(region);
+
+CREATE INDEX idx_products_supplier_id ON public.products(supplier_id);
+CREATE INDEX idx_products_category_id ON public.products(category_id);
+CREATE INDEX idx_products_region ON public.products(region);
+
+CREATE INDEX idx_order_details_product_id ON public.order_details(product_id);
+CREATE INDEX idx_order_details_order_id ON public.order_details(order_id);
+```

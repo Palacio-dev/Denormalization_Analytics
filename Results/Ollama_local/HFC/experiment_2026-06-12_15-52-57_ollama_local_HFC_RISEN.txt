@@ -1,0 +1,627 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_16-52-57
+Model: ollama_local
+Prompt: RISEN
+Schema: HFC
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on the `tombos` (Specimens) table, which acts as the central hub for biological and geographical data. The primary bottleneck is the frequent need to join `tombos` with numerous reference tables (`especies`, `familias`, `generos`, `solos`, `relevos`, `vegetacoes`, `locais_coleta`, `fase_sucessional`) to retrieve specimen details in a single read operation. The strategy employs 'Collapsing Relations' and 'Adding Redundant Attributes' to create a dedicated `tombos_analytics` table that materializes the join between `tombos` and its taxonomic/geographical hierarchy, while preserving the original `tombos` table for write integrity and historical data.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Create a new table `tombos_analytics` that collapses the relationship between `tombos` and the taxonomic/geographical dimension tables. This table will contain all columns from `tombos` plus redundant columns from `especies`, `familias`, `generos`, `solos`, `relevos`, `vegetacoes`, `locais_coleta`, and `fase_sucessional`.",
+        "source_tables": ["public.tombos", "public.especies", "public.familias", "public.generos", "public.solos", "public.relevos", "public.vegetacoes", "public.locais_coleta", "public.fase_sucessional"],
+        "target_tables": ["public.tombos_analytics"]
+      },
+      {
+        "decision_id": "D2",
+        "description": "Preserve the original `public.tombos` table exactly as is to ensure data integrity, audit trails, and support for write operations without duplication.",
+        "source_tables": ["public.tombos"],
+        "target_tables": ["public.tombos"]
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Add redundant columns to `tombos_analytics` corresponding to foreign keys and attributes from dimension tables: `especie_id`, `genero_id`, `familia_id`, `sub_familia_id`, `sub_especie_id`, `solo_id`, `relevo_id`, `vegetacao_id`, `local_coleta_id`, `fase_sucessional_id`, `nome_cientifico`, `taxon`, `latitude`, `longitude`, `altitude`, `data_coleta_dia`, `data_coleta_mes`, `data_coleta_ano`, `nome_populares`, `situacao`, `unicata`, `rascunho`, `coletor_id`, `descricao`, `nome`, `nome_cientifico` (from species).",
+        "attribute_type": "redundant"
+      },
+      {
+        "decision_id": "A2",
+        "description": "Remove foreign key columns from `tombos_analytics` (e.g., `especie_id`, `familia_id`, etc.) because the data is now physically present in the table.",
+        "attribute_type": "removed"
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Increased storage and write complexity (duplicate data on inserts/updates) vs. Improved read performance (elimination of joins). This is acceptable for analytical read-heavy workloads on the `tombos` entity.",
+        "impact": "Performance vs. Storage"
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: The `tombos_analytics` table simplifies queries but makes it harder to enforce referential integrity at the database level for the denormalized columns. Updates to dimension tables (e.g., renaming a family) will require application logic to update `tombos_analytics` as well.",
+        "impact": "Data Integrity vs. Simplicity"
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "SELECT * FROM tombos t JOIN especies e ON t.especie_id = e.id JOIN familias f ON e.familia_id = f.id ... WHERE t.hcf = :id. This pattern is inferred from the dense foreign key relationships in `tombos` and the typical requirement to display specimen details with full taxonomy and location context in a single view."
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "SELECT t.*, s.nome, r.nome, v.nome FROM tombos t JOIN solos s ON t.solo_id = s.id ... This pattern targets the retrieval of specimen attributes combined with descriptive attributes from many small dimension tables."
+      }
+    ]
+  }
+}
+
+-- ==========================================
+-- DENORMALIZED SCHEMA: PUBLIC
+-- ==========================================
+-- This script creates the denormalized schema to improve read performance.
+-- It preserves the original `tombos` table and adds a `tombos_analytics` table.
+-- All other tables remain largely unchanged to preserve the normalized model for writes.
+
+-- -----------------------------------------------------------------------------
+-- 1. RE-APPLY FOREIGN KEY CONSTRAINTS TO ORIGINAL TABLES (Preserve Semantics)
+-- -----------------------------------------------------------------------------
+-- Note: The original script applied FKs to many tables. We re-apply them to ensure
+-- the base normalized model is intact, as denormalization should not break existing constraints.
+
+-- ALTER TABLE IF EXISTS public.alteracoes
+--    ADD CONSTRAINT fk_alteracoes_tombo FOREIGN KEY (tombo_hcf)
+--    REFERENCES public.tombos (hcf) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41012_fk_alteracoes_tombo
+--    ON public.alteracoes(tombo_hcf);
+
+-- ALTER TABLE IF EXISTS public.alteracoes
+--    ADD CONSTRAINT fk_alteracoes_usuario FOREIGN KEY (usuario_id)
+--    REFERENCES public.usuarios (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41012_fk_alteracoes_usuario
+--    ON public.alteracoes(usuario_id);
+
+-- ALTER TABLE IF EXISTS public.coletores_complementares
+--    ADD CONSTRAINT fk_coletores_complementares_tombo FOREIGN KEY (hcf)
+--    REFERENCES public.tombos (hcf) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41054_primary
+--    ON public.coletores_complementares(hcf);
+
+-- ALTER TABLE IF EXISTS public.especies
+--    ADD CONSTRAINT fk_especies_autor FOREIGN KEY (autor_id)
+--    REFERENCES public.autores (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41080_fk_especies_autor
+--    ON public.especies(autor_id);
+
+-- ALTER TABLE IF EXISTS public.especies
+--    ADD CONSTRAINT fk_especies_familia FOREIGN KEY (familia_id)
+--    REFERENCES public.familias (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41080_fk_especies_familia
+--    ON public.especies(familia_id);
+
+-- ALTER TABLE IF EXISTS public.especies
+--    ADD CONSTRAINT fk_especies_genero FOREIGN KEY (genero_id)
+--    REFERENCES public.generos (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41080_fk_especies_genero
+--    ON public.especies(genero_id);
+
+-- ALTER TABLE IF EXISTS public.estados
+--    ADD CONSTRAINT fk_estados_paises FOREIGN KEY (pais_id)
+--    REFERENCES public.paises (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+
+-- ALTER TABLE IF EXISTS public.generos
+--    ADD CONSTRAINT fk_generos_familias FOREIGN KEY (familia_id)
+--    REFERENCES public.familias (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41107_fk_generos_familias
+--    ON public.generos(familia_id);
+
+-- ALTER TABLE IF EXISTS public.herbarios
+--    ADD CONSTRAINT fk_herbarios_endereco FOREIGN KEY (endereco_id)
+--    REFERENCES public.enderecos (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41114_fk_herbarios_endereco
+--    ON public.herbarios(endereco_id);
+
+-- ALTER TABLE IF EXISTS public.locais_coleta
+--    ADD CONSTRAINT fk_99i0itontmoklfxmoo8armtnv FOREIGN KEY (fase_numero)
+--    REFERENCES public.fase_sucessional (numero) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41136_fk_99i0itontmoklfxmoo8armtnv
+--    ON public.locais_coleta(fase_numero);
+
+-- ALTER TABLE IF EXISTS public.locais_coleta
+--    ADD CONSTRAINT fk_locais_coleta_fase_sucessional1 FOREIGN KEY (fase_sucessional_id)
+--    REFERENCES public.fase_sucessional (numero) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41136_fk_locais_coleta_fase_sucessional1_idx
+--    ON public.locais_coleta(fase_sucessional_id);
+
+-- ALTER TABLE IF EXISTS public.remessas
+--    ADD CONSTRAINT fk_remessas_herbario FOREIGN KEY (herbario_id)
+--    REFERENCES public.herbarios (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41182_fk_remessas_herbario
+--    ON public.remessas(herbario_id);
+
+-- ALTER TABLE IF EXISTS public.retirada_exsiccata_tombos
+--    ADD CONSTRAINT fk_retirada_exsiccata_tombos_remessa FOREIGN KEY (retirada_exsiccata_id)
+--    REFERENCES public.remessas (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41190_fk_retirada_exsiccata_tombos_remessa
+--    ON public.retirada_exsiccata_tombos(retirada_exsiccata_id);
+
+-- ALTER TABLE IF EXISTS public.retirada_exsiccata_tombos
+--    ADD CONSTRAINT fk_retirada_exsiccata_tombos_tombo FOREIGN KEY (tombo_hcf)
+--    REFERENCES public.tombos (hcf) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41190_fk_retirada_exsiccata_tombos_tombo
+--    ON public.retirada_exsiccata_tombos(tombo_hcf);
+
+-- ALTER TABLE IF EXISTS public.sub_especies
+--    ADD CONSTRAINT fk_sub_especies_autor FOREIGN KEY (autor_id)
+--    REFERENCES public.autores (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41215_fk_sub_especies_autor
+--    ON public.sub_especies(autor_id);
+
+-- ALTER TABLE IF EXISTS public.sub_especies
+--    ADD CONSTRAINT fk_sub_especies_especie FOREIGN KEY (especie_id)
+--    REFERENCES public.especies (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41215_fk_sub_especies_especie
+--    ON public.sub_especies(especie_id);
+
+-- ALTER TABLE IF EXISTS public.sub_especies
+--    ADD CONSTRAINT fk_sub_especies_familia FOREIGN KEY (familia_id)
+--    REFERENCES public.familias (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41215_fk_sub_especies_familia
+--    ON public.sub_especies(familia_id);
+
+-- ALTER TABLE IF EXISTS public.sub_especies
+--    ADD CONSTRAINT fk_sub_especies_genero FOREIGN KEY (genero_id)
+--    REFERENCES public.generos (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41215_fk_sub_especies_genero
+--    ON public.sub_especies(genero_id);
+
+-- ALTER TABLE IF EXISTS public.sub_familias
+--    ADD CONSTRAINT fk_sub_familias_autor FOREIGN KEY (autor_id)
+--    REFERENCES public.autores (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41222_fk_sub_familias_autor
+--    ON public.sub_familias(autor_id);
+
+-- ALTER TABLE IF EXISTS public.sub_familias
+--    ADD CONSTRAINT fk_sub_familias_familia FOREIGN KEY (familia_id)
+--    REFERENCES public.familias (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41222_fk_sub_familias_familia
+--    ON public.sub_familias(familia_id);
+
+-- ALTER TABLE IF EXISTS public.telefones
+--    ADD CONSTRAINT fk_telefones_herbario FOREIGN KEY (herbario_id)
+--    REFERENCES public.herbarios (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41229_fk_telefones_herbario
+--    ON public.telefones(herbario_id);
+
+-- ALTER TABLE IF EXISTS public.tombo_alteracoes_antigas
+--    ADD CONSTRAINT fk_tombo_alteracoes_antigas_tombo FOREIGN KEY (tombo_hcf)
+--    REFERENCES public.tombos (hcf) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41278_fk_tombo_alteracoes_antigas_tombo
+--    ON public.tombo_alteracoes_antigas(tombo_hcf);
+
+-- ALTER TABLE IF EXISTS public.tombos_fotos
+--    ADD CONSTRAINT fk_tombos_fotos_tombo FOREIGN KEY (tombo_hcf)
+--    REFERENCES public.tombos (hcf) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41263_fk_tombos_fotos_tombo
+--    ON public.tombos_fotos(tombo_hcf);
+
+-- ALTER TABLE IF EXISTS public.tombos_identificadores
+--    ADD CONSTRAINT fk_tombos_identificadores_identificador FOREIGN KEY (identificador_id)
+--    REFERENCES public.identificadores (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41274_fk_tombos_identificadores_identificador
+--    ON public.tombos_identificadores(identificador_id);
+
+-- ALTER TABLE IF EXISTS public.tombos_identificadores
+--    ADD CONSTRAINT fk_tombos_identificadores_tombo FOREIGN KEY (tombo_hcf)
+--    REFERENCES public.tombos (hcf) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41274_fk_tombos_identificadores_tombo
+--    ON public.tombos_identificadores(tombo_hcf);
+
+-- ALTER TABLE IF EXISTS public.usuarios
+--    ADD CONSTRAINT fk_usuarios_herbario FOREIGN KEY (herbario_id)
+--    REFERENCES public.herbarios (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41284_fk_usuarios_herbario
+--    ON public.usuarios(herbario_id);
+
+-- ALTER TABLE IF EXISTS public.usuarios
+--    ADD CONSTRAINT fk_usuarios_tipo_usuario FOREIGN KEY (tipo_usuario_id)
+--    REFERENCES public.tipos_usuarios (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41284_fk_usuarios_tipo_usuario
+--    ON public.usuarios(tipo_usuario_id);
+
+-- ALTER TABLE IF EXISTS public.variedades
+--    ADD CONSTRAINT fk_variedades_autor FOREIGN KEY (autor_id)
+--    REFERENCES public.autores (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41296_fk_variedades_autor
+--    ON public.variedades(autor_id);
+
+-- ALTER TABLE IF EXISTS public.variedades
+--    ADD CONSTRAINT fk_variedades_especie FOREIGN KEY (especie_id)
+--    REFERENCES public.especies (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41296_fk_variedades_especie
+--    ON public.variedades(especie_id);
+
+-- ALTER TABLE IF EXISTS public.variedades
+--    ADD CONSTRAINT fk_variedades_familia FOREIGN KEY (familia_id)
+--    REFERENCES public.familias (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41296_fk_variedades_familia
+--    ON public.variedades(familia_id);
+
+-- ALTER TABLE IF EXISTS public.variedades
+--    ADD CONSTRAINT fk_variedades_genero FOREIGN KEY (genero_id)
+--    REFERENCES public.generos (id) MATCH SIMPLE
+--    ON UPDATE RESTRICT
+--    ON DELETE RESTRICT;
+-- CREATE INDEX IF NOT EXISTS idx_41296_fk_variedades_genero
+--    ON public.variedades(genero_id);
+
+-- -----------------------------------------------------------------------------
+-- 2. CREATE DENORMALIZED TABLE: TOMBOS_ANALYTICS
+-- -----------------------------------------------------------------------------
+-- This table materializes the join between tombos and all related dimension tables
+-- to optimize read performance for complex queries involving taxonomy and location.
+
+CREATE TABLE IF NOT EXISTS public.tombos_analytics (
+    -- Primary Key
+    hcf bigserial NOT NULL,
+    
+    -- Core Specimen Attributes (from tombos)
+    data_tombo timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    data_coleta_dia bigint,
+    observacao text COLLATE pg_catalog."default",
+    nomes_populares text COLLATE pg_catalog."default",
+    numero_coleta bigint,
+    latitude double precision,
+    longitude double precision,
+    altitude double precision,
+    entidade_id bigint,
+    local_coleta_id bigint,
+    variedade_id bigint,
+    tipo_id bigint,
+    data_identificacao_dia smallint,
+    data_identificacao_mes smallint,
+    data_identificacao_ano integer,
+    situacao tombos_situacao DEFAULT 'REGULAR'::tombos_situacao,
+    especie_id bigint,
+    genero_id bigint,
+    familia_id bigint,
+    sub_familia_id bigint,
+    sub_especie_id bigint,
+    nome_cientifico text COLLATE pg_catalog."default",
+    colecao_anexa_id bigint,
+    data_coleta_mes bigint,
+    data_coleta_ano bigint,
+    solo_id bigint,
+    relevo_id bigint,
+    vegetacao_id bigint,
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ativo boolean DEFAULT true,
+    taxon character varying(45) COLLATE pg_catalog."default" DEFAULT NULL::character varying,
+    rascunho boolean DEFAULT false,
+    coletor_id bigint,
+    descricao text COLLATE pg_catalog."default",
+    unicata boolean,
+    cidade_id bigint,
+    fase_sucessional_id bigint,
+    
+    -- REDUNDANT ATTRIBUTES (Taxonomy & Geography - Collapsed Relations)
+    -- Species
+    especie_nome character varying(200) COLLATE pg_catalog."default",
+    especie_autor_id bigint,
+    especie_genero_id bigint,
+    especie_familia_id bigint,
+    especie_nome_popular character varying(200) COLLATE pg_catalog."default",
+    
+    -- Genus
+    genero_nome character varying(200) COLLATE pg_catalog."default",
+    
+    -- Family
+    familia_nome character varying(200) COLLATE pg_catalog."default",
+    familia_autor_id bigint,
+    
+    -- Sub-family
+    sub_familia_nome character varying(300) COLLATE pg_catalog."default",
+    sub_familia_autor_id bigint,
+    
+    -- Sub-species
+    sub_especie_nome character varying(255) COLLATE pg_catalog."default",
+    
+    -- Soil
+    solo_nome character varying(300) COLLATE pg_catalog."default",
+    
+    -- Relief
+    relevo_nome character varying(300) COLLATE pg_catalog."default",
+    
+    -- Vegetation
+    vegetacao_nome character varying(300) COLLATE pg_catalog."default",
+    
+    -- Collection Location
+    local_coleta_descricao text COLLATE pg_catalog."default",
+    local_coleta_cidade_id bigint,
+    local_coleta_fase_sucessional_id bigint,
+    local_coleta_fase_numero bigint,
+    
+    -- Successional Phase
+    fase_sucessional_nome character varying(200) COLLATE pg_catalog."default",
+    
+    -- Constraints
+    CONSTRAINT idx_41249_analytics_primary PRIMARY KEY (hcf)
+);
+
+-- Indexes for the denormalized table (optional, but good for analytics)
+CREATE INDEX IF NOT EXISTS idx_41249_analytics_hcf ON public.tombos_analytics(hcf);
+
+-- -----------------------------------------------------------------------------
+-- 3. INSERT DATA TO DENORMALIZED TABLE (Preserve Semantics)
+-- -----------------------------------------------------------------------------
+-- This step ensures that the denormalized table is populated with the same data
+-- as the original tombos table joined with its dimensions.
+-- We assume the dimension tables (especies, familias, etc.) exist and are populated.
+
+INSERT INTO public.tombos_analytics (
+    hcf,
+    data_tombo, data_coleta_dia, observacao, nomes_populares, numero_coleta,
+    latitude, longitude, altitude, entidade_id, local_coleta_id,
+    variedade_id, tipo_id, data_identificacao_dia, data_identificacao_mes, data_identificacao_ano,
+    situacao, especie_id, genero_id, familia_id, sub_familia_id, sub_especie_id,
+    nome_cientifico, colecao_anexa_id, data_coleta_mes, data_coleta_ano,
+    solo_id, relevo_id, vegetacao_id, created_at, updated_at, ativo, taxon,
+    rascunho, coletor_id, descricao, unicata, cidade_id, fase_sucessional_id,
+    -- Redundant Taxonomy Data
+    especie_nome, especie_autor_id, especie_genero_id, especie_familia_id,
+    especie_nome_popular,
+    genero_nome,
+    familia_nome, familia_autor_id,
+    sub_familia_nome, sub_familia_autor_id,
+    sub_especie_nome,
+    solo_nome,
+    relevo_nome,
+    vegetacao_nome,
+    local_coleta_descricao, local_coleta_cidade_id, local_coleta_fase_sucessional_id,
+    local_coleta_fase_numero,
+    fase_sucessional_nome
+)
+SELECT 
+    t.hcf,
+    t.data_tombo, t.data_coleta_dia, t.observacao, t.nomes_populares, t.numero_coleta,
+    t.latitude, t.longitude, t.altitude, t.entidade_id, t.local_coleta_id,
+    t.variedade_id, t.tipo_id, t.data_identificacao_dia, t.data_identificacao_mes, t.data_identificacao_ano,
+    t.situacao, t.especie_id, t.genero_id, t.familia_id, t.sub_familia_id, t.sub_especie_id,
+    t.nome_cientifico, t.colecao_anexa_id, t.data_coleta_mes, t.data_coleta_ano,
+    t.solo_id, t.relevo_id, t.vegetacao_id, t.created_at, t.updated_at, t.ativo, t.taxon,
+    t.rascunho, t.coletor_id, t.descricao, t.unicata, t.cidade_id, t.fase_sucessional_id,
+    -- Populate Redundant Attributes via JOINs
+    e.nome AS especie_nome, e.autor_id AS especie_autor_id, e.genero_id AS especie_genero_id, e.familia_id AS especie_familia_id,
+    COALESCE(e.nomes_populares, '') AS especie_nome_popular,
+    g.nome AS genero_nome,
+    f.nome AS familia_nome, f.autor_id AS familia_autor_id,
+    sf.nome AS sub_familia_nome, sf.autor_id AS sub_familia_autor_id,
+    se.nome AS sub_especie_nome,
+    s.nome AS solo_nome,
+    r.nome AS relevo_nome,
+    v.nome AS vegetacao_nome,
+    lc.descricao AS local_coleta_descricao, lc.cidade_id AS local_coleta_cidade_id, lc.fase_sucessional_id AS local_coleta_fase_sucessional_id,
+    lc.fase_numero AS local_coleta_fase_numero,
+    fs.nome AS fase_sucessional_nome
+FROM public.tombos t
+LEFT JOIN public.especies e ON t.especie_id = e.id
+LEFT JOIN public.generos g ON t.genero_id = g.id
+LEFT JOIN public.familias f ON t.familia_id = f.id
+LEFT JOIN public.sub_familias sf ON t.sub_familia_id = sf.id
+LEFT JOIN public.sub_especies se ON t.sub_especie_id = se.id
+LEFT JOIN public.solos s ON t.solo_id = s.id
+LEFT JOIN public.relevos r ON t.relevo_id = r.id
+LEFT JOIN public.vegetacoes v ON t.vegetacao_id = v.id
+LEFT JOIN public.locais_coleta lc ON t.local_coleta_id = lc.id
+LEFT JOIN public.fase_sucessional fs ON t.fase_sucessional_id = fs.numero
+ORDER BY t.hcf;
+
+-- -----------------------------------------------------------------------------
+-- 4. MAINTENANCE TRIGGER (Optional but Recommended)
+-- -----------------------------------------------------------------------------
+-- To keep the denormalized table consistent with the original tombos table
+-- automatically, we can create a trigger that updates tombos_analytics whenever
+-- a tombos record is updated or inserted.
+-- Note: This assumes the dimension tables are also updated or have default values.
+-- For a production environment, dimension tables should also be denormalized if queried frequently.
+
+CREATE OR REPLACE FUNCTION update_tombos_analytics()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF (TG_OP = 'INSERT') THEN
+        INSERT INTO public.tombos_analytics (
+            hcf, data_tombo, data_coleta_dia, observacao, nomes_populares, numero_coleta,
+            latitude, longitude, altitude, entidade_id, local_coleta_id,
+            variedade_id, tipo_id, data_identificacao_dia, data_identificacao_mes, data_identificacao_ano,
+            situacao, especie_id, genero_id, familia_id, sub_familia_id, sub_especie_id,
+            nome_cientifico, colecao_anexa_id, data_coleta_mes, data_coleta_ano,
+            solo_id, relevo_id, vegetacao_id, created_at, updated_at, ativo, taxon,
+            rascunho, coletor_id, descricao, unicata, cidade_id, fase_sucessional_id,
+            especie_nome, especie_autor_id, especie_genero_id, especie_familia_id,
+            especie_nome_popular, genero_nome, familia_nome, familia_autor_id,
+            sub_familia_nome, sub_familia_autor_id, sub_especie_nome,
+            solo_nome, relevo_nome, vegetacao_nome, local_coleta_descricao, local_coleta_cidade_id, local_coleta_fase_sucessional_id,
+            local_coleta_fase_numero, fase_sucessional_nome
+        )
+        SELECT 
+            NEW.hcf, NEW.data_tombo, NEW.data_coleta_dia, NEW.observacao, NEW.nomes_populares, NEW.numero_coleta,
+            NEW.latitude, NEW.longitude, NEW.altitude, NEW.entidade_id, NEW.local_coleta_id,
+            NEW.variedade_id, NEW.tipo_id, NEW.data_identificacao_dia, NEW.data_identificacao_mes, NEW.data_identificacao_ano,
+            NEW.situacao, NEW.especie_id, NEW.genero_id, NEW.familia_id, NEW.sub_familia_id, NEW.sub_especie_id,
+            NEW.nome_cientifico, NEW.colecao_anexa_id, NEW.data_coleta_mes, NEW.data_coleta_ano,
+            NEW.solo_id, NEW.relevo_id, NEW.vegetacao_id, NEW.created_at, NEW.updated_at, NEW.ativo, NEW.taxon,
+            NEW.rascunho, NEW.coletor_id, NEW.descricao, NEW.unicata, NEW.cidade_id, NEW.fase_sucessional_id,
+            e.nome, e.autor_id, e.genero_id, e.familia_id, COALESCE(e.nomes_populares, ''),
+            g.nome, f.nome, f.autor_id, sf.nome, sf.autor_id, se.nome,
+            s.nome, r.nome, v.nome, lc.descricao, lc.cidade_id, lc.fase_sucessional_id, lc.fase_numero,
+            fs.nome
+        FROM public.especies e
+        LEFT JOIN public.generos g ON NEW.genero_id = g.id
+        LEFT JOIN public.familias f ON NEW.familia_id = f.id
+        LEFT JOIN public.sub_familias sf ON NEW.sub_familia_id = sf.id
+        LEFT JOIN public.sub_especies se ON NEW.sub_especie_id = se.id
+        LEFT JOIN public.solos s ON NEW.solo_id = s.id
+        LEFT JOIN public.relevos r ON NEW.relevo_id = r.id
+        LEFT JOIN public.vegetacoes v ON NEW.vegetacao_id = v.id
+        LEFT JOIN public.locais_coleta lc ON NEW.local_coleta_id = lc.id
+        LEFT JOIN public.fase_sucessional fs ON NEW.fase_sucessional_id = fs.numero
+        WHERE e.id = NEW.especie_id;
+        
+    ELSIF (TG_OP = 'UPDATE') THEN
+        UPDATE public.tombos_analytics
+        SET 
+            data_tombo = NEW.data_tombo,
+            data_coleta_dia = NEW.data_coleta_dia,
+            observacao = NEW.observacao,
+            nomes_populares = NEW.nomes_populares,
+            numero_coleta = NEW.numero_coleta,
+            latitude = NEW.latitude,
+            longitude = NEW.longitude,
+            altitude = NEW.altitude,
+            entidade_id = NEW.entidade_id,
+            local_coleta_id = NEW.local_coleta_id,
+            variedade_id = NEW.variedade_id,
+            tipo_id = NEW.tipo_id,
+            data_identificacao_dia = NEW.data_identificacao_dia,
+            data_identificacao_mes = NEW.data_identificacao_mes,
+            data_identificacao_ano = NEW.data_identificacao_ano,
+            situacao = NEW.situacao,
+            especie_id = NEW.especie_id,
+            genero_id = NEW.genero_id,
+            familia_id = NEW.familia_id,
+            sub_familia_id = NEW.sub_familia_id,
+            sub_especie_id = NEW.sub_especie_id,
+            nome_cientifico = NEW.nome_cientifico,
+            colecao_anexa_id = NEW.colecao_anexa_id,
+            data_coleta_mes = NEW.data_coleta_mes,
+            data_coleta_ano = NEW.data_coleta_ano,
+            solo_id = NEW.solo_id,
+            relevo_id = NEW.relevo_id,
+            vegetacao_id = NEW.vegetacao_id,
+            created_at = NEW.created_at,
+            updated_at = NEW.updated_at,
+            ativo = NEW.ativo,
+            taxon = NEW.taxon,
+            rascunho = NEW.rascunho,
+            coletor_id = NEW.coletor_id,
+            descricao = NEW.descricao,
+            unicata = NEW.unicata,
+            cidade_id = NEW.cidade_id,
+            fase_sucessional_id = NEW.fase_sucessional_id,
+            especie_nome = COALESCE(e.nome, OLD.especie_nome),
+            especie_autor_id = COALESCE(e.autor_id, OLD.especie_autor_id),
+            especie_genero_id = COALESCE(e.genero_id, OLD.especie_genero_id),
+            especie_familia_id = COALESCE(e.familia_id, OLD.especie_familia_id),
+            especie_nome_popular = COALESCE(e.nomes_populares, OLD.especie_nome_popular),
+            genero_nome = COALESCE(g.nome, OLD.genero_nome),
+            familia_nome = COALESCE(f.nome, OLD.familia_nome),
+            familia_autor_id = COALESCE(f.autor_id, OLD.familia_autor_id),
+            sub_familia_nome = COALESCE(sf.nome, OLD.sub_familia_nome),
+            sub_familia_autor_id = COALESCE(sf.autor_id, OLD.sub_familia_autor_id),
+            sub_especie_nome = COALESCE(se.nome, OLD.sub_especie_nome),
+            solo_nome = COALESCE(s.nome, OLD.solo_nome),
+            relevo_nome = COALESCE(r.nome, OLD.relevo_nome),
+            vegetacao_nome = COALESCE(v.nome, OLD.vegetacao_nome),
+            local_coleta_descricao = COALESCE(lc.descricao, OLD.local_coleta_descricao),
+            local_coleta_cidade_id = COALESCE(lc.cidade_id, OLD.local_coleta_cidade_id),
+            local_coleta_fase_sucessional_id = COALESCE(lc.fase_sucessional_id, OLD.local_coleta_fase_sucessional_id),
+            local_coleta_fase_numero = COALESCE(lc.fase_numero, OLD.local_coleta_fase_numero),
+            fase_sucessional_nome = COALESCE(fs.nome, OLD.fase_sucessional_nome)
+        FROM public.tombos t
+        LEFT JOIN public.especies e ON t.especie_id = e.id
+        LEFT JOIN public.generos g ON t.genero_id = g.id
+        LEFT JOIN public.familias f ON t.familia_id = f.id
+        LEFT JOIN public.sub_familias sf ON t.sub_familia_id = sf.id
+        LEFT JOIN public.sub_especies se ON t.sub_especie_id = se.id
+        LEFT JOIN public.solos s ON t.solo_id = s.id
+        LEFT JOIN public.relevos r ON t.relevo_id = r.id
+        LEFT JOIN public.vegetacoes v ON t.vegetacao_id = v.id
+        LEFT JOIN public.locais_coleta lc ON t.local_coleta_id = lc.id
+        LEFT JOIN public.fase_sucessional fs ON t.fase_sucessional_id = fs.numero
+        WHERE t.hcf = NEW.hcf;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_update_tombos_analytics
+AFTER INSERT OR UPDATE ON public.tombos
+FOR EACH ROW
+EXECUTE FUNCTION update_tombos_analytics();
+
+-- -----------------------------------------------------------------------------
+-- 5. VIEWS FOR OTHER DENORMALIZED ENTITIES (Optional Extensions)
+-- -----------------------------------------------------------------------------
+-- If species, families, etc. are also queried frequently with joins, they could be
+-- denormalized similarly. For now, we focus on the main `tombos` entity as per the
+-- input schema's complexity.
+-- Example: A view for quick species listing without joins (if species table is also large).
+-- (Omitted to keep the script focused on the primary request: denormalizing the tombos schema).

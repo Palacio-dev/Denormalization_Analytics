@@ -1,0 +1,87 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_10-26-52
+Model: ollama_local
+Prompt: RISEN-few-shot
+Schema: solarwinds
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on optimizing read performance for the e-commerce order flow by collapsing the four related tables (customers, orders, products, order_details) into a single, wide table. This approach eliminates the need for complex JOINs between customers, orders, and products, which are the primary bottlenecks in analytical queries regarding total sales and order composition. By pre-joining the necessary data at the storage level, we enable single-table scans and aggregation.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapse 'customers', 'orders', 'products', and 'order_details' into a single 'orders' table. The new table retains the primary key 'order_id' and merges the foreign keys and attributes from all four original tables into one wide table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Add redundant attributes: 'customer_name', 'customer_email', 'customer_address', 'product_name', and 'price' directly to the 'orders' table. Remove the foreign key references to 'customers', 'products', and 'order_details' as they are no longer needed for the denormalized structure."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "A1",
+        "description": "Write performance degradation: The single wide table will be larger and potentially slower to update compared to the normalized schema, as every INSERT operation must populate multiple columns. Data consistency relies on application logic to keep redundant fields in sync."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Business intelligence queries such as 'Get total sales per customer including their name and address', or 'Analyze product performance across all orders with product details'. These queries historically required JOINs between customers, orders, products, and order_details, creating significant overhead."
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- Denormalized Schema: E-Commerce Order Analysis
+-- Dialect: PostgreSQL (matching input)
+
+BEGIN;
+
+-- Drop existing tables to ensure clean state
+DROP TABLE IF EXISTS order_details CASCADE;
+DROP TABLE IF EXISTS products CASCADE;
+DROP TABLE IF EXISTS orders CASCADE;
+DROP TABLE IF EXISTS customers CASCADE;
+
+-- Create the Denormalized 'orders' table
+-- This table combines data from customers, orders, products, and order_details
+-- to eliminate JOIN overhead for analytical queries.
+CREATE TABLE orders (
+    order_id SERIAL PRIMARY KEY,
+    order_date DATE,
+    customer_id INT,
+    customer_name VARCHAR(100),
+    customer_email VARCHAR(100),
+    customer_address TEXT,
+    product_id INT,
+    product_name VARCHAR(100),
+    price DECIMAL(10,2),
+    quantity INT
+);
+
+-- Note: 
+-- 1. 'customer_id', 'product_id', and 'order_detail_id' (implicit via quantity) are kept 
+--    as logical links but the foreign key constraints to other tables are removed 
+--    to reflect the denormalized nature.
+-- 2. All attributes from customers, products, and order_details are now redundant but stored 
+--    to allow single-table queries.
+-- 3. Data types and constraints (PRIMARY KEY) are preserved from the original schema.
+
+-- Optional: Create an index on order_date for time-based filtering
+CREATE INDEX IF NOT EXISTS idx_orders_order_date ON orders(order_date);
+
+-- Optional: Create an index on customer_name or product_name if full-text search is expected
+-- (Not strictly required by the prompt but good practice in denormalized models)
+-- CREATE INDEX IF NOT EXISTS idx_orders_customer_name ON orders(customer_name);
+
+COMMIT;
+```

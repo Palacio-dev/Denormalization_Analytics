@@ -1,0 +1,222 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_10-59-43
+Model: gemini
+Prompt: RISEN
+Schema: airplane
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transforms the highly normalized transactional airline booking schema into an
+    analytical star-schema-like structure. The goal is to eliminate expensive multi-table joins (up to 8 tables) required for 
+    common analytical workloads, such as calculating flight revenues, passenger loads, and delay metrics. This is achieved by 
+    collapsing hierarchical transaction tables, pre-joining dimension data into flight facts, vertically partitioning PII data to 
+    optimize cache efficiency, and materializing derived aggregate metrics.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapsing Relations: Merged `bookings`, `tickets`, `ticket_flights`, and `boarding_passes` into 
+        a single fact table `denorm_ticket_flights`. This provides a single row per passenger flight segment, containing 
+        all financial and boarding data without needing 4 joins."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapsing Relations: Merged `flights`, `airports_data` (twice, for departure and arrival), and `aircrafts_data` into a comprehensive `denorm_flights` table. This serves as a rich fact/dimension table for flight-level analytics."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Collapsing Relations: Merged `aircrafts_data` and `seats` into `denorm_aircraft_seats` to allow quick lookups of seat configurations and aircraft capabilities without joining."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Vertical Partitioning: Split `tickets` to isolate passenger PII (`passenger_name`, `contact_data`) into a separate `denorm_ticket_pii` table. This keeps the massive `denorm_ticket_flights` table narrow and cache-efficient for financial and aggregate queries."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Adding Redundant Attributes: Added `aircraft_model`, `aircraft_range`, and full airport details
+         (`airport_name`, `city`, `coordinates`, `timezone`) for both departure and arrival directly into `denorm_flights`."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Adding Derived Attributes: Added `departure_delay_mins`, `arrival_delay_mins`, `total_revenue`, and 
+        `total_passengers` to `denorm_flights` to precompute critical analytical metrics and avoid repetitive SUM/COUNT/date-math 
+        operations."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Attribute Renaming: Prefixed shared column names to avoid ambiguity 
+        (e.g., `total_amount` from `bookings` became `booking_total_amount`, `model` became `aircraft_model`)."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage Footprint: Storing redundant JSONB and text attributes (like airport names and cities) in the `denorm_flights` table will consume significantly more disk space than the normalized version."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "ETL Overhead and Update Anomalies: Precomputing derived attributes (delays, revenue) and storing redundant dimension data requires a robust ETL pipeline. If an airport name changes, it must be updated across all historical flight records."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D2",
+        "query": "SELECT departure_airport_name, AVG(departure_delay_mins) AS avg_delay FROM bookings.denorm_flights GROUP BY departure_airport_name ORDER BY avg_delay DESC;"
+      },
+      {
+        "decision_id": "D1",
+        "query": "SELECT flight_id, SUM(amount) AS flight_segment_revenue, COUNT(boarding_no) AS boarded_passengers FROM bookings.denorm_ticket_flights GROUP BY flight_id;"
+      },
+      {
+        "decision_id": "D4",
+        "query": "SELECT fare_conditions, SUM(booking_total_amount) FROM bookings.denorm_ticket_flights GROUP BY fare_conditions; -- Runs faster because wide PII text/jsonb columns are vertically partitioned out of the scan."
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- ==============================================================================
+-- DENORMALIZED ANALYTICAL SCHEMA DDL
+-- ==============================================================================
+
+CREATE SCHEMA IF NOT EXISTS bookings;
+
+-- 1. DENORM_FLIGHTS (Collapses flights, airports_data, aircrafts_data + Derived)
+CREATE TABLE IF NOT EXISTS bookings.denorm_flights
+(
+    flight_id serial NOT NULL,
+    flight_no character(6) COLLATE pg_catalog."default" NOT NULL,
+    scheduled_departure timestamp with time zone NOT NULL,
+    scheduled_arrival timestamp with time zone NOT NULL,
+    actual_departure timestamp with time zone,
+    actual_arrival timestamp with time zone,
+    status character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Redundant Attributes from aircrafts_data
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    aircraft_model jsonb NOT NULL,
+    aircraft_range integer NOT NULL,
+    
+    -- Redundant Attributes from airports_data (Departure)
+    departure_airport_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    departure_airport_name jsonb NOT NULL,
+    departure_city jsonb NOT NULL,
+    departure_coordinates point NOT NULL,
+    departure_timezone text COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Redundant Attributes from airports_data (Arrival)
+    arrival_airport_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    arrival_airport_name jsonb NOT NULL,
+    arrival_city jsonb NOT NULL,
+    arrival_coordinates point NOT NULL,
+    arrival_timezone text COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Derived Attributes
+    departure_delay_mins numeric(10, 2),
+    arrival_delay_mins numeric(10, 2),
+    total_revenue numeric(12, 2),
+    total_passengers integer,
+    
+    CONSTRAINT denorm_flights_pkey PRIMARY KEY (flight_id),
+    CONSTRAINT denorm_flights_flight_no_scheduled_departure_key UNIQUE (flight_no, scheduled_departure)
+);
+
+COMMENT ON TABLE bookings.denorm_flights IS 'Denormalized flights containing aircraft, departure/arrival airport details, and derived metrics';
+
+-- 2. DENORM_TICKET_PII (Vertical Partitioning of tickets for PII)
+CREATE TABLE IF NOT EXISTS bookings.denorm_ticket_pii
+(
+    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL,
+    passenger_name text COLLATE pg_catalog."default" NOT NULL,
+    contact_data jsonb,
+    
+    CONSTRAINT denorm_ticket_pii_pkey PRIMARY KEY (ticket_no)
+);
+
+COMMENT ON TABLE bookings.denorm_ticket_pii IS 'Vertically partitioned passenger PII data to optimize analytical fact table scans';
+
+-- 3. DENORM_TICKET_FLIGHTS (Collapses bookings, tickets, ticket_flights, boarding_passes)
+CREATE TABLE IF NOT EXISTS bookings.denorm_ticket_flights
+(
+    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL,
+    flight_id integer NOT NULL,
+    
+    -- Attributes from bookings
+    book_ref character(6) COLLATE pg_catalog."default" NOT NULL,
+    book_date timestamp with time zone NOT NULL,
+    booking_total_amount numeric(10, 2) NOT NULL,
+    
+    -- Attributes from tickets (Non-PII)
+    passenger_id character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Attributes from ticket_flights
+    fare_conditions character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    amount numeric(10, 2) NOT NULL,
+    
+    -- Attributes from boarding_passes (Nullable because a ticket might not have a boarding pass yet)
+    boarding_no integer,
+    seat_no character varying(4) COLLATE pg_catalog."default",
+    
+    CONSTRAINT denorm_ticket_flights_pkey PRIMARY KEY (ticket_no, flight_id),
+    CONSTRAINT denorm_ticket_flights_flight_id_boarding_no_key UNIQUE (flight_id, boarding_no),
+    CONSTRAINT denorm_ticket_flights_flight_id_seat_no_key UNIQUE (flight_id, seat_no)
+);
+
+COMMENT ON TABLE bookings.denorm_ticket_flights IS 'Denormalized fact table for ticket flight segments, including booking and boarding data';
+
+-- 4. DENORM_AIRCRAFT_SEATS (Collapses aircrafts_data and seats)
+CREATE TABLE IF NOT EXISTS bookings.denorm_aircraft_seats
+(
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    seat_no character varying(4) COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Attributes from aircrafts_data
+    aircraft_model jsonb NOT NULL,
+    aircraft_range integer NOT NULL,
+    
+    -- Attributes from seats
+    fare_conditions character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    
+    CONSTRAINT denorm_aircraft_seats_pkey PRIMARY KEY (aircraft_code, seat_no)
+);
+
+COMMENT ON TABLE bookings.denorm_aircraft_seats IS 'Denormalized dimension table for aircraft seat configurations';
+
+-- ==============================================================================
+-- FOREIGN KEYS & INDEXES FOR DENORMALIZED SCHEMA
+-- ==============================================================================
+
+ALTER TABLE IF EXISTS bookings.denorm_ticket_flights
+    ADD CONSTRAINT fk_denorm_ticket_flights_flight
+    FOREIGN KEY (flight_id)
+    REFERENCES bookings.denorm_flights (flight_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS bookings.denorm_ticket_flights
+    ADD CONSTRAINT fk_denorm_ticket_flights_pii
+    FOREIGN KEY (ticket_no)
+    REFERENCES bookings.denorm_ticket_pii (ticket_no) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+-- Analytical Indexes
+CREATE INDEX IF NOT EXISTS idx_denorm_flights_dep_airport 
+    ON bookings.denorm_flights(departure_airport_code);
+
+CREATE INDEX IF NOT EXISTS idx_denorm_flights_arr_airport 
+    ON bookings.denorm_flights(arrival_airport_code);
+
+CREATE INDEX IF NOT EXISTS idx_denorm_ticket_flights_flight_id 
+    ON bookings.denorm_ticket_flights(flight_id);
+
+CREATE INDEX IF NOT EXISTS idx_denorm_ticket_flights_book_date 
+    ON bookings.denorm_ticket_flights(book_date);
+```

@@ -1,0 +1,169 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_10-34-20
+Model: gemini
+Prompt: mid-level
+Schema: TPC_DS
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transforms a highly normalized, channel-specific transactional schema into a unified omnichannel analytical star schema. Order headers and line items are merged to eliminate the most frequent and costly joins. Furthermore, store, catalog, and web channels are consolidated into unified 'fact_sales' and 'fact_returns' tables to enable seamless cross-channel reporting. Pre-calculated measures are added to accelerate aggregations.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge Order Headers and Line Items: Combined s_purchase with s_purchase_lineitem, s_catalog_order with s_catalog_order_lineitem, and s_web_order with s_web_order_lineitem to eliminate header-line joins."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Consolidate Sales Channels: Merged the three resulting sales datasets into a single 'fact_sales' table to support omnichannel analytics and simplify BI queries."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Consolidate Returns: Merged s_store_returns and s_catalog_returns into a single 'fact_returns' table."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Inventory Snapshot: Retained s_inventory as 'fact_inventory', serving as a periodic snapshot fact table without structural changes, as it is already optimized for analytical workloads."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived attribute 'channel' (e.g., 'STORE', 'CATALOG', 'WEB') to 'fact_sales' and 'fact_returns' 
+        to distinguish the source of the transaction."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Standardized naming conventions across channels 
+        (e.g., mapped purc_customer_id, cord_bill_customer_id, and word_bill_customer_id to a unified 'customer_id')."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added derived measures 'total_sales_amount' (quantity * sales_price) and 'net_sales_amount' 
+        (total_sales_amount - coupon_amt) to 'fact_sales' to prevent recalculation during queries."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Changed 'order_id' data type in 'fact_returns' to VARCHAR(16) to safely accommodate both the CHAR(16)
+         format from store returns and the INTEGER format from catalog returns."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Sparsity in consolidated tables: Combining channels into a single fact table introduces NULL values for channel-specific attributes (e.g., store_id is NULL for web sales, web_site_id is NULL for store sales)."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Data redundancy: Header-level attributes (like order_date, customer_id, ship_mode_id) are repeated for every line item, increasing storage requirements in exchange for faster read performance."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Omnichannel sales performance: Aggregating total revenue by date and item across all channels without needing to union multiple tables."
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Basket analysis: Analyzing item combinations within the same order (requires line items and order ID together)."
+      },
+      {
+        "decision_id": "A3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Profitability reporting: Fast aggregation of net revenue without calculating (quantity * price) - discount on the fly for millions of rows."
+      }
+    ]
+  }
+}
+```
+
+-- ============================================================
+--   Table: fact_sales                                         
+-- ============================================================
+CREATE TABLE fact_sales
+(
+    channel                     VARCHAR(10)           NOT NULL, -- 'STORE', 'CATALOG', 'WEB'
+    order_id                    INTEGER               NOT NULL,
+    line_number                 INTEGER               NOT NULL,
+    order_date                  CHAR(10)                      ,
+    order_time                  INTEGER                       ,
+    item_id                     CHAR(16)              NOT NULL,
+    customer_id                 CHAR(16)                      , -- Bill-to customer or store customer
+    ship_customer_id            CHAR(16)                      , -- Null for store
+    promotion_id                CHAR(16)                      ,
+    
+    -- Measures
+    quantity                    INTEGER                       ,
+    sales_price                 NUMERIC(7,2)                  ,
+    coupon_amt                  NUMERIC(7,2)                  ,
+    ship_cost                   NUMERIC(7,2)                  ,
+    total_sales_amount          NUMERIC(10,2)                 , -- Derived: quantity * sales_price
+    net_sales_amount            NUMERIC(10,2)                 , -- Derived: total_sales_amount - coupon_amt
+    
+    -- Channel-specific dimensions (Nullable)
+    store_id                    CHAR(16)                      ,
+    register_id                 INTEGER                       ,
+    clerk_id                    INTEGER                       ,
+    warehouse_id                CHAR(16)                      ,
+    ship_mode_id                CHAR(16)                      ,
+    ship_date                   CHAR(10)                      ,
+    call_center_id              CHAR(16)                      ,
+    catalog_number              INTEGER                       ,
+    catalog_page_number         INTEGER                       ,
+    web_site_id                 CHAR(16)                      ,
+    web_page_id                 CHAR(16)                      ,
+    
+    -- Comments
+    order_comments              VARCHAR(100)                  ,
+    line_comment                VARCHAR(100)                  
+);
+
+-- ============================================================
+--   Table: fact_returns                                       
+-- ============================================================
+CREATE TABLE fact_returns
+(
+    channel                     VARCHAR(10)           NOT NULL, -- 'STORE', 'CATALOG'
+    order_id                    VARCHAR(16)           NOT NULL, -- VARCHAR to handle INT and CHAR(16) from source schemas
+    line_number                 INTEGER               NOT NULL,
+    return_date                 CHAR(10)                      ,
+    return_time                 CHAR(10)                      ,
+    item_id                     CHAR(16)              NOT NULL,
+    return_customer_id          CHAR(16)                      ,
+    refund_customer_id          CHAR(16)                      ,
+    reason_id                   CHAR(16)                      ,
+    
+    -- Measures
+    return_qty                  INTEGER                       ,
+    return_amt                  NUMERIC(7,2)                  ,
+    return_tax                  NUMERIC(7,2)                  ,
+    return_fee                  NUMERIC(7,2)                  ,
+    return_ship_cost            NUMERIC(7,2)                  ,
+    refunded_cash               NUMERIC(7,2)                  ,
+    reversed_charge             NUMERIC(7,2)                  ,
+    merchant_credit             NUMERIC(7,2)                  , -- Maps to sret_store_credit and cret_merchant_credit
+    
+    -- Channel-specific dimensions (Nullable)
+    store_id                    CHAR(16)                      ,
+    ticket_number               CHAR(20)                      ,
+    call_center_id              CHAR(16)                      ,
+    warehouse_id                CHAR(16)                      ,
+    catalog_page_id             CHAR(16)                      ,
+    shipmode_id                 CHAR(16)                      
+);
+
+-- ============================================================
+--   Table: fact_inventory                                     
+-- ============================================================
+CREATE TABLE fact_inventory
+(
+    warehouse_id                CHAR(16)              NOT NULL,
+    item_id                     CHAR(16)              NOT NULL,
+    inventory_date              CHAR(10)              NOT NULL,
+    qty_on_hand                 INTEGER                       
+);

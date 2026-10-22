@@ -1,0 +1,192 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 9
+  - Total Attributes: 35
+    * bioma: 2 columns
+    * categoria_manejo: 4 columns
+    * coleta_de_lixo: 10 columns
+    * esfera_administrativa: 2 columns
+    * instituicao_organizadora: 3 columns
+    * local_de_coleta: 2 columns
+    * mutirao_de_limpeza: 7 columns
+    * regiao: 3 columns
+    * unidade_de_conservacao: 10 columns
+
+Denormalized Model:
+  - Tables: 3
+  - Total Attributes: 26
+    * unidade_de_conservacao_analytics: 13 columns
+    * coleta_de_lixo_analytics: 11 columns
+    * conservation_event_master: 4 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Normalized model has MORE attributes (26 vs 35)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: id_bioma (INTEGER) -> nome_bioma (TEXT)
+  - Type mismatch: id_esfera (INTEGER) -> tipo_esfera (TEXT)
+  - Type mismatch: tipo (TEXT) -> data_evento (DATE)
+  - Type mismatch: nome (TEXT) -> volume_metal (INTEGER)
+  - Type mismatch: ano_de_criacao (INTEGER) -> nome_instituicao (TEXT)
+--------------------------------------------------------------------------------
+Completeness Ratio:        0.74
+Data Type Preservation:    0.81
+Avg Levenshtein Distance:  6.19
+BLEU Score:                0.05
+ROUGE-1:                   0.60
+METEOR Score:              0.03
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: conservation_event_master
+Dimension Tables Detected: unidade_de_conservacao_analytics, coleta_de_lixo_analytics
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected exactly 1 Fact table. Evaluating as a standard STAR SCHEMA.
+  - PAYLOAD WARNING: Fact table 'conservation_event_master' contains more text attributes (2) than numeric measures (0).
+  - DIMENSION NULL WARNING: Attribute 'volume_total' in 'coleta_de_lixo_analytics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'volume_plastico' in 'coleta_de_lixo_analytics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'volume_borracha' in 'coleta_de_lixo_analytics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'volume_madeira' in 'coleta_de_lixo_analytics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'volume_produtos_texteis' in 'coleta_de_lixo_analytics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'volume_papel' in 'coleta_de_lixo_analytics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'volume_metal' in 'coleta_de_lixo_analytics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'volume_vidro' in 'coleta_de_lixo_analytics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'volume_materiais_de_pesca' in 'coleta_de_lixo_analytics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'volume_outros_residuos' in 'coleta_de_lixo_analytics' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * conservation_event_master: 0 Numeric, 2 Text
+  * unidade_de_conservacao_analytics: 1 Numeric, 12 Text
+  * coleta_de_lixo_analytics: 11 Numeric, 0 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  ano_de_criacao area_marinha area_soma_biomas area_soma_biomas_continentais borracha carater categoria categoria_iucn data_do_ocorrido duracao_total estado horario_de_inicio id_bioma id_esfera id_instituicao_organizadora id_manejo id_municipio id_mutirao id_uc madeira materiais_de_pesca metal nome nome nome nome nome numero_aproximado_de_participantes outros_residuos papel plano plastico produtos_texteis tipo vidro
+
+Denormalized Model (Combined Text):
+  carater_instituicao categoria_texto categoria_texto data_evento duracao_total estado_regiao horario_inicio id_evento id_uc nome_bioma nome_bioma nome_instituicao nome_local nome_regiao plano_texto tipo_esfera volume_borracha volume_madeira volume_materiais_de_pesca volume_metal volume_outros_residuos volume_papel volume_plastico volume_produtos_texteis volume_total volume_vidro
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 26 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id_bioma INTEGER
+  Denormalized:  nome_bioma TEXT
+
+Pair 2:
+  Relational:    nome TEXT
+  Denormalized:  nome_regiao TEXT
+
+Pair 3:
+  Relational:    id_manejo INTEGER
+  Denormalized:  id_evento INTEGER
+
+Pair 4:
+  Relational:    categoria TEXT
+  Denormalized:  categoria_texto TEXT
+
+Pair 5:
+  Relational:    categoria_iucn TEXT
+  Denormalized:  categoria_texto TEXT
+
+Pair 6:
+  Relational:    plano TEXT
+  Denormalized:  plano_texto TEXT
+
+Pair 7:
+  Relational:    plastico INTEGER
+  Denormalized:  volume_plastico INTEGER
+
+Pair 8:
+  Relational:    borracha INTEGER
+  Denormalized:  volume_borracha INTEGER
+
+Pair 9:
+  Relational:    madeira INTEGER
+  Denormalized:  volume_madeira INTEGER
+
+Pair 10:
+  Relational:    produtos_texteis INTEGER
+  Denormalized:  volume_produtos_texteis INTEGER
+
+Pair 11:
+  Relational:    papel INTEGER
+  Denormalized:  volume_papel INTEGER
+
+Pair 12:
+  Relational:    metal INTEGER
+  Denormalized:  volume_total INTEGER
+
+Pair 13:
+  Relational:    vidro INTEGER
+  Denormalized:  volume_vidro INTEGER
+
+Pair 14:
+  Relational:    materiais_de_pesca INTEGER
+  Denormalized:  volume_materiais_de_pesca INTEGER
+
+Pair 15:
+  Relational:    outros_residuos INTEGER
+  Denormalized:  volume_outros_residuos INTEGER
+
+Pair 16:
+  Relational:    id_esfera INTEGER
+  Denormalized:  tipo_esfera TEXT
+
+Pair 17:
+  Relational:    tipo TEXT
+  Denormalized:  data_evento DATE
+
+Pair 18:
+  Relational:    nome TEXT
+  Denormalized:  nome_local TEXT
+
+Pair 19:
+  Relational:    carater TEXT
+  Denormalized:  carater_instituicao TEXT
+
+Pair 20:
+  Relational:    nome TEXT
+  Denormalized:  volume_metal INTEGER
+
+Pair 21:
+  Relational:    horario_de_inicio TIME
+  Denormalized:  horario_inicio TIME
+
+Pair 22:
+  Relational:    duracao_total TIME
+  Denormalized:  duracao_total TIME
+
+Pair 23:
+  Relational:    nome TEXT
+  Denormalized:  nome_bioma TEXT
+
+Pair 24:
+  Relational:    estado TEXT
+  Denormalized:  estado_regiao TEXT
+
+Pair 25:
+  Relational:    id_uc INTEGER
+  Denormalized:  id_uc INTEGER
+
+Pair 26:
+  Relational:    ano_de_criacao INTEGER
+  Denormalized:  nome_instituicao TEXT
+
+
+================================================================================

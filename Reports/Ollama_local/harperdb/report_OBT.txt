@@ -1,0 +1,89 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 3
+  - Total Attributes: 9
+    * entitlements: 8 columns
+    * users: 1 columns
+    * user_entitlements: 2 columns (junction table - excluded from attribute analysis)
+
+  Note: 1 junction table(s) detected and excluded from attribute analysis:
+    - user_entitlements
+
+Denormalized Model:
+  - Tables: 1
+  - Total Attributes: 7
+    * user_entitlements_flat: 7 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Normalized model has MORE attributes (7 vs 9)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: activeDate (DATE) -> entitlement_id (INT)
+  - Type mismatch: id (INT) -> status (VARCHAR(20))
+--------------------------------------------------------------------------------
+Completeness Ratio:        0.78
+Data Type Preservation:    0.71
+Avg Levenshtein Distance:  4.71
+BLEU Score:                0.00
+ROUGE-1:                   0.18
+METEOR Score:              0.00
+
+4. ONE-BIG-TABLE (OBT) ARCHITECTURE AUDIT
+--------------------------------------------------------------------------------
+
+✓ No OBT violations detected! The architecture resembles a true One-Big-Table approach.
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  activeDate activeFlag featureType id id inactiveDate packageType useCount useLimit
+
+Denormalized Model (Combined Text):
+  entitlement_id feature_name package_name status use_count use_limit user_id
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 7 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id INT
+  Denormalized:  user_id INT
+
+Pair 2:
+  Relational:    activeDate DATE
+  Denormalized:  entitlement_id INT
+
+Pair 3:
+  Relational:    useLimit INT
+  Denormalized:  use_limit INT
+
+Pair 4:
+  Relational:    useCount INT
+  Denormalized:  use_count INT
+
+Pair 5:
+  Relational:    featureType VARCHAR(4)
+  Denormalized:  feature_name VARCHAR(4)
+
+Pair 6:
+  Relational:    packageType VARCHAR(4)
+  Denormalized:  package_name VARCHAR(4)
+
+Pair 7:
+  Relational:    id INT
+  Denormalized:  status VARCHAR(20)
+
+
+================================================================================

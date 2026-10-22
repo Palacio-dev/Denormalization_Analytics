@@ -1,0 +1,184 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_15-52-52
+Model: ollama_local
+Prompt: junior
+Schema: employees
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on eliminating joins between the core employee data and their associated attributes (department, salary, title) for reporting scenarios. Since analytics queries often require aggregations or filtering across these dimensions (e.g., 'Average salary by department' or 'Employee list with department and title'), merging these tables into a single 'employee_facts' table reduces join complexity from O(N) to O(1) per row. The schema shifts from a strict 3NF structure to a Data Warehouse Star Schema approach.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge 'employees.employee', 'employees.department', 'employees.department_employee', and 'employees.department_manager' into a single 'employees.employee_base' table. This captures the employee's identity, current department, and tenure dates in one place."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge 'employees.salary' and 'employees.title' into the 'employees.employee_base' table. Since salary and title are specific attributes of an employee that are frequently queried alongside their demographic and departmental data, they are flattened to avoid joining the salary and title tables."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Create a new 'employees.employee_stats' table to store pre-aggregated data (e.g., total salary, count of titles) to further optimize heavy reporting queries."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added 'dept_name', 'dept_manager_name', 'salary_amount', and 'title_name' columns directly to the 'employee_base' table. Removed foreign key references to 'department', 'salary', and 'title' tables."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Retained 'from_date' and 'to_date' columns for tenure tracking within the base table to allow historical analysis without joining history tables."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Removed the 'gender' and 'birth_date' columns from the denormalized base table if they are considered static and not part of the primary analytical dimension being denormalized, or kept them if they are critical for the specific reporting use case (assumed kept here for completeness)."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Improved query performance (fewer joins) at the cost of increased storage redundancy and potential data inconsistency if not managed via triggers or application logic."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Loss of referential integrity constraints (Foreign Keys) means the database relies on application logic or triggers to ensure data accuracy, which adds complexity to the application layer."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical reports requiring a list of employees with their department names, current salaries, and titles in a single result set, e.g., SELECT * FROM employees WHERE hire_date > '2020-01-01';"
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Departmental analysis requiring aggregation across salary and title counts, e.g., SELECT dept_name, AVG(salary_amount) FROM employee_base GROUP BY dept_name;"
+      }
+    ]
+  }
+}
+```
+
+### Complete SQL DDL Creation Script for the Denormalized Schema
+
+```sql
+-- Drop existing tables if they exist to ensure a clean state for the new schema
+DROP TABLE IF EXISTS employees.employee_base;
+DROP TABLE IF EXISTS employees.employee_stats;
+
+-- 1. Create the Denormalized Employee Base Table
+-- This table merges employee, department, salary, and title data to eliminate joins.
+CREATE TABLE IF NOT EXISTS employees.employee_base (
+    id bigint NOT NULL DEFAULT nextval('employees.id_employee_seq'::regclass),
+    first_name character varying(14) COLLATE pg_catalog."default" NOT NULL,
+    last_name character varying(16) COLLATE pg_catalog."default" NOT NULL,
+    gender character varying(1) COLLATE pg_catalog."default" NOT NULL,
+    birth_date date NOT NULL,
+    hire_date date NOT NULL,
+    
+    -- Merged Department Data
+    dept_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    dept_manager_id bigint, -- Nullable as not all employees might be managers
+    dept_from_date date,
+    dept_to_date date,
+    
+    -- Merged Salary Data
+    salary_amount bigint,
+    salary_from_date date,
+    salary_to_date date,
+    
+    -- Merged Title Data
+    title_name character varying(50) COLLATE pg_catalog."default",
+    title_from_date date,
+    title_to_date date,
+    
+    -- Primary Key
+    CONSTRAINT employees_employee_base_pkey PRIMARY KEY (id)
+);
+
+-- 2. Create the Pre-aggregated Stats Table (Optional for heavy reporting)
+CREATE TABLE IF NOT EXISTS employees.employee_stats (
+    id bigint NOT NULL DEFAULT nextval('employees.id_employee_seq'::regclass),
+    dept_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    avg_salary bigint,
+    avg_tenure_days bigint,
+    CONSTRAINT employees_employee_stats_pkey PRIMARY KEY (id)
+);
+
+-- 3. Create Triggers to Maintain Denormalized Data (Simplified Logic)
+-- Note: In a real-world scenario, you would implement more robust triggers to handle
+-- complex date ranges and concurrent updates. Here is a simplified example for insertion.
+
+-- Trigger to update employee_base when an employee record is inserted
+CREATE OR REPLACE FUNCTION update_employee_base_on_insert()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Update Base Info
+    UPDATE employees.employee_base
+    SET first_name = NEW.first_name,
+        last_name = NEW.last_name,
+        gender = NEW.gender,
+        birth_date = NEW.birth_date,
+        hire_date = NEW.hire_date;
+    
+    -- Update Department Info (Assuming active employment)
+    UPDATE employees.employee_base
+    SET dept_name = NEW.dept_name,
+        dept_manager_id = NEW.dept_manager_id,
+        dept_from_date = NEW.dept_from_date,
+        dept_to_date = NEW.dept_to_date;
+    
+    -- Update Salary Info
+    UPDATE employees.employee_base
+    SET salary_amount = NEW.salary_amount,
+        salary_from_date = NEW.salary_from_date,
+        salary_to_date = NEW.salary_to_date;
+    
+    -- Update Title Info
+    UPDATE employees.employee_base
+    SET title_name = NEW.title_name,
+        title_from_date = NEW.title_from_date,
+        title_to_date = NEW.title_to_date;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_employee_base_on_insert
+AFTER INSERT ON employees.employee
+FOR EACH ROW
+EXECUTE FUNCTION update_employee_base_on_insert();
+
+-- Trigger to update employee_base when an employee record is updated
+CREATE TRIGGER trg_employee_base_on_update
+AFTER UPDATE ON employees.employee
+FOR EACH ROW
+EXECUTE FUNCTION update_employee_base_on_insert();
+
+-- Trigger to delete from employee_base when employee is deleted
+CREATE TRIGGER trg_employee_base_on_delete
+AFTER DELETE ON employees.employee
+FOR EACH ROW
+EXECUTE FUNCTION update_employee_base_on_delete();
+
+-- 4. Create Indexes for Performance
+CREATE INDEX IF NOT EXISTS idx_employee_base_first_name
+    ON employees.employee_base(first_name);
+
+CREATE INDEX IF NOT EXISTS idx_employee_base_dept_name
+    ON employees.employee_base(dept_name);
+
+CREATE INDEX IF NOT EXISTS idx_employee_base_salary
+    ON employees.employee_base(salary_amount);
+
+-- Grant permissions if necessary
+GRANT ALL PRIVILEGES ON TABLE employees.employee_base TO public;
+GRANT ALL PRIVILEGES ON TABLE employees.employee_stats TO public;
+GRANT USAGE, SELECT ON SEQUENCE employees.id_employee_seq TO public;
+```

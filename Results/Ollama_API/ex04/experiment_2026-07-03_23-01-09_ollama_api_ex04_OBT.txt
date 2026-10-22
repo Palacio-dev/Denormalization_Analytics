@@ -1,0 +1,168 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-03_23-01-09
+Model: ollama_api
+Prompt: OBT
+Schema: ex04
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy adopted follows the ONE-BIG-TABLE MODEL, which consolidates all normalized tables into a single wide table. This approach eliminates JOIN operations by embedding all relevant attributes directly into one denormalized structure. The primary goal is to optimize read-heavy analytical workloads by reducing query complexity and improving performance at the cost of increased storage and potential data redundancy.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged all tables into a single wide table named 'survey_analytics_denorm'. The central entity is the survey, which acts as the root for most relationships in the original schema."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Removed all foreign key constraints and replaced them with inline copies of referenced attributes from parent tables such as country, region, and demography."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Flattened hierarchical data like decile, population, life expectancy, and other fact tables into repeated columns or grouped metrics based on common keys such as survey_id or demographic context."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added prefix to ambiguous column names to avoid naming conflicts. For example, 'year' from demography, employment, education, economy, and health are prefixed with their respective source table names (e.g., demography_year, employment_year)."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Derived new composite fields where necessary to preserve semantic meaning. For instance, aggregated population data was flattened into multiple columns representing different age/gender groups."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Retained all non-key attributes from the original schema without dropping any to ensure full semantic equivalence and reconstructibility of data."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved read performance at the expense of write performance due to data duplication and larger row sizes."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Increased storage requirements as normalization eliminates redundant data, while denormalization reintroduces it."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of referential integrity enforcement through foreign keys increases risk of inconsistent data unless application-level validation compensates."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical queries that aggregate poverty metrics (headcount, gini, etc.) across countries and regions frequently require joining survey, country, and region tables. Denormalization avoids these expensive joins."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Demographic analysis involving population distribution, life expectancy, and urbanization trends often necessitates linking demography, population, and life_expectancy tables. Embedding this data improves query efficiency."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Employment and education indicators are typically queried alongside economic statistics. Consolidating employment, education, and economy tables into a single view reduces multi-table access overhead."
+      }
+    ]
+  }
+}
+
+```sql
+CREATE TABLE IF NOT EXISTS public.survey_analytics_denorm (
+    -- Primary key from survey table
+    id_survey serial NOT NULL PRIMARY KEY,
+
+    -- Survey attributes
+    country_code character varying,
+    welfare_type character varying,
+    survey_acronym character varying,
+    survey_comparability integer,
+    comparable_spell character varying,
+    poverty_line double precision,
+    headcount double precision,
+    poverty_gap double precision,
+    poverty_severity double precision,
+    gini double precision,
+    reporting_pop integer,
+    reporting_pce double precision,
+    distribution_type character varying,
+    spl double precision,
+    survey_year integer,
+    survey_coverage character varying,
+    reporting_level character varying,
+
+    -- Country attributes
+    country_name character varying,
+
+    -- Region attributes
+    region_code character varying,
+    region_name character varying,
+
+    -- Decile values (flattened as separate columns)
+    decile_1_value double precision,
+    decile_2_value double precision,
+    decile_3_value double precision,
+    decile_4_value double precision,
+    decile_5_value double precision,
+    decile_6_value double precision,
+    decile_7_value double precision,
+    decile_8_value double precision,
+    decile_9_value double precision,
+    decile_10_value double precision,
+
+    -- Demography attributes
+    demography_year integer,
+    pop_density double precision,
+    urban_pop double precision,
+    rural_pop double precision,
+    net_migration double precision,
+    death_rate double precision,
+    birth_rate double precision,
+
+    -- Population attributes (flattened for different age/gender combinations)
+    population_pop_ages character varying,
+    population_gender character varying,
+    population_number double precision,
+
+    -- Life expectancy attributes
+    life_expectancy_gender character varying,
+    life_expectancy_value double precision,
+
+    -- Employment attributes
+    employment_year integer,
+    child_emp double precision,
+    unemp double precision,
+    vulnerable_emp double precision,
+    part_time double precision,
+    employers double precision,
+    labor_force_total double precision,
+    labor_force_fem double precision,
+
+    -- Education attributes
+    education_year integer,
+    child_out_of_school double precision,
+    progression_to_sec double precision,
+    expenditure double precision,
+    preprim_enroll double precision,
+    prim_enrol double precision,
+    sec_enrol double precision,
+    terti_enrol double precision,
+
+    -- Economy attributes
+    economy_year integer,
+    gdp double precision,
+    inflation double precision,
+    tax_revenue double precision,
+
+    -- Health attributes
+    health_year integer,
+    hospital_beds double precision,
+    physicians double precision,
+    health_expenditure double precision
+);
+```

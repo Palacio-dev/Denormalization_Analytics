@@ -1,0 +1,423 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_09-56-40
+Model: gemini
+Prompt: RISEN
+Schema: HFC
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions the highly normalized transactional schema (3NF/Snowflake) into an analytical Star Schema. The original model suffered from excessive normalization, particularly in the taxonomy hierarchy (requiring up to 8 joins to reconstruct a full scientific classification) and environmental/geographical data. By collapsing these relationships into wide dimension tables (`dim_taxonomia`, `dim_ambiente_local`, `dim_herbario`, `dim_geografia`) and centralizing metrics and 1:1 relationships into a comprehensive `fact_tombos` table, we drastically reduce join overhead. Derived attributes were added to pre-compute frequent aggregations, and redundant attributes were strategically placed to optimize read-heavy analytical queries.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapsing Relations: Flattened the taxonomy hierarchy (`reinos`, `familias`, `sub_familias`, `generos`, `especies`, `sub_especies`, `variedades`, and `autores`) into a single dimension table `dim_taxonomia`."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapsing Relations: Merged environmental and local context (`locais_coleta`, `fase_sucessional`, `solos`, `relevos`, `vegetacoes`) into a single dimension `dim_ambiente_local`."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Collapsing Relations: Consolidated herbarium details by merging `herbarios`, `enderecos`, and `telefones` into `dim_herbario`."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Collapsing Relations: Merged 1:1 extensions and descriptive lookups (`tipos`, `colecoes_anexas`, `coletores_complementares`, `reflora`, `specieslink`) directly into the central `fact_tombos` table."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Vertical Partitioning: Kept operational logs and transactional history (`alteracoes`, `tombo_alteracoes_antigas`, `historico_acessos`) separate from the core analytical schema to prevent fact table bloat."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added Derived Attributes: Created `qtd_fotos` and `qtd_identificadores` in `fact_tombos` to pre-compute the count of photos and identifiers, avoiding frequent COUNT() and GROUP BY operations."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added Redundant Attributes: Prefixed and embedded `autores.nome` and `autores.observacao` into `dim_taxonomia` for each taxonomic level (e.g., `especie_autor_nome`, `variedade_autor_nome`) to eliminate the need for multiple joins to the `autores` table."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Attribute Removal: Removed audit attributes (`created_at`, `updated_at`) across all tables to streamline the schema strictly for analytical purposes, as permitted by the constraints."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage Footprint: Denormalizing the taxonomy and environment dimensions introduces data redundancy (e.g., repeating the kingdom and family names for every species). This trades storage space for significantly faster read performance."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies in Dimensions: If a taxonomic name or author changes, multiple rows in `dim_taxonomia` must be updated. This is an acceptable tradeoff in an OLAP environment where data is typically loaded in bulk and read heavily."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1",
+        "query": "SELECT t.reino_nome, t.familia_nome, t.genero_nome, COUNT(f.hcf) as total_specimens FROM fact_tombos f JOIN dim_taxonomia t ON f.taxonomia_id = t.id GROUP BY t.reino_nome, t.familia_nome, t.genero_nome ORDER BY total_specimens DESC;"
+      },
+      {
+        "decision_id": "D2",
+        "query": "SELECT a.vegetacao_nome, a.solo_nome, AVG(f.altitude) as avg_altitude FROM fact_tombos f JOIN dim_ambiente_local a ON f.ambiente_local_id = a.id WHERE a.vegetacao_nome IS NOT NULL GROUP BY a.vegetacao_nome, a.solo_nome;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- =======================================================================================
+-- DENORMALIZED ANALYTICAL SCHEMA (STAR SCHEMA)
+-- =======================================================================================
+
+-- 1. DIMENSION: TAXONOMY
+-- Collapses: reinos, familias, sub_familias, generos, especies, sub_especies, variedades, autores
+CREATE TABLE IF NOT EXISTS public.dim_taxonomia
+(
+    id bigserial NOT NULL,
+    reino_nome character varying(200) COLLATE pg_catalog."default",
+    familia_nome character varying(200) COLLATE pg_catalog."default",
+    sub_familia_nome character varying(300) COLLATE pg_catalog."default",
+    sub_familia_autor_nome character varying(200) COLLATE pg_catalog."default",
+    sub_familia_autor_observacao character varying(500) COLLATE pg_catalog."default",
+    genero_nome character varying(200) COLLATE pg_catalog."default",
+    especie_nome character varying(200) COLLATE pg_catalog."default",
+    especie_autor_nome character varying(200) COLLATE pg_catalog."default",
+    especie_autor_observacao character varying(500) COLLATE pg_catalog."default",
+    sub_especie_nome character varying(255) COLLATE pg_catalog."default",
+    sub_especie_autor_nome character varying(200) COLLATE pg_catalog."default",
+    sub_especie_autor_observacao character varying(500) COLLATE pg_catalog."default",
+    variedade_nome character varying(200) COLLATE pg_catalog."default",
+    variedade_autor_nome character varying(200) COLLATE pg_catalog."default",
+    variedade_autor_observacao character varying(500) COLLATE pg_catalog."default",
+    CONSTRAINT pk_dim_taxonomia PRIMARY KEY (id)
+);
+
+-- 2. DIMENSION: ENVIRONMENT & LOCAL
+-- Collapses: locais_coleta, fase_sucessional, solos, relevos, vegetacoes
+CREATE TABLE IF NOT EXISTS public.dim_ambiente_local
+(
+    id bigserial NOT NULL,
+    local_descricao text COLLATE pg_catalog."default",
+    local_cidade_id bigint,
+    fase_sucessional_numero bigint,
+    fase_sucessional_nome character varying(200) COLLATE pg_catalog."default",
+    solo_nome character varying(300) COLLATE pg_catalog."default",
+    relevo_nome character varying(300) COLLATE pg_catalog."default",
+    vegetacao_nome character varying(300) COLLATE pg_catalog."default",
+    CONSTRAINT pk_dim_ambiente_local PRIMARY KEY (id)
+);
+
+-- 3. DIMENSION: HERBARIUM
+-- Collapses: herbarios, enderecos, telefones
+CREATE TABLE IF NOT EXISTS public.dim_herbario
+(
+    id bigserial NOT NULL,
+    herbario_nome character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    herbario_sigla character varying(80) COLLATE pg_catalog."default" NOT NULL,
+    herbario_email character varying(200) COLLATE pg_catalog."default",
+    herbario_caminho_logotipo text COLLATE pg_catalog."default",
+    endereco_logradouro character varying(200) COLLATE pg_catalog."default",
+    endereco_numero character varying(10) COLLATE pg_catalog."default",
+    endereco_complemento text COLLATE pg_catalog."default",
+    endereco_cidade_id bigint,
+    telefones_lista text COLLATE pg_catalog."default", -- Aggregated phone numbers
+    CONSTRAINT pk_dim_herbario PRIMARY KEY (id)
+);
+
+-- 4. DIMENSION: USERS
+-- Collapses: usuarios, tipos_usuarios
+CREATE TABLE IF NOT EXISTS public.dim_usuario
+(
+    id bigserial NOT NULL,
+    usuario_nome character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    usuario_ra character varying(45) COLLATE pg_catalog."default",
+    usuario_email character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    usuario_senha character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    usuario_telefone character varying(45) COLLATE pg_catalog."default",
+    tipo_usuario_nome character varying(100) COLLATE pg_catalog."default",
+    herbario_id bigint NOT NULL,
+    token_troca_senha character varying(255) COLLATE pg_catalog."default",
+    token_troca_senha_expiracao timestamp with time zone,
+    CONSTRAINT pk_dim_usuario PRIMARY KEY (id)
+);
+
+-- 5. DIMENSION: GEOGRAPHY
+-- Collapses: estados, paises
+CREATE TABLE IF NOT EXISTS public.dim_geografia
+(
+    id bigserial NOT NULL,
+    estado_nome character varying(255) COLLATE pg_catalog."default" NOT NULL,
+    estado_sigla character(4) COLLATE pg_catalog."default",
+    pais_nome character varying(255) COLLATE pg_catalog."default" NOT NULL,
+    pais_sigla character(4) COLLATE pg_catalog."default",
+    CONSTRAINT pk_dim_geografia PRIMARY KEY (id)
+);
+
+-- 6. DIMENSION: COLLECTORS
+-- Direct mapping from coletores
+CREATE TABLE IF NOT EXISTS public.dim_coletor
+(
+    id bigserial NOT NULL,
+    coletor_nome character varying(255) COLLATE pg_catalog."default" NOT NULL,
+    coletor_email character varying(200) COLLATE pg_catalog."default",
+    CONSTRAINT pk_dim_coletor PRIMARY KEY (id)
+);
+
+-- 7. DIMENSION: CONFIGURATION
+-- Direct mapping from configuracao
+CREATE TABLE IF NOT EXISTS public.dim_configuracao
+(
+    id bigserial NOT NULL,
+    hora_inicio character varying(19) COLLATE pg_catalog."default" NOT NULL,
+    hora_fim character varying(19) COLLATE pg_catalog."default",
+    periodicidade configuracao_periodicidade,
+    data_proxima_atualizacao character varying(10) COLLATE pg_catalog."default",
+    nome_arquivo character varying(50) COLLATE pg_catalog."default",
+    servico configuracao_servico,
+    CONSTRAINT pk_dim_configuracao PRIMARY KEY (id)
+);
+
+-- 8. FACT: TOMBOS (CENTRAL FACT TABLE)
+-- Collapses: tombos, tipos, colecoes_anexas, coletores_complementares, reflora, specieslink
+CREATE TABLE IF NOT EXISTS public.fact_tombos
+(
+    hcf bigserial NOT NULL,
+    data_tombo timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    data_coleta_dia bigint,
+    data_coleta_mes bigint,
+    data_coleta_ano bigint,
+    observacao text COLLATE pg_catalog."default",
+    nomes_populares text COLLATE pg_catalog."default",
+    numero_coleta bigint,
+    latitude double precision,
+    longitude double precision,
+    altitude double precision,
+    data_identificacao_dia smallint,
+    data_identificacao_mes smallint,
+    data_identificacao_ano integer,
+    situacao tombos_situacao DEFAULT 'REGULAR'::tombos_situacao,
+    nome_cientifico text COLLATE pg_catalog."default",
+    taxon character varying(45) COLLATE pg_catalog."default",
+    rascunho boolean DEFAULT false,
+    unicata boolean,
+    descricao text COLLATE pg_catalog."default",
+    ativo boolean DEFAULT true,
+    cidade_id bigint,
+    
+    -- Collapsed from 'tipos'
+    tipo_tombo_nome character varying(250) COLLATE pg_catalog."default",
+    
+    -- Collapsed from 'colecoes_anexas'
+    colecao_anexa_tipo colecoes_anexas_tipo,
+    colecao_anexa_observacoes text COLLATE pg_catalog."default",
+    
+    -- Collapsed from 'coletores_complementares'
+    coletores_complementares_texto character varying(1000) COLLATE pg_catalog."default",
+    
+    -- Collapsed from 'reflora'
+    reflora_cod_barra character varying(12) COLLATE pg_catalog."default",
+    reflora_tombo_json text COLLATE pg_catalog."default",
+    reflora_ja_comparou boolean DEFAULT false,
+    reflora_ja_requisitou boolean DEFAULT false,
+    reflora_nro_requisicoes bigint DEFAULT 0,
+    
+    -- Collapsed from 'specieslink'
+    specieslink_cod_barra character varying(12) COLLATE pg_catalog."default",
+    specieslink_tombo_json text COLLATE pg_catalog."default",
+    specieslink_ja_comparou boolean DEFAULT false,
+    specieslink_ja_requisitou boolean DEFAULT false,
+    specieslink_nro_requisicoes bigint DEFAULT 0,
+    
+    -- Derived Attributes
+    qtd_fotos integer DEFAULT 0,
+    qtd_identificadores integer DEFAULT 0,
+    
+    -- Foreign Keys
+    taxonomia_id bigint,
+    ambiente_local_id bigint,
+    entidade_id bigint,
+    coletor_id bigint,
+    
+    CONSTRAINT pk_fact_tombos PRIMARY KEY (hcf)
+);
+
+-- 9. FACT: TOMBOS FOTOS
+-- Direct mapping from tombos_fotos
+CREATE TABLE IF NOT EXISTS public.fact_tombos_fotos
+(
+    id bigserial NOT NULL,
+    tombo_hcf bigint NOT NULL,
+    codigo_barra character varying(45) COLLATE pg_catalog."default" DEFAULT ''::character varying,
+    num_barra character varying(45) COLLATE pg_catalog."default" DEFAULT ''::character varying,
+    caminho_foto text COLLATE pg_catalog."default",
+    em_vivo boolean NOT NULL DEFAULT false,
+    sequencia bigint,
+    CONSTRAINT pk_fact_tombos_fotos PRIMARY KEY (id)
+);
+
+-- 10. FACT: TOMBOS IDENTIFICADORES
+-- Collapses: tombos_identificadores, identificadores
+CREATE TABLE IF NOT EXISTS public.fact_tombos_identificadores
+(
+    tombo_hcf bigint NOT NULL,
+    identificador_nome character varying(255) COLLATE pg_catalog."default" NOT NULL,
+    ordem smallint DEFAULT 1,
+    CONSTRAINT pk_fact_tombos_identificadores PRIMARY KEY (tombo_hcf, identificador_nome)
+);
+
+-- 11. FACT: REMESSAS
+-- Direct mapping from remessas
+CREATE TABLE IF NOT EXISTS public.fact_remessas
+(
+    id bigserial NOT NULL,
+    observacao text COLLATE pg_catalog."default",
+    data_envio timestamp with time zone,
+    entidade_destino_id bigint NOT NULL,
+    herbario_origem_id bigint NOT NULL,
+    CONSTRAINT pk_fact_remessas PRIMARY KEY (id)
+);
+
+-- 12. FACT: RETIRADAS
+-- Direct mapping from retirada_exsiccata_tombos
+CREATE TABLE IF NOT EXISTS public.fact_retiradas
+(
+    retirada_exsiccata_id bigint NOT NULL,
+    tombo_hcf bigint NOT NULL,
+    tipo retirada_exsiccata_tombos_tipo NOT NULL,
+    data_vencimento timestamp with time zone,
+    devolvido boolean DEFAULT false,
+    CONSTRAINT pk_fact_retiradas PRIMARY KEY (retirada_exsiccata_id, tombo_hcf)
+);
+
+-- 13. FACT: ALTERACOES (LOGS)
+-- Direct mapping from alteracoes
+CREATE TABLE IF NOT EXISTS public.fact_alteracoes
+(
+    id bigserial NOT NULL,
+    usuario_id bigint NOT NULL,
+    tombo_hcf bigint NOT NULL,
+    status alteracoes_status NOT NULL,
+    observacao text COLLATE pg_catalog."default",
+    tombo_json text COLLATE pg_catalog."default",
+    ativo boolean,
+    identificacao boolean,
+    CONSTRAINT pk_fact_alteracoes PRIMARY KEY (id)
+);
+
+-- 14. FACT: ALTERACOES ANTIGAS (LOGS)
+-- Direct mapping from tombo_alteracoes_antigas
+CREATE TABLE IF NOT EXISTS public.fact_alteracoes_antigas
+(
+    sequencia bigint NOT NULL,
+    tombo_hcf bigint NOT NULL,
+    data date,
+    descricao text COLLATE pg_catalog."default",
+    CONSTRAINT pk_fact_alteracoes_antigas PRIMARY KEY (sequencia, tombo_hcf)
+);
+
+-- 15. FACT: ACESSOS (LOGS)
+-- Direct mapping from historico_acessos
+CREATE TABLE IF NOT EXISTS public.fact_acessos
+(
+    id bigserial NOT NULL,
+    usuario_id bigint NOT NULL,
+    data_criacao timestamp with time zone NOT NULL,
+    CONSTRAINT pk_fact_acessos PRIMARY KEY (id)
+);
+
+-- =======================================================================================
+-- FOREIGN KEYS & INDEXES
+-- =======================================================================================
+
+-- fact_tombos
+ALTER TABLE IF EXISTS public.fact_tombos
+    ADD CONSTRAINT fk_fact_tombos_taxonomia FOREIGN KEY (taxonomia_id)
+    REFERENCES public.dim_taxonomia (id) MATCH SIMPLE ON UPDATE RESTRICT ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_fact_tombos_taxonomia ON public.fact_tombos(taxonomia_id);
+
+ALTER TABLE IF EXISTS public.fact_tombos
+    ADD CONSTRAINT fk_fact_tombos_ambiente FOREIGN KEY (ambiente_local_id)
+    REFERENCES public.dim_ambiente_local (id) MATCH SIMPLE ON UPDATE RESTRICT ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_fact_tombos_ambiente ON public.fact_tombos(ambiente_local_id);
+
+ALTER TABLE IF EXISTS public.fact_tombos
+    ADD CONSTRAINT fk_fact_tombos_entidade FOREIGN KEY (entidade_id)
+    REFERENCES public.dim_herbario (id) MATCH SIMPLE ON UPDATE RESTRICT ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_fact_tombos_entidade ON public.fact_tombos(entidade_id);
+
+ALTER TABLE IF EXISTS public.fact_tombos
+    ADD CONSTRAINT fk_fact_tombos_coletor FOREIGN KEY (coletor_id)
+    REFERENCES public.dim_coletor (id) MATCH SIMPLE ON UPDATE RESTRICT ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_fact_tombos_coletor ON public.fact_tombos(coletor_id);
+
+-- dim_usuario
+ALTER TABLE IF EXISTS public.dim_usuario
+    ADD CONSTRAINT fk_dim_usuario_herbario FOREIGN KEY (herbario_id)
+    REFERENCES public.dim_herbario (id) MATCH SIMPLE ON UPDATE RESTRICT ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_dim_usuario_herbario ON public.dim_usuario(herbario_id);
+
+-- fact_tombos_fotos
+ALTER TABLE IF EXISTS public.fact_tombos_fotos
+    ADD CONSTRAINT fk_fact_tombos_fotos_tombo FOREIGN KEY (tombo_hcf)
+    REFERENCES public.fact_tombos (hcf) MATCH SIMPLE ON UPDATE RESTRICT ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_fact_tombos_fotos_tombo ON public.fact_tombos_fotos(tombo_hcf);
+
+-- fact_tombos_identificadores
+ALTER TABLE IF EXISTS public.fact_tombos_identificadores
+    ADD CONSTRAINT fk_fact_tombos_identificadores_tombo FOREIGN KEY (tombo_hcf)
+    REFERENCES public.fact_tombos (hcf) MATCH SIMPLE ON UPDATE RESTRICT ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_fact_tombos_identificadores_tombo ON public.fact_tombos_identificadores(tombo_hcf);
+
+-- fact_remessas
+ALTER TABLE IF EXISTS public.fact_remessas
+    ADD CONSTRAINT fk_fact_remessas_destino FOREIGN KEY (entidade_destino_id)
+    REFERENCES public.dim_herbario (id) MATCH SIMPLE ON UPDATE RESTRICT ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_fact_remessas_destino ON public.fact_remessas(entidade_destino_id);
+
+ALTER TABLE IF EXISTS public.fact_remessas
+    ADD CONSTRAINT fk_fact_remessas_origem FOREIGN KEY (herbario_origem_id)
+    REFERENCES public.dim_herbario (id) MATCH SIMPLE ON UPDATE RESTRICT ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_fact_remessas_origem ON public.fact_remessas(herbario_origem_id);
+
+-- fact_retiradas
+ALTER TABLE IF EXISTS public.fact_retiradas
+    ADD CONSTRAINT fk_fact_retiradas_remessa FOREIGN KEY (retirada_exsiccata_id)
+    REFERENCES public.fact_remessas (id) MATCH SIMPLE ON UPDATE RESTRICT ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_fact_retiradas_remessa ON public.fact_retiradas(retirada_exsiccata_id);
+
+ALTER TABLE IF EXISTS public.fact_retiradas
+    ADD CONSTRAINT fk_fact_retiradas_tombo FOREIGN KEY (tombo_hcf)
+    REFERENCES public.fact_tombos (hcf) MATCH SIMPLE ON UPDATE RESTRICT ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_fact_retiradas_tombo ON public.fact_retiradas(tombo_hcf);
+
+-- fact_alteracoes
+ALTER TABLE IF EXISTS public.fact_alteracoes
+    ADD CONSTRAINT fk_fact_alteracoes_tombo FOREIGN KEY (tombo_hcf)
+    REFERENCES public.fact_tombos (hcf) MATCH SIMPLE ON UPDATE RESTRICT ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_fact_alteracoes_tombo ON public.fact_alteracoes(tombo_hcf);
+
+ALTER TABLE IF EXISTS public.fact_alteracoes
+    ADD CONSTRAINT fk_fact_alteracoes_usuario FOREIGN KEY (usuario_id)
+    REFERENCES public.dim_usuario (id) MATCH SIMPLE ON UPDATE RESTRICT ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_fact_alteracoes_usuario ON public.fact_alteracoes(usuario_id);
+
+-- fact_alteracoes_antigas
+ALTER TABLE IF EXISTS public.fact_alteracoes_antigas
+    ADD CONSTRAINT fk_fact_alteracoes_antigas_tombo FOREIGN KEY (tombo_hcf)
+    REFERENCES public.fact_tombos (hcf) MATCH SIMPLE ON UPDATE RESTRICT ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_fact_alteracoes_antigas_tombo ON public.fact_alteracoes_antigas(tombo_hcf);
+
+-- fact_acessos
+ALTER TABLE IF EXISTS public.fact_acessos
+    ADD CONSTRAINT fk_fact_acessos_usuario FOREIGN KEY (usuario_id)
+    REFERENCES public.dim_usuario (id) MATCH SIMPLE ON UPDATE RESTRICT ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_fact_acessos_usuario ON public.fact_acessos(usuario_id);
+
+```

@@ -1,0 +1,237 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_14-02-00
+Model: ollama_local
+Prompt: RISEN-few-shot
+Schema: TPC_H
+==================================================
+
+Based on the **RISEN FRAMEWORK**, here is the analysis and design for denormalizing the TPC-H schema to optimize read performance for analytical workloads.
+
+### Section 1: Denormalization Strategy Analysis
+
+**Summary**
+The denormalization strategy focuses on the `LINEITEM`, `ORDERS`, `CUSTOMER`, `PART`, `SUPPLIER`, `NATION`, and `REGION` tables. The primary bottleneck in this schema is the high cardinality of the `LINEITEM` table (often containing millions of rows) joined with multiple large tables (`ORDERS`, `CUSTOMER`, `PART`, `SUPPLIER`, `NATION`, `REGION`). To eliminate join overhead and improve cache efficiency, we will:
+1.  **Collapse Relations**: Merge `CUSTOMER`, `NATION`, and `REGION` into a single `CUSTOMER_HIERARCHY` table.
+2.  **Collapse Relations**: Merge `SUPPLIER`, `NATION`, and `REGION` into a single `SUPPLIER_HIERARCHY` table.
+3.  **Add Redundant Attributes**: Pre-calculate and store the `SUPPLIER_NAME` in the `LINEITEM` table to avoid joining `SUPPLIER` and `PART` during line item retrieval.
+4.  **Vertical Partitioning**: Split the `ORDERS` table into `ORDER_HEADER` (transaction details) and `ORDER_LINES` (line item references), while keeping `LINEITEM` attributes redundant where possible or referencing the collapsed hierarchy. *Correction*: Given the goal of minimizing joins, we will actually **denormalize the `LINEITEM` table** to include `CUSTOMER_NAME`, `SUPPLIER_NAME`, `PART_NAME`, `NATION_NAME`, and `REGION_NAME` directly, creating a "Fact-like" table for analytical queries.
+
+**Structural Decisions**
+*   **D1**: Create `CUSTOMER_HIERARCHY` table merging `CUSTOMER`, `NATION`, and `REGION`. This removes the need to join three tables to get customer location info.
+*   **D2**: Create `SUPPLIER_HIERARCHY` table merging `SUPPLIER`, `NATION`, and `REGION`. This removes the need to join three tables to get supplier location info.
+*   **D3**: Create a denormalized `LINEITEM_ANALYTICS` table. This table will contain all attributes from `LINEITEM`, plus redundant `CUSTOMER_NAME`, `SUPPLIER_NAME`, `PART_NAME`, `NATION_NAME`, `REGION_NAME`, `N_REGIONKEY`, and `S_NATIONKEY`. This effectively materializes the result of the most complex analytical query pattern.
+
+**Attribute-Level Changes**
+*   **A1**: Added `CUSTOMER_NAME`, `SUPPLIER_NAME`, `PART_NAME`, `NATION_NAME`, `REGION_NAME`, `N_REGIONKEY`, `S_NATIONKEY` to `LINEITEM_ANALYTICS`.
+*   **A2**: Added `C_MKTSEGMENT` to `CUSTOMER_HIERARCHY` to ensure no data loss.
+*   **A3**: Removed foreign key dependencies on `CUSTOMER`, `NATION`, `REGION`, `SUPPLIER`, `PART`, `LINEITEM` in the new `LINEITEM_ANALYTICS` table because the data is physically redundant.
+
+**Tradeoffs**
+*   **T1**: Write performance will decrease due to redundant data insertion.
+*   **T2**: Storage requirements will increase significantly (approx. 40-50% more data volume for the fact table).
+*   **T3**: Data integrity relies on the assumption that the source tables (`CUSTOMER`, `SUPPLIER`, etc.) are consistent; updates to `CUSTOMER` might not immediately reflect in `LINEITEM_ANALYTICS` unless a refresh process is implemented.
+
+### Section 2: Query Patterns
+
+**Query Pattern 1 (Inferred)**
+*   **Description**: "Get total revenue per region for parts manufactured by suppliers in a specific nation."
+*   **Motivation**: This requires joining `LINEITEM` -> `ORDERS` -> `CUSTOMER` -> `NATION` -> `REGION` AND `LINEITEM` -> `PART` -> `SUPPLIER` -> `NATION` -> `REGION`. With millions of rows, this multi-way join is expensive.
+*   **Denormalization Impact**: The `LINEITEM_ANALYTICS` table pre-computes the `REGION_NAME` and `NATION_NAME` (for both customer and supplier), allowing the query to be executed as a simple `GROUP BY` on the fact table.
+
+**Query Pattern 2 (Inferred)**
+*   **Description**: "List all customers in a region who ordered parts from a specific supplier."
+*   **Motivation**: Requires joining `CUSTOMER`, `NATION`, `REGION`, `ORDERS`, `LINEITEM`, `PART`, `SUPPLIER`, `NATION` (again), `REGION` (again).
+*   **Denormalization Impact**: The `CUSTOMER_HIERARCHY` and `SUPPLIER_HIERARCHY` tables reduce the join depth from 6+ to 2.
+
+---
+
+### Complete SQL DDL Creation Script
+
+```sql
+-- Denormalized Schema for TPC-H Analytical Workload
+-- Dialect: PostgreSQL (compatible with standard SQL)
+
+BEGIN;
+
+-- 1. Collapse Relations: CUSTOMER, NATION, REGION into CUSTOMER_HIERARCHY
+-- This table serves as the lookup for customer location and segment.
+CREATE TABLE IF NOT EXISTS CUSTOMER_HIERARCHY (
+    C_CUSTKEY     INTEGER NOT NULL,
+    C_NAME        VARCHAR(25) NOT NULL,
+    C_ADDRESS     VARCHAR(40) NOT NULL,
+    C_NATIONKEY   INTEGER NOT NULL,
+    C_PHONE       CHAR(15) NOT NULL,
+    C_ACCTBAL     DECIMAL(15,2) NOT NULL,
+    C_MKTSEGMENT  CHAR(10) NOT NULL,
+    C_COMMENT     VARCHAR(117) NOT NULL,
+    N_NAME        CHAR(25) NOT NULL,
+    N_REGIONKEY   INTEGER NOT NULL,
+    N_COMMENT     VARCHAR(152) NOT NULL,
+    R_NAME        CHAR(25) NOT NULL,
+    R_COMMENT     VARCHAR(152) NOT NULL,
+    CONSTRAINT CUST_HIER_PKEY PRIMARY KEY (C_CUSTKEY)
+);
+
+-- 2. Collapse Relations: SUPPLIER, NATION, REGION into SUPPLIER_HIERARCHY
+-- This table serves as the lookup for supplier location and nation.
+CREATE TABLE IF NOT EXISTS SUPPLIER_HIERARCHY (
+    S_SUPPKEY     INTEGER NOT NULL,
+    S_NAME        CHAR(25) NOT NULL,
+    S_ADDRESS     VARCHAR(40) NOT NULL,
+    S_NATIONKEY   INTEGER NOT NULL,
+    S_PHONE       CHAR(15) NOT NULL,
+    S_ACCTBAL     DECIMAL(15,2) NOT NULL,
+    S_COMMENT     VARCHAR(101) NOT NULL,
+    N_NAME        CHAR(25) NOT NULL,
+    N_REGIONKEY   INTEGER NOT NULL,
+    N_COMMENT     VARCHAR(152) NOT NULL,
+    R_NAME        CHAR(25) NOT NULL,
+    R_COMMENT     VARCHAR(152) NOT NULL,
+    CONSTRAINT SUP_HIER_PKEY PRIMARY KEY (S_SUPPKEY)
+);
+
+-- 3. Collapse Relations: PART, SUPPLIER, NATION, REGION into PART_HIERARCHY
+-- While PART is often a small table, in denormalized analytical models, 
+-- we often join it. However, to strictly follow the "reduce joins" rule 
+-- for the Fact table, we can keep PART separate but denormalize the 
+-- relationship between PART and SUPPLIER/NATION if needed. 
+-- For this specific schema, we will keep PART normalized as it is small, 
+-- but we will ensure LINEITEM_ANALYTICS has redundant PART_NAME.
+-- *Self-Correction based on strict denormalization goal*: 
+-- We will also create a PART_HIERARCHY to allow easy filtering by supplier/nation without joins if that pattern is heavy.
+-- However, the prompt asks to denormalize the physical model. 
+-- Let's create PART_HIERARCHY to cover the case where we need Part info + Supplier info without joining.
+CREATE TABLE IF NOT EXISTS PART_HIERARCHY (
+    P_PARTKEY     INTEGER NOT NULL,
+    P_NAME        VARCHAR(55) NOT NULL,
+    P_MFGR        CHAR(25) NOT NULL,
+    P_BRAND       CHAR(10) NOT NULL,
+    P_TYPE        VARCHAR(25) NOT NULL,
+    P_SIZE        INTEGER NOT NULL,
+    P_CONTAINER   CHAR(10) NOT NULL,
+    P_RETAILPRICE DECIMAL(15,2) NOT NULL,
+    P_COMMENT     VARCHAR(23) NOT NULL,
+    S_SUPPKEY     INTEGER NOT NULL,
+    S_NAME        CHAR(25) NOT NULL,
+    S_NATIONKEY   INTEGER NOT NULL,
+    S_PHONE       CHAR(15) NOT NULL,
+    S_ACCTBAL     DECIMAL(15,2) NOT NULL,
+    S_COMMENT     VARCHAR(101) NOT NULL,
+    N_NAME        CHAR(25) NOT NULL,
+    N_REGIONKEY   INTEGER NOT NULL,
+    N_COMMENT     VARCHAR(152) NOT NULL,
+    R_NAME        CHAR(25) NOT NULL,
+    R_COMMENT     VARCHAR(152) NOT NULL,
+    CONSTRAINT PART_HIER_PKEY PRIMARY KEY (P_PARTKEY)
+);
+
+-- 4. Create Denormalized Fact Table: LINEITEM_ANALYTICS
+-- This table contains all attributes from LINEITEM plus redundant 
+-- attributes from CUSTOMER, SUPPLIER, PART, NATION, REGION.
+CREATE TABLE IF NOT EXISTS LINEITEM_ANALYTICS (
+    L_ORDERKEY    INTEGER NOT NULL,
+    L_PARTKEY     INTEGER NOT NULL,
+    L_SUPPKEY     INTEGER NOT NULL,
+    L_LINENUMBER  INTEGER NOT NULL,
+    L_QUANTITY    DECIMAL(15,2) NOT NULL,
+    L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,
+    L_DISCOUNT    DECIMAL(15,2) NOT NULL,
+    L_TAX         DECIMAL(15,2) NOT NULL,
+    L_RETURNFLAG  CHAR(1) NOT NULL,
+    L_LINESTATUS  CHAR(1) NOT NULL,
+    L_SHIPDATE    DATE NOT NULL,
+    L_COMMITDATE  DATE NOT NULL,
+    L_RECEIPTDATE DATE NOT NULL,
+    L_SHIPINSTRUCT CHAR(25) NOT NULL,
+    L_SHIPMODE     CHAR(10) NOT NULL,
+    L_COMMENT      VARCHAR(44) NOT NULL,
+    -- Redundant Customer Attributes
+    C_CUSTKEY      INTEGER NOT NULL,
+    C_NAME         VARCHAR(25) NOT NULL,
+    C_ADDRESS      VARCHAR(40) NOT NULL,
+    C_PHONE        CHAR(15) NOT NULL,
+    C_ACCTBAL      DECIMAL(15,2) NOT NULL,
+    C_MKTSEGMENT   CHAR(10) NOT NULL,
+    C_COMMENT      VARCHAR(117) NOT NULL,
+    -- Redundant Supplier Attributes
+    S_SUPPKEY      INTEGER NOT NULL,
+    S_NAME         CHAR(25) NOT NULL,
+    S_ADDRESS      VARCHAR(40) NOT NULL,
+    S_PHONE        CHAR(15) NOT NULL,
+    S_ACCTBAL      DECIMAL(15,2) NOT NULL,
+    S_COMMENT      VARCHAR(101) NOT NULL,
+    -- Redundant Part Attributes (Part Name already in table, keeping full context)
+    P_PARTKEY      INTEGER NOT NULL,
+    P_NAME         VARCHAR(55) NOT NULL,
+    P_MFGR         CHAR(25) NOT NULL,
+    P_BRAND        CHAR(10) NOT NULL,
+    P_TYPE         VARCHAR(25) NOT NULL,
+    P_SIZE         INTEGER NOT NULL,
+    P_CONTAINER    CHAR(10) NOT NULL,
+    P_RETAILPRICE  DECIMAL(15,2) NOT NULL,
+    P_COMMENT      VARCHAR(23) NOT NULL,
+    -- Redundant Nation Attributes (Customer Nation)
+    N_NAME         CHAR(25) NOT NULL,
+    N_REGIONKEY    INTEGER NOT NULL,
+    N_COMMENT      VARCHAR(152) NOT NULL,
+    -- Redundant Nation Attributes (Supplier Nation)
+    -- Note: We need to store Supplier Nation info here too. 
+    -- Since we are flattening, we add a duplicate NATION block or a specific column set.
+    -- Let's use a specific set of columns for Supplier Nation to avoid ambiguity 
+    -- or just duplicate the structure if the query pattern is strictly flat.
+    -- To be safe and clear, we will add explicit columns for Supplier Nation info 
+    -- if they differ from Customer Nation info (which they do).
+    S_NATION_NAME  CHAR(25) NOT NULL,
+    S_NATION_REGIONKEY INTEGER NOT NULL,
+    S_NATION_COMMENT VARCHAR(152) NOT NULL,
+    -- Redundant Region Attributes (Customer Region)
+    R_NAME         CHAR(25) NOT NULL,
+    R_COMMENT      VARCHAR(152) NOT NULL,
+    -- Redundant Region Attributes (Supplier Region)
+    S_R_NAME       CHAR(25) NOT NULL,
+    S_R_COMMENT    VARCHAR(152) NOT NULL,
+    -- Primary Key to ensure uniqueness per order line
+    CONSTRAINT LINEITEM_ANALYTICS_PKEY PRIMARY KEY (L_ORDERKEY, L_LINENUMBER)
+);
+
+-- 5. Create Denormalized Order Header Table
+-- We keep ORDERS mostly normalized but add redundant CUST_NAME and C_NATION_NAME 
+-- if the pattern "Order details by customer name" is heavy.
+-- Actually, to maximize denormalization, we will add C_NAME and C_NATION_NAME here.
+CREATE TABLE IF NOT EXISTS ORDER_HEADER (
+    O_ORDERKEY     INTEGER NOT NULL,
+    O_CUSTKEY      INTEGER NOT NULL,
+    O_ORDERSTATUS  CHAR(1) NOT NULL,
+    O_TOTALPRICE   DECIMAL(15,2) NOT NULL,
+    O_ORDERDATE    DATE NOT NULL,
+    O_ORDERPRIORITY CHAR(15) NOT NULL,
+    O_CLERK        CHAR(15) NOT NULL,
+    O_SHIPPRIORITY INTEGER NOT NULL,
+    O_COMMENT      VARCHAR(79) NOT NULL,
+    -- Redundant Customer Name
+    C_NAME         VARCHAR(25) NOT NULL,
+    -- Redundant Customer Nation Name
+    N_NAME         CHAR(25) NOT NULL,
+    CONSTRAINT ORDER_HIER_PKEY PRIMARY KEY (O_ORDERKEY)
+);
+
+-- 6. Create Denormalized Region Table (if used standalone or merged)
+-- Usually regions are referenced via Nation. If we have heavy region queries, 
+-- we might flatten Region too, but it's often small. 
+-- We will keep REGION normalized but ensure it's consistent.
+
+-- 7. Create Indexes for Performance (PostgreSQL specific)
+CREATE INDEX IF NOT EXISTS IDX_CUSTOMER_HIER_CUSTKEY ON CUSTOMER_HIERARCHY (C_CUSTKEY);
+CREATE INDEX IF NOT EXISTS IDX_SUPPLIER_HIER_SUPPKEY ON SUPPLIER_HIERARCHY (S_SUPPKEY);
+CREATE INDEX IF NOT EXISTS IDX_PART_HIER_PARTKEY ON PART_HIERARCHY (P_PARTKEY);
+CREATE INDEX IF NOT EXISTS IDX_LINEITEM_ANALYTICS_L_ORDERKEY ON LINEITEM_ANALYTICS (L_ORDERKEY);
+CREATE INDEX IF NOT EXISTS IDX_LINEITEM_ANALYTICS_L_PARTKEY ON LINEITEM_ANALYTICS (L_PARTKEY);
+CREATE INDEX IF NOT EXISTS IDX_LINEITEM_ANALYTICS_L_SUPPKEY ON LINEITEM_ANALYTICS (L_SUPPKEY);
+CREATE INDEX IF NOT EXISTS IDX_ORDER_HEADER_O_ORDERKEY ON ORDER_HEADER (O_ORDERKEY);
+
+-- 8. Populate Data (Simulated logic comment)
+-- In a real scenario, this would be a massive INSERT ... SELECT operation 
+-- joining the original tables. Here we just define the structure.
+
+END;
+```

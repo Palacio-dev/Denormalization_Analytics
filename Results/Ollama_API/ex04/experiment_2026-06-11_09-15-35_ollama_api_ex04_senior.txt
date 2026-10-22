@@ -1,0 +1,205 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-15-35
+Model: ollama_api
+Prompt: senior
+Schema: ex04
+==================================================
+
+{
+  "section_1": {
+    "summary": "The normalized OLTP schema is transformed into a star schema with denormalized dimensions and a central fact table. The country, region, and survey tables are merged into a Survey Dimension table. The demography, employment, education, economy, health, and population tables are consolidated into a Country-Year Fact table. The life_expectancy table is absorbed into the demography dimension. The decile table is kept as a separate table with a foreign key to the Survey Dimension.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge country and region tables into a Country Dimension table to reduce joins and improve query performance for region-based analysis."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge survey table with the Country Dimension to create a Survey Dimension table, as survey data is often analyzed in the context of country and region."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Consolidate demography, employment, education, economy, and health tables into a single Country-Year Fact table, as they all share the same granularity (country and year)."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Absorb life_expectancy data into the demography table, as they share the same foreign key (id_demography) and are both demographic indicators."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Keep the decile table separate but link it to the Survey Dimension, as decile data is survey-specific and has a one-to-many relationship with surveys."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Remove the population table and integrate its data into the Country-Year Fact table as separate columns for male and female population numbers, grouped by age ranges."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added region_name to the Survey Dimension table by joining with the region table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added male_pop and female_pop columns to the Country-Year Fact table, derived from the population table by summing the number column grouped by gender."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added life_expectancy_male and life_expectancy_female columns to the Country-Year Fact table, derived from the life_expectancy table by selecting the value column based on gender."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Removed the id_population and id_life_expectancy columns as they are no longer needed in the denormalized schema."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Renamed the 'number' column in the population table to 'pop_count' for clarity before integrating it into the Country-Year Fact table."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data redundancy is introduced by duplicating country_code and region information in the Survey Dimension table, but this reduces the need for joins and improves query performance."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Storage space increases due to denormalization, but query performance improves significantly by reducing the number of joins required for common analytical queries."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Update and maintenance operations become more complex, as changes to country or region information need to be propagated to multiple tables, but this is acceptable for an analytical workload where reads far outweigh writes."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analysts often want to compare demographic, economic, and social indicators across regions and countries over time. A star schema with a central fact table and denormalized dimensions supports this by allowing direct filtering on region and country attributes without joins."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Survey-specific analysis, such as comparing poverty metrics or Gini coefficients across different surveys, is facilitated by a dedicated Survey Dimension table that includes all relevant survey attributes."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Time-series analysis of country-level indicators is common. Consolidating all annual indicators into a single Country-Year Fact table allows for efficient aggregation and trend analysis across multiple metrics."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Gender-based analysis of population and life expectancy is supported by having separate columns for male and female values in the fact table, avoiding the need for row-level filtering."
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Income distribution analysis using decile data requires linking decile values to specific surveys. Keeping the decile table separate but linked to the Survey Dimension allows for detailed distribution analysis without cluttering the main fact table."
+      }
+    ]
+  }
+}
+
+-- SQL DDL for Denormalized Schema
+
+-- Survey Dimension Table
+CREATE TABLE IF NOT EXISTS public.survey_dimension
+(
+    id_survey serial NOT NULL,
+    country_code character varying NOT NULL,
+    country_name character varying,
+    region_code character varying NOT NULL,
+    region_name character varying NOT NULL,
+    welfare_type character varying,
+    survey_acronym character varying,
+    survey_comparability integer,
+    comparable_spell character varying,
+    poverty_line double precision,
+    headcount double precision,
+    poverty_gap double precision,
+    poverty_severity double precision,
+    gini double precision,
+    reporting_pop integer,
+    reporting_pce double precision,
+    distribution_type character varying,
+    spl double precision,
+    survey_year integer,
+    survey_coverage character varying,
+    reporting_level character varying,
+    PRIMARY KEY (id_survey)
+);
+
+-- Country-Year Fact Table
+CREATE TABLE IF NOT EXISTS public.country_year_fact
+(
+    id_fact serial NOT NULL,
+    year integer,
+    country_code character varying NOT NULL,
+    -- Demography
+    pop_density double precision,
+    urban_pop double precision,
+    rural_pop double precision,
+    net_migration double precision,
+    death_rate double precision,
+    birth_rate double precision,
+    -- Employment
+    child_emp double precision,
+    unemp double precision,
+    vulnerable_emp double precision,
+    part_time double precision,
+    employers double precision,
+    labor_force_total double precision,
+    labor_force_fem double precision,
+    -- Education
+    child_out_of_school double precision,
+    progression_to_sec double precision,
+    expenditure_edu double precision,
+    preprim_enroll double precision,
+    prim_enrol double precision,
+    sec_enrol double precision,
+    terti_enrol double precision,
+    -- Economy
+    gdp double precision,
+    inflation double precision,
+    tax_revenue double precision,
+    -- Health
+    hospital_beds double precision,
+    physicians double precision,
+    expenditure_health double precision,
+    -- Population (derived)
+    male_pop double precision,
+    female_pop double precision,
+    -- Life Expectancy (derived)
+    life_expectancy_male double precision,
+    life_expectancy_female double precision,
+    PRIMARY KEY (id_fact)
+);
+
+-- Decile Table (remains separate)
+CREATE TABLE IF NOT EXISTS public.decile
+(
+    id_decile serial NOT NULL,
+    value double precision,
+    name character varying,
+    id_survey integer NOT NULL,
+    PRIMARY KEY (id_decile),
+    FOREIGN KEY (id_survey) REFERENCES public.survey_dimension (id_survey)
+);
+
+-- Indexes for performance
+CREATE INDEX idx_survey_dimension_country_code ON public.survey_dimension (country_code);
+CREATE INDEX idx_survey_dimension_region_code ON public.survey_dimension (region_code);
+CREATE INDEX idx_survey_dimension_survey_year ON public.survey_dimension (survey_year);
+CREATE INDEX idx_country_year_fact_country_code ON public.country_year_fact (country_code);
+CREATE INDEX idx_country_year_fact_year ON public.country_year_fact (year);
+CREATE INDEX idx_decile_id_survey ON public.decile (id_survey);
+
+-- Partitioning recommendations
+-- The country_year_fact table can be partitioned by year to improve query performance for time-series analysis.
+-- Example: PARTITION BY RANGE (year)
+
+-- Clustering recommendations
+-- Cluster the survey_dimension table by region_code and country_code for efficient regional and country-based queries.
+-- Cluster the country_year_fact table by country_code and year for efficient time-series analysis.

@@ -1,0 +1,253 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_09-57-59
+Model: gemini
+Prompt: junior
+Schema: HFC
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The original physical schema is highly normalized (approaching 3NF), which is excellent for transactional 
+    integrity (OLTP) but inefficient for analytical queries (OLAP) due to the excessive number of JOINs required to reconstruct 
+    a single specimen record (Tombo). The denormalization strategy focuses on creating a 'One Big Table' (OBT) or Star Schema approach. We will consolidate taxonomy, geography, environment, and collection details into a central `analytics_tombos` table. Additionally, we will create denormalized tables for tracking specimen alterations (`analytics_alteracoes`) and shipments (`analytics_remessas`) to support operational reporting.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge Taxonomy dimensions (`reinos`, `familias`, `sub_familias`, `generos`, `especies`, `sub_especies`, 
+        `variedades`, `autores`) directly into the central specimen table (`analytics_tombos`)."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge Environmental and Location dimensions (`solos`, `relevos`, `vegetacoes`, `locais_coleta`, 
+        `fase_sucessional`) into `analytics_tombos`."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Flatten 1:N relationships for Identifiers (`tombos_identificadores`, `identificadores`) and 
+        Complementary Collectors (`coletores_complementares`) into aggregated text arrays/strings within `analytics_tombos`."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Aggregate 1:N photo records (`tombos_fotos`) into summary metrics (e.g., `quantidade_fotos`, `tem_foto_vivo`) inside `analytics_tombos`."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Denormalize the `alteracoes` table by joining it with `usuarios`, `tipos_usuarios`, and 
+        `herbarios` to create `analytics_alteracoes` for fast audit and activity reporting."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Denormalize `remessas` by joining with `herbarios` and aggregating `retirada_exsiccata_tombos` 
+        to create `analytics_remessas` to track loans and shipments easily."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Derived attribute: Combine `data_coleta_dia`, `data_coleta_mes`, and `data_coleta_ano` from `tombos` 
+        into a single `data_coleta` DATE column for easier time-series analysis."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Derived attribute: Combine `data_identificacao_dia`, `data_identificacao_mes`, and 
+        `data_identificacao_ano` into a single `data_identificacao` DATE column."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added attribute: `quantidade_fotos` (INT) and `tem_foto_vivo` (BOOLEAN) to avoid joining the photos table just to check for media presence."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Removed attributes: Surrogate keys for dimensions (e.g., `especie_id`, `solo_id`, `relevo_id`) 
+        are removed in the analytics tables, replaced entirely by their descriptive string equivalents 
+        (e.g., `especie_nome`, `solo_nome`)."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Storage vs. Compute: The denormalized tables will consume significantly more disk space due to repeated string values (e.g., repeating 'Plantae' or 'Fabaceae' thousands of times), but will drastically reduce CPU and memory usage during read queries by eliminating joins."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "ETL Complexity vs. Query Simplicity: If a taxonomic name or herbarium name changes in the source system, the ETL pipeline must update thousands of rows in the denormalized tables, whereas the normalized schema only required a single row update. However, BI tools and analysts will have a much easier time querying the data."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Biodiversity Distribution: 'Show me the count of specimens grouped by Family, Genus, and Species collected in a specific geographic area over the last 10 years.' (Requires Taxonomy, Geography, and Dates)."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Collector Productivity: 'List all specimens collected by a specific person (either as primary or complementary collector) along with the identifiers who verified them.'"
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "System Audit: 'Count the number of specimen alterations performed by each user role (e.g., Admin vs. Student) per herbarium in the last month.'"
+      },
+      {
+        "decision_id": "D6",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Loan Tracking: 'Show all shipments (remessas) sent by our herbarium, including the total number of specimens sent and how many have been returned (devolvido).'"
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL for Denormalized Schema
+
+```sql
+-- ==============================================================================
+-- DENORMALIZED SCHEMA FOR ANALYTICS AND REPORTING
+-- ==============================================================================
+
+-- 1. ANALYTICS_TOMBOS (One Big Table for Specimens)
+-- This table centralizes the 'tombos' (specimens) and flattens taxonomy, 
+-- geography, environment, collectors, and identifiers into a single row per specimen.
+CREATE TABLE IF NOT EXISTS public.analytics_tombos
+(
+    -- Primary Identifier
+    hcf bigint NOT NULL,
+    
+    -- Dates
+    data_tombo timestamp with time zone,
+    data_coleta date, -- Derived from dia/mes/ano
+    data_identificacao date, -- Derived from dia/mes/ano
+    
+    -- Specimen Core Data
+    numero_coleta bigint,
+    observacao text,
+    situacao character varying(50), -- Cast from enum tombos_situacao
+    ativo boolean,
+    rascunho boolean,
+    unicata boolean,
+    tipo_nome character varying(250), -- From tipos.nome
+    
+    -- Taxonomy (Flattened)
+    reino_nome character varying(200),
+    familia_nome character varying(200),
+    sub_familia_nome character varying(300),
+    genero_nome character varying(200),
+    especie_nome character varying(200),
+    sub_especie_nome character varying(255),
+    variedade_nome character varying(200),
+    nome_cientifico text,
+    nomes_populares text,
+    taxon character varying(45),
+    autor_especie_nome character varying(200), -- From autores.nome
+    
+    -- Geography & Environment (Flattened)
+    latitude double precision,
+    longitude double precision,
+    altitude double precision,
+    cidade_id bigint, -- Kept as ID assuming a separate geographic master table, or can be enriched via ETL
+    local_coleta_descricao text,
+    fase_sucessional_nome character varying(200),
+    solo_nome character varying(300),
+    relevo_nome character varying(300),
+    vegetacao_nome character varying(300),
+    
+    -- People (Flattened / Aggregated)
+    coletor_principal_nome character varying(255),
+    coletores_complementares text, -- Aggregated from coletores_complementares
+    identificadores_nomes text, -- Aggregated comma-separated string from tombos_identificadores -> identificadores
+    
+    -- Institution
+    herbario_nome character varying(200),
+    herbario_sigla character varying(80),
+    
+    -- Media & Attachments (Aggregated)
+    quantidade_fotos integer DEFAULT 0, -- Count from tombos_fotos
+    tem_foto_vivo boolean DEFAULT false, -- Boolean OR from tombos_fotos.em_vivo
+    colecao_anexa_tipo character varying(50), -- Cast from enum
+    colecao_anexa_observacoes text,
+    
+    -- External Integrations
+    reflora_ja_comparou boolean DEFAULT false,
+    specieslink_ja_comparou boolean DEFAULT false,
+    
+    -- Metadata
+    created_at timestamp with time zone,
+    updated_at timestamp with time zone,
+    
+    CONSTRAINT pk_analytics_tombos PRIMARY KEY (hcf)
+);
+
+-- Indexes for common analytical filters
+CREATE INDEX idx_analytics_tombos_tax_familia ON public.analytics_tombos(familia_nome);
+CREATE INDEX idx_analytics_tombos_tax_especie ON public.analytics_tombos(especie_nome);
+CREATE INDEX idx_analytics_tombos_data_coleta ON public.analytics_tombos(data_coleta);
+CREATE INDEX idx_analytics_tombos_herbario ON public.analytics_tombos(herbario_sigla);
+
+
+-- 2. ANALYTICS_ALTERACOES (Audit and Activity Fact Table)
+-- Flattens the tracking of changes made to specimens, including user and herbarium details.
+CREATE TABLE IF NOT EXISTS public.analytics_alteracoes
+(
+    id bigint NOT NULL,
+    tombo_hcf bigint NOT NULL,
+    
+    -- User Details (Flattened)
+    usuario_nome character varying(200),
+    usuario_email character varying(200),
+    tipo_usuario character varying(100), -- From tipos_usuarios.tipo
+    
+    -- Herbarium Details
+    herbario_nome character varying(200),
+    herbario_sigla character varying(80),
+    
+    -- Alteration Details
+    status character varying(50), -- Cast from enum alteracoes_status
+    observacao text,
+    tombo_json_snapshot text, -- State of the record at the time
+    
+    -- Timestamps
+    created_at timestamp with time zone,
+    
+    CONSTRAINT pk_analytics_alteracoes PRIMARY KEY (id)
+);
+
+CREATE INDEX idx_analytics_alteracoes_tombo ON public.analytics_alteracoes(tombo_hcf);
+CREATE INDEX idx_analytics_alteracoes_created ON public.analytics_alteracoes(created_at);
+CREATE INDEX idx_analytics_alteracoes_usuario ON public.analytics_alteracoes(usuario_nome);
+
+
+-- 3. ANALYTICS_REMESSAS (Shipments and Loans Fact Table)
+-- Flattens shipments and aggregates the items (exsiccatas) inside them.
+CREATE TABLE IF NOT EXISTS public.analytics_remessas
+(
+    id bigint NOT NULL,
+    
+    -- Origin and Destination
+    herbario_origem_nome character varying(200),
+    herbario_origem_sigla character varying(80),
+    entidade_destino_nome character varying(200), -- Assuming joined with herbarios for destination
+    
+    -- Shipment Details
+    data_envio timestamp with time zone,
+    observacao text,
+    
+    -- Aggregated Metrics from retirada_exsiccata_tombos
+    total_exsicatas_enviadas integer DEFAULT 0,
+    total_exsicatas_devolvidas integer DEFAULT 0,
+    total_exsicatas_pendentes integer DEFAULT 0, -- (enviadas - devolvidas)
+    data_vencimento_proxima timestamp with time zone, -- MIN(data_vencimento) for pending items
+    
+    -- Metadata
+    created_at timestamp with time zone,
+    updated_at timestamp with time zone,
+    
+    CONSTRAINT pk_analytics_remessas PRIMARY KEY (id)
+);
+
+CREATE INDEX idx_analytics_remessas_data_envio ON public.analytics_remessas(data_envio);
+CREATE INDEX idx_analytics_remessas_origem ON public.analytics_remessas(herbario_origem_sigla);
+```

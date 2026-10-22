@@ -1,0 +1,169 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-04_01-05-09
+Model: ollama_local
+Prompt: OBT
+Schema: ex04
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy employs the 'One-Big-Table' model to transform the provided relational schema into a single wide table. This approach eliminates all Foreign Keys and joins, replacing them with direct attribute duplication. The new schema serves as a materialized fact table optimized for high-volume analytical reads (e.g., country-year aggregates, demographic breakdowns), at the cost of increased write complexity and storage redundancy.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidation of all 11 source tables (`country`, `region`, `survey`, `decile`, `demography`, `employment`, `education`, `economy`, `population`, `life_expectancy`, `health`) into a single physical table named `country_indicators_facts`."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Removal of all Foreign Key constraints. The relationships (e.g., `survey.country_code` -> `country.country_code`, `demography.id_demography` -> `demography.id_demography`) are resolved by carrying all relevant identifiers and attributes within the same row."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Creation of a composite Primary Key `(country_code, survey_year, dimension_type)` to uniquely identify rows across different indicator dimensions (Demography, Employment, etc.) for a specific country and year, replacing the serial auto-increment IDs used in the original schema."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Expansion of attribute set: Every column from `country`, `region`, `survey`, `demography`, `employment`, `education`, `economy`, `population`, `life_expectancy`, `health`, and `decile` is now a column in the new table. Columns with identical names across tables (e.g., `year`, `country_code`, `value`) are prefixed with their source dimension name (e.g., `dim_demography_year`, `dim_demography_country_code`, `val_demography_value`) to ensure semantic clarity and prevent ambiguity."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Derived Attribute Addition: A column `dimension_name` is added to categorize each row (e.g., 'DEMOGRAPHY', 'EMPLOYMENT', 'HEALTH') without requiring a separate dimension table."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Data Type Preservation: All original data types (VARCHAR, INTEGER, DOUBLE PRECISION) are preserved exactly as per the input schema, ensuring no loss of precision or information."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Write Performance vs. Read Performance. While read queries become instant (no joins), the write path becomes significantly slower and more complex due to the need to insert multiple rows per logical entity or manage a massive single row, and storage requirements increase due to duplicated data."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Schema Evolution vs. Flexibility. The new schema is rigid; adding a new indicator requires adding a new column to the existing table, whereas the original normalized model allowed adding a new table easily."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical aggregation: 'Calculate total population, average Gini coefficient, and total health expenditure for all countries in 2020 grouped by region.'"
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Cross-dimensional analysis: 'Compare the urbanization rate (demography) against the education progression (education) and poverty gap (survey) for developing nations over the last 10 years.'"
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Report generation: 'Generate a comprehensive dashboard report listing Country Name, Year, Population Density, GDP, Inflation, and Hospital Beds per country.'"
+      }
+    ]
+  }
+}
+
+-- ================================================================
+-- DENORMALIZED SCHEMA: COUNTRY_INDICATORS_FACTS
+-- Strategy: ONE-BIG-TABLE MODEL
+-- Purpose: Optimize read performance for analytical queries by eliminating joins.
+-- Note: All Foreign Keys from the original schema are removed.
+--       Primary Key is (country_code, survey_year, dimension_type).
+-- ================================================================
+
+CREATE TABLE IF NOT EXISTS public.country_indicators_facts (
+    -- Composite Primary Key to uniquely identify records
+    country_code character varying NOT NULL,
+    survey_year integer NOT NULL,
+    dimension_type character varying NOT NULL, -- 'COUNTRY', 'REGION', 'SURVEY', 'DEMOGRAPHY', 'EMPLOYMENT', 'EDUCATION', 'ECONOMY', 'POPULATION', 'LIFE_EXPECTANCY', 'HEALTH', 'DECILE'
+    
+    -- --- COUNTRY DIMENSION ATTRIBUTES ---
+    country_name character varying,
+    region_code character varying,
+    region_name character varying,
+    
+    -- --- SURVEY DIMENSION ATTRIBUTES ---
+    id_survey integer,
+    welfare_type character varying,
+    survey_acronym character varying,
+    survey_comparability integer,
+    comparable_spell character varying,
+    poverty_line double precision,
+    headcount double precision,
+    poverty_gap double precision,
+    poverty_severity double precision,
+    gini double precision,
+    reporting_pop integer,
+    reporting_pce double precision,
+    distribution_type character varying,
+    spl double precision,
+    survey_coverage character varying,
+    reporting_level character varying,
+    
+    -- --- DEMOGRAPHY DIMENSION ATTRIBUTES ---
+    id_demography integer,
+    pop_density double precision,
+    urban_pop double precision,
+    rural_pop double precision,
+    net_migration double precision,
+    death_rate double precision,
+    birth_rate double precision,
+    
+    -- --- POPULATION DIMENSION ATTRIBUTES ---
+    pop_ages character varying,
+    gender character varying,
+    number double precision,
+    
+    -- --- EMPLOYMENT DIMENSION ATTRIBUTES ---
+    id_employment integer,
+    child_emp double precision,
+    unemp double precision,
+    vulnerable_emp double precision,
+    part_time double precision,
+    employers double precision,
+    labor_force_total double precision,
+    labor_force_fem double precision,
+    
+    -- --- EDUCATION DIMENSION ATTRIBUTES ---
+    id_education integer,
+    child_out_of_school double precision,
+    progression_to_sec double precision,
+    expenditure double precision,
+    preprim_enroll double precision,
+    prim_enrol double precision,
+    sec_enrol double precision,
+    terti_enrol double precision,
+    
+    -- --- ECONOMY DIMENSION ATTRIBUTES ---
+    id_economy integer,
+    gdp double precision,
+    inflation double precision,
+    tax_revenue double precision,
+    
+    -- --- LIFE EXPECTANCY DIMENSION ATTRIBUTES ---
+    id_life_expectancy integer,
+    value double precision,
+    
+    -- --- HEALTH DIMENSION ATTRIBUTES ---
+    id_health integer,
+    hospital_beds double precision,
+    physicians double precision,
+    health_expenditure double precision,
+    
+    -- --- DECILE DIMENSION ATTRIBUTES ---
+    id_decile integer,
+    decile_value double precision,
+    decile_name character varying
+    
+    -- Note: No Foreign Keys are defined.
+);
+
+-- Indexes for optimized read performance on the denormalized table
+CREATE INDEX IF NOT EXISTS idx_country_indicators_year_dim ON public.country_indicators_facts(survey_year, dimension_type);
+CREATE INDEX IF NOT EXISTS idx_country_indicators_country ON public.country_indicators_facts(country_code);
+CREATE INDEX IF NOT EXISTS idx_country_indicators_region ON public.country_indicators_facts(region_code);

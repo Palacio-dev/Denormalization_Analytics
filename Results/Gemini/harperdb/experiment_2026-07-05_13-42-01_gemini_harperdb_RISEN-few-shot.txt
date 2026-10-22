@@ -1,0 +1,58 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-42-01
+Model: gemini
+Prompt: RISEN-few-shot
+Schema: harperdb
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on 'Collapsing Relations' to eliminate the join overhead associated with the many-to-many relationship between users and entitlements. Since the 'users' table only contains an ID and the 'user_entitlements' table acts purely as a junction, we can flatten the entire model into a single denormalized table. This allows analytical and heavy read queries to retrieve full user entitlement profiles via a single table scan.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapse the 'users', 'user_entitlements', and 'entitlements' tables into a single denormalized table named 'user_entitlements_denorm'. This materializes the many-to-many joins into a single flat structure."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "All non-key attributes from the 'entitlements' table (activeDate, inactiveDate, useLimit, useCount, featureType, packageType, activeFlag) were added directly to the new denormalized table alongside user_id and entitlement_id."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage and Update Anomalies: Entitlement details are now duplicated for every user assigned to that entitlement. If an entitlement's core configuration (e.g., packageType) changes, the update must be applied to multiple rows instead of a single row in a normalized dimension table."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1",
+        "query": "SELECT user_id, featureType, packageType, useCount, useLimit FROM user_entitlements_denorm WHERE user_id = ? AND activeFlag = 1 AND CURRENT_DATE BETWEEN activeDate AND inactiveDate;"
+      },
+      {
+        "decision_id": "D1",
+        "query": "SELECT packageType, COUNT(DISTINCT user_id) as active_users FROM user_entitlements_denorm WHERE activeFlag = 1 GROUP BY packageType;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+CREATE TABLE user_entitlements_denorm (
+    user_id INT,
+    entitlement_id INT,
+    activeDate DATE,
+    inactiveDate DATE,
+    useLimit INT,
+    useCount INT,
+    featureType VARCHAR(4),
+    packageType VARCHAR(4),
+    activeFlag INT
+);
+```

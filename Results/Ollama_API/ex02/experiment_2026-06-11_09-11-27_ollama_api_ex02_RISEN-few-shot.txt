@@ -1,0 +1,100 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-11-27
+Model: ollama_api
+Prompt: RISEN-few-shot
+Schema: ex02
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on collapsing relations and adding redundant attributes to reduce JOIN operations for common analytical queries. Key decisions include merging the cleanup event data with its related entities (location, waste collection, organizer, region) into a single fact-like table, and consolidating conservation unit data with its categorical dimensions (biome, management category, administrative sphere, region) into a unified dimensional table. This approach eliminates frequent JOINs while preserving all original data semantics.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapse the cleanup event related tables (mutirao_de_limpeza, local_de_coleta, coleta_de_lixo, instituicao_organizadora, regiao) into a single denormalized table 'evento_limpeza_denormalizado' to eliminate multiple JOINs for event analysis."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapse the conservation unit table (unidade_de_conservacao) with its dimension tables (bioma, categoria_manejo, esfera_administrativa, regiao) into a single denormalized table 'unidade_conservacao_denormalizado' to avoid JOINs for conservation unit reporting."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant attributes from related tables to 'evento_limpeza_denormalizado': local name, organizer name/type, municipality name/state."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added redundant attributes from dimension tables to 'unidade_conservacao_denormalizado': biome name, management category details, administrative sphere type, municipality name/state."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved read performance for analytical queries at the cost of increased storage and potential data redundancy. Updates to dimension data (e.g., organizer name) now require updates in multiple places."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified query structure and reduced JOIN complexity, but increased row size and potential for data inconsistency if not properly maintained through application logic or triggers."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Frequent analytical queries about cleanup events requiring JOINs across mutirao_de_limpeza, local_de_coleta, coleta_de_lixo, instituicao_organizadora, and regiao tables to analyze waste collection by location, organizer, or region."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Frequent reporting queries on conservation units requiring JOINs with bioma, categoria_manejo, esfera_administrativa, and regiao to analyze protected areas by biome, management type, or administrative level."
+      }
+    ]
+  }
+}
+
+```sql
+CREATE TABLE IF NOT EXISTS public.evento_limpeza_denormalizado
+(
+    id_mutirao integer NOT NULL,
+    data_do_ocorrido date NOT NULL,
+    horario_de_inicio time without time zone NOT NULL,
+    numero_aproximado_de_participantes integer,
+    duracao_total time without time zone NOT NULL,
+    local_nome text COLLATE pg_catalog."default" NOT NULL,
+    plastico integer,
+    borracha integer,
+    madeira integer,
+    produtos_texteis integer,
+    papel integer,
+    metal integer,
+    vidro integer,
+    materiais_de_pesca integer,
+    outros_residuos integer,
+    instituicao_organizadora_nome text COLLATE pg_catalog."default" NOT NULL,
+    instituicao_organizadora_carater text COLLATE pg_catalog."default" NOT NULL,
+    municipio_nome text COLLATE pg_catalog."default" NOT NULL,
+    estado text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT evento_limpeza_denormalizado_pkey PRIMARY KEY (id_mutirao)
+);
+
+CREATE TABLE IF NOT EXISTS public.unidade_conservacao_denormalizado
+(
+    id_uc integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    ano_de_criacao integer,
+    area_soma_biomas double precision,
+    area_soma_biomas_continentais double precision,
+    area_marinha double precision,
+    bioma_nome text COLLATE pg_catalog."default" NOT NULL,
+    municipio_nome text COLLATE pg_catalog."default" NOT NULL,
+    estado text COLLATE pg_catalog."default" NOT NULL,
+    categoria_manejo text COLLATE pg_catalog."default" NOT NULL,
+    categoria_iucn text COLLATE pg_catalog."default" NOT NULL,
+    plano text COLLATE pg_catalog."default" NOT NULL,
+    esfera_administrativa_tipo text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT unidade_conservacao_denormalizado_pkey PRIMARY KEY (id_uc)
+);
+```

@@ -1,0 +1,186 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_15-47-46
+Model: ollama_local
+Prompt: RISEN-few-shot
+Schema: employees
+==================================================
+
+```json
+{
+    "section_1": {
+        "summary": "The denormalization strategy focuses on the 'employees' and 'department' domain, which is a classic Many-to-Many relationship scenario. The primary bottleneck is the need to join `employees`, `department`, `department_employee`, and `department_manager` to get a complete picture of an employee's departmental history. The strategy employs 'Collapsing Relations' to merge `department_employee` and `department_manager` into a single `department_relationships` table, and 'Adding Redundant Attributes' to include department names directly in the relationship table to eliminate the need for joining back to the `department` table.",
+        "structural_decisions": [
+            {
+                "decision_id": "D1",
+                "description": "Merge `department_employee` and `department_manager` into a unified `department_relationships` table. This table will hold `employee_id`, `department_id`, `from_date`, `to_date`, and `role_type` (to distinguish between manager and employee roles)."
+            },
+            {
+                "decision_id": "D2",
+                "description": "Create a new `department` table that contains `id`, `dept_name`, and `role_type`. This effectively flattures the schema so that `department_relationships` no longer needs to join with `department` to get the name."
+            },
+            {
+                "decision_id": "D3",
+                "description": "Keep `employee` as a standalone table but add `dept_name` as a redundant attribute if the query pattern involves frequent employee-level department lookups without joins."
+            }
+        ],
+        "attribute_level_changes": [
+            {
+                "decision_id": "A1",
+                "description": "Added `role_type` (ENUM: 'EMPLOYEE', 'MANAGER') to the `department_relationships` table to semantically differentiate the two previously separate tables."
+            },
+            {
+                "decision_id": "A2",
+                "description": "Moved `dept_name` from the `department` table to the `department_relationships` table (as `dept_name_for_role`) to avoid JOINs."
+            },
+            {
+                "decision_id": "A3",
+                "description": "Moved `dept_name` from the `department` table to the `employee` table (as `current_dept_name`) to avoid JOINs for simple employee queries."
+            }
+        ],
+        "tradeoffs": [
+            {
+                "tradeoff_id": "T1",
+                "description": "Data Redundancy: Storing `dept_name` multiple times increases storage requirements and introduces update anomalies if the department name changes but is not propagated to all relationship records (though we will use triggers to handle this)."
+            },
+            {
+                "tradeoff_id": "T2",
+                "description": "Write Complexity: The application logic must now handle the `role_type` distinction to know which `dept_name` value to update, or rely on application-side logic to populate the redundant columns."
+            }
+        ]
+    },
+    "section_2": {
+        "query_patterns": [
+            {
+                "decision_id": "D1",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Get all employees who are managers in a specific department, along with the department name and tenure dates."
+            },
+            {
+                "decision_id": "D1",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "List all employees in a specific department, regardless of whether they are managers or regular employees, with their department name."
+            },
+            {
+                "decision_id": "D2",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Retrieve an employee's details and their current department name without performing a JOIN operation."
+            }
+        ]
+    }
+}
+```
+
+```sql
+-- Drop existing tables to ensure clean state
+DROP TABLE IF EXISTS employees.department;
+DROP TABLE IF EXISTS employees.department_employee;
+DROP TABLE IF EXISTS employees.department_manager;
+DROP TABLE IF EXISTS employees.employee;
+DROP TABLE IF EXISTS employees.salary;
+DROP TABLE IF EXISTS employees.title;
+
+-- 1. Create the unified Department Relationships table
+-- Combines department_employee and department_manager into one table with a role discriminator.
+CREATE TABLE IF NOT EXISTS employees.department_relationships
+(
+    employee_id bigint NOT NULL,
+    department_id character(4) COLLATE pg_catalog."default" NOT NULL,
+    from_date date NOT NULL,
+    to_date date,
+    role_type character varying(10) COLLATE pg_catalog."default" NOT NULL, -- 'EMPLOYEE' or 'MANAGER'
+    CONSTRAINT idx_16982_primary PRIMARY KEY (employee_id, department_id, from_date)
+);
+
+-- 2. Create the Denormalized Department table
+-- Contains ID and Name. The Name is redundant in the relationships table to avoid JOINs.
+CREATE TABLE IF NOT EXISTS employees.department
+(
+    id character(4) COLLATE pg_catalog."default" NOT NULL,
+    dept_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT idx_16979_primary PRIMARY KEY (id)
+);
+
+-- 3. Create the Denormalized Employee table
+-- Contains ID, Name, Birth Date, Gender, Hire Date. 
+-- We add dept_name as a redundant attribute to avoid JOINs for simple employee queries.
+CREATE TABLE IF NOT EXISTS employees.employee
+(
+    id bigint NOT NULL DEFAULT nextval('employees.id_employee_seq'::regclass),
+    birth_date date NOT NULL,
+    first_name character varying(14) COLLATE pg_catalog."default" NOT NULL,
+    last_name character varying(16) COLLATE pg_catalog."default" NOT NULL,
+    gender employees.employee_gender NOT NULL,
+    hire_date date NOT NULL,
+    dept_name character varying(40) COLLATE pg_catalog."default", -- Redundant attribute for performance
+    CONSTRAINT idx_16988_primary PRIMARY KEY (id)
+);
+
+-- 4. Create Salary table (Minimal changes, mostly normalized but kept for completeness)
+CREATE TABLE IF NOT EXISTS employees.salary
+(
+    employee_id bigint NOT NULL,
+    amount bigint NOT NULL,
+    from_date date NOT NULL,
+    to_date date NOT NULL,
+    CONSTRAINT idx_16991_primary PRIMARY KEY (employee_id, from_date)
+);
+
+-- 5. Create Title table (Minimal changes, mostly normalized but kept for completeness)
+CREATE TABLE IF NOT EXISTS employees.title
+(
+    employee_id bigint NOT NULL,
+    title character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    from_date date NOT NULL,
+    to_date date,
+    CONSTRAINT idx_16994_primary PRIMARY KEY (employee_id, title, from_date)
+);
+
+-- Create Indexes for the new denormalized schema
+CREATE INDEX IF NOT EXISTS idx_16982_dept_no ON employees.department_relationships(department_id);
+CREATE INDEX IF NOT EXISTS idx_16982_emp_no ON employees.department_relationships(employee_id);
+CREATE INDEX IF NOT EXISTS idx_16988_dept_name ON employees.employee(dept_name);
+
+-- Add Foreign Keys and Constraints
+ALTER TABLE IF EXISTS employees.department_relationships
+    ADD CONSTRAINT dept_rel_ibfk_1 FOREIGN KEY (employee_id)
+    REFERENCES employees.employee (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE CASCADE;
+
+ALTER TABLE IF EXISTS employees.department_relationships
+    ADD CONSTRAINT dept_rel_ibfk_2 FOREIGN KEY (department_id)
+    REFERENCES employees.department (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE CASCADE;
+
+ALTER TABLE IF EXISTS employees.salary
+    ADD CONSTRAINT salaries_ibfk_1 FOREIGN KEY (employee_id)
+    REFERENCES employees.employee (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE CASCADE;
+
+ALTER TABLE IF EXISTS employees.title
+    ADD CONSTRAINT titles_ibfk_1 FOREIGN KEY (employee_id)
+    REFERENCES employees.employee (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE CASCADE;
+
+-- Trigger to maintain consistency of redundant dept_name in employee table
+-- This ensures that when a department is updated, the employee table is also updated.
+CREATE OR REPLACE FUNCTION update_employee_dept_name()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF OLD.id IS NOT NULL AND NEW.id IS NOT NULL THEN
+        UPDATE employees.employee
+        SET dept_name = NEW.dept_name
+        WHERE id = NEW.id;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_update_employee_dept_name
+    AFTER UPDATE ON employees.department
+    FOR EACH ROW
+    EXECUTE FUNCTION update_employee_dept_name();
+```

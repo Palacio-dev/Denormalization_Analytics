@@ -1,0 +1,141 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_10-44-38
+Model: gemini
+Prompt: OBT
+Schema: TPC_H
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy adopts a ONE-BIG-TABLE (OBT) model centered around the lowest grain of the schema: the LINEITEM table. By joining all dimension tables (ORDERS, CUSTOMER, PART, SUPPLIER, PARTSUPP, NATION, and REGION) into a single flat table, we completely eliminate the need for complex, multi-table JOIN operations during heavy analytical reads. Foreign keys are dropped as relationships are now implicitly resolved within each row.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge ORDERS, CUSTOMER, PART, SUPPLIER, and PARTSUPP directly into the LINEITEM grain to form a single wide table."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Duplicate the NATION and REGION entities to represent both Customer and Supplier geographies within the same flat record, ensuring no data loss for either relationship path."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Remove all Foreign Key constraints and their underlying columns (e.g., O_CUSTKEY, C_NATIONKEY, S_NATIONKEY, L_PARTKEY, L_SUPPKEY) since the descriptive attributes they point to are now embedded directly in the table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Rename NATION attributes (N_NAME, N_COMMENT) to C_NATION_NAME / C_NATION_COMMENT for the Customer path, and S_NATION_NAME / S_NATION_COMMENT for the Supplier path to prevent column name collisions."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Rename REGION attributes (R_NAME, R_COMMENT) to C_REGION_NAME / C_REGION_COMMENT for the Customer path, and S_REGION_NAME / S_REGION_COMMENT for the Supplier path."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Retain L_ORDERKEY and L_LINENUMBER to serve as the composite Primary Key of the new ONE-BIG-TABLE, ensuring each row remains uniquely identifiable."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Significantly increased storage footprint (data redundancy) due to repeating dimension attributes (like Customer Address or Part Name) for every single line item."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "High risk of update anomalies and slower write performance; updating a single dimension attribute (e.g., a Supplier's phone number) now requires updating millions of line item records."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Heavy analytical aggregations (e.g., total revenue and discounts grouped by customer nation and part category) that previously required joining up to 7 tables."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Time-series reporting on shipping and order dates filtered by supplier region and customer market segment, which traditionally caused massive hash join bottlenecks."
+      }
+    ]
+  }
+}
+```
+
+```sql
+CREATE TABLE LINEITEM_OBT ( 
+    -- Primary Key (Preserved to uniquely identify the grain of the One-Big-Table)
+    L_ORDERKEY       INTEGER NOT NULL,
+    L_LINENUMBER     INTEGER NOT NULL,
+
+    -- LINEITEM Attributes
+    L_QUANTITY       DECIMAL(15,2) NOT NULL,
+    L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,
+    L_DISCOUNT       DECIMAL(15,2) NOT NULL,
+    L_TAX            DECIMAL(15,2) NOT NULL,
+    L_RETURNFLAG     CHAR(1) NOT NULL,
+    L_LINESTATUS     CHAR(1) NOT NULL,
+    L_SHIPDATE       DATE NOT NULL,
+    L_COMMITDATE     DATE NOT NULL,
+    L_RECEIPTDATE    DATE NOT NULL,
+    L_SHIPINSTRUCT   CHAR(25) NOT NULL,
+    L_SHIPMODE       CHAR(10) NOT NULL,
+    L_COMMENT        VARCHAR(44) NOT NULL,
+
+    -- ORDERS Attributes
+    O_ORDERSTATUS    CHAR(1) NOT NULL,
+    O_TOTALPRICE     DECIMAL(15,2) NOT NULL,
+    O_ORDERDATE      DATE NOT NULL,
+    O_ORDERPRIORITY  CHAR(15) NOT NULL,  
+    O_CLERK          CHAR(15) NOT NULL, 
+    O_SHIPPRIORITY   INTEGER NOT NULL,
+    O_COMMENT        VARCHAR(79) NOT NULL,
+
+    -- CUSTOMER Attributes
+    C_NAME           VARCHAR(25) NOT NULL,
+    C_ADDRESS        VARCHAR(40) NOT NULL,
+    C_PHONE          CHAR(15) NOT NULL,
+    C_ACCTBAL        DECIMAL(15,2) NOT NULL,
+    C_MKTSEGMENT     CHAR(10) NOT NULL,
+    C_COMMENT        VARCHAR(117) NOT NULL,
+
+    -- CUSTOMER NATION & REGION Attributes
+    C_NATION_NAME    CHAR(25) NOT NULL,
+    C_NATION_COMMENT VARCHAR(152),
+    C_REGION_NAME    CHAR(25) NOT NULL,
+    C_REGION_COMMENT VARCHAR(152),
+
+    -- PART Attributes
+    P_NAME           VARCHAR(55) NOT NULL,
+    P_MFGR           CHAR(25) NOT NULL,
+    P_BRAND          CHAR(10) NOT NULL,
+    P_TYPE           VARCHAR(25) NOT NULL,
+    P_SIZE           INTEGER NOT NULL,
+    P_CONTAINER      CHAR(10) NOT NULL,
+    P_RETAILPRICE    DECIMAL(15,2) NOT NULL,
+    P_COMMENT        VARCHAR(23) NOT NULL,
+
+    -- SUPPLIER Attributes
+    S_NAME           CHAR(25) NOT NULL,
+    S_ADDRESS        VARCHAR(40) NOT NULL,
+    S_PHONE          CHAR(15) NOT NULL,
+    S_ACCTBAL        DECIMAL(15,2) NOT NULL,
+    S_COMMENT        VARCHAR(101) NOT NULL,
+
+    -- SUPPLIER NATION & REGION Attributes
+    S_NATION_NAME    CHAR(25) NOT NULL,
+    S_NATION_COMMENT VARCHAR(152),
+    S_REGION_NAME    CHAR(25) NOT NULL,
+    S_REGION_COMMENT VARCHAR(152),
+
+    -- PARTSUPP Attributes
+    PS_AVAILQTY      INTEGER NOT NULL,
+    PS_SUPPLYCOST    DECIMAL(15,2) NOT NULL,
+    PS_COMMENT       VARCHAR(199) NOT NULL,
+
+    PRIMARY KEY (L_ORDERKEY, L_LINENUMBER)
+);
+```

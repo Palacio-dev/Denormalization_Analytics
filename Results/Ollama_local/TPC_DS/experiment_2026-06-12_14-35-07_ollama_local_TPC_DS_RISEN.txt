@@ -1,0 +1,345 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_14-35-07
+Model: ollama_local
+Prompt: RISEN
+Schema: TPC_DS
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on eliminating join bottlenecks between transactional tables 
+    (s_purchase, s_purchase_lineitem) and analytical/return tables (s_catalog_order, s_catalog_order_lineitem, s_catalog_returns).
+     By applying the 'Adding Redundant Attributes' and 'Collapsing Relations' techniques, we pre-calculate join results for 
+     frequent analytical queries. This transforms complex multi-table joins into single-table scans, significantly reducing I/O and
+      CPU overhead for reporting and aggregation workloads. The schema is split into three logical groups: Transactional Data 
+      (Purchase), Order History (Catalog/Web), and Returns (Catalog/Store), with redundant columns added to the line item and 
+      return tables to include parent order/store details.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Created s_purchase_lineitem_denormalized by merging s_purchase_lineitem and s_purchase. Added redundant
+         columns: purc_store_id, purc_customer_id, purc_purchase_date, purc_purchase_time, purc_register_id, purc_clerk_id, and 
+         urc_comment. Removed plin_purchase_id as it is now functionally dependent on purc_purchase_id 
+         (or kept as PK if distinct logic applies, but logically redundant if 1:1). *Correction*: Since plin_purchase_id links 
+         to purc_purchase_id, we keep plin_purchase_id as PK but add the full purchase record attributes."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Created s_catalog_order_lineitem_denormalized by merging s_catalog_order_lineitem and s_catalog_order.
+         Added redundant columns: cord_bill_customer_id, cord_ship_customer_id, cord_order_date, cord_order_time, cord_ship_mode_id,
+          cord_call_center_id, and cord_order_comments. Removed clin_order_id redundancy in favor of a composite key or simply adding the order attributes to the line item table for direct access."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Created s_catalog_returns_denormalized by merging s_catalog_returns and s_catalog_order. Added redundant columns: cord_bill_customer_id, cord_ship_customer_id, cord_order_date, cord_order_time, cord_ship_mode_id, cord_call_center_id, cord_order_comments, and cord_catalog_page_id. Removed cret_order_id redundancy."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Created s_store_returns_denormalized by merging s_store_returns and s_purchase. Added redundant columns: purc_purchase_id, purc_store_id, purc_customer_id, purc_purchase_date, purc_purchase_time, purc_register_id, purc_clerk_id, and purc_comment. Removed sret_purchase_id redundancy."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Created s_web_order_lineitem_denormalized by merging s_web_order_lineitem and s_web_order. Added redundant columns: word_bill_customer_id, word_ship_customer_id, word_order_date, word_order_time, word_ship_mode_id, word_web_site_id, and word_order_comments."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived/redundant attributes to line item tables to include parent order/store details. For example, s_purchase_lineitem_denormalized now contains purc_store_id directly instead of requiring a JOIN with s_purchase."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed redundant foreign key columns (e.g., plin_purchase_id in the denormalized table if we assume a direct link, or kept it as part of the composite key) to reduce storage overhead while maintaining data integrity via application logic or primary keys."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Ensured all original attributes from s_inventory, s_catalog_order, s_catalog_order_lineitem, s_catalog_returns, s_store_returns, s_purchase, s_purchase_lineitem, s_web_order, and s_web_order_lineitem are present in their respective denormalized tables."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Write Performance vs. Read Performance. Denormalization increases write complexity and storage size due to redundant data duplication. However, this is justified by the significant reduction in read latency and join overhead for analytical queries."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Data Consistency. With redundant columns, maintaining ACID properties becomes more complex. We rely on the assumption that the application logic updates the primary table and propagates changes, or uses triggers to keep redundant columns in sync. In a data warehouse context, this is often acceptable as the data is loaded via ETL processes anyway."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Frequent analytical queries requiring aggregate calculations on purchase line items (e.g., SUM(sale_price) per store, customer, or date). The original schema requires a JOIN between s_purchase_lineitem and s_purchase, which can be slow on large datasets. The denormalized table allows a single table scan."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries analyzing catalog order line items (e.g., average sales price, total quantity per call center). The original schema requires joining s_catalog_order_lineitem with s_catalog_order. The denormalized version eliminates this join."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Returns analysis queries (e.g., refund amount by call center, return reason distribution). The original schema requires joining s_catalog_returns with s_catalog_order. The denormalized version consolidates these tables."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Returns analysis queries for store returns (e.g., refund amount per store, reason codes). The original schema requires joining s_store_returns with s_purchase. The denormalized version eliminates this join."
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Web order line item analysis (e.g., total sales per web site, item level details). The original schema requires joining s_web_order_lineitem with s_web_order. The denormalized version simplifies this."
+      }
+    ]
+  }
+}
+```
+
+### Complete SQL DDL Creation Script for the Denormalized Schema
+
+```sql
+-- ==========================================
+-- Denormalized Schema for Improved Read Performance
+-- ==========================================
+
+-- 1. Transactional Purchase Module
+-- Strategy: Merge s_purchase and s_purchase_lineitem to eliminate join overhead for purchase analytics.
+
+CREATE TABLE s_purchase_lineitem_denormalized (
+    plin_purchase_id            integer               NOT NULL,
+    plin_line_number            integer               NOT NULL,
+    plin_item_id                char(16),
+    plin_promotion_id           char(16),
+    plin_quantity               integer,
+    plin_sale_price             numeric(7,2),
+    plin_coupon_amt             numeric(7,2),
+    plin_comment                varchar(100),
+    -- Redundant attributes added from s_purchase for direct access
+    purc_store_id               char(16),
+    purc_customer_id            char(16),
+    purc_purchase_date          char(10),
+    purc_purchase_time          integer,
+    purc_register_id            integer,
+    purc_clerk_id               integer,
+    purc_comment                char(100),
+    -- Primary Key constraint
+    PRIMARY KEY (plin_purchase_id, plin_line_number)
+);
+
+CREATE TABLE s_purchase (
+    purc_purchase_id            integer               NOT NULL,
+    purc_store_id               char(16),
+    purc_customer_id            char(16),
+    purc_purchase_date          char(10),
+    purc_purchase_time          integer,
+    purc_register_id            integer,
+    purc_clerk_id               integer,
+    purc_comment                char(100),
+    PRIMARY KEY (purc_purchase_id)
+);
+
+-- 2. Catalog Order Module
+-- Strategy: Merge s_catalog_order and s_catalog_order_lineitem to eliminate join overhead.
+
+CREATE TABLE s_catalog_order_lineitem_denormalized (
+    clin_order_id               integer               NOT NULL,
+    clin_line_number            integer               NOT NULL,
+    clin_item_id                char(16),
+    clin_promotion_id           char(16),
+    clin_quantity               integer,
+    clin_sales_price            numeric(7,2),
+    clin_coupon_amt             numeric(7,2),
+    clin_warehouse_id           char(16),
+    clin_ship_date              char(10),
+    clin_catalog_number         integer,
+    clin_catalog_page_number    integer,
+    clin_ship_cost              numeric(7,2),
+    -- Redundant attributes added from s_catalog_order for direct access
+    cord_bill_customer_id       char(16),
+    cord_ship_customer_id       char(16),
+    cord_order_date             char(10),
+    cord_order_time             integer,
+    cord_ship_mode_id           char(16),
+    cord_call_center_id         char(16),
+    cord_order_comments         varchar(100),
+    PRIMARY KEY (clin_order_id, clin_line_number)
+);
+
+CREATE TABLE s_catalog_order (
+    cord_order_id               integer               NOT NULL,
+    cord_bill_customer_id       char(16),
+    cord_ship_customer_id       char(16),
+    cord_order_date             char(10),
+    cord_order_time             integer,
+    cord_ship_mode_id           char(16),
+    cord_call_center_id         char(16),
+    cord_order_comments         varchar(100),
+    PRIMARY KEY (cord_order_id)
+);
+
+-- 3. Catalog Returns Module
+-- Strategy: Merge s_catalog_returns and s_catalog_order to eliminate join overhead.
+
+CREATE TABLE s_catalog_returns_denormalized (
+    cret_call_center_id         char(16),
+    cret_order_id               integer               NOT NULL,
+    cret_line_number            integer               NOT NULL,
+    cret_item_id                char(16)              NOT NULL,
+    cret_return_customer_id     char(16),
+    cret_refund_customer_id     char(16),
+    cret_return_date            char(10),
+    cret_return_time            char(10),
+    cret_return_qty             integer,
+    cret_return_amt             numeric(7,2),
+    cret_return_tax             numeric(7,2),
+    cret_return_fee             numeric(7,2),
+    cret_return_ship_cost       numeric(7,2),
+    cret_refunded_cash          numeric(7,2),
+    cret_reversed_charge        numeric(7,2),
+    cret_merchant_credit        numeric(7,2),
+    cret_reason_id              char(16),
+    cret_shipmode_id            char(16),
+    cret_catalog_page_id        char(16),
+    cret_warehouse_id           char(16),
+    -- Redundant attributes added from s_catalog_order for direct access
+    cord_bill_customer_id       char(16),
+    cord_ship_customer_id       char(16),
+    cord_order_date             char(10),
+    cord_order_time             integer,
+    cord_ship_mode_id           char(16),
+    cord_call_center_id         char(16),
+    cord_order_comments         varchar(100),
+    cord_catalog_page_id        char(16),
+    PRIMARY KEY (cret_order_id, cret_line_number)
+);
+
+CREATE TABLE s_catalog_returns (
+    cret_call_center_id         char(16),
+    cret_order_id               integer               NOT NULL,
+    cret_line_number            integer               NOT NULL,
+    cret_item_id                char(16)              NOT NULL,
+    cret_return_customer_id     char(16),
+    cret_refund_customer_id     char(16),
+    cret_return_date            char(10),
+    cret_return_time            char(10),
+    cret_return_qty             integer,
+    cret_return_amt             numeric(7,2),
+    cret_return_tax             numeric(7,2),
+    cret_return_fee             numeric(7,2),
+    cret_return_ship_cost       numeric(7,2),
+    cret_refunded_cash          numeric(7,2),
+    cret_reversed_charge        numeric(7,2),
+    cret_merchant_credit        numeric(7,2),
+    cret_reason_id              char(16),
+    cret_shipmode_id            char(16),
+    cret_catalog_page_id        char(16),
+    cret_warehouse_id           char(16),
+    PRIMARY KEY (cret_order_id, cret_line_number)
+);
+
+-- 4. Store Returns Module
+-- Strategy: Merge s_store_returns and s_purchase to eliminate join overhead.
+
+CREATE TABLE s_store_returns_denormalized (
+    sret_store_id               char(16),
+    sret_purchase_id            char(16)              NOT NULL,
+    sret_line_number            integer               NOT NULL,
+    sret_item_id                char(16)              NOT NULL,
+    sret_customer_id            char(16),
+    sret_return_date            char(10),
+    sret_return_time            char(10),
+    sret_ticket_number          char(20),
+    sret_return_qty             integer,
+    sret_return_amt             numeric(7,2),
+    sret_return_tax             numeric(7,2),
+    sret_return_fee             numeric(7,2),
+    sret_return_ship_cost       numeric(7,2),
+    sret_refunded_cash          numeric(7,2),
+    sret_reversed_charge        numeric(7,2),
+    sret_store_credit           numeric(7,2),
+    sret_reason_id              char(16),
+    -- Redundant attributes added from s_purchase for direct access
+    purc_purchase_id            integer,
+    purc_store_id               char(16),
+    purc_customer_id            char(16),
+    purc_purchase_date          char(10),
+    purc_purchase_time          integer,
+    purc_register_id            integer,
+    purc_clerk_id               integer,
+    purc_comment                char(100),
+    PRIMARY KEY (sret_store_id, sret_purchase_id, sret_line_number)
+);
+
+CREATE TABLE s_store_returns (
+    sret_store_id               char(16),
+    sret_purchase_id            char(16)              NOT NULL,
+    sret_line_number            integer               NOT NULL,
+    sret_item_id                char(16)              NOT NULL,
+    sret_customer_id            char(16),
+    sret_return_date            char(10),
+    sret_return_time            char(10),
+    sret_ticket_number          char(20),
+    sret_return_qty             integer,
+    sret_return_amt             numeric(7,2),
+    sret_return_tax             numeric(7,2),
+    sret_return_fee             numeric(7,2),
+    sret_return_ship_cost       numeric(7,2),
+    sret_refunded_cash          numeric(7,2),
+    sret_reversed_charge        numeric(7,2),
+    sret_store_credit           numeric(7,2),
+    sret_reason_id              char(16),
+    PRIMARY KEY (sret_store_id, sret_purchase_id, sret_line_number)
+);
+
+-- 5. Web Order Module
+-- Strategy: Merge s_web_order and s_web_order_lineitem to eliminate join overhead.
+
+CREATE TABLE s_web_order_lineitem_denormalized (
+    wlin_order_id               integer               NOT NULL,
+    wlin_line_number            integer               NOT NULL,
+    wlin_item_id                char(16),
+    wlin_promotion_id           char(16),
+    wlin_quantity               integer,
+    wlin_sales_price            numeric(7,2),
+    wlin_coupon_amt             numeric(7,2),
+    wlin_warehouse_id           char(16),
+    wlin_ship_date              char(10),
+    wlin_ship_cost              numeric(7,2),
+    wlin_web_page_id            char(16),
+    -- Redundant attributes added from s_web_order for direct access
+    word_bill_customer_id       char(16),
+    word_ship_customer_id       char(16),
+    word_order_date             char(10),
+    word_order_time             integer,
+    word_ship_mode_id           char(16),
+    word_web_site_id            char(16),
+    word_order_comments         char(100),
+    PRIMARY KEY (wlin_order_id, wlin_line_number)
+);
+
+CREATE TABLE s_web_order (
+    word_order_id               integer               NOT NULL,
+    word_bill_customer_id       char(16),
+    word_ship_customer_id       char(16),
+    word_order_date             char(10),
+    word_order_time             integer,
+    word_ship_mode_id           char(16),
+    word_web_site_id            char(16),
+    word_order_comments         char(100),
+    PRIMARY KEY (word_order_id)
+);
+
+-- 6. Inventory Module (Unchanged as it has no foreign keys to join with in this context)
+CREATE TABLE s_inventory (
+    invn_warehouse_id           char(16)              NOT NULL,
+    invn_item_id                char(16)              NOT NULL,
+    invn_date                   char(10)              NOT NULL,
+    invn_qty_on_hand            integer,
+    PRIMARY KEY (invn_warehouse_id, invn_item_id, invn_date)
+);
+```

@@ -1,0 +1,135 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 6
+  - Total Attributes: 19
+    * Usina: 12 columns
+    * Proprietarios: 2 columns
+    * Municipios: 3 columns
+    * Estados: 1 columns
+    * Rios: 2 columns
+    * Localizacoes: 5 columns
+
+Denormalized Model:
+  - Tables: 3
+  - Total Attributes: 15
+    * Usina: 13 columns
+    * Municipios_Estados: 3 columns
+    * Proprietarios: 3 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Normalized model has MORE attributes (15 vs 19)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: id_municipio (SERIAL) -> nome_municipio (VARCHAR)
+  - Type mismatch: id_localização (INTEGER) -> nome_estado_localizacao (VARCHAR)
+  - Type mismatch: longitude (DOUBLE) -> nome_estado (VARCHAR)
+--------------------------------------------------------------------------------
+Completeness Ratio:        0.79
+Data Type Preservation:    0.80
+Avg Levenshtein Distance:  1.93
+BLEU Score:                0.56
+ROUGE-1:                   0.62
+METEOR Score:              0.52
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: Usina
+Dimension Tables Detected: Municipios_Estados, Proprietarios
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected exactly 1 Fact table. Evaluating as a standard STAR SCHEMA.
+  - FACT FK VIOLATION: Foreign Key 'id_proprietario' in Fact 'Usina' allows NULL values.
+  - PAYLOAD WARNING: Fact table 'Usina' contains more text attributes (5) than numeric measures (4).
+  - SNOWFLAKE VIOLATION: Dimension 'Proprietarios' contains 1 Foreign Key(s). It is not fully flattened.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * Usina: 4 Numeric, 5 Text
+  * Municipios_Estados: 0 Numeric, 2 Text
+  * Proprietarios: 0 Numeric, 2 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  atualizacao estagio id id_localização id_municipio id_proprietario id_rio iniciop lat latitude long longitude municipio nome potfis potkw proprietario rio uf
+
+Denormalized Model (Combined Text):
+  atualizacao estagio id id_proprietario iniciop lat long nome nome_estado nome_estado_localizacao nome_municipio nome_proprietario potfis potkw uf
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 15 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id SERIAL
+  Denormalized:  id SERIAL
+
+Pair 2:
+  Relational:    nome VARCHAR
+  Denormalized:  nome VARCHAR
+
+Pair 3:
+  Relational:    potkw FLOAT
+  Denormalized:  potkw FLOAT
+
+Pair 4:
+  Relational:    potfis FLOAT
+  Denormalized:  potfis FLOAT
+
+Pair 5:
+  Relational:    iniciop DATE
+  Denormalized:  iniciop DATE
+
+Pair 6:
+  Relational:    atualizacao DATE
+  Denormalized:  atualizacao DATE
+
+Pair 7:
+  Relational:    lat DOUBLE
+  Denormalized:  lat DOUBLE
+
+Pair 8:
+  Relational:    long DOUBLE
+  Denormalized:  long DOUBLE
+
+Pair 9:
+  Relational:    estagio VARCHAR
+  Denormalized:  estagio VARCHAR
+
+Pair 10:
+  Relational:    proprietario VARCHAR
+  Denormalized:  nome_proprietario VARCHAR
+
+Pair 11:
+  Relational:    id_proprietario INTEGER
+  Denormalized:  id_proprietario INTEGER
+
+Pair 12:
+  Relational:    id_municipio SERIAL
+  Denormalized:  nome_municipio VARCHAR
+
+Pair 13:
+  Relational:    uf CHAR(2)
+  Denormalized:  uf CHAR(2)
+
+Pair 14:
+  Relational:    id_localização INTEGER
+  Denormalized:  nome_estado_localizacao VARCHAR
+
+Pair 15:
+  Relational:    longitude DOUBLE
+  Denormalized:  nome_estado VARCHAR
+
+
+================================================================================

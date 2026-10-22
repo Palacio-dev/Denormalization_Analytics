@@ -1,0 +1,75 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_10-28-09
+Model: ollama_local
+Prompt: RISEN
+Schema: solarwinds
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on eliminating the join between `orders` and `order_details` to create a flat `orders` table containing line item data. This is achieved by adding redundant attributes (product_id, quantity, price) to the `orders` table, effectively materializing the join result. Additionally, a derived attribute 'total_order_value' is precomputed to support common analytical aggregations without runtime calculation.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged `orders` and `order_details` tables into a single `orders` table. The `order_details` table is removed. The new `orders` table will contain all original `orders` columns plus redundant columns from `order_details` (product_id, quantity, price) to allow single-table access for order analysis."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant attributes: `product_id`, `quantity`, and `price` to the `orders` table. Added a derived attribute `total_order_value` (DECIMAL(10,2)) to precompute the sum of (quantity * price) for the order."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Write performance degradation. Inserting an order now requires calculating the total value and inserting multiple rows into the `orders` table (one per line item), increasing write complexity. Read performance is significantly improved as no joins are required."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical queries requiring a list of all orders with their constituent items, such as: 'Select customer name, order date, product name, quantity, and total value for all orders placed in January 2023'."
+      },
+      {
+        "decision_id": "A1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregation queries needing order totals, such as: 'Calculate the total revenue per customer for the last quarter'."
+      }
+    ]
+  }
+}
+
+-- Denormalized Schema for Improved Read Performance
+-- Dialect: PostgreSQL (matching input)
+
+CREATE TABLE customers (
+  customer_id SERIAL PRIMARY KEY,
+  customer_name VARCHAR(100),
+  customer_email VARCHAR(100),
+  customer_address TEXT
+);
+
+CREATE TABLE orders (
+  order_id SERIAL PRIMARY KEY,
+  customer_id INT REFERENCES customers(customer_id),
+  order_date DATE,
+  -- Redundant attributes from order_details added to eliminate joins
+  product_id INT,
+  quantity INT,
+  price DECIMAL(10,2),
+  -- Derived attribute precomputed for analytical efficiency
+  total_order_value DECIMAL(10,2)
+);
+
+CREATE TABLE products (
+  product_id SERIAL PRIMARY KEY,
+  product_name VARCHAR(100),
+  price DECIMAL(10,2)
+);
+
+-- Note: The order_details table has been removed as its data is now redundant in the orders table.
+-- Data integrity is maintained via application logic ensuring exactly one line item exists per order in the denormalized structure.

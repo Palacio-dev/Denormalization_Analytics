@@ -1,0 +1,118 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 3
+  - Total Attributes: 9
+    * entitlements: 8 columns
+    * users: 1 columns
+    * user_entitlements: 2 columns (junction table - excluded from attribute analysis)
+
+  Note: 1 junction table(s) detected and excluded from attribute analysis:
+    - user_entitlements
+
+Denormalized Model:
+  - Tables: 3
+  - Total Attributes: 20
+    * DimUser: 3 columns
+    * DimEntitlement: 10 columns
+    * FactUserEntitlement: 11 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Denormalized model has MORE attributes (9 vs 20)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: activeFlag (INT) -> activeDate (DATE)
+--------------------------------------------------------------------------------
+Completeness Ratio:        2.22
+Data Type Preservation:    0.89
+Avg Levenshtein Distance:  2.67
+BLEU Score:                0.20
+ROUGE-1:                   0.34
+METEOR Score:              0.20
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: FactUserEntitlement
+Dimension Tables Detected: DimUser, DimEntitlement
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected exactly 1 Fact table. Evaluating as a standard STAR SCHEMA.
+  - FACT FK VIOLATION: Foreign Key 'user_sk' in Fact 'FactUserEntitlement' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'entitlement_sk' in Fact 'FactUserEntitlement' allows NULL values.
+  - PAYLOAD WARNING: Fact table 'FactUserEntitlement' contains more text attributes (5) than numeric measures (4).
+  - DIMENSION NULL WARNING: Attribute 'created_date' in 'DimUser' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'activeDate' in 'DimEntitlement' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'inactiveDate' in 'DimEntitlement' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'useLimit' in 'DimEntitlement' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'useCount' in 'DimEntitlement' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'FeatureTypeCode' in 'DimEntitlement' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'PackageTypeCode' in 'DimEntitlement' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'IsActive' in 'DimEntitlement' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'created_date' in 'DimEntitlement' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * FactUserEntitlement: 4 Numeric, 5 Text
+  * DimUser: 1 Numeric, 1 Text
+  * DimEntitlement: 3 Numeric, 6 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  activeDate activeFlag featureType id id inactiveDate packageType useCount useLimit
+
+Denormalized Model (Combined Text):
+  FeatureTypeCode FeatureTypeCode IsActive IsActive PackageTypeCode PackageTypeCode activeDate activeDate entitlement_id entitlement_id entitlement_sk inactiveDate inactiveDate useCount useCount useLimit useLimit user_id user_id user_sk
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 9 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id INT
+  Denormalized:  user_id INT
+
+Pair 2:
+  Relational:    activeDate DATE
+  Denormalized:  activeDate DATE
+
+Pair 3:
+  Relational:    inactiveDate DATE
+  Denormalized:  inactiveDate DATE
+
+Pair 4:
+  Relational:    useLimit INT
+  Denormalized:  useLimit INT
+
+Pair 5:
+  Relational:    useCount INT
+  Denormalized:  useCount INT
+
+Pair 6:
+  Relational:    featureType VARCHAR(4)
+  Denormalized:  FeatureTypeCode VARCHAR(4)
+
+Pair 7:
+  Relational:    packageType VARCHAR(4)
+  Denormalized:  PackageTypeCode VARCHAR(4)
+
+Pair 8:
+  Relational:    activeFlag INT
+  Denormalized:  activeDate DATE
+
+Pair 9:
+  Relational:    id INT
+  Denormalized:  user_id INT
+
+
+================================================================================

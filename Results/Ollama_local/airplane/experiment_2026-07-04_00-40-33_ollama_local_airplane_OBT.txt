@@ -1,0 +1,250 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-04_00-40-33
+Model: ollama_local
+Prompt: OBT
+Schema: airplane
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy consolidates 8 separate relational tables into a single wide table (`bookings_all_data`). This eliminates JOIN operations, which are the primary bottleneck for complex analytical queries (e.g., 'Find all passengers on flight X with their seat info, airport details, and booking cost'). By flattening the schema, we trade write complexity and potential data duplication during updates for significant read performance gains.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged all 8 source tables (`aircrafts_data`, `airports_data`, `boarding_passes`, `bookings`, `flights`, `seats`, `ticket_flights`, `tickets`) into a single physical table `bookings_all_data`."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Removed all Foreign Key constraints. Instead of referencing foreign keys (e.g., `flight_id` in `tickets` referencing `flights`), all tables now store full attributes directly in the single table."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Selected `ticket_no` as the single Primary Key for the new table, as it is a unique identifier for a complete booking entity across all related dimensions."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Added `rowid` as a unique index to support efficient lookups by the composite key (`ticket_no`, `flight_id`) which was previously a unique constraint."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Flattened `flights` attributes (`scheduled_departure`, `scheduled_arrival`, `departure_airport`, `arrival_airport`, `status`, `aircraft_code`) directly into the main table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Flattened `aircrafts_data` attributes (`model`, `range`) into the main table, removing the need to join `flights` to `aircrafts`."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Flattened `airports_data` attributes (`airport_name`, `city`, `coordinates`, `timezone`) into the main table, removing joins for departure/arrival airports."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Flattened `seats` attributes (`fare_conditions`) into the main table, removing the need to join `flights` to `seats`."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Flattened `ticket_flights` attributes (`fare_conditions`, `amount`) into the main table, removing the need to join `tickets` to `ticket_flights`."
+      },
+      {
+        "decision_id": "A6",
+        "description": "Flattened `bookings` attributes (`book_date`, `total_amount`) into the main table, removing the need to join `tickets` to `bookings`."
+      },
+      {
+        "decision_id": "A7",
+        "description": "Flattened `tickets` attributes (`passenger_id`, `passenger_name`, `contact_data`) into the main table, removing the need to join `tickets` to `bookings`."
+      },
+      {
+        "decision_id": "A8",
+        "description": "Flattened `boarding_passes` attributes (`boarding_no`, `seat_no`) into the main table, removing the need to join `tickets` to `boarding_passes`."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Write Performance: Inserting a row now requires updating 8 logical 'rows' in memory, which increases write contention and transaction duration compared to the normalized model."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Storage Overhead: The single table is significantly wider, increasing I/O per row. However, this is offset by the elimination of disk I/O for multiple table pages during reads."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Data Integrity: Without Foreign Keys, referential integrity is enforced at the application logic level. The system must ensure that `aircraft_code` values in the `flights` section match those in the `aircrafts_data` section manually."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Complex analytical query: 'Retrieve a list of all passengers for a specific flight number, including their names, seat assignments, boarding order, flight status, departure/arrival times, aircraft model, and both airport details (name, city, timezone).' This query previously required 4-5 JOINs across multiple tables."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting query: 'Calculate total revenue per aircraft model, grouped by city of departure, including the number of seats sold and average fare conditions.' Previously required joining `bookings`, `tickets`, `ticket_flights`, `flights`, `seats`, and `aircrafts_data`."
+      }
+    ]
+  }
+}
+
+-- ============================================================
+-- DENORMALIZED SCHEMA: ONE-BIG-TABLE MODEL
+-- Target: PostgreSQL Dialect
+-- Strategy: Consolidate all relational tables into one wide table
+-- ============================================================
+
+BEGIN;
+
+-- Drop existing schema if it exists to ensure clean state
+DROP SCHEMA IF EXISTS bookings CASCADE;
+CREATE SCHEMA IF NOT EXISTS bookings;
+
+-- Create the single denormalized table containing all attributes
+CREATE TABLE IF NOT EXISTS bookings.bookings_all_data
+(
+    -- PRIMARY KEY: The unique identifier for a complete booking entity
+    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL,
+    
+    -- BOOKINGS DIMENSION (from bookings table)
+    book_ref character(6) COLLATE pg_catalog."default" NOT NULL,
+    book_date timestamp with time zone NOT NULL,
+    total_amount numeric(10, 2) NOT NULL,
+    
+    -- TICKETS DIMENSION (from tickets table)
+    passenger_id character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    passenger_name text COLLATE pg_catalog."default" NOT NULL,
+    contact_data jsonb COLLATE pg_catalog."default",
+    
+    -- TICKET_FLIGHTS DIMENSION (from ticket_flights table)
+    flight_id integer NOT NULL,
+    fare_conditions character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    amount numeric(10, 2) NOT NULL,
+    
+    -- BOARDING_PASSES DIMENSION (from boarding_passes table)
+    boarding_no integer NOT NULL,
+    seat_no character varying(4) COLLATE pg_catalog."default" NOT NULL,
+    
+    -- FLIGHTS DIMENSION (from flights table)
+    flight_no character(6) COLLATE pg_catalog."default" NOT NULL,
+    scheduled_departure timestamp with time zone NOT NULL,
+    scheduled_arrival timestamp with time zone NOT NULL,
+    status character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    actual_departure timestamp with time zone,
+    actual_arrival timestamp with time zone,
+    
+    -- AIRPORTS DIMENSION (from airports_data table)
+    departure_airport character(3) COLLATE pg_catalog."default" NOT NULL,
+    arrival_airport character(3) COLLATE pg_catalog."default" NOT NULL,
+    airport_name jsonb COLLATE pg_catalog."default" NOT NULL,
+    city jsonb COLLATE pg_catalog."default" NOT NULL,
+    coordinates point COLLATE pg_catalog."default" NOT NULL,
+    timezone text COLLATE pg_catalog."default" NOT NULL,
+    
+    -- AIRCRAFTS DIMENSION (from aircrafts_data table)
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    model jsonb COLLATE pg_catalog."default" NOT NULL,
+    range integer COLLATE pg_catalog."default" NOT NULL,
+    
+    -- CONSTRAINTS
+    CONSTRAINT bookings_all_data_pkey PRIMARY KEY (ticket_no),
+    CONSTRAINT bookings_all_data_ticket_flight_no_unique UNIQUE (ticket_no, flight_id)
+);
+
+-- Add comments for clarity
+COMMENT ON TABLE bookings.bookings_all_data
+    IS 'Denormalized master table for all booking, flight, and passenger data to optimize read performance.';
+
+COMMENT ON COLUMN bookings.bookings_all_data.ticket_no
+    IS 'Ticket number (Primary Key)';
+
+COMMENT ON COLUMN bookings.bookings_all_data.book_ref
+    IS 'Booking number';
+
+COMMENT ON COLUMN bookings.bookings_all_data.book_date
+    IS 'Booking date';
+
+COMMENT ON COLUMN bookings.bookings_all_data.total_amount
+    IS 'Total booking cost';
+
+COMMENT ON COLUMN bookings.bookings_all_data.passenger_id
+    IS 'Passenger ID';
+
+COMMENT ON COLUMN bookings.bookings_all_data.passenger_name
+    IS 'Passenger name';
+
+COMMENT ON COLUMN bookings.bookings_all_data.contact_data
+    IS 'Passenger contact information';
+
+COMMENT ON COLUMN bookings.bookings_all_data.flight_id
+    IS 'Flight ID';
+
+COMMENT ON COLUMN bookings.bookings_all_data.fare_conditions
+    IS 'Travel class';
+
+COMMENT ON COLUMN bookings.bookings_all_data.amount
+    IS 'Travel cost';
+
+COMMENT ON COLUMN bookings.bookings_all_data.boarding_no
+    IS 'Boarding pass number';
+
+COMMENT ON COLUMN bookings.bookings_all_data.seat_no
+    IS 'Seat number';
+
+COMMENT ON COLUMN bookings.bookings_all_data.flight_no
+    IS 'Flight number';
+
+COMMENT ON COLUMN bookings.bookings_all_data.scheduled_departure
+    IS 'Scheduled departure time';
+
+COMMENT ON COLUMN bookings.bookings_all_data.scheduled_arrival
+    IS 'Scheduled arrival time';
+
+COMMENT ON COLUMN bookings.bookings_all_data.status
+    IS 'Flight status';
+
+COMMENT ON COLUMN bookings.bookings_all_data.actual_departure
+    IS 'Actual departure time';
+
+COMMENT ON COLUMN bookings.bookings_all_data.actual_arrival
+    IS 'Actual arrival time';
+
+COMMENT ON COLUMN bookings.bookings_all_data.departure_airport
+    IS 'Airport of departure';
+
+COMMENT ON COLUMN bookings.bookings_all_data.arrival_airport
+    IS 'Airport of arrival';
+
+COMMENT ON COLUMN bookings.bookings_all_data.airport_name
+    IS 'Airport name';
+
+COMMENT ON COLUMN bookings.bookings_all_data.city
+    IS 'City';
+
+COMMENT ON COLUMN bookings.bookings_all_data.coordinates
+    IS 'Airport coordinates (longitude and latitude)';
+
+COMMENT ON COLUMN bookings.bookings_all_data.timezone
+    IS 'Airport time zone';
+
+COMMENT ON COLUMN bookings.bookings_all_data.aircraft_code
+    IS 'Aircraft code, IATA';
+
+COMMENT ON COLUMN bookings.bookings_all_data.model
+    IS 'Aircraft model';
+
+COMMENT ON COLUMN bookings.bookings_all_data.range
+    IS 'Maximal flying distance, km';
+
+-- Create index on the composite key for efficient lookups
+CREATE INDEX IF NOT EXISTS bookings_all_data_ticket_flight_idx
+    ON bookings.bookings_all_data (ticket_no, flight_id);
+
+-- Ensure referential integrity is handled at the application level
+-- Note: In a real system, you would add triggers to validate aircraft/airport codes
+-- against the denormalized data to prevent garbage data accumulation.
+
+COMMIT;

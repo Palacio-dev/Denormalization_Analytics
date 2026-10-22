@@ -1,0 +1,217 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-50-19
+Model: gemini
+Prompt: mid-level
+Schema: northwind
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions the highly normalized transactional schema (3NF) into a Star Schema optimized for OLAP/BI workloads. The core transformation involves merging the 'orders' and 'order_details' tables into a single 'fact_sales' table at the order-line grain. Surrounding dimensions are created by heavily consolidating snowflake entities (e.g., merging products, categories, and suppliers into 'dim_products'; flattening the employee hierarchy and territory mappings into 'dim_employees'). This reduces the number of joins required for typical analytical queries from 10+ to just 1 or 2, significantly improving read performance while accepting minor data redundancy.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge 'orders' and 'order_details' into a single 'fact_sales' table. The grain is one row per order line item."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Consolidate 'products', 'categories', and 'suppliers' into a single 'dim_products' table."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Consolidate 'employees', 'employee_territories', 'territories', and 'region' into a single 'dim_employees' table. The recursive 'reports_to' relationship is also flattened."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Consolidate 'customers', 'customer_customer_demo', and 'customer_demographics' into a single 'dim_customers' table."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Introduce a 'dim_date' table to handle 'order_date', 'required_date', and 'shipped_date' as role-playing dimensions."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived measure 'sales_amount' (calculated as quantity * unit_price * (1 - discount)) to 'fact_sales'."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed BLOB columns ('picture' from categories, 'photo' from employees) as they are not useful for analytical aggregations and consume significant storage."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Derived 'manager_name' in 'dim_employees' to resolve the recursive employee hierarchy without requiring self-joins at query time."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Aggregated many-to-many relationships into delimited text fields (e.g., 'territories' and 'regions' in dim_employees, 'demographics' in dim_customers) to prevent grain explosion in the dimension tables."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy: Storing category and supplier details directly in 'dim_products' increases storage requirements and violates 3NF, but drastically improves read performance."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If a category name or supplier address changes, multiple rows in 'dim_products' must be updated. In a true DW, this is handled via Slowly Changing Dimensions (SCD Type 1 or 2)."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of M:N query flexibility: Flattening territories into a comma-separated string in 'dim_employees' makes it slightly harder to filter by a single territory without using string-matching functions (e.g., LIKE or regex)."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Calculate total revenue, discounts, and quantities sold over time. Merging orders and order_details prevents a massive join between fact header and fact lines."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze sales performance by product category and supplier region. Flattening dim_products avoids joining three large tables for product-level aggregations."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Compare sales performance between employees and their managers. Flattening the hierarchy into manager_name removes the need for recursive CTEs or self-joins."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL for Denormalized Analytical Schema
+
+```sql
+-- ==========================================
+-- DIMENSION TABLES
+-- ==========================================
+
+CREATE TABLE IF NOT EXISTS public.dim_date
+(
+    date_id integer NOT NULL, -- e.g., 19960704
+    full_date date NOT NULL,
+    year smallint NOT NULL,
+    quarter smallint NOT NULL,
+    month smallint NOT NULL,
+    month_name character varying(15) NOT NULL,
+    day_of_month smallint NOT NULL,
+    day_of_week smallint NOT NULL,
+    day_name character varying(15) NOT NULL,
+    is_weekend boolean NOT NULL,
+    CONSTRAINT pk_dim_date PRIMARY KEY (date_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.dim_customers
+(
+    customer_id character varying(5) NOT NULL,
+    company_name character varying(40) NOT NULL,
+    contact_name character varying(30),
+    contact_title character varying(30),
+    address character varying(60),
+    city character varying(15),
+    region character varying(15),
+    postal_code character varying(10),
+    country character varying(15),
+    phone character varying(24),
+    fax character varying(24),
+    customer_demographics text, -- Flattened comma-separated list of demographics
+    CONSTRAINT pk_dim_customers PRIMARY KEY (customer_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.dim_employees
+(
+    employee_id smallint NOT NULL,
+    full_name character varying(35) NOT NULL,
+    title character varying(30),
+    title_of_courtesy character varying(25),
+    birth_date date,
+    hire_date date,
+    address character varying(60),
+    city character varying(15),
+    region character varying(15),
+    postal_code character varying(10),
+    country character varying(15),
+    manager_name character varying(35), -- Flattened from reports_to
+    territories text, -- Flattened comma-separated list of territories
+    regions text, -- Flattened comma-separated list of regions
+    CONSTRAINT pk_dim_employees PRIMARY KEY (employee_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.dim_products
+(
+    product_id smallint NOT NULL,
+    product_name character varying(40) NOT NULL,
+    quantity_per_unit character varying(20),
+    unit_price real,
+    discontinued integer NOT NULL,
+    -- Category attributes
+    category_name character varying(15),
+    category_description text,
+    -- Supplier attributes
+    supplier_name character varying(40),
+    supplier_country character varying(15),
+    supplier_region character varying(15),
+    CONSTRAINT pk_dim_products PRIMARY KEY (product_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.dim_shippers
+(
+    shipper_id smallint NOT NULL,
+    company_name character varying(40) NOT NULL,
+    CONSTRAINT pk_dim_shippers PRIMARY KEY (shipper_id)
+);
+
+-- ==========================================
+-- FACT TABLE
+-- ==========================================
+
+CREATE TABLE IF NOT EXISTS public.fact_sales
+(
+    -- Degenerate Dimensions / Identifiers
+    order_id smallint NOT NULL,
+    product_id smallint NOT NULL,
+    
+    -- Foreign Keys to Dimensions
+    customer_id character varying(5),
+    employee_id smallint,
+    shipper_id smallint,
+    
+    -- Role-playing Date Dimensions (Foreign Keys to dim_date)
+    order_date_id integer,
+    required_date_id integer,
+    shipped_date_id integer,
+    
+    -- Order Header Attributes (Shipment info specific to the order)
+    ship_name character varying(40),
+    ship_address character varying(60),
+    ship_city character varying(15),
+    ship_region character varying(15),
+    ship_postal_code character varying(10),
+    ship_country character varying(15),
+    
+    -- Measures (Line Item Grain)
+    quantity smallint NOT NULL,
+    unit_price real NOT NULL,
+    discount real NOT NULL,
+    sales_amount real NOT NULL, -- Derived: quantity * unit_price * (1 - discount)
+    
+    -- Measures (Header Grain - Allocated or Repeated)
+    order_freight real, 
+    
+    CONSTRAINT pk_fact_sales PRIMARY KEY (order_id, product_id),
+    CONSTRAINT fk_fact_sales_customers FOREIGN KEY (customer_id) REFERENCES public.dim_customers (customer_id),
+    CONSTRAINT fk_fact_sales_employees FOREIGN KEY (employee_id) REFERENCES public.dim_employees (employee_id),
+    CONSTRAINT fk_fact_sales_products FOREIGN KEY (product_id) REFERENCES public.dim_products (product_id),
+    CONSTRAINT fk_fact_sales_shippers FOREIGN KEY (shipper_id) REFERENCES public.dim_shippers (shipper_id),
+    CONSTRAINT fk_fact_sales_order_date FOREIGN KEY (order_date_id) REFERENCES public.dim_date (date_id),
+    CONSTRAINT fk_fact_sales_required_date FOREIGN KEY (required_date_id) REFERENCES public.dim_date (date_id),
+    CONSTRAINT fk_fact_sales_shipped_date FOREIGN KEY (shipped_date_id) REFERENCES public.dim_date (date_id)
+);
+```

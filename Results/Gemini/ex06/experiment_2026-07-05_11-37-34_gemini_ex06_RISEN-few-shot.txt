@@ -1,0 +1,119 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-37-34
+Model: gemini
+Prompt: RISEN-few-shot
+Schema: ex06
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on optimizing heavy analytical reads by eliminating complex multi-table joins. The original normalized model contains two distinct hierarchical branches originating from the MUNICIPIO table: one for basic education (ESCOLA) and one for higher education evaluations (IES -> CURSO -> ANO -> ENADE/SAEB/IDEB). To prevent Cartesian products and massive data sparsity, the schema is collapsed into two wide tables: 'denorm_escola' (flattening school and location data) and 'denorm_curso_avaliacao' (flattening course, institution, location, and all yearly evaluation metrics). This heavily utilizes the 'Collapsing Relations' and 'Adding Redundant Attributes' techniques.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapsed the tables ANO, CURSO, IES, ENADE, SAEB, IDEB, MUNICIPIO, and UF into a single wide fact table named 'denorm_curso_avaliacao'. This materializes the entire hierarchy and evaluation metrics for courses per year, eliminating up to 7 joins."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapsed the tables ESCOLA, MUNICIPIO, and UF into a single dimension table named 'denorm_escola' to serve analytical queries focused on basic education infrastructure without requiring joins to location tables."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant attributes for municipality and state metrics (e.g., municipio_qtd_ies, uf_qtd_habitantes) into both denormalized tables to ensure full standalone analytical capabilities."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Prefixed attributes sharing the same name or ambiguous meanings in the original model. For example, 'nome' from UF became 'uf_nome', 'nome_municipio' became 'municipio_nome', and 'rede' became 'ies_rede' and 'escola_rede'."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage and Redundancy: Municipality and State attributes are duplicated across both 'denorm_escola' and 'denorm_curso_avaliacao', significantly increasing disk space usage."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If a municipality's population or average IDEB score changes, the update must be propagated across multiple rows in both denormalized tables instead of a single row in the original MUNICIPIO table."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1",
+        "query": "SELECT uf_sigla, curso_nome, AVG(enade_nota_enade_continua) AS media_enade FROM denorm_curso_avaliacao WHERE ano_avaliacao = 2023 GROUP BY uf_sigla, curso_nome ORDER BY media_enade DESC;"
+      },
+      {
+        "decision_id": "D2",
+        "query": "SELECT uf_nome, municipio_nome, COUNT(escola_cod) AS total_escolas FROM denorm_escola GROUP BY uf_nome, municipio_nome ORDER BY total_escolas DESC;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+BEGIN;
+
+DROP TABLE IF EXISTS denorm_escola CASCADE;
+
+CREATE TABLE denorm_escola (
+    escola_cod INTEGER PRIMARY KEY,
+    escola_nome VARCHAR(100) NOT NULL,
+    escola_rede VARCHAR(100) NOT NULL,
+    municipio_nome VARCHAR(100) NOT NULL,
+    municipio_qtd_ies INT CHECK (municipio_qtd_ies >= 0),
+    municipio_qtd_escolas INT CHECK (municipio_qtd_escolas >= 0),
+    municipio_media_ideb REAL,
+    municipio_media_saeb REAL,
+    municipio_media_enade REAL,
+    municipio_total_participantes INT CHECK (municipio_total_participantes >= 0),
+    uf_sigla VARCHAR(2) NOT NULL,
+    uf_nome VARCHAR(100) NOT NULL,
+    uf_qtd_habitantes INT CHECK(uf_qtd_habitantes >= 0)
+);
+
+DROP TABLE IF EXISTS denorm_curso_avaliacao CASCADE;
+
+CREATE TABLE denorm_curso_avaliacao (
+    id_avaliacao INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ano_avaliacao INT NOT NULL,
+    curso_nome VARCHAR(100) NOT NULL,
+    ies_codigo INT NOT NULL,
+    ies_nome VARCHAR(100) NOT NULL,
+    ies_sigla VARCHAR(20),
+    ies_rede VARCHAR(100) NOT NULL,
+    municipio_nome VARCHAR(100) NOT NULL,
+    municipio_qtd_ies INT CHECK (municipio_qtd_ies >= 0),
+    municipio_qtd_escolas INT CHECK (municipio_qtd_escolas >= 0),
+    municipio_media_ideb REAL,
+    municipio_media_saeb REAL,
+    municipio_media_enade REAL,
+    municipio_total_participantes INT CHECK (municipio_total_participantes >= 0),
+    uf_sigla VARCHAR(2) NOT NULL,
+    uf_nome VARCHAR(100) NOT NULL,
+    uf_qtd_habitantes INT CHECK(uf_qtd_habitantes >= 0),
+    enade_total_inscritos INT CHECK (enade_total_inscritos >= 0),
+    enade_total_concluintes INT CHECK (enade_total_concluintes >= 0),
+    enade_nota_bruta_ce REAL,
+    enade_nota_padronizada_ce REAL,
+    enade_nota_bruta_fg REAL,
+    enade_nota_padronizada_fg REAL,
+    enade_nota_enade_continua REAL,
+    enade_nota_enade_faixa REAL,
+    saeb_nota_mat REAL,
+    saeb_nota_port REAL,
+    saeb_nota_padrao REAL,
+    ideb_rend_1 REAL,
+    ideb_rend_2 REAL,
+    ideb_rend_3 REAL,
+    ideb_rend_4 REAL,
+    ideb_ind_rend REAL,
+    ideb_nota_ideb REAL
+);
+
+END;
+```

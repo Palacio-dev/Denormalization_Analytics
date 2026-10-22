@@ -1,0 +1,153 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_15-09-38
+Model: ollama_local
+Prompt: junior
+Schema: airplane
+==================================================
+
+### Analysis and Denormalization Strategy
+
+#### Section 1: Structural Analysis and Decisions
+
+**Summary:**
+The original schema follows a strict Third Normal Form (3NF) design, separating entities like `aircrafts`, `airports`, `bookings`, 
+`flights`, `tickets`, `seats`, `ticket_flights`, and `boarding_passes`. While efficient for data integrity and point lookups, 
+this structure suffers from high join counts during complex analytical reporting (e.g., "Total revenue by city for flights using 
+Boeing 737 in the last 6 months").
+
+The denormalization strategy focuses on creating a **Star Schema** or **Data Warehouse** style layout. The goal is to create a
+ central "Fact" table that aggregates transactional details with denormalized dimension attributes to eliminate joins.
+
+**Structural Decisions:**
+1.  **Merge `tickets` and `ticket_flights` into `fact_bookings`**: These tables share a primary key (`ticket_no`) and have overlapping attributes (`book_ref`, `passenger` details, `flight_id`, `amount`, `fare_conditions`). Merging them creates a single atomic fact record.
+2.  **Merge `boarding_passes` into `fact_bookings`**: Boarding passes are tightly coupled with tickets and flights. Adding `boarding_no` and `seat_no` to the fact table allows reporting on seat utilization without joining a separate dimension table.
+3.  **Create `dim_flight_details`**: Instead of joining `flights` with `aircrafts` and `airports` on every query, we create a derived table containing flight metadata, airport names, aircraft models, and status. This pre-calculates the join path.
+4.  **Create `dim_passenger_bookings`**: Merges `bookings` and `tickets` to store booking reference, date, amount, and passenger details in one place.
+
+**Attribute-Level Changes:**
+1.  **Computed Attributes**: Added `city`, `airport_name`, `aircraft_model`, and `status` directly to the `dim_flight_details` table (previously in separate tables).
+2.  **Derived Keys**: Added `passenger_name` and `contact_data` directly to the `dim_passenger_bookings` table (previously split between `bookings` and `tickets`).
+3.  **Removed Redundancy**: Removed `flight_id` from `dim_passenger_bookings` as it is implied by the booking reference in this specific denormalized context, or kept if multi-segment tickets are common (kept for safety).
+
+**Tradeoffs:**
+1.  **Write Performance vs. Read Performance**: The new schema requires significantly more `INSERT` operations (one row per ticket/booking instead of two). However, `SELECT` performance will improve drastically for analytical queries.
+2.  **Data Freshness**: If the underlying transactional system changes frequently, the denormalized tables must be refreshed (ETL process) to ensure accuracy.
+3.  **Storage Overhead**: Storing repeated strings (e.g., airport names) increases storage size but reduces CPU usage during joins.
+
+---
+
+#### Section 2: Query Patterns
+
+**Query Pattern 1: Complex Flight Analysis**
+*   **Pattern**: "Calculate total revenue per city for flights operated by specific aircraft models, including actual departure times."
+*   **Original Challenge**: Requires `JOIN`s between `bookings`, `ticket_flights`, `flights`, `aircrafts_data`, and `airports_data`.
+*   **Denormalized Benefit**: A single `JOIN` (or even no join if pre-aggregated) against `dim_flight_details` and `dim_passenger_bookings`.
+
+**Query Pattern 2: Passenger Seat Utilization**
+*   **Pattern**: "List all passengers booked for Seat 10A across all flights in the last month."
+*   **Original Challenge**: Requires joining `tickets`, `boarding_passes`, `flights`, and `seats`.
+*   **Denormalized Benefit**: Direct lookup in the merged `fact_bookings` table which now contains `seat_no` and `passenger_name`.
+
+---
+
+### Complete SQL DDL for Denormalized Schema
+
+```sql
+-- Drop existing tables if they exist to ensure clean creation
+DROP TABLE IF EXISTS denormalized.fact_bookings;
+DROP TABLE IF EXISTS denormalized.dim_flight_details;
+DROP TABLE IF EXISTS denormalized.dim_passenger_bookings;
+
+-- Table 1: Core Fact Table (Merges tickets, ticket_flights, boarding_passes, bookings)
+-- This table holds the atomic transaction data plus denormalized attributes.
+CREATE TABLE IF NOT EXISTS denormalized.fact_bookings (
+    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL,
+    book_ref character(6) COLLATE pg_catalog."default" NOT NULL,
+    passenger_id character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    passenger_name text COLLATE pg_catalog."default" NOT NULL,
+    contact_data jsonb COLLATE pg_catalog."default",
+    
+    -- Flight Segment Details (Merged from ticket_flights)
+    flight_id integer NOT NULL,
+    fare_conditions character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    amount numeric(10, 2) NOT NULL,
+    
+    -- Boarding Details (Merged from boarding_passes)
+    boarding_no integer NOT NULL,
+    seat_no character varying(4) COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Booking Metadata (Merged from bookings)
+    total_amount numeric(10, 2) NOT NULL,
+    book_date timestamp with time zone NOT NULL,
+    
+    -- Flight Metadata (Denormalized from flights, aircrafts, airports)
+    -- These are pre-calculated to avoid joins
+    departure_airport_name text COLLATE pg_catalog."default" NOT NULL,
+    arrival_airport_name text COLLATE pg_catalog."default" NOT NULL,
+    departure_city text COLLATE pg_catalog."default",
+    arrival_city text COLLATE pg_catalog."default",
+    aircraft_model jsonb COLLATE pg_catalog."default",
+    aircraft_range integer COLLATE pg_catalog."default",
+    flight_status character varying(20) COLLATE pg_catalog."default",
+    scheduled_departure timestamp with time zone NOT NULL,
+    scheduled_arrival timestamp with time zone NOT NULL,
+    actual_departure timestamp with time zone,
+    actual_arrival timestamp with time zone,
+    
+    -- Passenger Metadata (Denormalized from tickets)
+    passenger_contact_data jsonb COLLATE pg_catalog."default",
+    
+    PRIMARY KEY (ticket_no, book_ref, flight_id),
+    CONSTRAINT fact_bookings_ticket_no_key UNIQUE (ticket_no)
+);
+
+-- Table 2: Dimension Table for Flight Details
+-- Aggregates flight, airport, and aircraft info for easy filtering
+CREATE TABLE IF NOT EXISTS denormalized.dim_flight_details (
+    flight_id integer NOT NULL,
+    flight_no character(6) COLLATE pg_catalog."default" NOT NULL,
+    departure_airport_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    arrival_airport_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    departure_airport_name text COLLATE pg_catalog."default" NOT NULL,
+    arrival_airport_name text COLLATE pg_catalog."default" NOT NULL,
+    departure_city text COLLATE pg_catalog."default",
+    arrival_city text COLLATE pg_catalog."default",
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    aircraft_model jsonb COLLATE pg_catalog."default" NOT NULL,
+    aircraft_range integer COLLATE pg_catalog."default" NOT NULL,
+    flight_status character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    scheduled_departure timestamp with time zone NOT NULL,
+    scheduled_arrival timestamp with time zone NOT NULL,
+    actual_departure timestamp with time zone,
+    actual_arrival timestamp with time zone,
+    
+    PRIMARY KEY (flight_id)
+);
+
+-- Table 3: Dimension Table for Passenger Bookings
+-- Aggregates booking and passenger info
+CREATE TABLE IF NOT EXISTS denormalized.dim_passenger_bookings (
+    book_ref character(6) COLLATE pg_catalog."default" NOT NULL,
+    book_date timestamp with time zone NOT NULL,
+    total_amount numeric(10, 2) NOT NULL,
+    passenger_id character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    passenger_name text COLLATE pg_catalog."default" NOT NULL,
+    passenger_contact_data jsonb COLLATE pg_catalog."default" NOT NULL,
+    
+    PRIMARY KEY (book_ref)
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_fact_bookings_flight_id ON denormalized.fact_bookings(flight_id);
+CREATE INDEX IF NOT EXISTS idx_fact_bookings_seat_no ON denormalized.fact_bookings(seat_no);
+CREATE INDEX IF NOT EXISTS idx_fact_bookings_book_date ON denormalized.fact_bookings(book_date);
+CREATE INDEX IF NOT EXISTS idx_fact_bookings_aircraft_model ON denormalized.fact_bookings(aircraft_model);
+CREATE INDEX IF NOT EXISTS idx_fact_bookings_departure_city ON denormalized.fact_bookings(departure_city);
+CREATE INDEX IF NOT EXISTS idx_fact_bookings_arrival_city ON denormalized.fact_bookings(arrival_city);
+CREATE INDEX IF NOT EXISTS idx_fact_bookings_status ON denormalized.fact_bookings(flight_status);
+
+-- Comments
+COMMENT ON TABLE denormalized.fact_bookings IS 'Denormalized Fact Table containing booking, flight, seat, and passenger data for analytics';
+COMMENT ON TABLE denormalized.dim_flight_details IS 'Denormalized Dimension Table for flight and airport attributes';
+COMMENT ON TABLE denormalized.dim_passenger_bookings IS 'Denormalized Dimension Table for booking and passenger attributes';
+```

@@ -1,0 +1,115 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-19-13
+Model: ollama_api
+Prompt: junior
+Schema: ex07
+==================================================
+
+{
+  "section_1": {
+    "summary": "The relational schema consists of a central 'Usina' table that references several dimension tables: 'Proprietarios', 'Rios', 'Localizacoes', 'Municipios', and 'Estados'. To improve query performance for analytics and reporting, we will denormalize by merging related dimension data directly into the 'Usina' table. This reduces the need for multiple joins during querying, at the cost of increased storage and potential data redundancy.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge 'Proprietarios' into 'Usina' by adding a 'proprietario' column to eliminate join with 'Proprietarios'."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge 'Rios' into 'Usina' by adding a 'rio' column to eliminate join with 'Rios'."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge 'Localizacoes' into 'Usina' by adding 'longitude', 'latitude', 'id_municipio1', and 'id_municipio2' columns to eliminate join with 'Localizacoes'."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Merge 'Municipios' into 'Usina' twice (for both municipalities) by adding 'municipio1', 'uf1', 'municipio2', and 'uf2' columns to eliminate joins with 'Municipios'."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Merge 'Estados' into 'Usina' twice (for both municipios) by adding 'uf1' and 'uf2' columns to eliminate joins with 'Estados'."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added 'proprietario' column derived from 'Proprietarios' table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added 'rio' column derived from 'Rios' table."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added 'longitude' and 'latitude' columns derived from 'Localizacoes' table."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added 'municipio1', 'uf1', 'municipio2', and 'uf2' columns derived from 'Municipios' and 'Estados' tables."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Removed foreign key columns: 'id_proprietario', 'id_rio', 'id_localizacao', 'id_municipio1', 'id_municipio2'."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved query performance for analytics at the cost of data redundancy and increased storage requirements."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified data model for read-heavy workloads but increased complexity for data updates and maintenance."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of normalization benefits like data consistency and easier maintenance of referential integrity."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting queries often require owner name along with plant details, making it beneficial to include 'proprietario' directly in the 'Usina' table."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical queries frequently filter or group by river name, so including 'rio' in 'Usina' avoids joining with 'Rios'."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Geospatial analytics require latitude and longitude data, so embedding them in 'Usina' improves performance."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Regional reporting often involves municipality and state information, making it efficient to include these directly in 'Usina'."
+      }
+    ]
+  }
+}
+
+-- Denormalized SQL DDL Script
+CREATE TABLE IF NOT EXISTS public."Usina_Denormalized" (
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    iniciop DATE,
+    atualizacao DATE,
+    lat DOUBLE PRECISION,
+    long DOUBLE PRECISION,
+    estagio VARCHAR,
+    proprietario VARCHAR,
+    rio VARCHAR NOT NULL,
+    longitude DOUBLE PRECISION,
+    latitude DOUBLE PRECISION,
+    municipio1 VARCHAR NOT NULL,
+    uf1 CHAR(2) NOT NULL,
+    municipio2 VARCHAR,
+    uf2 CHAR(2)
+);

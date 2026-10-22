@@ -1,0 +1,170 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-22-20
+Model: gemini
+Prompt: junior
+Schema: ex02
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on transforming a highly normalized transactional schema into an analytical schema (OLAP) by creating two wide, flat tables: one for 'Mutirões de Limpeza' (Cleanup Efforts) and another for 'Unidades de Conservação' (Conservation Units). By embedding 1:1 extensions and N:1 lookup dimensions directly into the main fact tables, we eliminate the need for costly JOIN operations during analytical querying and reporting.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge the 1:1 tables 'coleta_de_lixo' and 'local_de_coleta' directly into the central 'mutirao_de_limpeza' table. Since they share the same primary key (id_mutirao), their attributes can exist in a single row."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Embed the 'instituicao_organizadora' dimension into the 'mutirao_de_limpeza' table to avoid joining when analyzing cleanups by organizing institution."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Embed the 'regiao' dimension into both 'mutirao_de_limpeza' and 'unidade_de_conservacao' tables. This allows geospatial filtering (by municipality or state) without joins."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Embed 'bioma', 'categoria_manejo', and 'esfera_administrativa' dimensions directly into the 'unidade_de_conservacao' table to create a single wide table for conservation unit analytics."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Renamed 'nome' attributes from various source tables to avoid column ambiguity in the wide tables (e.g., 'instituicao_nome', 'local_coleta_nome', 'municipio_nome', 'uc_nome', 'bioma_nome')."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed surrogate foreign keys (id_instituicao_organizadora, id_bioma, id_manejo, id_esfera) from the denormalized tables, keeping only the descriptive attributes to save storage space and simplify the schema."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Retained 'id_municipio' as 'municipio_id' in both tables to allow drill-across queries between cleanups and conservation units if needed."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage / Data Redundancy: Descriptive attributes like institution names, biome names, and municipality names will be duplicated across many rows, increasing the overall storage footprint."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If a dimension attribute changes (e.g., a municipality changes its name or a management category updates its IUCN status), the update must be applied to multiple rows instead of a single dimension record."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregate waste collected by type (plastic, glass, etc.) and correlate it with the number of participants and total duration of the cleanup."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze the volume of cleanups and waste collected grouped by the character (carater) of the organizing institution."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Geographical reporting: Compare the total marine area of conservation units vs. total waste collected in cleanups, grouped by state and municipality."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Filter and aggregate conservation unit areas by biome, administrative sphere, and IUCN management category without performing four separate joins."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Creation Script for the Denormalized Schema
+
+```sql
+-- ==============================================================================
+-- Denormalized Schema for Analytics and Reporting
+-- ==============================================================================
+
+-- 1. Denormalized table for Cleanup Efforts (Mutirões de Limpeza)
+-- Combines: mutirao_de_limpeza, coleta_de_lixo, local_de_coleta, instituicao_organizadora, regiao
+CREATE TABLE IF NOT EXISTS public.denorm_mutirao_limpeza
+(
+    id_mutirao integer NOT NULL,
+    
+    -- Cleanup Fact Details (from mutirao_de_limpeza)
+    data_do_ocorrido date NOT NULL,
+    horario_de_inicio time without time zone NOT NULL,
+    numero_aproximado_de_participantes integer,
+    duracao_total time without time zone NOT NULL,
+    
+    -- Location Details (from local_de_coleta)
+    local_coleta_nome text COLLATE pg_catalog."default",
+    
+    -- Waste Collection Metrics (from coleta_de_lixo)
+    plastico integer,
+    borracha integer,
+    madeira integer,
+    produtos_texteis integer,
+    papel integer,
+    metal integer,
+    vidro integer,
+    materiais_de_pesca integer,
+    outros_residuos integer,
+    
+    -- Organizer Dimension (from instituicao_organizadora)
+    instituicao_nome text COLLATE pg_catalog."default",
+    instituicao_carater text COLLATE pg_catalog."default",
+    
+    -- Geography Dimension (from regiao)
+    municipio_id integer,
+    municipio_nome text COLLATE pg_catalog."default",
+    estado text COLLATE pg_catalog."default",
+    
+    CONSTRAINT denorm_mutirao_limpeza_pkey PRIMARY KEY (id_mutirao)
+);
+
+-- Create indexes to support common analytical filtering and grouping
+CREATE INDEX IF NOT EXISTS idx_denorm_mutirao_data ON public.denorm_mutirao_limpeza(data_do_ocorrido);
+CREATE INDEX IF NOT EXISTS idx_denorm_mutirao_estado ON public.denorm_mutirao_limpeza(estado);
+CREATE INDEX IF NOT EXISTS idx_denorm_mutirao_instituicao ON public.denorm_mutirao_limpeza(instituicao_carater);
+
+
+-- 2. Denormalized table for Conservation Units (Unidades de Conservação)
+-- Combines: unidade_de_conservacao, bioma, categoria_manejo, esfera_administrativa, regiao
+CREATE TABLE IF NOT EXISTS public.denorm_unidade_conservacao
+(
+    id_uc integer NOT NULL,
+    
+    -- Conservation Unit Details (from unidade_de_conservacao)
+    uc_nome text COLLATE pg_catalog."default" NOT NULL,
+    ano_de_criacao integer,
+    area_soma_biomas double precision,
+    area_soma_biomas_continentais double precision,
+    area_marinha double precision,
+    
+    -- Biome Dimension (from bioma)
+    bioma_nome text COLLATE pg_catalog."default",
+    
+    -- Management Category Dimension (from categoria_manejo)
+    manejo_categoria text COLLATE pg_catalog."default",
+    manejo_categoria_iucn text COLLATE pg_catalog."default",
+    manejo_plano text COLLATE pg_catalog."default",
+    
+    -- Administrative Sphere Dimension (from esfera_administrativa)
+    esfera_tipo text COLLATE pg_catalog."default",
+    
+    -- Geography Dimension (from regiao)
+    municipio_id integer,
+    municipio_nome text COLLATE pg_catalog."default",
+    estado text COLLATE pg_catalog."default",
+    
+    CONSTRAINT denorm_unidade_conservacao_pkey PRIMARY KEY (id_uc)
+);
+
+-- Create indexes to support common analytical filtering and grouping
+CREATE INDEX IF NOT EXISTS idx_denorm_uc_bioma ON public.denorm_unidade_conservacao(bioma_nome);
+CREATE INDEX IF NOT EXISTS idx_denorm_uc_estado ON public.denorm_unidade_conservacao(estado);
+CREATE INDEX IF NOT EXISTS idx_denorm_uc_esfera ON public.denorm_unidade_conservacao(esfera_tipo);
+CREATE INDEX IF NOT EXISTS idx_denorm_uc_iucn ON public.denorm_unidade_conservacao(manejo_categoria_iucn);
+```

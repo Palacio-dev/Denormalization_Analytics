@@ -1,0 +1,317 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_10-24-25
+Model: gemini
+Prompt: OBT
+Schema: HFC
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The relational model has been denormalized into a single One-Big-Table (OBT) named `obt_tombos_denormalized`. This flattens the highly normalized structure, which contains 37 tables including taxonomy, geography, users, and specimen records (tombos), into a single wide table. All foreign keys have been removed, and a single surrogate primary key has been introduced. This approach eliminates the need for complex JOINs during read-heavy analytical queries, significantly improving read performance at the cost of data redundancy and write performance.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge all taxonomic tables (reinos, familias, generos, especies, sub_especies, variedades) into the OBT to avoid deep JOIN chains when querying specimen taxonomy."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Flatten geographic and environmental data (locais_coleta, enderecos, estados, paises, solos, relevos, vegetacoes, fase_sucessional) into the OBT to allow fast geospatial and environmental filtering."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Integrate 1:N and M:N relationships (tombos_fotos, alteracoes, identificadores, coletores, remessas) into the OBT. This will increase the grain of the table, causing data duplication for the core tombo attributes, but ensures all non-key attributes are preserved without JOINs."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Remove all Foreign Key constraints and replace the distributed Primary Keys with a single surrogate Primary Key (`id`) for the OBT."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Prefix all non-key attributes with their source table name (e.g., `especies_nome`, `tombos_data_tombo`) to guarantee uniqueness and avoid ambiguity, as many tables share column names like `nome`, `created_at`, and `updated_at`."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Drop all Foreign Key columns (e.g., `entidade_id`, `especie_id`, `familia_id`) as the relationships are now implicitly represented by the flattened structure."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Retain all original data types and semantics, including custom ENUM types (e.g., `tombos_situacao`, `alteracoes_status`) and collations to preserve data integrity in the denormalized schema."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy: Flattening 1:N relationships (like photos per specimen) will cause the core specimen (tombo) data to be duplicated across multiple rows, increasing storage costs."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Write Anomalies: Updates to a single entity (e.g., correcting a family name) will require updating multiple rows in the OBT, increasing write latency and the risk of inconsistencies."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of Referential Integrity: Removing Foreign Keys means the database can no longer enforce relational constraints, pushing the responsibility of data integrity to the application or ETL pipeline."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "Q1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Retrieve all specimens (tombos) with their full taxonomic hierarchy (family, genus, species) and collection location, filtered by state and year of collection. Motivation: Flattening taxonomy and geography eliminates at least 6 JOINs."
+      },
+      {
+        "decision_id": "Q2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregate the number of specimens collected by collector and herbarium. Motivation: Including collector and herbarium details in the OBT allows for rapid GROUP BY operations."
+      },
+      {
+        "decision_id": "Q3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Fetch specimen details along with their photos and identification history for a specific species. Motivation: Denormalizing photos and identifiers avoids complex left joins and speeds up detailed view rendering."
+      }
+    ]
+  }
+}
+```
+
+```sql
+CREATE TABLE IF NOT EXISTS public.obt_tombos_denormalized
+(
+    id bigserial NOT NULL,
+    
+    -- alteracoes
+    alteracoes_status alteracoes_status,
+    alteracoes_observacao text COLLATE pg_catalog."default",
+    alteracoes_created_at timestamp with time zone,
+    alteracoes_updated_at timestamp with time zone,
+    alteracoes_tombo_json text COLLATE pg_catalog."default",
+    alteracoes_ativo boolean,
+    alteracoes_identificacao boolean,
+    
+    -- autores
+    autores_nome character varying(200) COLLATE pg_catalog."default",
+    autores_observacao character varying(500) COLLATE pg_catalog."default",
+    autores_created_at timestamp with time zone,
+    autores_updated_at timestamp with time zone,
+    
+    -- colecoes_anexas
+    colecoes_anexas_tipo colecoes_anexas_tipo,
+    colecoes_anexas_observacoes text COLLATE pg_catalog."default",
+    colecoes_anexas_created_at timestamp with time zone,
+    colecoes_anexas_updated_at timestamp with time zone,
+    
+    -- coletores
+    coletores_nome character varying(255) COLLATE pg_catalog."default",
+    coletores_email character varying(200) COLLATE pg_catalog."default",
+    coletores_created_at timestamp with time zone,
+    coletores_updated_at timestamp with time zone,
+    
+    -- coletores_complementares
+    coletores_complementares_complementares character varying(1000) COLLATE pg_catalog."default",
+    coletores_complementares_created_at timestamp with time zone,
+    coletores_complementares_updated_at timestamp with time zone,
+    
+    -- configuracao
+    configuracao_hora_inicio character varying(19) COLLATE pg_catalog."default",
+    configuracao_hora_fim character varying(19) COLLATE pg_catalog."default",
+    configuracao_periodicidade configuracao_periodicidade,
+    configuracao_data_proxima_atualizacao character varying(10) COLLATE pg_catalog."default",
+    configuracao_nome_arquivo character varying(50) COLLATE pg_catalog."default",
+    configuracao_servico configuracao_servico,
+    
+    -- enderecos
+    enderecos_logradouro character varying(200) COLLATE pg_catalog."default",
+    enderecos_numero character varying(10) COLLATE pg_catalog."default",
+    enderecos_complemento text COLLATE pg_catalog."default",
+    enderecos_created_at timestamp with time zone,
+    enderecos_updated_at timestamp with time zone,
+    
+    -- especies
+    especies_nome character varying(200) COLLATE pg_catalog."default",
+    especies_created_at timestamp with time zone,
+    especies_updated_at timestamp with time zone,
+    
+    -- estados
+    estados_nome character varying(255) COLLATE pg_catalog."default",
+    estados_sigla character(4) COLLATE pg_catalog."default",
+    estados_created_at timestamp with time zone,
+    estados_updated_at timestamp with time zone,
+    
+    -- familias
+    familias_nome character varying(200) COLLATE pg_catalog."default",
+    familias_created_at timestamp with time zone,
+    familias_updated_at timestamp with time zone,
+    
+    -- fase_sucessional
+    fase_sucessional_nome character varying(200) COLLATE pg_catalog."default",
+    fase_sucessional_created_at timestamp with time zone,
+    fase_sucessional_updated_at timestamp with time zone,
+    
+    -- generos
+    generos_nome character varying(200) COLLATE pg_catalog."default",
+    generos_created_at timestamp with time zone,
+    generos_updated_at timestamp with time zone,
+    
+    -- herbarios
+    herbarios_nome character varying(200) COLLATE pg_catalog."default",
+    herbarios_caminho_logotipo text COLLATE pg_catalog."default",
+    herbarios_sigla character varying(80) COLLATE pg_catalog."default",
+    herbarios_email character varying(200) COLLATE pg_catalog."default",
+    herbarios_created_at timestamp with time zone,
+    herbarios_updated_at timestamp with time zone,
+    
+    -- historico_acessos
+    historico_acessos_data_criacao timestamp with time zone,
+    
+    -- identificadores
+    identificadores_nome character varying(255) COLLATE pg_catalog."default",
+    identificadores_created_at timestamp with time zone,
+    identificadores_updated_at timestamp with time zone,
+    
+    -- locais_coleta
+    locais_coleta_descricao text COLLATE pg_catalog."default",
+    locais_coleta_created_at timestamp with time zone,
+    locais_coleta_updated_at timestamp with time zone,
+    
+    -- migrations
+    migrations_applied_at timestamp with time zone,
+    
+    -- paises
+    paises_nome character varying(255) COLLATE pg_catalog."default",
+    paises_sigla character(4) COLLATE pg_catalog."default",
+    paises_created_at timestamp with time zone,
+    paises_updated_at timestamp with time zone,
+    
+    -- reflora
+    reflora_cod_barra character varying(12) COLLATE pg_catalog."default",
+    reflora_tombo_json text COLLATE pg_catalog."default",
+    reflora_ja_comparou boolean,
+    reflora_ja_requisitou boolean,
+    reflora_nro_requisicoes bigint,
+    
+    -- reinos
+    reinos_nome character varying(200) COLLATE pg_catalog."default",
+    reinos_created_at timestamp with time zone,
+    reinos_updated_at timestamp with time zone,
+    
+    -- relevos
+    relevos_nome character varying(300) COLLATE pg_catalog."default",
+    relevos_updated_at timestamp with time zone,
+    relevos_created_at timestamp with time zone,
+    
+    -- remessas
+    remessas_observacao text COLLATE pg_catalog."default",
+    remessas_data_envio timestamp with time zone,
+    remessas_created_at timestamp with time zone,
+    remessas_updated_at timestamp with time zone,
+    
+    -- retirada_exsiccata_tombos
+    retirada_exsiccata_tombos_tipo retirada_exsiccata_tombos_tipo,
+    retirada_exsiccata_tombos_data_vencimento timestamp with time zone,
+    retirada_exsiccata_tombos_created_at timestamp with time zone,
+    retirada_exsiccata_tombos_updated_at timestamp with time zone,
+    retirada_exsiccata_tombos_devolvido boolean,
+    
+    -- solos
+    solos_nome character varying(300) COLLATE pg_catalog."default",
+    solos_created_at timestamp with time zone,
+    solos_updated_at timestamp with time zone,
+    
+    -- specieslink
+    specieslink_cod_barra character varying(12) COLLATE pg_catalog."default",
+    specieslink_tombo_json text COLLATE pg_catalog."default",
+    specieslink_ja_comparou boolean,
+    specieslink_ja_requisitou boolean,
+    specieslink_nro_requisicoes bigint,
+    
+    -- sub_especies
+    sub_especies_nome character varying(255) COLLATE pg_catalog."default",
+    sub_especies_created_at timestamp with time zone,
+    sub_especies_updated_at timestamp with time zone,
+    
+    -- sub_familias
+    sub_familias_nome character varying(300) COLLATE pg_catalog."default",
+    sub_familias_created_at timestamp with time zone,
+    sub_familias_updated_at timestamp with time zone,
+    
+    -- telefones
+    telefones_numero character varying(200) COLLATE pg_catalog."default",
+    
+    -- tipos
+    tipos_nome character varying(250) COLLATE pg_catalog."default",
+    tipos_created_at timestamp with time zone,
+    tipos_updated_at timestamp with time zone,
+    
+    -- tipos_usuarios
+    tipos_usuarios_tipo character varying(100) COLLATE pg_catalog."default",
+    tipos_usuarios_created_at timestamp with time zone,
+    tipos_usuarios_updated_at timestamp with time zone,
+    
+    -- tombo_alteracoes_antigas
+    tombo_alteracoes_antigas_data date,
+    tombo_alteracoes_antigas_descricao text COLLATE pg_catalog."default",
+    
+    -- tombos
+    tombos_data_tombo timestamp with time zone,
+    tombos_data_coleta_dia bigint,
+    tombos_observacao text COLLATE pg_catalog."default",
+    tombos_nomes_populares text COLLATE pg_catalog."default",
+    tombos_numero_coleta bigint,
+    tombos_latitude double precision,
+    tombos_longitude double precision,
+    tombos_altitude double precision,
+    tombos_data_identificacao_dia smallint,
+    tombos_data_identificacao_mes smallint,
+    tombos_data_identificacao_ano integer,
+    tombos_situacao tombos_situacao,
+    tombos_nome_cientifico text COLLATE pg_catalog."default",
+    tombos_data_coleta_mes bigint,
+    tombos_data_coleta_ano bigint,
+    tombos_created_at timestamp with time zone,
+    tombos_updated_at timestamp with time zone,
+    tombos_ativo boolean,
+    tombos_taxon character varying(45) COLLATE pg_catalog."default",
+    tombos_rascunho boolean,
+    tombos_descricao text COLLATE pg_catalog."default",
+    tombos_unicata boolean,
+    
+    -- tombos_fotos
+    tombos_fotos_codigo_barra character varying(45) COLLATE pg_catalog."default",
+    tombos_fotos_num_barra character varying(45) COLLATE pg_catalog."default",
+    tombos_fotos_caminho_foto text COLLATE pg_catalog."default",
+    tombos_fotos_em_vivo boolean,
+    tombos_fotos_sequencia bigint,
+    tombos_fotos_created_at timestamp with time zone,
+    tombos_fotos_updated_at timestamp with time zone,
+    
+    -- tombos_identificadores
+    tombos_identificadores_ordem smallint,
+    
+    -- usuarios
+    usuarios_nome character varying(200) COLLATE pg_catalog."default",
+    usuarios_ra character varying(45) COLLATE pg_catalog."default",
+    usuarios_email character varying(200) COLLATE pg_catalog."default",
+    usuarios_senha character varying(200) COLLATE pg_catalog."default",
+    usuarios_telefone character varying(45) COLLATE pg_catalog."default",
+    usuarios_created_at timestamp with time zone,
+    usuarios_updated_at timestamp with time zone,
+    usuarios_token_troca_senha character varying(255) COLLATE pg_catalog."default",
+    usuarios_token_troca_senha_expiracao timestamp with time zone,
+    
+    -- variedades
+    variedades_nome character varying(200) COLLATE pg_catalog."default",
+    variedades_created_at timestamp with time zone,
+    variedades_updated_at timestamp with time zone,
+    
+    -- vegetacoes
+    vegetacoes_nome character varying(300) COLLATE pg_catalog."default",
+    vegetacoes_created_at timestamp with time zone,
+    vegetacoes_updated_at timestamp with time zone,
+    
+    CONSTRAINT pk_obt_tombos_denormalized PRIMARY KEY (id)
+);
+```

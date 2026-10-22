@@ -1,0 +1,174 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_10-38-29
+Model: gemini
+Prompt: RISEN-few-shot
+Schema: TPC_H
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The original schema is a highly normalized snowflake design (standard TPC-H). For analytical workloads, this structure introduces severe bottlenecks due to massive multi-table JOINs (e.g., joining LINEITEM, ORDERS, CUSTOMER, NATION, and REGION just to aggregate revenue by region). The denormalization strategy transitions the model into a Star Schema. We apply 'Collapsing Relations' to merge the snowflake dimensions (NATION and REGION) directly into the CUSTOMER and SUPPLIER dimensions. We also collapse the ORDERS and LINEITEM tables into a single FACT_SALES table, as they represent a classic header-detail relationship that is almost always queried together. Finally, we use 'Adding Derived Attributes' to precompute revenue, eliminating repetitive inline calculations.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapse NATION and REGION into CUSTOMER to create a single DIM_CUSTOMER table. This removes two JOINs for customer-geography queries."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapse NATION and REGION into SUPPLIER to create a single DIM_SUPPLIER table. This removes two JOINs for supplier-geography queries."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Collapse ORDERS and LINEITEM into a single FACT_SALES table. Since analytical queries almost always filter by order date or group by order attributes while aggregating line items, this materializes the heaviest JOIN in the database."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived attribute L_REVENUE_DERIVED (calculated as L_EXTENDEDPRICE * (1 - L_DISCOUNT)) to FACT_SALES to speed up common financial aggregations."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Renamed N_NAME, N_COMMENT, R_NAME, and R_COMMENT in DIM_CUSTOMER to C_NATION_NAME, C_NATION_COMMENT, C_REGION_NAME, and C_REGION_COMMENT to prevent ambiguity and clarify the entity context."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Renamed N_NAME, N_COMMENT, R_NAME, and R_COMMENT in DIM_SUPPLIER to S_NATION_NAME, S_NATION_COMMENT, S_REGION_NAME, and S_REGION_COMMENT."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage footprint (Data Redundancy): Nation and Region names and comments are duplicated across every customer and supplier record."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If a Region or Nation name changes, multiple rows in DIM_CUSTOMER and DIM_SUPPLIER must be updated. This is generally acceptable in OLAP environments where data is mostly append-only or batch-updated."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D3",
+        "query": "SELECT O_ORDERDATE, SUM(L_REVENUE_DERIVED) FROM FACT_SALES GROUP BY O_ORDERDATE ORDER BY O_ORDERDATE;"
+      },
+      {
+        "decision_id": "D1",
+        "query": "SELECT C_REGION_NAME, SUM(L_REVENUE_DERIVED) FROM FACT_SALES JOIN DIM_CUSTOMER ON FACT_SALES.O_CUSTKEY = DIM_CUSTOMER.C_CUSTKEY GROUP BY C_REGION_NAME;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+BEGIN;
+
+-- Drop existing tables if necessary (for idempotency)
+DROP TABLE IF EXISTS FACT_SALES CASCADE;
+DROP TABLE IF EXISTS FACT_PARTSUPP CASCADE;
+DROP TABLE IF EXISTS DIM_CUSTOMER CASCADE;
+DROP TABLE IF EXISTS DIM_SUPPLIER CASCADE;
+DROP TABLE IF EXISTS DIM_PART CASCADE;
+
+-- 1. DIM_CUSTOMER: Collapsed from CUSTOMER, NATION, and REGION
+CREATE TABLE DIM_CUSTOMER ( 
+    C_CUSTKEY          INTEGER NOT NULL,
+    C_NAME             VARCHAR(25) NOT NULL,
+    C_ADDRESS          VARCHAR(40) NOT NULL,
+    C_PHONE            CHAR(15) NOT NULL,
+    C_ACCTBAL          DECIMAL(15,2) NOT NULL,
+    C_MKTSEGMENT       CHAR(10) NOT NULL,
+    C_COMMENT          VARCHAR(117) NOT NULL,
+    C_NATION_NAME      CHAR(25) NOT NULL,
+    C_NATION_COMMENT   VARCHAR(152),
+    C_REGION_NAME      CHAR(25) NOT NULL,
+    C_REGION_COMMENT   VARCHAR(152),
+    CONSTRAINT DIM_CUSTOMER_PKEY PRIMARY KEY (C_CUSTKEY)
+);
+
+-- 2. DIM_SUPPLIER: Collapsed from SUPPLIER, NATION, and REGION
+CREATE TABLE DIM_SUPPLIER ( 
+    S_SUPPKEY          INTEGER NOT NULL,
+    S_NAME             CHAR(25) NOT NULL,
+    S_ADDRESS          VARCHAR(40) NOT NULL,
+    S_PHONE            CHAR(15) NOT NULL,
+    S_ACCTBAL          DECIMAL(15,2) NOT NULL,
+    S_COMMENT          VARCHAR(101) NOT NULL,
+    S_NATION_NAME      CHAR(25) NOT NULL,
+    S_NATION_COMMENT   VARCHAR(152),
+    S_REGION_NAME      CHAR(25) NOT NULL,
+    S_REGION_COMMENT   VARCHAR(152),
+    CONSTRAINT DIM_SUPPLIER_PKEY PRIMARY KEY (S_SUPPKEY)
+);
+
+-- 3. DIM_PART: Kept standalone as a dimension (No changes needed, maps 1:1)
+CREATE TABLE DIM_PART ( 
+    P_PARTKEY          INTEGER NOT NULL,
+    P_NAME             VARCHAR(55) NOT NULL,
+    P_MFGR             CHAR(25) NOT NULL,
+    P_BRAND            CHAR(10) NOT NULL,
+    P_TYPE             VARCHAR(25) NOT NULL,
+    P_SIZE             INTEGER NOT NULL,
+    P_CONTAINER        CHAR(10) NOT NULL,
+    P_RETAILPRICE      DECIMAL(15,2) NOT NULL,
+    P_COMMENT          VARCHAR(23) NOT NULL,
+    CONSTRAINT DIM_PART_PKEY PRIMARY KEY (P_PARTKEY)
+);
+
+-- 4. FACT_PARTSUPP: Represents the Many-to-Many inventory relationship between Part and Supplier
+CREATE TABLE FACT_PARTSUPP ( 
+    PS_PARTKEY         INTEGER NOT NULL,
+    PS_SUPPKEY         INTEGER NOT NULL,
+    PS_AVAILQTY        INTEGER NOT NULL,
+    PS_SUPPLYCOST      DECIMAL(15,2) NOT NULL,
+    PS_COMMENT         VARCHAR(199) NOT NULL,
+    CONSTRAINT FACT_PARTSUPP_PKEY PRIMARY KEY (PS_PARTKEY, PS_SUPPKEY),
+    CONSTRAINT FK_PS_PART FOREIGN KEY (PS_PARTKEY) REFERENCES DIM_PART(P_PARTKEY),
+    CONSTRAINT FK_PS_SUPP FOREIGN KEY (PS_SUPPKEY) REFERENCES DIM_SUPPLIER(S_SUPPKEY)
+);
+
+-- 5. FACT_SALES: Collapsed from ORDERS and LINEITEM with derived analytical attributes
+CREATE TABLE FACT_SALES ( 
+    L_ORDERKEY         INTEGER NOT NULL,
+    L_LINENUMBER       INTEGER NOT NULL,
+    L_PARTKEY          INTEGER NOT NULL,
+    L_SUPPKEY          INTEGER NOT NULL,
+    O_CUSTKEY          INTEGER NOT NULL,
+    
+    -- Orders Attributes
+    O_ORDERSTATUS      CHAR(1) NOT NULL,
+    O_TOTALPRICE       DECIMAL(15,2) NOT NULL,
+    O_ORDERDATE        DATE NOT NULL,
+    O_ORDERPRIORITY    CHAR(15) NOT NULL,  
+    O_CLERK            CHAR(15) NOT NULL, 
+    O_SHIPPRIORITY     INTEGER NOT NULL,
+    O_COMMENT          VARCHAR(79) NOT NULL,
+    
+    -- Lineitem Attributes
+    L_QUANTITY         DECIMAL(15,2) NOT NULL,
+    L_EXTENDEDPRICE    DECIMAL(15,2) NOT NULL,
+    L_DISCOUNT         DECIMAL(15,2) NOT NULL,
+    L_TAX              DECIMAL(15,2) NOT NULL,
+    L_RETURNFLAG       CHAR(1) NOT NULL,
+    L_LINESTATUS       CHAR(1) NOT NULL,
+    L_SHIPDATE         DATE NOT NULL,
+    L_COMMITDATE       DATE NOT NULL,
+    L_RECEIPTDATE      DATE NOT NULL,
+    L_SHIPINSTRUCT     CHAR(25) NOT NULL,
+    L_SHIPMODE         CHAR(10) NOT NULL,
+    L_COMMENT          VARCHAR(44) NOT NULL,
+    
+    -- Derived Attributes
+    L_REVENUE_DERIVED  DECIMAL(15,4) NOT NULL,
+    
+    CONSTRAINT FACT_SALES_PKEY PRIMARY KEY (L_ORDERKEY, L_LINENUMBER),
+    CONSTRAINT FK_FS_CUST FOREIGN KEY (O_CUSTKEY) REFERENCES DIM_CUSTOMER(C_CUSTKEY),
+    CONSTRAINT FK_FS_PART FOREIGN KEY (L_PARTKEY) REFERENCES DIM_PART(P_PARTKEY),
+    CONSTRAINT FK_FS_SUPP FOREIGN KEY (L_SUPPKEY) REFERENCES DIM_SUPPLIER(S_SUPPKEY)
+);
+
+COMMIT;
+```

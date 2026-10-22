@@ -1,0 +1,306 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-02-46
+Model: ollama_api
+Prompt: senior
+Schema: adv_works
+==================================================
+
+{
+  "section_1": {
+    "summary": "This schema transformation creates an analytics-optimized star schema from the AdventureWorks OLTP schema. The approach focuses on flattening key dimension hierarchies (Employee, Product, Geography, Date) and creating atomic fact tables for core business processes (Sales, Purchasing, Inventory). Dimension tables are denormalized to include descriptive attributes from related lookup tables, while fact tables maintain foreign keys to these rich dimensions. This design minimizes joins for typical analytical queries while preserving data integrity and lineage.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Transformed the Employee hierarchy (Employee, EmployeeDepartmentHistory, Department, Shift) into a single denormalized Employee dimension with historical context columns."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Created a unified Product dimension by flattening Product, ProductSubcategory, and ProductCategory tables."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Built a comprehensive Geography dimension by joining Address, StateProvince, and CountryRegion tables."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Designed atomic Sales Fact table (FactSales) based on SalesOrderHeader and SalesOrderDetail tables."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Designed atomic Purchasing Fact table (FactPurchases) based on PurchaseOrderHeader and PurchaseOrderDetail tables."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Created Inventory Snapshot Fact table (FactInventory) based on ProductInventory table."
+      },
+      {
+        "decision_id": "D7",
+        "description": "Implemented Date dimension with keys for all date-related foreign keys in the schema."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added calculated fields like EmployeeAge, YearsOfService, and FullEmployeeName to the Employee dimension."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Included hierarchical product information (Category, Subcategory) directly in the Product dimension."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added full geographic names (StateProvinceName, CountryRegionName) to the Geography dimension."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Created surrogate keys for all dimension tables to support slowly changing dimensions."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Added calculated metrics like LineTotal and DiscountAmount to the Sales fact table."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Denormalization increases storage requirements but significantly reduces query complexity and join overhead for analytical workloads."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Flattened dimensions introduce data redundancy but eliminate the need for multiple joins in reporting queries."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Atomic fact tables provide maximum flexibility for analysis but may require more storage than aggregated tables."
+      },
+      {
+        "tradeoff_id": "T4",
+        "description": "Using surrogate keys improves performance and supports type-2 SCDs but adds complexity to ETL processes."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze sales performance by employee demographics and department."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze product sales by category, subcategory, and individual product attributes."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze sales and purchasing trends by geographic region."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze sales performance over time with various date granularities."
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Compare sales and purchasing metrics for inventory analysis."
+      }
+    ]
+  }
+}
+
+-- SQL DDL Creation Script for Denormalized Analytical Schema
+
+-- Dimension Tables
+
+CREATE TABLE DimDate (
+    DateKey INTEGER PRIMARY KEY,
+    Date DATE NOT NULL,
+    Day INTEGER NOT NULL,
+    DaySuffix VARCHAR(4) NOT NULL,
+    Weekday INTEGER NOT NULL,
+    WeekDayName VARCHAR(10) NOT NULL,
+    WeekDayName_Short VARCHAR(3) NOT NULL,
+    WeekDayName_FirstLetter VARCHAR(1) NOT NULL,
+    DOWInMonth INTEGER NOT NULL,
+    DayOfYear INTEGER NOT NULL,
+    WeekOfMonth INTEGER NOT NULL,
+    WeekOfYear INTEGER NOT NULL,
+    Month INTEGER NOT NULL,
+    MonthName VARCHAR(10) NOT NULL,
+    MonthName_Short VARCHAR(3) NOT NULL,
+    MonthName_FirstLetter VARCHAR(1) NOT NULL,
+    Quarter INTEGER NOT NULL,
+    QuarterName VARCHAR(6) NOT NULL,
+    Year INTEGER NOT NULL,
+    MMYYYY VARCHAR(6) NOT NULL,
+    MonthYear VARCHAR(8) NOT NULL,
+    IsWeekend BOOLEAN NOT NULL
+);
+
+CREATE TABLE DimEmployee (
+    EmployeeKey SERIAL PRIMARY KEY,
+    EmployeeID INTEGER NOT NULL,
+    NationalIDNumber VARCHAR(15) NOT NULL,
+    LoginID VARCHAR(256) NOT NULL,
+    EmployeeFullName VARCHAR(150) NOT NULL,
+    JobTitle VARCHAR(50) NOT NULL,
+    BirthDate DATE NOT NULL,
+    MaritalStatus CHAR(1) NOT NULL,
+    Gender CHAR(1) NOT NULL,
+    HireDate DATE NOT NULL,
+    SalariedFlag BOOLEAN NOT NULL,
+    VacationHours SMALLINT NOT NULL,
+    SickLeaveHours SMALLINT NOT NULL,
+    CurrentFlag BOOLEAN NOT NULL,
+    DepartmentID INTEGER,
+    DepartmentName VARCHAR(50),
+    DepartmentGroupName VARCHAR(50),
+    ShiftID SMALLINT,
+    ShiftName VARCHAR(50),
+    ShiftStartTime TIME,
+    ShiftEndTime TIME,
+    StartDate DATE,
+    EndDate DATE,
+    IsActive BOOLEAN,
+    EmployeeAge INTEGER,
+    YearsOfService INTEGER
+);
+
+CREATE TABLE DimProduct (
+    ProductKey SERIAL PRIMARY KEY,
+    ProductID INTEGER NOT NULL,
+    ProductName VARCHAR(50) NOT NULL,
+    ProductNumber VARCHAR(25) NOT NULL,
+    MakeFlag BOOLEAN NOT NULL,
+    FinishedGoodsFlag BOOLEAN NOT NULL,
+    Color VARCHAR(15),
+    SafetyStockLevel SMALLINT NOT NULL,
+    ReorderPoint SMALLINT NOT NULL,
+    StandardCost NUMERIC NOT NULL,
+    ListPrice NUMERIC NOT NULL,
+    Size VARCHAR(5),
+    SizeUnitMeasureCode CHAR(3),
+    WeightUnitMeasureCode CHAR(3),
+    Weight NUMERIC(8, 2),
+    DaysToManufacture INTEGER NOT NULL,
+    ProductLine CHAR(2),
+    Class CHAR(2),
+    Style CHAR(2),
+    ProductSubcategoryID INTEGER,
+    ProductSubcategoryName VARCHAR(50),
+    ProductCategoryID INTEGER,
+    ProductCategoryName VARCHAR(50),
+    SellStartDate DATE NOT NULL,
+    SellEndDate DATE
+);
+
+CREATE TABLE DimGeography (
+    GeographyKey SERIAL PRIMARY KEY,
+    AddressID INTEGER NOT NULL,
+    AddressLine1 VARCHAR(60) NOT NULL,
+    AddressLine2 VARCHAR(60),
+    City VARCHAR(30) NOT NULL,
+    StateProvinceID INTEGER NOT NULL,
+    StateProvinceCode CHAR(3) NOT NULL,
+    StateProvinceName VARCHAR(50) NOT NULL,
+    CountryRegionCode VARCHAR(3) NOT NULL,
+    CountryRegionName VARCHAR(50) NOT NULL,
+    PostalCode VARCHAR(15) NOT NULL
+);
+
+CREATE TABLE DimCustomer (
+    CustomerKey SERIAL PRIMARY KEY,
+    CustomerID INTEGER NOT NULL,
+    PersonID INTEGER,
+    StoreID INTEGER,
+    TerritoryID INTEGER,
+    CustomerType VARCHAR(20) -- Derived from PersonID/StoreID
+);
+
+CREATE TABLE DimVendor (
+    VendorKey SERIAL PRIMARY KEY,
+    VendorID INTEGER NOT NULL,
+    AccountNumber VARCHAR(15) NOT NULL,
+    VendorName VARCHAR(50) NOT NULL,
+    CreditRating SMALLINT NOT NULL,
+    PreferredVendorStatus BOOLEAN NOT NULL,
+    ActiveFlag BOOLEAN NOT NULL
+);
+
+-- Fact Tables
+
+CREATE TABLE FactSales (
+    SalesOrderID INTEGER NOT NULL,
+    SalesOrderDetailID INTEGER NOT NULL,
+    OrderDateKey INTEGER NOT NULL REFERENCES DimDate(DateKey),
+    DueDateKey INTEGER NOT NULL REFERENCES DimDate(DateKey),
+    ShipDateKey INTEGER REFERENCES DimDate(DateKey),
+    CustomerKey INTEGER NOT NULL REFERENCES DimCustomer(CustomerKey),
+    ProductKey INTEGER NOT NULL REFERENCES DimProduct(ProductKey),
+    EmployeeKey INTEGER NOT NULL REFERENCES DimEmployee(EmployeeKey),
+    GeographyKey INTEGER NOT NULL REFERENCES DimGeography(GeographyKey),
+    OrderQty SMALLINT NOT NULL,
+    UnitPrice NUMERIC NOT NULL,
+    UnitPriceDiscount NUMERIC NOT NULL,
+    LineTotal NUMERIC NOT NULL,
+    DiscountAmount NUMERIC NOT NULL,
+    TaxAmt NUMERIC NOT NULL,
+    Freight NUMERIC NOT NULL,
+    TotalDue NUMERIC NOT NULL,
+    PRIMARY KEY (SalesOrderID, SalesOrderDetailID)
+);
+
+CREATE TABLE FactPurchases (
+    PurchaseOrderID INTEGER NOT NULL,
+    PurchaseOrderDetailID INTEGER NOT NULL,
+    OrderDateKey INTEGER NOT NULL REFERENCES DimDate(DateKey),
+    DueDateKey INTEGER NOT NULL REFERENCES DimDate(DateKey),
+    ShipDateKey INTEGER REFERENCES DimDate(DateKey),
+    ProductKey INTEGER NOT NULL REFERENCES DimProduct(ProductKey),
+    VendorKey INTEGER NOT NULL REFERENCES DimVendor(VendorKey),
+    EmployeeKey INTEGER NOT NULL REFERENCES DimEmployee(EmployeeKey),
+    OrderQty SMALLINT NOT NULL,
+    UnitPrice NUMERIC NOT NULL,
+    ReceivedQty NUMERIC(8, 2) NOT NULL,
+    RejectedQty NUMERIC(8, 2) NOT NULL,
+    StockedQty NUMERIC(9, 2) NOT NULL,
+    LineTotal NUMERIC NOT NULL,
+    SubTotal NUMERIC NOT NULL,
+    TaxAmt NUMERIC NOT NULL,
+    Freight NUMERIC NOT NULL,
+    TotalDue NUMERIC NOT NULL,
+    PRIMARY KEY (PurchaseOrderID, PurchaseOrderDetailID)
+);
+
+CREATE TABLE FactInventory (
+    ProductKey INTEGER NOT NULL REFERENCES DimProduct(ProductKey),
+    GeographyKey INTEGER NOT NULL REFERENCES DimGeography(GeographyKey),
+    Shelf VARCHAR(10) NOT NULL,
+    Bin SMALLINT NOT NULL,
+    Quantity SMALLINT NOT NULL,
+    PRIMARY KEY (ProductKey, GeographyKey, Shelf, Bin)
+);
+
+-- Indexes for Performance Optimization
+
+CREATE INDEX idx_fact_sales_date ON FactSales(OrderDateKey);
+CREATE INDEX idx_fact_sales_customer ON FactSales(CustomerKey);
+CREATE INDEX idx_fact_sales_product ON FactSales(ProductKey);
+CREATE INDEX idx_fact_sales_employee ON FactSales(EmployeeKey);
+
+CREATE INDEX idx_fact_purchases_date ON FactPurchases(OrderDateKey);
+CREATE INDEX idx_fact_purchases_product ON FactPurchases(ProductKey);
+CREATE INDEX idx_fact_purchases_vendor ON FactPurchases(VendorKey);
+CREATE INDEX idx_fact_purchases_employee ON FactPurchases(EmployeeKey);
+
+CREATE INDEX idx_fact_inventory_product ON FactInventory(ProductKey);
+CREATE INDEX idx_fact_inventory_geography ON FactInventory(GeographyKey);
+
+CREATE INDEX idx_dim_employee_department ON DimEmployee(DepartmentID);
+CREATE INDEX idx_dim_employee_date ON DimEmployee(HireDate);
+CREATE INDEX idx_dim_product_category ON DimProduct(ProductCategoryID);
+CREATE INDEX idx_dim_product_subcategory ON DimProduct(ProductSubcategoryID);
+CREATE INDEX idx_dim_geography_state ON DimGeography(StateProvinceID);
+CREATE INDEX idx_dim_geography_country ON DimGeography(CountryRegionCode);

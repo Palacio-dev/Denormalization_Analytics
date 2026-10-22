@@ -1,0 +1,190 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_11-05-30
+Model: ollama_local
+Prompt: RISEN-few-shot
+Schema: ex08
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on the 'matricula_ifb' (enrollment) table, which acts as the central hub 
+    connecting Students, Courses, Schools, and Employment data. The primary bottleneck is the frequent need to retrieve complete 
+    enrollment profiles (Student details + Course details + School details + Employment status) in a single query. By denormalizing 'matricula_ifb', we eliminate the need for 4-5 JOINs, reducing query complexity and significantly improving read performance. We also denormalize 'vinculo_empregaticio' to include location and remuneration data, as employment queries often require joining back to 'aluno', 'escola', and 'localizacao'.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Create a single, wide 'matricula_ifb_denormalizado' table. This table includes all columns from 'matricula_ifb', plus redundant copies of 'aluno_ifb' columns (id_aluno, data_nascimento, idade, sexo, nacionalidade, raca, portador_deficiencia), 'curso_ifb' columns (no_curso, co_tipo_curso, etc.), 'escola' columns (no_escola_educacenso, tp_dependencia_adm_escola, tp_localizacao_escola), and 'localizacao' columns (uf, municipio).",
+        "source_table": "matricula_ifb, aluno_ifb, curso_ifb, escola, localizacao",
+        "target_table": "matricula_ifb_denormalizado"
+      },
+      {
+        "decision_id": "D2",
+        "description": "Create a 'vinculo_empregaticio_denormalizado' table. This table includes all columns from 'vinculo_empregaticio', plus redundant copies of 'aluno_ifb' (id_aluno), 'remuneracao' (vl_remun_media_nom, vl_remun_media_sm, etc.), and 'localizacao' (uf, municipio) columns.",
+        "source_table": "vinculo_empregaticio, aluno_ifb, remuneracao, localizacao",
+        "target_table": "vinculo_empregaticio_denormalizado"
+      },
+      {
+        "decision_id": "D3",
+        "description": "Keep 'escola', 'aluno_ifb', 'curso_ifb', 'localizacao', 'desempenho_enem', 'indicadores_escolares', 'participacao_enem', 'remuneracao' as reference tables. These are kept normalized to maintain data integrity for write operations and to serve as the source of truth for data that is not frequently joined in complex analytical queries.",
+        "source_table": "Original Reference Tables",
+        "target_table": "No change"
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant columns to 'matricula_ifb_denormalizado': 'data_nascimento', 'idade', 'sexo', 'nacionalidade', 'raca', 'portador_deficiencia' (from aluno), 'no_curso', 'co_tipo_curso', 'tipo_curso', 'co_tipo_nivel', 'ds_tipo_nivel', 'ds_eixo_tecnologico', 'modalidade_ensino', 'carga_horaria' (from curso), 'no_escola_educacenso', 'tp_dependencia_adm_escola', 'tp_localizacao_escola' (from escola), 'uf', 'municipio' (from localizacao).",
+        "affected_table": "matricula_ifb_denormalizado"
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added redundant columns to 'vinculo_empregaticio_denormalizado': 'vl_remun_media_nom', 'vl_remun_media_sm', 'vl_remun_dezembro_nom', 'vl_remun_dezembro_sm', 'qtd_hora_contr', 'vl_ultima_remuneracao_ano', 'vl_salario_contratual' (from remuneracao), 'uf', 'municipio' (from localizacao).",
+        "affected_table": "vinculo_empregaticio_denormalizado"
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Write Performance vs. Read Performance: The denormalized tables will have higher write overhead because every INSERT/UPDATE/DELETE must now update multiple redundant columns. However, the read performance gain (eliminating JOINs) is expected to be substantial for analytical queries.",
+        "impact": "High read improvement, moderate write overhead"
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Data Consistency: The risk of data inconsistency increases if the redundant columns are updated via different paths (e.g., updating 'idade' in 'aluno_ifb' but not in 'matricula_ifb_denormalizado'). To mitigate this, we must ensure that any write operation updates all related tables atomically.",
+        "impact": "Requires strict transaction management"
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Business Query: 'List all current students enrolled in Engineering courses at Federal schools, including their full personal details, course specifics, school location, and whether they are currently employed with salary details.'\nOriginal normalized query required 5+ JOINs (aluno -> matricula -> curso -> escola -> localizacao, and vinculo -> aluno -> remuneracao -> localizacao). The denormalized schema allows this to be executed with simple SELECT * FROM matricula_ifb_denormalizado WHERE ... JOIN vinculo_empregaticio_denormalizado ON ...",
+        "complexity_reduction": "Eliminates 4-5 JOINs, reducing query execution time by an estimated 60-80% for large datasets."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical Query: 'Analyze the average salary and years of employment for students from specific municipalities (UF) in the year 2023.'\nThis query requires joining 'vinculo_empregaticio' with 'aluno', 'localizacao', and 'remuneracao'. Denormalizing 'vinculo_empregaticio' allows the query to run directly on the denormalized table, filtering by 'uf' and 'ano' without needing to reconstruct the join path.",
+        "complexity_reduction": "Reduces join depth from 4 to 0, enabling efficient aggregation on the denormalized table."
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- Denormalized Schema for IFB Database (PostgreSQL)
+-- Strategy: Materialize joins in 'matricula_ifb' and 'vinculo_empregaticio' to improve read performance.
+
+BEGIN;
+
+-- Drop denormalized tables if they exist
+DROP TABLE IF EXISTS public.matricula_ifb_denormalizado CASCADE;
+DROP TABLE IF EXISTS public.vinculo_empregaticio_denormalizado CASCADE;
+
+-- 1. Denormalized Enrollment Table
+-- Includes all columns from matricula_ifb, plus redundant attributes from aluno_ifb, curso_ifb, escola, and localizacao.
+CREATE TABLE IF NOT EXISTS public.matricula_ifb_denormalizado (
+    id_matricula serial NOT NULL,
+    co_ciclo_matricula character varying(50) COLLATE pg_catalog."default",
+    periodo character varying(30) COLLATE pg_catalog."default",
+    situacao_matricula character varying(50) COLLATE pg_catalog."default",
+    tipo_cota character varying(50) COLLATE pg_catalog."default",
+    atestado_baixarenda character varying(20) COLLATE pg_catalog."default",
+    ano character varying(20) COLLATE pg_catalog."default",
+    
+    -- Redundant Student Attributes (from aluno_ifb)
+    id_aluno integer NOT NULL,
+    data_nascimento date,
+    idade integer,
+    sexo character(1) COLLATE pg_catalog."default",
+    nacionalidade character varying(50) COLLATE pg_catalog."default",
+    raca character varying(50) COLLATE pg_catalog."default",
+    portador_deficiencia boolean,
+    
+    -- Redundant Course Attributes (from curso_ifb)
+    co_curso character varying(50) COLLATE pg_catalog."default",
+    no_curso character varying(200) COLLATE pg_catalog."default",
+    co_tipo_curso character varying(10) COLLATE pg_catalog."default",
+    tipo_curso character varying(100) COLLATE pg_catalog."default",
+    co_tipo_nivel character varying(10) COLLATE pg_catalog."default",
+    ds_tipo_nivel character varying(100) COLLATE pg_catalog."default",
+    ds_eixo_tecnologico character varying(200) COLLATE pg_catalog."default",
+    modalidade_ensino character varying(100) COLLATE pg_catalog."default",
+    carga_horaria integer,
+    
+    -- Redundant School Attributes (from escola)
+    co_escola_educacenso character varying(20) COLLATE pg_catalog."default",
+    no_escola_educacenso character varying(200) COLLATE pg_catalog."default",
+    tp_dependencia_adm_escola smallint,
+    tp_localizacao_escola smallint,
+    
+    -- Redundant Location Attributes (from localizacao)
+    uf character varying(2) COLLATE pg_catalog."default",
+    municipio character varying(100) COLLATE pg_catalog."default",
+    
+    CONSTRAINT matricula_ifb_denormalizado_pkey PRIMARY KEY (id_matricula),
+    CONSTRAINT matricula_ifb_denormalizado_aluno_fkey FOREIGN KEY (id_aluno) REFERENCES public.aluno_ifb (id_aluno) MATCH SIMPLE ON UPDATE NO ACTION ON DELETE NO ACTION,
+    CONSTRAINT matricula_ifb_denormalizado_curso_fkey FOREIGN KEY (co_curso) REFERENCES public.curso_ifb (co_curso) MATCH SIMPLE ON UPDATE NO ACTION ON DELETE NO ACTION,
+    CONSTRAINT matricula_ifb_denormalizado_escola_fkey FOREIGN KEY (co_escola_educacenso) REFERENCES public.escola (co_escola_educacenso) MATCH SIMPLE ON UPDATE NO ACTION ON DELETE NO ACTION
+);
+
+-- 2. Denormalized Employment Table
+-- Includes all columns from vinculo_empregaticio, plus redundant attributes from aluno_ifb, remuneracao, and localizacao.
+CREATE TABLE IF NOT EXISTS public.vinculo_empregaticio_denormalizado (
+    id_vinculo serial NOT NULL,
+    ano_rais integer,
+    razao_social character varying(200) COLLATE pg_catalog."default",
+    tipo_vinculo_empregaticio character varying(200) COLLATE pg_catalog."default",
+    data_admissao_declarada date,
+    tempo_emprego integer,
+    motivo_desligamento character varying(200) COLLATE pg_catalog."default",
+    mes_desligamento character varying(20) COLLATE pg_catalog."default",
+    indicador_vinculo_ativo boolean,
+    
+    -- Redundant Student Attributes (from aluno_ifb)
+    id_aluno integer,
+    
+    -- Redundant Remuneration Attributes (from remuneracao)
+    id_remuneracao integer,
+    vl_remun_media_nom numeric(10, 2),
+    vl_remun_media_sm numeric(10, 2),
+    vl_remun_dezembro_nom numeric(10, 2),
+    vl_remun_dezembro_sm numeric(10, 2),
+    qtd_hora_contr integer,
+    vl_ultima_remuneracao_ano numeric(10, 2),
+    vl_salario_contratual numeric(10, 2),
+    
+    -- Redundant Location Attributes (from localizacao)
+    id_loc integer,
+    uf character varying(2) COLLATE pg_catalog."default",
+    municipio character varying(100) COLLATE pg_catalog."default",
+    
+    CONSTRAINT vinculo_empregaticio_denormalizado_pkey PRIMARY KEY (id_vinculo),
+    CONSTRAINT vinculo_empregaticio_denormalizado_aluno_fkey FOREIGN KEY (id_aluno) REFERENCES public.aluno_ifb (id_aluno) MATCH SIMPLE ON UPDATE NO ACTION ON DELETE NO ACTION,
+    CONSTRAINT vinculo_empregaticio_denormalizado_remuneracao_fkey FOREIGN KEY (id_remuneracao) REFERENCES public.remuneracao (id_remuneracao) MATCH SIMPLE ON UPDATE NO ACTION ON DELETE NO ACTION
+);
+
+-- Note: Foreign keys to escola and localizacao are omitted from vinculo_empregaticio_denormalizado 
+-- because the original schema did not explicitly define them as foreign keys in the provided script,
+-- though 'matricula_ifb' had a FK to escola. We rely on the redundant data in the denormalized table
+-- for analytical queries. If strict referential integrity is required for employment data linked to schools,
+-- those FKs should be added here as well.
+
+-- Indexes for performance on the denormalized tables
+CREATE INDEX IF NOT EXISTS idx_matricula_denormalizado_aluno ON public.matricula_ifb_denormalizado(id_aluno);
+CREATE INDEX IF NOT EXISTS idx_matricula_denormalizado_escola ON public.matricula_ifb_denormalizado(co_escola_educacenso);
+CREATE INDEX IF NOT EXISTS idx_matricula_denormalizado_curso ON public.matricula_ifb_denormalizado(co_curso);
+CREATE INDEX IF NOT EXISTS idx_matricula_denormalizado_uf ON public.matricula_ifb_denormalizado(uf);
+CREATE INDEX IF NOT EXISTS idx_matricula_denormalizado_municipio ON public.matricula_ifb_denormalizado(municipio);
+
+CREATE INDEX IF NOT EXISTS idx_vinculo_denormalizado_aluno ON public.vinculo_empregaticio_denormalizado(id_aluno);
+CREATE INDEX IF NOT EXISTS idx_vinculo_denormalizado_remuneracao ON public.vinculo_empregaticio_denormalizado(id_remuneracao);
+CREATE INDEX IF NOT EXISTS idx_vinculo_denormalizado_uf ON public.vinculo_empregaticio_denormalizado(uf);
+CREATE INDEX IF NOT EXISTS idx_vinculo_denormalizado_municipio ON public.vinculo_empregaticio_denormalizado(municipio);
+
+COMMIT;
+```

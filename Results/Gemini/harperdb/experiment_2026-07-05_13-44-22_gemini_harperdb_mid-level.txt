@@ -1,0 +1,121 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-44-22
+Model: gemini
+Prompt: mid-level
+Schema: harperdb
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The source schema consists of a normalized many-to-many relationship between users and entitlements. For a read-heavy analytical workload, maintaining this structure requires multiple joins (Users -> User_Entitlements -> Entitlements) which degrades performance. The denormalization strategy consolidates these three tables into a single 'One Big Table' (OBT) / Denormalized Fact Table. This eliminates join complexity entirely, allowing BI tools to rapidly slice and dice entitlement metrics by user, feature, and package types. We also introduce derived attributes to pre-calculate common analytical metrics like utilization rates and expiration statuses.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidate `users`, `user_entitlements`, and `entitlements` into a single denormalized table named `denorm_user_entitlements`. The grain of this table is one row per user per entitlement."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived measure `utilization_percentage`. Calculated as (`useCount` / `useLimit`) to prevent BI tools from having to compute this on the fly."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added derived dimension `is_expired`. A boolean/flag evaluated based on whether the `inactiveDate` has passed, simplifying active/inactive filtering."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added derived dimension `validity_duration_days`. Calculated as the date difference between `activeDate` and `inactiveDate` to analyze entitlement lifespans."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Removed the standalone `users` table from the analytical model, as it only contained an `id` which is now fully embedded in the denormalized table."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Duplication / Fan-out: Because multiple users can share the same entitlement, flattening the many-to-many relationship duplicates the `useLimit` and `useCount` measures for each user attached to that entitlement. BI developers must use Level of Detail (LOD) expressions, COUNT DISTINCT, or average/max aggregations at the `entitlement_id` grain to avoid double-counting measures across users."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Increased Storage: Storing dimensional attributes (like featureType, packageType, and dates) repeatedly for every user mapped to an entitlement increases the overall storage footprint compared to the normalized schema."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "How many active users do we have per package type and feature type? (Motivated the consolidation of user_id, packageType, and featureType into one table)."
+      },
+      {
+        "decision_id": "A1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Which entitlements are nearing their usage limits? (Motivated the pre-calculation of `utilization_percentage`)."
+      },
+      {
+        "decision_id": "A2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Which users have entitlements that are currently expired but still have an activeFlag set to 1? (Motivated the `is_expired` derived attribute for quick data quality and status checks)."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Creation Script
+
+```sql
+-- ==============================================================================
+-- Denormalized Analytical Schema: denorm_user_entitlements
+-- Grain: One row per User per Entitlement
+-- Purpose: Optimized for read-heavy BI workloads, reporting, and aggregations.
+-- ==============================================================================
+
+CREATE TABLE denorm_user_entitlements (
+    -- Identifiers
+    user_id INT NOT NULL,
+    entitlement_id INT NOT NULL,
+    
+    -- Dimensional Attributes
+    feature_type VARCHAR(4),
+    package_type VARCHAR(4),
+    active_date DATE,
+    inactive_date DATE,
+    active_flag INT,
+    
+    -- Derived Dimensional Attributes
+    is_expired BOOLEAN,               -- e.g., inactive_date < CURRENT_DATE
+    validity_duration_days INT,       -- e.g., DATEDIFF(day, active_date, inactive_date)
+    
+    -- Measures
+    use_limit INT,
+    use_count INT,
+    
+    -- Derived Measures
+    utilization_percentage DECIMAL(10, 4), -- e.g., (use_count * 1.0) / NULLIF(use_limit, 0)
+    
+    -- Composite Primary Key based on the grain of the table
+    PRIMARY KEY (user_id, entitlement_id)
+);
+
+-- ==============================================================================
+-- Analytical Indexes
+-- Designed to support common filtering and grouping operations in BI tools
+-- ==============================================================================
+
+-- Index for user-centric queries (e.g., "Show all entitlements for User X")
+CREATE INDEX idx_denorm_ue_user 
+    ON denorm_user_entitlements(user_id);
+
+-- Index for product/feature-centric aggregations (e.g., "Total users per package")
+CREATE INDEX idx_denorm_ue_package_feature 
+    ON denorm_user_entitlements(package_type, feature_type);
+
+-- Index for status-centric queries (e.g., "Show all active, non-expired entitlements")
+CREATE INDEX idx_denorm_ue_status 
+    ON denorm_user_entitlements(active_flag, is_expired);
+```

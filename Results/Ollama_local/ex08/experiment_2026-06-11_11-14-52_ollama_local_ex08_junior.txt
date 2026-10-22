@@ -1,0 +1,191 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_11-14-52
+Model: ollama_local
+Prompt: junior
+Schema: ex08
+==================================================
+
+Here is the analysis and denormalization strategy for your database schema, followed by the complete SQL DDL script.
+
+### Part 1: Analysis and Strategy
+
+#### Section 1: Structural Analysis and Denormalization Plan
+
+**1. Identification of Tables and Relationships:**
+The schema consists of 10 tables with the following core relationships:
+*   **Students (`aluno_ifb`)**: Central entity for student demographics.
+*   **Courses (`curso_ifb`)**: Describes course structure. Linked to students via `matricula_ifb`.
+*   **Enrollment (`matricula_ifb`)**: The bridge table linking Students, Courses, and Schools. Contains critical temporal and status data.
+*   **Schools (`escola`)**: Linked to locations and performance metrics.
+*   **Performance (`desempenho_enem`**): School-level ENEM performance metrics.
+*   **Indicators (`indicadores_escolares`)**: School-level academic indicators (retention, approval rates).
+*   **Participation (`participacao_enem`)**: School-level ENEM participation rates.
+*   **Locations (`localizacao`)**: Geographic data for schools.
+*   **Employment (`vinculo_empregaticio`)**: Links students to jobs, salaries, and locations.
+*   **Remuneration (`remuneracao`)**: Salary data for employees.
+
+**2. Tables to Merge (Denormalization Strategy):**
+To optimize analytics queries (e.g., "Show all students who took ENEM, their school's approval rate, and their current salary"), we should reduce joins by merging entities that share a common key or are frequently accessed together in a single report.
+
+*   **Merge `desempenho_enem`, `indicadores_escolares`, and `participacao_enem`**: These three tables are all keyed by `co_escola_educacenso` (or implicitly by year). Merging them into a single `escola_metrics` table eliminates the need to join three tables just to get school stats.
+*   **Merge `escola` and `localizacao`**: Since `escola` only has a foreign key to `localizacao` and no other independent attributes, and location data is often queried alongside school data, merging them into `escola_geo` reduces join complexity.
+*   **Merge `remuneracao` and `vinculo_empregaticio`**: These tables are tightly coupled. `vinculo_empregaticio` holds the employment type and duration, while `remuneracao` holds the salary values. Merging them into `emprego_aluno` creates a single record per employment instance, avoiding joins when reporting on student earnings.
+*   **Keep `curso_ifb` separate**: Courses are often queried with filters on course type/nature which might be too granular to merge with the student demographic table without bloating it excessively. However, if the report is "Student X's courses," we can consider merging `curso_ifb` into `matricula_ifb` if the course details are rarely queried independently. *Decision: Keep `curso_ifb` distinct for maintainability, but merge its attributes into `matricula_ifb` if the report focuses purely on student course completion.* For this schema, we will merge `curso_ifb` into `matricula_ifb` to create a fully denormalized "Student-Course Record" table, as `co_curso` is already in `matricula_ifb`.
+*   **Keep `aluno_ifb` separate**: Student demographics are fundamental and rarely overlap with other entities except through enrollment.
+
+**3. Attribute-Level Changes:**
+*   **New Table `escola_metrics`**: Columns from `desempenho_enem`, `indicadores_escolares`, and `participacao_enem`.
+*   **New Table `escola_geo`**: Columns from `escola` and `localizacao`.
+*   **New Table `emprego_aluno`**: Columns from `vinculo_empregaticio` and `remuneracao`.
+*   **New Table `matricula_denormalizada`**: Columns from `matricula_ifb` + all columns from `curso_ifb`.
+
+**4. Tradeoffs:**
+*   **Storage Overhead**: The new schema will consume significantly more disk space due to data duplication (e.g., school name stored in multiple places, course details repeated for every enrollment).
+*   **Write Performance**: Updates to specific fields (like a student's age or a course's description) will now require updating multiple rows in the denormalized tables, potentially slowing down DML operations.
+*   **Data Freshness**: If source data changes frequently, the denormalized tables must be refreshed (ETL process) to reflect current state, whereas the original schema updates instantly.
+
+---
+
+#### Section 2: Query Patterns
+
+**1. School Performance & Demographics Report**
+*   **Pattern**: `SELECT ... FROM escola_geo, escola_metrics ... WHERE escola_geo.co_escola = escola_metrics.co_escola`
+*   **Motivation**: Analysts often need a single dashboard showing school location, administrative type, and multiple performance metrics (ENEM scores, retention, participation) simultaneously.
+*   **Impact**: Reduces join count from 3 to 1.
+
+**2. Student Earnings & Location Report**
+*   **Pattern**: `SELECT ... FROM emprego_aluno ... JOIN localizacao ON emprego_aluno.id_loc = localizacao.id_loc`
+*   **Motivation**: Reporting on the economic status of students (salary, contract type) combined with their geographic location.
+*   **Impact**: Eliminates the need to join `vinculo_empregaticio` and `remuneracao` tables.
+
+**3. Student Course Completion Analysis**
+*   **Pattern**: `SELECT ... FROM matricula_denormalizada ... JOIN aluno_ifb ON matricula_denormalizada.id_aluno = aluno_ifb.id_aluno`
+*   **Motivation**: Analyzing which students completed which specific courses with details on course type and load.
+*   **Impact**: Removes the need to join `curso_ifb` in the query.
+
+---
+
+### Part 2: SQL DDL Creation Script
+
+```sql
+-- Drop existing tables if they exist to ensure clean state for denormalization
+DROP TABLE IF EXISTS public.matricula_denormalizada;
+DROP TABLE IF EXISTS public.emprego_aluno;
+DROP TABLE IF EXISTS public.escola_geo;
+DROP TABLE IF EXISTS public.escola_metrics;
+
+-- 1. Merge Curso and Matricula
+-- Creates a single table holding all course details and enrollment info
+CREATE TABLE public.matricula_denormalizada (
+    id_matricula serial NOT NULL,
+    co_ciclo_matricula character varying(50) COLLATE pg_catalog."default",
+    periodo character varying(30) COLLATE pg_catalog."default",
+    situacao_matricula character varying(50) COLLATE pg_catalog."default",
+    tipo_cota character varying(50) COLLATE pg_catalog."default",
+    atestado_baixarenda character varying(20) COLLATE pg_catalog."default",
+    ano character varying(20) COLLATE pg_catalog."default",
+    id_aluno integer,
+    -- Course details moved here to avoid joins
+    co_curso character varying(50) COLLATE pg_catalog."default",
+    no_curso character varying(200) COLLATE pg_catalog."default",
+    co_tipo_curso character varying(10) COLLATE pg_catalog."default",
+    tipo_curso character varying(100) COLLATE pg_catalog."default",
+    co_tipo_nivel character varying(10) COLLATE pg_catalog."default",
+    ds_tipo_nivel character varying(100) COLLATE pg_catalog."default",
+    ds_eixo_tecnologico character varying(200) COLLATE pg_catalog."default",
+    modalidade_ensino character varying(100) COLLATE pg_catalog."default",
+    carga_horaria integer,
+    unidade_ensino character varying(100) COLLATE pg_catalog."default",
+    co_escola_educacenso character varying(20) COLLATE pg_catalog."default",
+    CONSTRAINT matricula_denormalizada_pkey PRIMARY KEY (id_matricula),
+    CONSTRAINT matricula_denormalizada_fk_aluno FOREIGN KEY (id_aluno) REFERENCES public.aluno_ifb (id_aluno)
+);
+
+-- 2. Merge Escola and Localizacao
+-- Combines school administrative data with geographic data
+CREATE TABLE public.escola_geo (
+    co_escola_educacenso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    no_escola_educacenso character varying(200) COLLATE pg_catalog."default",
+    tp_dependencia_adm_escola smallint,
+    tp_localizacao_escola smallint,
+    inse character varying(10) COLLATE pg_catalog."default",
+    id_loc integer,
+    uf character varying(2) COLLATE pg_catalog."default" NOT NULL,
+    municipio character varying(100) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT escola_geo_pkey PRIMARY KEY (co_escola_educacenso),
+    CONSTRAINT escola_geo_fk_loc FOREIGN KEY (id_loc) REFERENCES public.localizacao (id_loc)
+);
+
+-- 3. Merge Desempenho, Indicadores, and Participacao
+-- Consolidates all school-level performance metrics into one table
+CREATE TABLE public.escola_metrics (
+    id_metricas serial NOT NULL,
+    nu_ano integer NOT NULL,
+    -- ENEM Performance Metrics
+    nu_media_cn numeric(6, 2),
+    nu_media_ch numeric(6, 2),
+    nu_media_lp numeric(6, 2),
+    nu_media_mt numeric(6, 2),
+    nu_media_red numeric(6, 2),
+    nu_matriculas integer,
+    nu_participantes_nec_esp integer,
+    nu_participantes integer,
+    nu_taxa_participacao numeric(5, 2),
+    nu_taxa_permanencia numeric(6, 2),
+    nu_taxa_aprovacao numeric(5, 2),
+    nu_taxa_reprovacao numeric(5, 2),
+    nu_taxa_abandono numeric(5, 2),
+    co_escola_educacenso character varying(20) COLLATE pg_catalog."default",
+    porte_escola character varying(50) COLLATE pg_catalog."default",
+    pc_formacao_docente numeric(5, 2),
+    CONSTRAINT escola_metrics_pkey PRIMARY KEY (id_metricas),
+    CONSTRAINT escola_metrics_fk_escola FOREIGN KEY (co_escola_educacenso) REFERENCES public.escola_geo (co_escola_educacenso)
+);
+
+-- 4. Merge Vinculo and Remuneracao
+-- Creates a unified table for student employment and salary data
+CREATE TABLE public.emprego_aluno (
+    id_vinculo serial NOT NULL,
+    ano_rais integer,
+    razao_social character varying(200) COLLATE pg_catalog."default",
+    tipo_vinculo_empregaticio character varying(200) COLLATE pg_catalog."default",
+    data_admissao_declarada date,
+    tempo_emprego integer,
+    motivo_desligamento character varying(200) COLLATE pg_catalog."default",
+    mes_desligamento character varying(20) COLLATE pg_catalog."default",
+    indicador_vinculo_ativo boolean,
+    id_aluno integer,
+    id_remuneracao integer,
+    id_loc integer,
+    -- Salary metrics moved here
+    vl_remun_media_nom numeric(10, 2),
+    vl_remun_media_sm numeric(10, 2),
+    vl_remun_dezembro_nom numeric(10, 2),
+    vl_remun_dezembro_sm numeric(10, 2),
+    qtd_hora_contr integer,
+    vl_ultima_remuneracao_ano numeric(10, 2),
+    vl_salario_contratual numeric(10, 2),
+    CONSTRAINT emprego_aluno_pkey PRIMARY KEY (id_vinculo),
+    CONSTRAINT emprego_aluno_fk_aluno FOREIGN KEY (id_aluno) REFERENCES public.aluno_ifb (id_aluno),
+    CONSTRAINT emprego_aluno_fk_rem FOREIGN KEY (id_remuneracao) REFERENCES public.remuneracao (id_remuneracao),
+    CONSTRAINT emprego_aluno_fk_loc FOREIGN KEY (id_loc) REFERENCES public.localizacao (id_loc)
+);
+
+-- Create Indexes for the new denormalized schema to support analytics queries
+CREATE INDEX IF NOT EXISTS idx_matricula_denormalizada_escola ON public.matricula_denormalizada(co_escola_educacenso);
+CREATE INDEX IF NOT EXISTS idx_matricula_denormalizada_aluno ON public.matricula_denormalizada(id_aluno);
+CREATE INDEX IF NOT EXISTS idx_escola_geo_uf ON public.escola_geo(uf);
+CREATE INDEX IF NOT EXISTS idx_escola_geo_municipio ON public.escola_geo(municipio);
+CREATE INDEX IF NOT EXISTS idx_escola_metrics_ano ON public.escola_metrics(nu_ano);
+CREATE INDEX IF NOT EXISTS idx_emprego_aluno_aluno ON public.emprego_aluno(id_aluno);
+CREATE INDEX IF NOT EXISTS idx_emprego_aluno_loc ON public.emprego_aluno(id_loc);
+
+-- Optional: Populate data from original tables to the new schema
+-- This is a placeholder script to demonstrate data migration logic
+-- In a real scenario, this would be run via a separate ETL process or migration script
+-- DO NOT RUN THIS IN PRODUCTION WITHOUT BACKUP
+
+-- Example Migration Logic (Conceptual):
+-- INSERT INTO public.matricula_denormalizada (...)
+-- SELECT * FROM public.matricula_ifb, public.curso_ifb WHERE ...
+```

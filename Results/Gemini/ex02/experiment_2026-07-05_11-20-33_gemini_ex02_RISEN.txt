@@ -1,0 +1,150 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-20-33
+Model: gemini
+Prompt: RISEN
+Schema: ex02
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on transforming the highly normalized transactional schema into an analytical schema composed of two wide tables (Fact/Dimension hybrids): 'denorm_mutirao_limpeza' and 'denorm_unidade_conservacao'. By collapsing 1:1 relationships and embedding N:1 lookup dimensions directly into the main entities, we eliminate the need for costly multi-table JOINs. This significantly accelerates heavy read operations and aggregations typical of analytical workloads, such as calculating total waste collected per region or analyzing conservation units by biome and management category.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapsing Relations (1:1): Merged 'coleta_de_lixo' and 'local_de_coleta' directly into 'mutirao_de_limpeza'. Since they share the same primary key (id_mutirao), they represent a 1:1 relationship that causes unnecessary JOIN overhead."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Adding Redundant Attributes (N:1): Embedded attributes from 'instituicao_organizadora' and 'regiao' into the new 'denorm_mutirao_limpeza' table to materialize the JOINs."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Adding Redundant Attributes (N:1): Embedded attributes from 'bioma', 'categoria_manejo', 'esfera_administrativa', and 'regiao' into the new 'denorm_unidade_conservacao' table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived attribute 'total_residuos' in 'denorm_mutirao_limpeza' to precompute the sum of all waste types (plastico, borracha, madeira, etc.), avoiding repetitive row-level addition during analytical queries."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Renamed attributes that shared the name 'nome' across multiple source tables (e.g., 'bioma_nome', 'uc_nome', 'municipio_nome', 'instituicao_nome', 'local_nome') to preserve semantic clarity and avoid ambiguity in the wide tables."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage Footprint: Storing redundant dimensional data (like region names, biome names, and institution details) directly in the wide tables increases the overall disk space required."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If a dimension attribute changes (e.g., a region changes its name or an institution changes its character), it will require a bulk update across all rows in the denormalized table instead of a single row update in a normalized dimension table."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1_D2_A1",
+        "query": "SELECT municipio_estado, instituicao_nome, SUM(total_residuos) AS total_lixo_recolhido, SUM(numero_aproximado_de_participantes) AS total_participantes FROM denorm_mutirao_limpeza GROUP BY municipio_estado, instituicao_nome ORDER BY total_lixo_recolhido DESC;"
+      },
+      {
+        "decision_id": "D3",
+        "query": "SELECT bioma_nome, manejo_categoria, esfera_tipo, COUNT(id_uc) AS qtd_ucs, SUM(area_soma_biomas) AS area_total_protegida FROM denorm_unidade_conservacao GROUP BY bioma_nome, manejo_categoria, esfera_tipo;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- =======================================================================================
+-- DENORMALIZED ANALYTICAL SCHEMA
+-- Dialect: PostgreSQL
+-- =======================================================================================
+
+BEGIN;
+
+-- 1. Wide Table for Cleanup Events (Mutirão de Limpeza)
+-- Collapses: mutirao_de_limpeza, coleta_de_lixo, local_de_coleta, instituicao_organizadora, regiao
+CREATE TABLE IF NOT EXISTS public.denorm_mutirao_limpeza
+(
+    id_mutirao integer NOT NULL,
+    data_do_ocorrido date NOT NULL,
+    horario_de_inicio time without time zone NOT NULL,
+    numero_aproximado_de_participantes integer,
+    duracao_total time without time zone NOT NULL,
+    
+    -- Attributes from local_de_coleta
+    local_nome text COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Attributes from coleta_de_lixo
+    plastico integer,
+    borracha integer,
+    madeira integer,
+    produtos_texteis integer,
+    papel integer,
+    metal integer,
+    vidro integer,
+    materiais_de_pesca integer,
+    outros_residuos integer,
+    
+    -- Derived Attribute
+    total_residuos integer, 
+    
+    -- Attributes from instituicao_organizadora
+    id_instituicao_organizadora integer,
+    instituicao_nome text COLLATE pg_catalog."default",
+    instituicao_carater text COLLATE pg_catalog."default",
+    
+    -- Attributes from regiao
+    id_municipio integer,
+    municipio_nome text COLLATE pg_catalog."default",
+    municipio_estado text COLLATE pg_catalog."default",
+    
+    CONSTRAINT denorm_mutirao_limpeza_pkey PRIMARY KEY (id_mutirao)
+);
+
+-- 2. Wide Table for Conservation Units (Unidade de Conservação)
+-- Collapses: unidade_de_conservacao, bioma, categoria_manejo, esfera_administrativa, regiao
+CREATE TABLE IF NOT EXISTS public.denorm_unidade_conservacao
+(
+    id_uc integer NOT NULL,
+    uc_nome text COLLATE pg_catalog."default" NOT NULL,
+    ano_de_criacao integer,
+    area_soma_biomas double precision,
+    area_soma_biomas_continentais double precision,
+    area_marinha double precision,
+    
+    -- Attributes from bioma
+    id_bioma integer,
+    bioma_nome text COLLATE pg_catalog."default",
+    
+    -- Attributes from categoria_manejo
+    id_manejo integer,
+    manejo_categoria text COLLATE pg_catalog."default",
+    manejo_categoria_iucn text COLLATE pg_catalog."default",
+    manejo_plano text COLLATE pg_catalog."default",
+    
+    -- Attributes from esfera_administrativa
+    id_esfera integer,
+    esfera_tipo text COLLATE pg_catalog."default",
+    
+    -- Attributes from regiao
+    id_municipio integer,
+    municipio_nome text COLLATE pg_catalog."default",
+    municipio_estado text COLLATE pg_catalog."default",
+    
+    CONSTRAINT denorm_unidade_conservacao_pkey PRIMARY KEY (id_uc)
+);
+
+-- Creating indexes on frequently grouped/filtered redundant attributes for analytical queries
+CREATE INDEX IF NOT EXISTS idx_denorm_mutirao_estado ON public.denorm_mutirao_limpeza(municipio_estado);
+CREATE INDEX IF NOT EXISTS idx_denorm_mutirao_instituicao ON public.denorm_mutirao_limpeza(instituicao_nome);
+CREATE INDEX IF NOT EXISTS idx_denorm_uc_bioma ON public.denorm_unidade_conservacao(bioma_nome);
+CREATE INDEX IF NOT EXISTS idx_denorm_uc_manejo ON public.denorm_unidade_conservacao(manejo_categoria);
+
+END;
+```

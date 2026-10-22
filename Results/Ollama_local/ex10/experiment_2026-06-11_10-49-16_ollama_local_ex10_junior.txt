@@ -1,0 +1,137 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_10-49-16
+Model: ollama_local
+Prompt: junior
+Schema: ex10
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on eliminating joins between frequently accessed dimensions (Country, Continent, Energy Source) and facts (Annual Consumption, Emissions, Population). By merging dimension attributes directly into the fact tables, we optimize for analytical queries that require aggregations across years and categories. The primary goal is to reduce query complexity from O(n*m) joins to O(n) single-table scans.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge 'paises' (Country) and 'continente' (Continent) attributes into 'consumo_anual', 'emissao_g_efeito_estufa', and 'populacao' tables. This removes the need to join with the 'paises' and 'continente' lookup tables."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Expand 'fonte_energia' (Energy Source) from a single column to a multi-column structure within 'consumo_anual' to support multi-dimensional analysis (e.g., consumption by energy type per country per year)."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge 'paises' attributes into 'emissao_g_efeito_estufa' to allow direct reporting of emissions by country without joining."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Merge 'paises' attributes into 'populacao' to enable demographic analysis (e.g., emissions per capita) without joins."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added columns: 'nome_paises', 'fundacao', 'continente' to 'consumo_anual', 'emissao_g_efeito_estufa', and 'populacao'. Added 'nome_continente' to 'paises' (moved from reference to value)."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Changed 'tipo_energia' from integer to an array of integers ('integer[]') in 'consumo_anual' to store multiple energy types per record."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added columns: 'nome_fonte_energia' to 'consumo_anual' to store energy source names."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Write performance and storage efficiency vs. Read performance. The denormalized schema increases storage size and requires write-time data validation to ensure consistency between the source of truth and the denormalized tables."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Loss of referential integrity enforcement. While foreign keys are removed, data consistency relies on application logic or periodic ETL validation scripts rather than database constraints."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Business query: 'Show total annual energy consumption by country and continent for each year.' Previously required 3 joins (consumo -> paises -> continente). Now requires 1 join."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Business query: 'Calculate total emissions per energy source per country.' Previously required joining emissao with fonte_energia. Now requires only 1 join on consumo_anual."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Business query: 'Calculate population density (population / area) per country.' (Assumed area derived from fundacao or added metric). Requires joining populacao with paises."
+      }
+    ]
+  }
+}
+```
+
+### Complete SQL DDL Creation Script for the Denormalized Schema
+
+```sql
+-- Drop existing denormalized tables if they exist
+DROP TABLE IF EXISTS public.consumo_anual_denormalizado;
+DROP TABLE IF EXISTS public.emissao_g_efeito_estufa_denormalizado;
+DROP TABLE IF EXISTS public.populacao_denormalizado;
+
+-- Table 1: Denormalized Annual Consumption
+-- Merges consumo_anual, paises, continente, and fonte_energia attributes
+CREATE TABLE IF NOT EXISTS public.consumo_anual_denormalizado (
+    id_consumo integer NOT NULL,
+    id_paises integer NOT NULL,
+    ano integer NOT NULL,
+    nome_paises character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    fundacao integer NOT NULL,
+    nome_continente character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    tipo_energia integer[] NOT NULL, -- Changed to array to support multiple energy types
+    nome_fonte_energia character varying(50)[] COLLATE pg_catalog."default" NOT NULL,
+    porcentagem integer NOT NULL,
+    CONSTRAINT consumo_anual_denormalizado_pkey PRIMARY KEY (id_consumo)
+);
+
+-- Table 2: Denormalized Emissions
+-- Merges emissao_g_efeito_estufa and paises attributes
+CREATE TABLE IF NOT EXISTS public.emissao_g_efeito_estufa_denormalizado (
+    id_emissao integer NOT NULL,
+    id_paises integer NOT NULL,
+    ano integer NOT NULL,
+    quantidade_emitida bigint NOT NULL,
+    nome_paises character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    fundacao integer NOT NULL,
+    nome_continente character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT emissao_g_efeito_estufa_denormalizado_pkey PRIMARY KEY (id_emissao)
+);
+
+-- Table 3: Denormalized Population
+-- Merges populacao and paises attributes
+CREATE TABLE IF NOT EXISTS public.populacao_denormalizado (
+    id_pop integer NOT NULL,
+    id_paises integer NOT NULL,
+    ano integer NOT NULL,
+    quantidade_hab integer NOT NULL,
+    nome_paises character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    fundacao integer NOT NULL,
+    nome_continente character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT populacao_denormalizado_pkey PRIMARY KEY (id_pop)
+);
+
+-- Indexes for performance optimization on frequently queried columns
+CREATE INDEX idx_consumo_anual_denormalizado_paises ON public.consumo_anual_denormalizado(id_paises);
+CREATE INDEX idx_consumo_anual_denormalizado_ano ON public.consumo_anual_denormalizado(ano);
+CREATE INDEX idx_emissao_denormalizado_paises ON public.emissao_g_efeito_estufa_denormalizado(id_paises);
+CREATE INDEX idx_emissao_denormalizado_ano ON public.emissao_g_efeito_estufa_denormalizado(ano);
+CREATE INDEX idx_populacao_denormalizado_paises ON public.populacao_denormalizado(id_paises);
+CREATE INDEX idx_populacao_denormalizado_ano ON public.populacao_denormalizado(ano);
+
+-- Note: Foreign key constraints are intentionally omitted in the denormalized schema
+-- to improve write performance and reduce complexity. Data consistency is managed via
+-- application logic or periodic ETL validation scripts.
+```

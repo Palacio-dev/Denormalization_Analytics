@@ -1,0 +1,63 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-53-12
+Model: gemini
+Prompt: RISEN-few-shot
+Schema: solarwinds
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on creating a One Big Table (OBT) architecture tailored for OLAP workloads. By collapsing the four highly normalized transactional tables into a single flat table at the order-line granularity, we eliminate the need for expensive multi-table JOINs. Additionally, we are introducing a derived attribute to precompute the total sales amount per line item, significantly speeding up revenue-based aggregations.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapsed 'customers', 'orders', 'products', and 'order_details' into a single denormalized table named 'sales_analytics' to eliminate JOIN bottlenecks."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived attribute 'total_amount' calculated as (quantity * price) to prevent repetitive runtime calculations during aggregations."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy and Storage: Customer and product details are repeated for every order line, increasing storage requirements. Updates to a customer's address or a product's name will require updating multiple rows (Update Anomaly), which is an acceptable tradeoff in read-heavy analytical environments."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1",
+        "query": "SELECT customer_name, product_name, SUM(total_amount) as total_revenue FROM sales_analytics WHERE order_date >= '2023-01-01' GROUP BY customer_name, product_name ORDER BY total_revenue DESC;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+BEGIN;
+
+DROP TABLE IF EXISTS sales_analytics;
+
+CREATE TABLE sales_analytics (
+  order_detail_id SERIAL PRIMARY KEY,
+  order_id INT NOT NULL,
+  order_date DATE,
+  customer_id INT NOT NULL,
+  customer_name VARCHAR(100),
+  customer_email VARCHAR(100),
+  customer_address TEXT,
+  product_id INT NOT NULL,
+  product_name VARCHAR(100),
+  price DECIMAL(10,2),
+  quantity INT,
+  total_amount DECIMAL(14,2)
+);
+
+COMMIT;
+```

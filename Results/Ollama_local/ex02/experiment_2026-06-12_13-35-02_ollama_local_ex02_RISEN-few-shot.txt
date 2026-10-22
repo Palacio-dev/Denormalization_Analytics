@@ -1,0 +1,201 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_13-35-02
+Model: ollama_local
+Prompt: RISEN-few-shot
+Schema: ex02
+==================================================
+
+{
+    "section_1": {
+        "summary": "The denormalization strategy focuses on collapsing the complex relationships between `unidade_de_conservacao` (UC), `mutirao_de_limpeza` (Clean-up events), and their associated metadata (bioma, esfera, categoria, regiao) into a single analytical table. This eliminates the need for frequent JOINs on `bioma`, `esfera_administrativa`, `categoria_manejo`, `regiao`, and `instituicao_organizadora`. Additionally, redundant attributes like `nome` are duplicated in the `coleta_de_lixo` table to avoid joining back to `local_de_coleta`. The schema is optimized for read-heavy analytical queries where users need a holistic view of clean-up events within a specific UC context.",
+        "structural_decisions": [
+            {
+                "decision_id": "D1",
+                "description": "Collapsed the 6 normalized tables (`bioma`, `categoria_manejo`, `coleta_de_lixo`, `esfera_administrativa`, `instituicao_organizadora`, `local_de_coleta`, `mutirao_de_limpeza`, `regiao`, `unidade_de_conservacao`) into a single analytical table named `uc_cleanup_events`."
+            },
+            {
+                "decision_id": "D2",
+                "description": "Moved `nome` (from `bioma` and `local_de_coleta`) and `id_bioma` directly into the `uc_cleanup_events` table to avoid JOINs when querying event details."
+            },
+            {
+                "decision_id": "D3",
+                "description": "Consolidated `coleta_de_lixo` attributes (waste types) into the main table, removing the dependency on the separate `coleta_de_lixo` table."
+            }
+        ],
+        "attribute_level_changes": [
+            {
+                "decision_id": "A1",
+                "description": "Added `nome_bioma` (text) and `id_bioma` (integer) to the main table."
+            },
+            {
+                "decision_id": "A2",
+                "description": "Added `nome_local` (text) to the main table, derived from `local_de_coleta`."
+            },
+            {
+                "decision_id": "A3",
+                "description": "Added `tipo_esfera` (text) and `plano` (text) to the main table, derived from `esfera_administrativa` and `categoria_manejo`."
+            },
+            {
+                "decision_id": "A4",
+                "description": "Added `nome_instituicao` (text) to the main table, derived from `instituicao_organizadora`."
+            },
+            {
+                "decision_id": "A5",
+                "description": "Added `nome_regiao` (text) to the main table, derived from `regiao`."
+            },
+            {
+                "decision_id": "A6",
+                "description": "Retained all waste type columns (`plastico`, `borracha`, etc.) directly in the main table."
+            }
+        ],
+        "tradeoffs": [
+            {
+                "tradeoff_id": "T1",
+                "description": "Tradeoff: Data Redundancy vs. Query Performance. While data is duplicated (e.g., `nome_bioma` stored in every UC row), read performance for complex reports involving multiple dimensions is significantly improved. However, maintaining this single table requires careful backup strategies as it now contains data that was previously spread across multiple tables."
+            },
+            {
+                "tradeoff_id": "T2",
+                "description": "Tradeoff: Schema Complexity vs. Write Simplicity. The write operations for `unidade_de_conservacao` and `mutirao_de_limpeza` become more complex as they must now insert into a wider table, but this eliminates the need to manage foreign keys and maintain consistency across multiple related tables."
+            }
+        ]
+    },
+    "section_2": {
+        "query_patterns": [
+            {
+                "decision_id": "D1",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Business Query: 'List all clean-up events for a specific Conservation Unit, including the Bioma name, the administrative Sphere type, the Waste breakdown, and the Organizing Institution name, ordered by date.' This query previously required joining 4-5 tables."
+            },
+            {
+                "decision_id": "D1",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Analytical Query: 'Aggregate total waste collected (by type) for each Conservation Unit within a specific Region.' The denormalized schema allows this to be done with a simple GROUP BY on the main table without nested subqueries or multiple JOINs."
+            }
+        ]
+    }
+}
+
+-- =========================================================
+-- DENORMALIZED SCHEMA: UC_CLEANUP_EVENTS
+-- Dialect: PostgreSQL
+-- Strategy: Collapse Relations + Redundant Attributes
+-- =========================================================
+
+BEGIN;
+
+-- Drop existing tables to ensure clean state
+DROP TABLE IF EXISTS public.uc_cleanup_events CASCADE;
+
+-- Create the denormalized analytical table
+CREATE TABLE IF NOT EXISTS public.uc_cleanup_events
+(
+    -- Primary Key (Union of UC ID and Event ID for uniqueness)
+    id_uc integer NOT NULL,
+    id_mutirao integer NOT NULL,
+    
+    -- UC Attributes (Original: unidade_de_conservacao)
+    nome_uc text COLLATE pg_catalog."default" NOT NULL,
+    ano_de_criacao integer,
+    area_soma_biomas double precision,
+    area_soma_biomas_continentais double precision,
+    area_marinha double precision,
+    id_bioma integer,
+    id_municipio integer,
+    id_manejo integer,
+    id_esfera integer,
+    
+    -- Bioma Attributes (Original: bioma) - Added for performance
+    nome_bioma text COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Sphere & Management Attributes (Original: esfera_administrativa, categoria_manejo) - Added for performance
+    tipo_esfera text COLLATE pg_catalog."default" NOT NULL,
+    plano text COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Institution Attributes (Original: instituicao_organizadora) - Added for performance
+    nome_instituicao text COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Region Attributes (Original: regiao) - Added for performance
+    nome_regiao text COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Event Attributes (Original: mutirao_de_limpeza)
+    data_do_ocorrido date NOT NULL,
+    horario_de_inicio time without time zone NOT NULL,
+    numero_aproximado_de_participantes integer,
+    duracao_total time without time zone NOT NULL,
+    id_municipio integer, -- Duplicate of UC id_municipio for potential event-level granularity if needed
+    
+    -- Local Attributes (Original: local_de_coleta) - Added for performance
+    nome_local text COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Waste Collection Attributes (Original: coleta_de_lixo) - Added for performance
+    plastico integer,
+    borracha integer,
+    madeira integer,
+    produtos_texteis integer,
+    papel integer,
+    metal integer,
+    vidro integer,
+    materiais_de_pesca integer,
+    outros_residuos integer
+);
+
+-- Add Primary Key
+ALTER TABLE IF EXISTS public.uc_cleanup_events
+    ADD CONSTRAINT uc_cleanup_events_pkey PRIMARY KEY (id_uc, id_mutirao);
+
+-- Add Unique Constraint to prevent duplicate events per UC per day (Optional but recommended for data integrity)
+ALTER TABLE IF EXISTS public.uc_cleanup_events
+    ADD CONSTRAINT uc_cleanup_events_uc_event_date_uq UNIQUE (id_uc, id_mutirao, data_do_ocorrido);
+
+-- =========================================================
+-- DATA MIGRATION LOGIC (Simulated via Comments)
+-- In a real migration, you would use INSERT INTO ... SELECT ...
+-- =========================================================
+-- 
+-- 1. Load Bioma Data
+-- INSERT INTO public.uc_cleanup_events (id_uc, id_bioma, nome_bioma, ...)
+-- SELECT id_uc, id_bioma, nome, ... FROM public.unidade_de_conservacao JOIN public.bioma ...
+--
+-- 2. Load UC Core Data
+-- INSERT INTO public.uc_cleanup_events (id_uc, nome_uc, ...)
+-- SELECT id_uc, nome, ... FROM public.unidade_de_conservacao
+--
+-- 3. Load Sphere & Management Data
+-- INSERT INTO public.uc_cleanup_events (tipo_esfera, plano, ...)
+-- SELECT tipo, plano FROM public.esfera_administrativa JOIN public.categoria_manejo ...
+--
+-- 4. Load Institution Data
+-- INSERT INTO public.uc_cleanup_events (nome_instituicao, ...)
+-- SELECT nome FROM public.instituicao_organizadora ...
+--
+-- 5. Load Region Data
+-- INSERT INTO public.uc_cleanup_events (nome_regiao, ...)
+-- SELECT nome FROM public.regiao ...
+--
+-- 6. Load Event Data (Mutirao)
+-- INSERT INTO public.uc_cleanup_events (data_do_ocorrido, ...)
+-- SELECT * FROM public.mutirao_de_limpeza ...
+--
+-- 7. Load Local Data
+-- INSERT INTO public.uc_cleanup_events (nome_local, ...)
+-- SELECT nome FROM public.local_de_coleta ...
+--
+-- 8. Load Waste Data
+-- INSERT INTO public.uc_cleanup_events (plastico, borracha, ...)
+-- SELECT plastico, borracha, ... FROM public.coleta_de_lixo ...
+--
+-- Note: The actual migration script would handle the JOINs to populate the
+-- new denormalized table from the old normalized tables.
+-- =========================================================
+
+-- No Foreign Keys are strictly necessary in the denormalized schema 
+-- because the data is physically redundant. However, if we wish to maintain
+-- some referential integrity for future updates, we can add them, 
+-- but typically in analytical denormalization, we drop FKs to avoid
+-- update anomalies on redundant data.
+
+-- For the purpose of this schema definition, we will NOT add Foreign Keys 
+-- to the new table to prevent update anomalies on the redundant columns.
+-- Instead, data consistency is managed during the ETL/Migration process.
+
+END;

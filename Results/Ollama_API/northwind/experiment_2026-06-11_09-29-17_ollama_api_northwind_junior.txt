@@ -1,0 +1,170 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-29-17
+Model: ollama_api
+Prompt: junior
+Schema: northwind
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on creating a centralized fact-like table for order analytics by merging key transactional and dimensional data. The main goal is to reduce joins for common analytical queries such as sales performance, customer behavior, and product trends. We merge order details with orders, customers, products, categories, employees, and shippers into a single wide table. Additional denormalized tables are created for employee territories and customer demographics to support regional and demographic analysis without complex joins.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge order_details with orders to create a central fact table containing transactional data and core order information."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Denormalize customer information into the order fact table by joining customers to orders."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Denormalize product, category, and supplier information into the order fact table by joining products, categories, and suppliers to order_details."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Denormalize employee information into the order fact table by joining employees to orders."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Denormalize shipper information into the order fact table by joining shippers to orders."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Create a separate denormalized table for employee_territories by merging with territories and region to support regional analysis."
+      },
+      {
+        "decision_id": "D7",
+        "description": "Create a separate denormalized table for customer demographics by merging customer_customer_demo with customer_demographics."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added descriptive fields like customer_name, product_name, category_name, employee_name, shipper_name directly into the fact table to avoid joins."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added calculated field 'gross_sales' (unit_price * quantity * (1 - discount)) in the fact table for immediate aggregation."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Removed bytea fields (picture, photo) and large text fields (notes, homepage) to optimize storage and performance for analytics."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved query performance at the cost of increased storage space due to data duplication."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified querying and reduced ETL complexity for analytics, but increased complexity in maintaining data consistency during updates."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of granular updates; changes in dimension tables like customer or product info require updates across multiple rows in the denormalized fact table."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Sales analysis by customer, product, category, and time period."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Employee performance analysis based on sales volume and revenue."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Shipping performance analysis by shipper and region."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Customer segmentation and demographic analysis."
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Inventory and supplier performance analysis."
+      }
+    ]
+  }
+}
+
+-- Denormalized schema DDL creation script
+
+-- 1. Denormalized Order Fact Table
+CREATE TABLE IF NOT EXISTS public.denormalized_order_fact (
+    order_id smallint NOT NULL,
+    product_id smallint NOT NULL,
+    customer_id character varying(5) COLLATE pg_catalog."default",
+    employee_id smallint,
+    supplier_id smallint,
+    category_id smallint,
+    shipper_id smallint,
+    order_date date,
+    required_date date,
+    shipped_date date,
+    unit_price real NOT NULL,
+    quantity smallint NOT NULL,
+    discount real NOT NULL,
+    gross_sales real, -- Calculated field
+    freight real,
+    -- Customer Info
+    customer_company_name character varying(40) COLLATE pg_catalog."default",
+    customer_contact_name character varying(30) COLLATE pg_catalog."default",
+    customer_city character varying(15) COLLATE pg_catalog."default",
+    customer_region character varying(15) COLLATE pg_catalog."default",
+    customer_country character varying(15) COLLATE pg_catalog."default",
+    -- Product Info
+    product_name character varying(40) COLLATE pg_catalog."default",
+    category_name character varying(15) COLLATE pg_catalog."default",
+    -- Employee Info
+    employee_last_name character varying(20) COLLATE pg_catalog."default",
+    employee_first_name character varying(10) COLLATE pg_catalog."default",
+    employee_title character varying(30) COLLATE pg_catalog."default",
+    -- Shipper Info
+    shipper_company_name character varying(40) COLLATE pg_catalog."default",
+    -- PK
+    CONSTRAINT pk_denormalized_order_fact PRIMARY KEY (order_id, product_id)
+);
+
+-- 2. Denormalized Employee Territory Table
+CREATE TABLE IF NOT EXISTS public.denormalized_employee_territory (
+    employee_id smallint NOT NULL,
+    territory_id character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    territory_description character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    region_id smallint NOT NULL,
+    region_description character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    -- Employee Info
+    employee_last_name character varying(20) COLLATE pg_catalog."default",
+    employee_first_name character varying(10) COLLATE pg_catalog."default",
+    employee_title character varying(30) COLLATE pg_catalog."default",
+    employee_city character varying(15) COLLATE pg_catalog."default",
+    employee_region character varying(15) COLLATE pg_catalog."default",
+    employee_country character varying(15) COLLATE pg_catalog."default",
+    -- PK
+    CONSTRAINT pk_denormalized_employee_territory PRIMARY KEY (employee_id, territory_id)
+);
+
+-- 3. Denormalized Customer Demographic Table
+CREATE TABLE IF NOT EXISTS public.denormalized_customer_demographic (
+    customer_id character varying(5) COLLATE pg_catalog."default" NOT NULL,
+    customer_type_id character varying(5) COLLATE pg_catalog."default" NOT NULL,
+    customer_desc text COLLATE pg_catalog."default",
+    -- Customer Info
+    customer_company_name character varying(40) COLLATE pg_catalog."default",
+    customer_contact_name character varying(30) COLLATE pg_catalog."default",
+    customer_city character varying(15) COLLATE pg_catalog."default",
+    customer_region character varying(15) COLLATE pg_catalog."default",
+    customer_country character varying(15) COLLATE pg_catalog."default",
+    -- PK
+    CONSTRAINT pk_denormalized_customer_demographic PRIMARY KEY (customer_id, customer_type_id)
+);

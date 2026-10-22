@@ -1,0 +1,125 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-04_01-01-01
+Model: ollama_local
+Prompt: OBT
+Schema: ex02
+==================================================
+
+Based on the RISEN Framework analysis, here is the denormalization strategy and the resulting SQL schema.
+
+### Section 1: Analysis and Strategy
+
+```json
+{
+    "section_1": {
+        "summary": "The denormalization strategy adopts the 'One-Big-Table' model to optimize read performance for analytical queries involving environmental units, their management categories, locations, and waste collection data. By eliminating foreign keys and normalizing constraints, the schema transforms from a multi-table join-heavy structure into a single wide table. This approach minimizes I/O operations and reduces the complexity of JOIN logic, which is critical for reporting on waste collection efficiency per unit, location, and time.",
+        "structural_decisions": [
+            {
+                "decision_id": "D1",
+                "description": "Merged all 9 original tables (bioma, categoria_manejo, coleta_de_lixo, esfera_administrativa, instituicao_organizadora, local_de_coleta, mutirao_de_limpeza, regiao, unidade_de_conservacao) into a single table named 'unidade_de_conservacao_denormalizada'. Removed all FOREIGN KEY constraints to satisfy the ONE-BIG-TABLE MODEL requirement."
+            },
+            {
+                "decision_id": "D2",
+                "description": "Established 'id_uc' (id_unidade_de_conservacao) as the single Primary Key. All other columns were converted to nullable (INTEGER, TEXT, DOUBLE PRECISION) as they no longer participate in relational integrity constraints."
+            },
+            {
+                "decision_id": "D3",
+                "description": "Applied column name prefixing to resolve naming conflicts across entities. For example, 'nome' was renamed to 'nome_bioma' and 'nome_uc', 'id_municipio' was renamed to 'id_municipio_uc' and 'id_municipio_mutirao', and 'data_do_ocorrido' was renamed to 'data_do_ocorrido_mutirao'."
+            }
+        ],
+        "attribute_level_changes": [
+            {
+                "decision_id": "A1",
+                "description": "Removed all foreign key columns (e.g., id_bioma, id_manejo, id_esfera, id_instituicao_organizadora, id_mutirao references) from the schema. Instead, the raw data attributes from the referenced tables (e.g., 'nome_bioma', 'categoria', 'nome_instituicao') are stored directly in the main table."
+            },
+            {
+                "decision_id": "A2",
+                "description": "Added derived or specific attributes to the main table to ensure full semantic equivalence. For instance, the 'plano' from 'categoria_manejo' is kept, and 'area_soma_biomas' from 'unidade_de_conservacao' is preserved."
+            },
+            {
+                "decision_id": "A3",
+                "description": "Ensured all non-key attributes from the original normalized model are present in the final table, including 'plastico', 'borracha', 'madeira', etc., from 'coleta_de_lixo', and 'nome_mutirao' from 'local_de_coleta'."
+            }
+        ],
+        "tradeoffs": [
+            {
+                "tradeoff_id": "T1",
+                "description": "Trade-off: Loss of Referential Integrity. The schema no longer enforces that a waste collection record must exist for a specific unit or that a municipality must belong to a region. Data consistency must now be maintained at the application level or via application logic."
+            },
+            {
+                "tradeoff_id": "T2",
+                "description": "Trade-off: Storage and Maintenance Overhead. The single table is significantly wider than the original normalized schema, leading to larger storage footprint and slower bulk insert/update operations due to the need to write many columns per row."
+            },
+            {
+                "tradeoff_id": "T3",
+                "description": "Trade-off: Write Performance vs. Read Performance. While reads (aggregations, joins) are drastically improved, writes are slower. This model is optimized for OLAP/Reporting scenarios, not high-frequency OLTP transactional processing."
+            }
+        ]
+    },
+    "section_2": {
+        "query_patterns": [
+            {
+                "decision_id": "D1",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Complex analytical query requiring a summary of waste collection types (plastic, rubber, etc.) across all units of conservation, grouped by the organizing institution and the administrative sphere. Original: SELECT COUNT(*), SUM(plastico) FROM coleta_de_lixo JOIN mutirao_de_limpeza ... JOIN unidade_de_conservacao ..."
+            },
+            {
+                "decision_id": "D2",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Report on the physical characteristics of conservation units (area, creation year) alongside their management category (IUCN plan) and the specific waste composition of the most recent cleanup event in that unit."
+            },
+            {
+                "decision_id": "D3",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Geospatial analysis of waste collection events, joining the unit, the municipality, and the administrative sphere to determine which regions have the highest participation rates in cleanup events."
+            }
+        ]
+    }
+}
+```
+
+### Section 2: SQL DDL Creation Script
+
+```sql
+CREATE TABLE IF NOT EXISTS public.unidade_de_conservacao_denormalizada (
+    id_uc integer NOT NULL,
+    nome_uc text COLLATE pg_catalog."default" NOT NULL,
+    ano_de_criacao integer,
+    area_soma_biomas double precision,
+    area_soma_biomas_continentais double precision,
+    area_marinha double precision,
+    nome_bioma text COLLATE pg_catalog."default",
+    nome_uc_bioma text COLLATE pg_catalog."default",
+    categoria text COLLATE pg_catalog."default",
+    categoria_iucn text COLLATE pg_catalog."default",
+    plano text COLLATE pg_catalog."default",
+    nome_instituicao text COLLATE pg_catalog."default",
+    carater text COLLATE pg_catalog."default",
+    nome_esfera text COLLATE pg_catalog."default",
+    tipo_esfera text COLLATE pg_catalog."default",
+    nome_mutirao text COLLATE pg_catalog."default",
+    nome_local_de_coleta text COLLATE pg_catalog."default",
+    id_municipio_uc integer,
+    id_municipio_mutirao integer,
+    estado text COLLATE pg_catalog."default",
+    data_do_ocorrido_mutirao date NOT NULL,
+    horario_de_inicio_mutirao time without time zone NOT NULL,
+    numero_aproximado_de_participantes integer,
+    duracao_total_mutirao time without time zone NOT NULL,
+    plastico integer,
+    borracha integer,
+    madeira integer,
+    produtos_texteis integer,
+    papel integer,
+    metal integer,
+    vidro integer,
+    materiais_de_pesca integer,
+    outros_residuos integer,
+    CONSTRAINT unidade_de_conservacao_denormalizada_pkey PRIMARY KEY (id_uc)
+);
+
+-- Note: In the ONE-BIG-TABLE MODEL, we do not create Foreign Key constraints 
+-- or indexes on foreign keys to ensure the schema remains a single flat table 
+-- without relational dependencies. The data integrity is assumed to be handled 
+-- by the application layer or data loading process.
+```

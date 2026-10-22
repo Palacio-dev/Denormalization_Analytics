@@ -1,0 +1,318 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-02-01
+Model: ollama_api
+Prompt: mid-level
+Schema: adv_works
+==================================================
+
+{
+  "section_1": {
+    "summary": "The strategy is to transform the normalized OLTP schema into a star schema optimized for analytical queries. This involves creating denormalized fact tables for core business processes (sales, purchasing, production) and dimensional tables that consolidate related entities. Key decisions include consolidating employee and department history into a single employee dimension, merging product-related tables into a comprehensive product dimension, and creating fact tables that pre-join transactional data to reduce query complexity.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidate humanresources.employee, humanresources.employeedepartmenthistory, humanresources.department into a single employee dimension table to provide a complete view of employee history and departmental assignments."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Create a comprehensive product dimension by merging production.product, production.productsubcategory, and production.productcategory to enable direct analysis of product hierarchies."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Create a sales fact table (fact_sales) by combining sales.salesorderheader and sales.salesorderdetail to centralize sales transaction data and reduce join complexity for sales analysis."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Create a purchasing fact table (fact_purchase) by combining purchasing.purchaseorderheader and purchasing.purchaseorderdetail to centralize purchasing transaction data."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Create a production fact table (fact_workorder) by combining production.workorder and production.workorderrouting to centralize manufacturing data."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Create a date dimension table to support time-based analysis across all fact tables."
+      },
+      {
+        "decision_id": "D7",
+        "description": "Create a customer dimension by consolidating sales.customer, sales.store, and person-related tables (person, businessentity) to provide a unified view of customers."
+      },
+      {
+        "decision_id": "D8",
+        "description": "Create a vendor dimension by consolidating purchasing.vendor and person.businessentity to provide a unified view of vendors."
+      },
+      {
+        "decision_id": "D9",
+        "description": "Create a geography dimension by consolidating person.address, person.stateprovince, and person.countryregion to support location-based analysis."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added calculated fields like employee_age, employee_years_employed, product_days_to_manufacture, sales_line_total (unitprice * orderqty), and purchase_line_total (unitprice * orderqty) to pre-compute common metrics."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added surrogate keys to fact tables for efficient joins with dimension tables."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added effective date ranges (effective_start_date, effective_end_date) to dimension tables to handle slowly changing dimensions, particularly for employee and product data."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Removed redundant columns from fact tables that are already present in related dimension tables to reduce data redundancy and storage requirements."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage requirements due to denormalization and duplication of dimensional data across fact tables. This is acceptable for improved query performance."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Increased ETL complexity to maintain consistency across denormalized tables. Updates to a dimension may require updates to multiple fact tables."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of some transactional detail, such as individual employee pay history rates or specific special offer details, which are not directly included in the main fact tables but can be accessed through dimension tables."
+      },
+      {
+        "tradeoff_id": "T4",
+        "description": "Potential for data anomalies if ETL processes do not correctly handle slowly changing dimensions, leading to inconsistent historical data."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze sales performance by employee, department, and time period. This requires joining sales data with employee and department information, which is simplified by consolidating these into a single employee dimension."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze product sales by category and subcategory. This requires traversing the product hierarchy, which is simplified by consolidating product, subcategory, and category into a single dimension."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Generate sales reports showing total revenue, quantity sold, and discounts by product, customer, and time period. This requires combining sales order headers and details, which is simplified by creating a consolidated sales fact table."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze purchasing patterns and costs by vendor, product, and time period. This requires combining purchase order headers and details, which is simplified by creating a consolidated purchase fact table."
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze production efficiency and costs by product, work order, and time period. This requires combining work order and routing data, which is simplified by creating a consolidated work order fact table."
+      },
+      {
+        "decision_id": "D6",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Perform time-series analysis of sales, purchasing, and production data. This requires a consistent date dimension that can be joined to all fact tables."
+      },
+      {
+        "decision_id": "D7",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze customer purchasing behavior and segment customers based on demographics and purchase history. This requires a comprehensive customer dimension that consolidates relevant customer data."
+      },
+      {
+        "decision_id": "D8",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze vendor performance and purchasing costs. This requires a comprehensive vendor dimension that consolidates relevant vendor data."
+      },
+      {
+        "decision_id": "D9",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze sales and purchasing data by geographic region. This requires a comprehensive geography dimension that consolidates address, state, and country data."
+      }
+    ]
+  }
+}
+
+-- Denormalized Analytical Schema DDL
+
+-- Dimension Tables
+
+CREATE TABLE dim_date (
+    date_key SERIAL PRIMARY KEY,
+    date_value DATE NOT NULL,
+    day_of_week SMALLINT NOT NULL,
+    day_name VARCHAR(10) NOT NULL,
+    day_of_month SMALLINT NOT NULL,
+    day_of_year SMALLINT NOT NULL,
+    week_of_year SMALLINT NOT NULL,
+    month_number SMALLINT NOT NULL,
+    month_name VARCHAR(10) NOT NULL,
+    quarter SMALLINT NOT NULL,
+    year_number INTEGER NOT NULL,
+    is_weekend BOOLEAN NOT NULL
+);
+
+CREATE TABLE dim_employee (
+    employee_key SERIAL PRIMARY KEY,
+    businessentityid INTEGER NOT NULL,
+    employee_name VARCHAR(150),
+    jobtitle VARCHAR(50),
+    birthdate DATE,
+    maritalstatus CHAR(1),
+    gender CHAR(1),
+    hiredate DATE,
+    salariedflag BOOLEAN,
+    vacationhours SMALLINT,
+    sickleavehours SMALLINT,
+    currentflag BOOLEAN,
+    department_name VARCHAR(50),
+    group_name VARCHAR(50),
+    startdate DATE,
+    enddate DATE,
+    effective_start_date DATE,
+    effective_end_date DATE,
+    is_current BOOLEAN,
+    employee_age INTEGER,
+    employee_years_employed INTEGER
+);
+
+CREATE TABLE dim_product (
+    product_key SERIAL PRIMARY KEY,
+    productid INTEGER NOT NULL,
+    product_name VARCHAR(50),
+    productnumber VARCHAR(25),
+    color VARCHAR(15),
+    standardcost NUMERIC,
+    listprice NUMERIC,
+    size VARCHAR(5),
+    weight NUMERIC(8, 2),
+    daystomanufacture INTEGER,
+    productline CHAR(2),
+    class CHAR(2),
+    style CHAR(2),
+    productsubcategoryid INTEGER,
+    productsubcategory_name VARCHAR(50),
+    productcategoryid INTEGER,
+    productcategory_name VARCHAR(50),
+    sellstartdate DATE,
+    sellenddate DATE,
+    discontinueddate DATE,
+    is_active BOOLEAN,
+    product_days_to_manufacture INTEGER
+);
+
+CREATE TABLE dim_customer (
+    customer_key SERIAL PRIMARY KEY,
+    customerid INTEGER NOT NULL,
+    personid INTEGER,
+    storeid INTEGER,
+    territoryid INTEGER,
+    customer_type VARCHAR(20), -- 'Individual' or 'Store'
+    person_name VARCHAR(150), -- For individual customers
+    store_name VARCHAR(50), -- For store customers
+    salespersonid INTEGER,
+    demographics XML,
+    emailpromotion INTEGER
+);
+
+CREATE TABLE dim_vendor (
+    vendor_key SERIAL PRIMARY KEY,
+    businessentityid INTEGER NOT NULL,
+    accountnumber VARCHAR(15),
+    vendor_name VARCHAR(50),
+    creditrating SMALLINT,
+    preferredvendorstatus BOOLEAN,
+    activeflag BOOLEAN,
+    purchasingwebserviceurl VARCHAR(1024)
+);
+
+CREATE TABLE dim_geography (
+    geography_key SERIAL PRIMARY KEY,
+    addressid INTEGER NOT NULL,
+    addressline1 VARCHAR(60),
+    addressline2 VARCHAR(60),
+    city VARCHAR(30),
+    stateprovinceid INTEGER,
+    state_name VARCHAR(50),
+    countryregioncode VARCHAR(3),
+    country_name VARCHAR(50),
+    postalcode VARCHAR(15)
+);
+
+CREATE TABLE dim_ship_method (
+    ship_method_key SERIAL PRIMARY KEY,
+    shipmethodid INTEGER NOT NULL,
+    name VARCHAR(50),
+    shipbase NUMERIC,
+    shiprate NUMERIC
+);
+
+-- Fact Tables
+
+CREATE TABLE fact_sales (
+    sales_key SERIAL PRIMARY KEY,
+    salesorderid INTEGER NOT NULL,
+    salesorderdetailid INTEGER NOT NULL,
+    orderdate_key INTEGER REFERENCES dim_date(date_key),
+    duedate_key INTEGER REFERENCES dim_date(date_key),
+    shipdate_key INTEGER REFERENCES dim_date(date_key),
+    customer_key INTEGER REFERENCES dim_customer(customer_key),
+    salesperson_key INTEGER REFERENCES dim_employee(employee_key),
+    territoryid INTEGER,
+    billtoaddress_key INTEGER REFERENCES dim_geography(geography_key),
+    shiptoaddress_key INTEGER REFERENCES dim_geography(geography_key),
+    ship_method_key INTEGER REFERENCES dim_ship_method(ship_method_key),
+    product_key INTEGER REFERENCES dim_product(product_key),
+    specialofferid INTEGER,
+    orderqty SMALLINT,
+    unitprice NUMERIC,
+    unitpricediscount NUMERIC,
+    line_total NUMERIC, -- Derived: unitprice * orderqty
+    subtotal NUMERIC,
+    taxamt NUMERIC,
+    freight NUMERIC,
+    totaldue NUMERIC
+);
+
+CREATE TABLE fact_purchase (
+    purchase_key SERIAL PRIMARY KEY,
+    purchaseorderid INTEGER NOT NULL,
+    purchaseorderdetailid INTEGER NOT NULL,
+    orderdate_key INTEGER REFERENCES dim_date(date_key),
+    shipdate_key INTEGER REFERENCES dim_date(date_key),
+    duedate_key INTEGER REFERENCES dim_date(date_key),
+    employee_key INTEGER REFERENCES dim_employee(employee_key),
+    vendor_key INTEGER REFERENCES dim_vendor(vendor_key),
+    ship_method_key INTEGER REFERENCES dim_ship_method(ship_method_key),
+    product_key INTEGER REFERENCES dim_product(product_key),
+    orderqty SMALLINT,
+    unitprice NUMERIC,
+    receivedqty NUMERIC(8, 2),
+    rejectedqty NUMERIC(8, 2),
+    line_total NUMERIC, -- Derived: unitprice * orderqty
+    subtotal NUMERIC,
+    taxamt NUMERIC,
+    freight NUMERIC
+);
+
+CREATE TABLE fact_work_order (
+    work_order_key SERIAL PRIMARY KEY,
+    workorderid INTEGER NOT NULL,
+    product_key INTEGER REFERENCES dim_product(product_key),
+    orderqty INTEGER,
+    scrappedqty SMALLINT,
+    startdate_key INTEGER REFERENCES dim_date(date_key),
+    enddate_key INTEGER REFERENCES dim_date(date_key),
+    duedate_key INTEGER REFERENCES dim_date(date_key),
+    scrapreasonid SMALLINT,
+    operationsequence SMALLINT,
+    locationid SMALLINT,
+    scheduledstartdate TIMESTAMP,
+    scheduledenddate TIMESTAMP,
+    actualstartdate TIMESTAMP,
+    actualenddate TIMESTAMP,
+    actualresourcehrs NUMERIC(9, 4),
+    plannedcost NUMERIC,
+    actualcost NUMERIC
+);

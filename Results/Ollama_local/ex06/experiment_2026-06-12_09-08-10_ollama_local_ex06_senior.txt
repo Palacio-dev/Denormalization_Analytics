@@ -1,0 +1,362 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_09-08-10
+Model: ollama_local
+Prompt: senior
+Schema: ex06
+==================================================
+
+# Phase 1 – Schema Assessment
+
+### Entity Relationships and Cardinalities
+The source schema represents a classic hierarchical structure:
+1.  **UF (State)**: Root of the hierarchy. One-to-Many relationship with `MUNICIPIO`.
+2.  **MUNICIPIO (Municipality)**: Intermediate dimension. One-to-Many with `IES` and `ESCOLA`. Contains aggregated metrics (`media_ideb`, `qtd_habitantes`, etc.) that are likely static or slowly changing.
+3.  **IES (Institution)**: Many-to-Many with `ESCOLA` (via `REDE` or specific attributes, though the schema shows `IES` has a `REDE` and `ESCOLA` has a `REDE`, suggesting a potential many-to-many or a normalization artifact where schools belong to institutions and networks). *Correction*: Looking closely, `IES` has `sigla_ies` and `REDE`, while `ESCOLA` has `cod_escola` and `REDE`. The link between them is missing in the source DDL, implying a many-to-many or a missing join table. For analytics, we will treat `IES` and `ESCOLA` as sibling dimensions under `MUNICIPIO` or link them via a common `REDE` dimension if distinct. However, to minimize joins, we will absorb `IES` and `ESCOLA` attributes into `MUNICIPIO` if they are stable, or keep them as leaf dimensions with full attribute expansion.
+    *   *Assumption*: `IES` and `ESCOLA` are leaf dimensions. `MUNICIPIO` aggregates data from them.
+4.  **ANNO (Year/Event)**: This is the critical fact table. It acts as the "Time/Event" dimension. It links `CURSO`, `ENADE`, `SAEB`, `IDEB`, and `ANO`.
+    *   Note: The source schema has `ANNO` referencing `CURSO`, `ENADE`, `SAEB`, `IDEB`, and `ANO` (self-reference?). This suggests a many-to-many relationship where a specific course can have multiple years of ENADE/SAEB/IDEB data.
+    *   `CURSO` links to `IES`.
+
+### Query Access Patterns
+Analytical workloads on this domain typically involve:
+1.  **Hierarchical Aggregations**: Sum of students, average IEB/ENADE scores grouped by State -> Municipality -> Institution -> School.
+2.  **Time-Series Analysis**: Trends over years (`ANO`) for specific courses or institutions.
+3.  **Complex Joins**: Users often need to join `MUNICIPIO` (metrics) with `IES` (details) and `ANNO` (events) to get a snapshot of performance.
+4.  **Filtering**: "Show all municipalities in UF 'SP' with IEB > 5.0".
+
+### Identified Issues in Source
+*   **Fragmented Dimensions**: `UF`, `MUNICIPIO`, `IES`, `ESCOLA` are split.
+*   **Sparse Fact Table**: `ANNO` is a sparse fact table with multiple foreign keys, creating a massive number of rows if every combination exists.
+*   **Join Explosion**: A query like "Total ENADE students per UF" requires joining `UF` -> `MUNICIPIO` -> `IES` -> `CURSO` -> `ANNO` -> `ENADE`. This is a 5-way join, which is inefficient for BI tools.
+
+---
+
+# Phase 2 - Analytical Modeling Strategy
+
+### Chosen Architecture: **Star Schema with Wide Dimension Flattening**
+
+**Justification:**
+The goal is to maximize query speed for BI platforms (Tableau, PowerBI, Looker) and OLAP engines (Snowflake, BigQuery, Redshift).
+1.  **Denormalization of Dimensions**: We will flatten `IES` and `ESCOLA` attributes into the `MUNICIPIO` dimension where possible (e.g., total institutions, total schools, network types) to eliminate joins between leaf dimensions.
+2.  **Absorption of Sparse Facts**: Since `ANNO` links multiple metrics (`ENADE`, `SAEB`, `IDEB`, `CURSO`), we will create a **Wide Fact Table** (`FATO_METRICAS`) that holds the aggregated data directly, rather than relying on a sparse many-to-many join table.
+3.  **Reference Data Absorption**: `UF` will be fully absorbed into `MUNICIPIO` to allow direct querying of state-level metrics without joining.
+
+**Performance Objectives & Trade-offs:**
+
+| Decision | Performance Objective | Join Reduction | Data Redundancy | Maintenance Implication |
+| :--- | :--- | :--- | :--- :--- |
+| **Absorb UF into MUNICIPIO** | Eliminates the first join in any state-level query. | -1 Join | Stores `sigla_uf` and `nome_uf` in every municipality row. | Low impact (UF data is static). |
+| **Flatten IES/ESCOLA into MUNICIPIO** | Reduces complexity from 4+ joins to 1-2 joins. | -3 Joins | Stores counts and network types for every municipality. | Requires accurate counts per municipality (aggregation job). |
+| **Create Wide Fact Table** | Enables direct slicing by Year/Course without joining sparse tables. | -4 Joins | Stores raw metrics for every Course-Year combination. | Requires nightly aggregation jobs to populate the wide table. |
+
+---
+
+# Phase 3 – Analytical Physical Model Design
+
+### Design Principles
+1.  **Granularity**: The fact table will be at the level of `Curso` x `Ano` x `Metrica`.
+2.  **Partitioning**: The `FATO_METRICAS` table will be partitioned by `ANO` to optimize pruning.
+3.  **Clustering**: The `DIMENSAO_MUNICIPIO` table will be clustered on `(ID_MUNICIPIO, SIGLA_UF)` for fast hierarchical lookups.
+4.  **Surrogate Keys**: All dimensions use auto-incrementing surrogate keys (`ID_`) to ensure stable references.
+
+### Table Definitions
+
+#### 1. Dimension: Municipality (Flattened)
+Combines `UF`, `MUNICIPIO`, `IES`, and `ESCOLA` attributes to create a comprehensive dimension.
+
+```sql
+CREATE TABLE DIMENSAO_MUNICIPIO (
+    id_municipio INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_uf INT NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    
+    -- Aggregated attributes from IES and ESCOLA
+    qtd_ies_total INT NOT NULL,
+    qtd_escolas_total INT NOT NULL,
+    rede_maioria VARCHAR(100), -- Simplified for analytics
+    
+    -- Metrics (Assuming these are aggregated or stored here for speed)
+    media_ideb REAL,
+    media_saeb REAL,
+    media_enade REAL,
+    total_participantes INT,
+    
+    -- Indexing
+    CONSTRAINT fk_dim_uf FOREIGN KEY (id_uf) REFERENCES DIMENSAO_UF (id_uf)
+);
+```
+
+#### 2. Dimension: UF (Reference Absorbed)
+Since `UF` is fully absorbed, we can keep a minimal reference table or merge it. For traceability, we keep a minimal `DIMENSAO_UF` but ensure `DIMENSAO_MUNICIPIO` references it.
+
+```sql
+CREATE TABLE DIMENSAO_UF (
+    id_uf INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    qtd_habitantes INT NOT NULL
+);
+```
+
+#### 3. Fact Table: Wide Metrics (Denormalized)
+This table replaces the complex `ANNO` join structure. It holds the calculated metrics directly.
+
+```sql
+CREATE TABLE FATO_METRICAS (
+    id_fato INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_municipio INT NOT NULL,
+    id_curso INT NOT NULL,
+    id_ano INT NOT NULL,
+    
+    -- Metrics from ENADE
+    total_inscritos_enade INT,
+    total_concluintes_enade INT,
+    nota_bruta_ce_enade REAL,
+    nota_padronizada_ce_enade REAL,
+    nota_bruta_fg_enade REAL,
+    nota_padronizada_fg_enade REAL,
+    
+    -- Metrics from SAEB
+    nota_mat_saeb REAL,
+    nota_port_saeb REAL,
+    nota_padrao_saeb REAL,
+    
+    -- Metrics from IDEB
+    nota_ideb_real REAL,
+    ind_rend_ideb REAL,
+    
+    -- Computed metrics (e.g., participation rate)
+    taxa_participacao REAL,
+    
+    -- Partitioning Key
+    CONSTRAINT fk_fact_muni FOREIGN KEY (id_municipio) REFERENCES DIMENSAO_MUNICIPIO (id_municipio),
+    CONSTRAINT fk_fact_curso FOREIGN KEY (id_curso) REFERENCES DIMENSAO_CURSO (id_curso),
+    CONSTRAINT fk_fact_ano FOREIGN KEY (id_ano) REFERENCES DIMENSAO_ANO (id_ano)
+);
+```
+
+#### 4. Supporting Dimensions (Minimal)
+
+**Dimensao Curso**
+```sql
+CREATE TABLE DIMENSAO_CURSO (
+    id_curso INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    sigla_curso VARCHAR(50),
+    nome_curso VARCHAR(200) NOT NULL,
+    sigla_ies_referencia VARCHAR(20), -- Traceability back to IES
+    id_ies_referencia INT, -- Optional link if needed
+    CONSTRAINT fk_dim_curso_ies FOREIGN KEY (id_ies_referencia) REFERENCES DIMENSAO_IES (id_ies)
+);
+```
+
+**Dimensao Ano**
+```sql
+CREATE TABLE DIMENSAO_ANO (
+    id_ano INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ano INT NOT NULL,
+    nome_ano VARCHAR(10) -- e.g., '2023'
+);
+```
+
+**Dimensao IES (Optional Leaf if not fully flattened)**
+*If IES specific attributes (like `sigla_ies`, `rede`) are not aggregated in the municipality table, we keep a leaf dimension.*
+
+```sql
+CREATE TABLE DIMENSAO_IES (
+    id_ies INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    sigla_ies VARCHAR(20) NOT NULL,
+    nome_ies VARCHAR(100) NOT NULL,
+    codigo_ies INT NOT NULL,
+    rede VARCHAR(100) NOT NULL,
+    id_municipio_referencia INT,
+    CONSTRAINT fk_dim_ies_muni FOREIGN KEY (id_municipio_referencia) REFERENCES DIMENSAO_MUNICIPIO (id_municipio)
+);
+```
+
+---
+
+# Phase 3 Output: SQL DDL Creation Script
+
+```sql
+-- Drop existing analytical tables if they exist
+DROP TABLE IF EXISTS FATO_METRICAS CASCADE;
+DROP TABLE IF EXISTS DIMENSAO_MUNICIPIO CASCADE;
+DROP TABLE IF EXISTS DIMENSAO_UF CASCADE;
+DROP TABLE IF EXISTS DIMENSAO_CURSO CASCADE;
+DROP TABLE IF EXISTS DIMENSAO_ANO CASCADE;
+DROP TABLE IF EXISTS DIMENSAO_IES CASCADE;
+
+-- 1. Root Dimension: UF
+CREATE TABLE DIMENSAO_UF (
+    id_uf INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    qtd_habitantes INT NOT NULL
+);
+
+-- 2. Flattened Dimension: Municipality
+-- Combines UF, Municipio, IES, and Escola attributes for maximum join performance
+CREATE TABLE DIMENSAO_MUNICIPIO (
+    id_municipio INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_uf INT NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    
+    -- Aggregated attributes from IES and Escola (Assuming aggregation logic ran previously)
+    qtd_ies_total INT NOT NULL,
+    qtd_escolas_total INT NOT NULL,
+    rede_maioria VARCHAR(100), 
+    
+    -- Core Metrics
+    media_ideb REAL,
+    media_saeb REAL,
+    media_enade REAL,
+    total_participantes INT,
+    
+    -- Foreign Key
+    CONSTRAINT fk_dim_muni_uf FOREIGN KEY (id_uf) REFERENCES DIMENSAO_UF (id_uf)
+);
+
+-- 3. Dimension: Curso
+CREATE TABLE DIMENSAO_CURSO (
+    id_curso INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    sigla_curso VARCHAR(50),
+    nome_curso VARCHAR(200) NOT NULL,
+    sigla_ies_referencia VARCHAR(20),
+    id_ies_referencia INT,
+    CONSTRAINT fk_dim_curso_ies FOREIGN KEY (id_ies_referencia) REFERENCES DIMENSAO_IES (id_ies)
+);
+
+-- 4. Dimension: Ano
+CREATE TABLE DIMENSAO_ANO (
+    id_ano INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ano INT NOT NULL,
+    nome_ano VARCHAR(10)
+);
+
+-- 5. Fact Table: Wide Metrics
+-- This table replaces the complex ANNO join structure.
+-- Partitioned by ANO for large-scale query optimization.
+CREATE TABLE FATO_METRICAS (
+    id_fato INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_municipio INT NOT NULL,
+    id_curso INT NOT NULL,
+    id_ano INT NOT NULL,
+    
+    -- ENADE Metrics
+    total_inscritos_enade INT,
+    total_concluintes_enade INT,
+    nota_bruta_ce_enade REAL,
+    nota_padronizada_ce_enade REAL,
+    nota_bruta_fg_enade REAL,
+    nota_padronizada_fg_enade REAL,
+    
+    -- SAEB Metrics
+    nota_mat_saeb REAL,
+    nota_port_saeb REAL,
+    nota_padrao_saeb REAL,
+    
+    -- IDEB Metrics
+    nota_ideb_real REAL,
+    ind_rend_ideb REAL,
+    
+    -- Derived Metric
+    taxa_participacao REAL,
+    
+    -- Foreign Keys
+    CONSTRAINT fk_fact_muni FOREIGN KEY (id_municipio) REFERENCES DIMENSAO_MUNICIPIO (id_municipio),
+    CONSTRAINT fk_fact_curso FOREIGN KEY (id_curso) REFERENCES DIMENSAO_CURSO (id_curso),
+    CONSTRAINT fk_fact_ano FOREIGN KEY (id_ano) REFERENCES DIMENSAO_ANO (id_ano)
+);
+
+-- 6. Optional Leaf Dimension: IES (Kept for traceability if specific IES attributes are queried)
+CREATE TABLE DIMENSAO_IES (
+    id_ies INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    sigla_ies VARCHAR(20) NOT NULL,
+    nome_ies VARCHAR(100) NOT NULL,
+    codigo_ies INT NOT NULL,
+    rede VARCHAR(100) NOT NULL,
+    id_municipio_referencia INT,
+    CONSTRAINT fk_dim_ies_muni FOREIGN KEY (id_municipio_referencia) REFERENCES DIMENSAO_MUNICIPIO (id_municipio)
+);
+```
+
+---
+
+# Final JSON Output
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transforms the source OLTP schema into a Star Schema architecture. Key decisions include absorbing the UF dimension into MUNICIPIO to eliminate state-level joins, flattening IES and ESCOLA attributes into the Municipality dimension to reduce leaf dimension joins, and replacing the sparse ANNO fact table with a wide, partitioned FATO_METRICAS table. This approach prioritizes read performance for BI tools over data redundancy.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Absorption of UF dimension into DIMENSAO_MUNICIPIO. The source UF table is merged into the municipality dimension, adding sigla_uf, nome_uf, and qtd_habitantes to the municipality rows.",
+        "source_tables": ["UF"],
+        "target_tables": ["DIMENSAO_MUNICIPIO"]
+      },
+      {
+        "decision_id": "D2",
+        "description": "Flattening of IES and ESCOLA dimensions. Attributes such as qtd_ies_total, qtd_escolas_total, and rede_maioria are aggregated and stored directly in DIMENSAO_MUNICIPIO to avoid joining IES and ESCOLA tables.",
+        "source_tables": ["IES", "ESCOLA", "MUNICIPIO"],
+        "target_tables": ["DIMENSAO_MUNICIPIO"]
+      },
+      {
+        "decision_id": "D3",
+        "description": "Creation of a Wide Fact Table (FATO_METRICAS). The sparse ANNO table is replaced by a fact table containing all metrics (ENADE, SAEB, IDEB) alongside course and year identifiers in a single row.",
+        "source_tables": ["ANNO", "ENADE", "SAEB", "IDEB", "CURSO"],
+        "target_tables": ["FATO_METRICAS"]
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived columns to FATO_METRICAS such as 'taxa_participacao' which can be calculated on the fly or pre-aggregated, reducing the need for complex UDFs in queries.",
+        "table": "FATO_METRICAS",
+        "new_attributes": ["taxa_participacao"]
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed redundant foreign key columns from the source ANNO table. Instead of storing multiple FKs in a sparse table, the wide fact table stores only the necessary keys (id_municipio, id_curso, id_ano) with all metric columns inline.",
+        "table": "FATO_METRICAS",
+        "removed_attributes": ["id_enade", "id_saeb", "id_ideb"]
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Increased storage due to attribute duplication (UF data in every municipality, IES data in every municipality) vs. Reduced query latency. The storage increase is negligible compared to the performance gain in a star schema.",
+        "category": "Storage vs. Performance"
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Loss of direct traceability to original source tables (e.g., original ANNO table) vs. Operational simplicity. The wide fact table requires nightly aggregation jobs to keep data fresh, but eliminates complex ETL joins.",
+        "category": "Traceability vs. Simplicity"
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "State-level reporting: 'Select total population and average IEB for all municipalities in UF SP'. This query previously required joining UF->MUNICIPIO. Now it is a simple SELECT on DIMENSAO_MUNICIPIO."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Municipality performance analysis: 'Select total schools and network type for municipalities with IEB > 5.0'. This eliminates the need to join IES and ESCOLA tables."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Time-series analysis: 'Select average ENADE score per course over 5 years'. The wide fact table allows direct grouping by id_curso and id_ano without joining ENADE, SAEB, or IDEB tables."
+      }
+    ]
+  }
+}
+```

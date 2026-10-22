@@ -1,0 +1,81 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_10-11-09
+Model: ollama_local
+Prompt: RISEN-few-shot
+Schema: harperdb
+==================================================
+
+```json
+{
+    "section_1": {
+        "summary": "The denormalization strategy focuses on eliminating the JOIN operations between the junction table `user_entitlements` and the entity tables `users` and `entitlements`. This is achieved by materializing the join result into a single, wide table. The primary bottleneck identified is the frequent need to retrieve user details alongside their active entitlement features in a single query, which requires a join on the `user_entitlements` table. By collapsing these three tables into one, we remove the join overhead, significantly improving read performance for analytical reporting on user entitlement status.",
+        "structural_decisions": [
+            {
+                "decision_id": "D1",
+                "description": "Collapse the `users`, `entitlements`, and `user_entitlements` tables into a single denormalized table named `user_entitlements_flat`. This table will contain all columns from the original three tables, using `user_id` as the primary key."
+            }
+        ],
+        "attribute_level_changes": [
+            {
+                "decision_id": "A1",
+                "description": "All attributes from `users` (`id`), `entitlements` (all columns), and `user_entitlements` (`user_id`, `entitlement_id`) are preserved. The `entitlement_id` is logically redundant in the flat table but is kept to maintain semantic clarity regarding the relationship origin, though it can be functionally dependent on `user_id` in a denormalized context. `activeFlag` is added as a boolean derived from the integer `activeFlag` in the original schema for easier querying."
+            }
+        ],
+        "tradeoffs": [
+            {
+                "tradeoff_id": "T1",
+                "description": "Tradeoff: Increased storage and write complexity. The denormalized table is wider and any update to a user or entitlement attribute requires updating the corresponding row in the flat table. However, this is acceptable for a read-heavy analytical workload where data consistency is less critical than query speed, and the original schema supports ACID transactions."
+            }
+        ]
+    },
+    "section_2": {
+        "query_patterns": [
+            {
+                "decision_id": "D1",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Business Query: 'List all active users and their associated feature types and usage counts for the current month.'\n\nIn the normalized model, this requires:\nSELECT u.id, e.featureType, e.useCount, e.activeFlag\nFROM users u\nJOIN user_entitlements ue ON u.id = ue.user_id\nJOIN entitlements e ON ue.entitlement_id = e.id\nWHERE e.activeFlag = 1 AND CURRENT_DATE BETWEEN e.activeDate AND e.inactiveDate;\n\nIn the denormalized model, this becomes a simple filter on a single table, removing the JOINs entirely."
+            }
+        ]
+    }
+}
+```
+
+```sql
+-- Denormalized Schema for User Entitlements
+-- Dialect: PostgreSQL (compatible with the input)
+
+BEGIN;
+
+-- Drop existing tables if they exist to ensure a clean migration
+DROP TABLE IF EXISTS user_entitlements_flat;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS entitlements;
+
+-- Create the denormalized schema
+CREATE TABLE user_entitlements_flat (
+    user_id INT PRIMARY KEY,
+    entitlement_id INT,
+    active_date DATE,
+    inactive_date DATE,
+    use_limit INT,
+    use_count INT,
+    feature_type VARCHAR(4),
+    package_type VARCHAR(4),
+    active_flag BOOLEAN,
+    -- Note: 'id' from users is functionally dependent on user_id in this context 
+    -- but is included to preserve full semantic equivalence if needed for reporting.
+    user_id_original INT
+);
+
+-- Create indexes to optimize common read patterns (filtering by user and feature)
+CREATE INDEX idx_user_entitlements_flat_user_id ON user_entitlements_flat(user_id);
+CREATE INDEX idx_user_entitlements_flat_feature_type ON user_entitlements_flat(feature_type);
+CREATE INDEX idx_user_entitlements_flat_active ON user_entitlements_flat(active_flag);
+
+-- Create a unique constraint on the combination of user_id and feature_type to prevent duplicates 
+-- if the same user has the same feature type multiple times (optional but good for data integrity in flat tables)
+CREATE UNIQUE INDEX idx_user_entitlements_flat_user_feature ON user_entitlements_flat(user_id, feature_type);
+
+-- End transaction
+COMMIT;
+```

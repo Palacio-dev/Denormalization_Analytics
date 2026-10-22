@@ -1,0 +1,336 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_14-45-19
+Model: ollama_local
+Prompt: mid-level
+Schema: TPC_DS
+==================================================
+
+### Analysis and Redesign Strategy
+
+#### 1. Analysis of Current Structure
+The provided schema represents a classic **Star Schema** foundation but with some redundancy and inconsistent naming conventions.
+- **Facts**: `s_purchase_lineitem`, `s_catalog_order_lineitem`, `s_web_order_lineitem`, `s_store_returns`, `s_catalog_returns`.
+- **Dimensions**: `s_purchase`, `s_catalog_order`, `s_web_order`, `s_inventory`, `s_store_returns` (partially acts as dimension), `s_catalog_returns` (partially acts as dimension).
+- **Issues**:
+    - **Join Complexity**: Queries often require joining multiple tables to get context (e.g., joining a line item table with its parent order table to get customer or store info).
+    - **Data Redundancy**: Attributes like `customer_id`, `store_id`, and `item_id` are repeated in every line item table.
+    - **Inconsistent Types**: IDs are mixed between `integer` and `char(16)`. For analytical consistency, `char(16)` is often preferred to preserve leading zeros or specific formatting, but `integer` is better for sorting and numeric operations if the data is strictly numeric. Given the source uses `char(16)`, we will standardize on `char(16)` for Dimensional attributes to maintain data integrity and avoid casting issues.
+    - **Lack of Fact Keys**: The fact tables (line items) lack a primary key linking them to the parent order, forcing joins on `order_id` which can be slow if the order table is large.
+
+#### 2. Structural Decisions (Denormalization Strategy)
+To optimize for read-heavy workloads (BI dashboards), we will adopt a **Snowflake/Star Hybrid** approach where possible, but heavily lean towards **Denormalization** for the Fact tables to eliminate joins.
+
+1.  **Consolidate Order Dimensions**: Instead of joining `s_purchase_lineitem` to `s_purchase` to get `store_id` or `customer_id`, we will **embed** these dimensions directly into the `s_purchase_lineitem` table. This is a "Denormalized Fact" pattern.
+2.  **Standardize Fact Keys**: Add a `fk_purchase_id` (integer) to `s_purchase_lineitem` to explicitly link to the parent purchase, allowing for hierarchical aggregation without complex joins.
+3.  **Merge Return Tables**: `s_store_returns` and `s_catalog_returns` are very similar. We will keep them separate to preserve the distinction between "Store" and "Catalog" channels, but we will **denormalize** the `call_center_id` and `order_id` fields into the return line item tables to avoid joining back to the order tables.
+4.  **Inventory Integration**: `s_inventory` is a snapshot table. We will create a denormalized view or a derived column in the fact tables (if possible via ETL) or keep it as a standalone dimension. However, for this DDL, we will ensure `s_inventory` is structured as a pure dimension with a composite key (`warehouse_id`, `item_id`, `date`).
+5.  **Data Type Unification**: Standardize all ID columns to `char(16)` to match the existing dimension style and prevent implicit casting errors during joins.
+
+#### 3. Attribute-Level Changes
+- **Derived Attributes**: Add `total_return_amt` to return tables if applicable (though usually calculated, we can pre-calculate or leave for aggregation). We will focus on **embedding** dimensions.
+- **Removed Attributes**: Removed `purc_register_id` and `purc_clerk_id` from the fact tables if they are not needed for the specific analytical queries (usually, sales volume by store/customer is the key metric). *Correction*: We will keep them if they are required for specific reports, but the primary goal is removing the need to join `s_purchase`.
+- **Added Attributes**: Added `fk_order_id` to line item tables to link back to the parent order for potential multi-level analysis.
+
+#### 4. Trade-offs
+- **Write Performance**: Denormalized tables are larger. Inserting data will be slower because more rows must be written per transaction.
+- **Storage Cost**: Increased storage usage due to repeated dimension values (e.g., `customer_id` repeated in every line item).
+- **Maintenance**: Data consistency must be enforced at the application/ETL layer. If `s_purchase.customer_id` changes, `s_purchase_lineitem` does not automatically update (it's a snapshot).
+- **Query Performance**: Significant improvement in read performance (fewer joins, no index lookups on foreign keys).
+
+---
+
+### JSON Output
+
+```json
+{
+  "section_1": {
+    "summary": "The schema has been redesigned into a highly denormalized Star Schema. Fact tables (Line Items and Returns) now contain embedded dimension attributes (Customer, Store, Call Center, Warehouse) to eliminate the need for frequent joins. IDs are standardized to char(16). The model prioritizes read performance for OLAP operations.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Denormalized s_purchase_lineitem by embedding purc_store_id, purc_customer_id, and purc_purchase_date directly into the table, removing the need to join with s_purchase."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Added fk_purchase_id (integer) to s_purchase_lineitem to maintain a direct link to the parent order for hierarchical analysis, while keeping all order attributes denormalized."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Denormalized s_store_returns and s_catalog_returns by embedding cret_order_id, cret_call_center_id, and cret_warehouse_id directly, removing dependencies on s_catalog_order."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Standardized all dimension ID columns (store_id, customer_id, item_id, etc.) from integer to char(16) to ensure consistent formatting and avoid casting issues during analytical queries."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Reorganized s_inventory to strictly follow Dimension Table standards with a composite key (warehouse_id, item_id, date) and removed any transactional attributes."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added 'fk_purchase_id' (integer) to s_purchase_lineitem. Added 'fk_order_id' (integer) to s_catalog_order_lineitem and s_web_order_lineitem for reference integrity."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Modified s_purchase_lineitem: Added 'purc_store_id', 'purc_customer_id', 'purc_purchase_date'. Removed 'purc_register_id', 'purc_clerk_id', 'purc_comment' (unless specifically needed for audit, assumed removed for simplicity)."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Modified s_store_returns: Added 'cret_order_id', 'cret_call_center_id', 'cret_warehouse_id'. Removed dependencies on s_catalog_order."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Standardized data types: All foreign keys and dimension identifiers changed from integer to char(16) to match the dimension convention."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage footprint due to duplicated dimension data in fact tables."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Reduced write performance as more data must be inserted per transaction, but read performance is optimized."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Data consistency relies on the ETL process; if a dimension attribute changes in the source, fact tables are snapshots and will not reflect the change automatically."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "BI Dashboard: 'Sales Volume by Store and Customer'. Previously required a JOIN between line item and purchase tables. Now achieved with a single table scan."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytics: 'Return Rate by Call Center'. Previously required joining returns to catalog orders. Now achieved by scanning the denormalized return table."
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Reporting: 'Inventory Snapshot by Date'. The denormalized inventory table allows for quick aggregation of stock levels without joining warehouse or item master tables."
+      }
+    ]
+  }
+}
+```
+
+---
+
+### Complete SQL DDL Creation Script
+
+```sql
+-- ==========================================
+-- Denormalized Analytical Schema
+-- Optimized for Read-Heavy Workloads (OLAP)
+-- ==========================================
+
+-- ============================================================================
+-- DIMENSION TABLES
+-- ============================================================================
+
+-- 1. s_purchase (Dimension)
+-- Note: In a fully denormalized model, this table is often only used to define the 
+-- relationship key, but we keep it minimal.
+CREATE TABLE s_purchase (
+    purc_purchase_id            INTEGER NOT NULL,
+    purc_store_id               CHAR(16),
+    purc_customer_id            CHAR(16),
+    purc_purchase_date          CHAR(10),
+    purc_purchase_time          INTEGER,
+    purc_register_id            INTEGER,
+    purc_clerk_id               INTEGER,
+    purc_comment                CHAR(100)
+);
+
+-- 2. s_catalog_order (Dimension)
+CREATE TABLE s_catalog_order (
+    cord_order_id               INTEGER NOT NULL,
+    cord_bill_customer_id       CHAR(16),
+    cord_ship_customer_id       CHAR(16),
+    cord_order_date             CHAR(10),
+    cord_order_time             INTEGER,
+    cord_ship_mode_id           CHAR(16),
+    cord_call_center_id         CHAR(16),
+    cord_order_comments         VARCHAR(100)
+);
+
+-- 3. s_web_order (Dimension)
+CREATE TABLE s_web_order (
+    word_order_id               INTEGER NOT NULL,
+    word_bill_customer_id       CHAR(16),
+    word_ship_customer_id       CHAR(16),
+    word_order_date             CHAR(10),
+    word_order_time             INTEGER,
+    word_ship_mode_id           CHAR(16),
+    word_web_site_id            CHAR(16),
+    word_order_comments         CHAR(100)
+);
+
+-- 4. s_inventory (Dimension - Snapshot)
+CREATE TABLE s_inventory (
+    invn_warehouse_id           CHAR(16) NOT NULL,
+    invn_item_id                CHAR(16) NOT NULL,
+    invn_date                   CHAR(10) NOT NULL,
+    invn_qty_on_hand            INTEGER
+);
+
+-- ============================================================================
+-- FACT TABLES (Denormalized)
+-- ============================================================================
+
+-- 5. s_purchase_lineitem (Fact - Denormalized)
+-- Embeds all purchase dimension attributes to avoid JOINs.
+CREATE TABLE s_purchase_lineitem (
+    plin_purchase_id            INTEGER NOT NULL,
+    plin_line_number            INTEGER NOT NULL,
+    plin_item_id                CHAR(16),
+    plin_promotion_id           CHAR(16),
+    plin_quantity               INTEGER,
+    plin_sale_price             NUMERIC(7,2),
+    plin_coupon_amt             NUMERIC(7,2),
+    plin_comment                VARCHAR(100),
+    
+    -- Embedded Dimension Attributes (Denormalized)
+    purc_store_id               CHAR(16),
+    purc_customer_id            CHAR(16),
+    purc_purchase_date          CHAR(10),
+    purc_purchase_time          INTEGER,
+    
+    -- Reference Key for hierarchical analysis
+    fk_purchase_id              INTEGER NOT NULL,
+    
+    PRIMARY KEY (plin_purchase_id, plin_line_number),
+    -- Index for common analytical queries
+    CREATE INDEX idx_plin_purchase_date ON s_purchase_lineitem (purc_purchase_date),
+    CREATE INDEX idx_plin_customer ON s_purchase_lineitem (purc_customer_id)
+);
+
+-- 6. s_catalog_order_lineitem (Fact - Denormalized)
+-- Embeds order and warehouse attributes.
+CREATE TABLE s_catalog_order_lineitem (
+    clin_order_id               INTEGER NOT NULL,
+    clin_line_number            INTEGER NOT NULL,
+    clin_item_id                CHAR(16),
+    clin_promotion_id           CHAR(16),
+    clin_quantity               INTEGER,
+    clin_sales_price            NUMERIC(7,2),
+    clin_coupon_amt             NUMERIC(7,2),
+    clin_warehouse_id           CHAR(16),
+    clin_ship_date              CHAR(10),
+    clin_catalog_number         INTEGER,
+    clin_catalog_page_number    INTEGER,
+    clin_ship_cost              NUMERIC(7,2),
+    
+    -- Embedded Dimension Attributes
+    cord_call_center_id         CHAR(16),
+    cord_ship_mode_id           CHAR(16),
+    cord_bill_customer_id       CHAR(16),
+    cord_ship_customer_id       CHAR(16),
+    cord_order_date             CHAR(10),
+    
+    -- Reference Key
+    fk_order_id                 INTEGER NOT NULL,
+    
+    PRIMARY KEY (clin_order_id, clin_line_number),
+    CREATE INDEX idx_clin_ship_date ON s_catalog_order_lineitem (clin_ship_date)
+);
+
+-- 7. s_web_order_lineitem (Fact - Denormalized)
+CREATE TABLE s_web_order_lineitem (
+    wlin_order_id               INTEGER NOT NULL,
+    wlin_line_number            INTEGER NOT NULL,
+    wlin_item_id                CHAR(16),
+    wlin_promotion_id           CHAR(16),
+    wlin_quantity               INTEGER,
+    wlin_sales_price            NUMERIC(7,2),
+    wlin_coupon_amt             NUMERIC(7,2),
+    wlin_warehouse_id           CHAR(16),
+    wlin_ship_date              CHAR(10),
+    wlin_ship_cost              NUMERIC(7,2),
+    wlin_web_page_id            CHAR(16),
+    
+    -- Embedded Dimension Attributes
+    word_bill_customer_id       CHAR(16),
+    word_ship_customer_id       CHAR(16),
+    word_web_site_id            CHAR(16),
+    word_order_date             CHAR(10),
+    word_ship_mode_id           CHAR(16),
+    
+    -- Reference Key
+    fk_order_id                 INTEGER NOT NULL,
+    
+    PRIMARY KEY (wlin_order_id, wlin_line_number),
+    CREATE INDEX idx_wlin_ship_date ON s_web_order_lineitem (wlin_ship_date)
+);
+
+-- 8. s_store_returns (Fact - Denormalized)
+CREATE TABLE s_store_returns (
+    sret_store_id               CHAR(16),
+    sret_purchase_id            CHAR(16) NOT NULL,
+    sret_line_number            INTEGER NOT NULL,
+    sret_item_id                CHAR(16) NOT NULL,
+    sret_customer_id            CHAR(16),
+    sret_return_date            CHAR(10),
+    sret_return_time            CHAR(10),
+    sret_ticket_number          CHAR(20),
+    sret_return_qty             INTEGER,
+    sret_return_amt             NUMERIC(7,2),
+    sret_return_tax             NUMERIC(7,2),
+    sret_return_fee             NUMERIC(7,2),
+    sret_return_ship_cost       NUMERIC(7,2),
+    sret_refunded_cash          NUMERIC(7,2),
+    sret_reversed_charge        NUMERIC(7,2),
+    sret_store_credit           NUMERIC(7,2),
+    sret_reason_id              CHAR(16),
+    
+    -- Embedded Dimension Attributes (from Catalog/Order context)
+    cord_call_center_id         CHAR(16),
+    cord_order_id               INTEGER,
+    cord_ship_mode_id           CHAR(16),
+    cord_warehouse_id           CHAR(16),
+    
+    PRIMARY KEY (sret_store_id, sret_purchase_id, sret_line_number, sret_item_id),
+    CREATE INDEX idx_sret_return_date ON s_store_returns (sret_return_date)
+);
+
+-- 9. s_catalog_returns (Fact - Denormalized)
+CREATE TABLE s_catalog_returns (
+    cret_call_center_id         CHAR(16),
+    cret_order_id               INTEGER NOT NULL,
+    cret_line_number            INTEGER NOT NULL,
+    cret_item_id                CHAR(16) NOT NULL,
+    cret_return_customer_id     CHAR(16),
+    cret_refund_customer_id     CHAR(16),
+    cret_return_date            CHAR(10),
+    cret_return_time            CHAR(10),
+    cret_return_qty             INTEGER,
+    cret_return_amt             NUMERIC(7,2),
+    cret_return_tax             NUMERIC(7,2),
+    cret_return_fee             NUMERIC(7,2),
+    cret_return_ship_cost       NUMERIC(7,2),
+    cret_refunded_cash          NUMERIC(7,2),
+    cret_reversed_charge        NUMERIC(7,2),
+    cret_merchant_credit        NUMERIC(7,2),
+    cret_reason_id              CHAR(16),
+    cret_shipmode_id            CHAR(16),
+    cret_catalog_page_id        CHAR(16),
+    cret_warehouse_id           CHAR(16),
+    
+    -- Embedded Dimension Attributes (from Order context)
+    cord_bill_customer_id       CHAR(16),
+    cord_ship_customer_id       CHAR(16),
+    cord_order_date             CHAR(10),
+    cord_web_site_id            CHAR(16), -- Added for completeness if web returns exist
+    
+    PRIMARY KEY (cret_call_center_id, cret_order_id, cret_line_number, cret_item_id),
+    CREATE INDEX idx_cret_return_date ON s_catalog_returns (cret_return_date)
+);
+```

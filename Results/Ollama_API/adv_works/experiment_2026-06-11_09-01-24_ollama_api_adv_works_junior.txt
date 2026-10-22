@@ -1,0 +1,355 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-01-24
+Model: ollama_api
+Prompt: junior
+Schema: adv_works
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on creating a star schema with fact tables at the center and dimension tables around them. The main fact tables are sales orders and purchase orders, with dimensions for products, customers, employees, dates, and geography. This approach reduces the need for complex joins during analytical queries by pre-joining related data into fewer, wider tables.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge humanresources.employee, humanresources.employeedepartmenthistory, and humanresources.employeepayhistory into a single employee dimension table with historical salary and department information"
+      },
+      {
+        "decision_id": "D2",
+        "description": "Combine person.person, person.emailaddress, and person.personphone into a single customer/contact dimension table"
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge production.product, production.productsubcategory, and production.productcategory into a single product dimension table"
+      },
+      {
+        "decision_id": "D4",
+        "description": "Combine person.address, person.stateprovince, and person.countryregion into a single geography dimension table"
+      },
+      {
+        "decision_id": "D5",
+        "description": "Create a date dimension table to support time-based analysis"
+      },
+      {
+        "decision_id": "D6",
+        "description": "Denormalize sales.salesorderheader and sales.salesorderdetail into a single sales fact table"
+      },
+      {
+        "decision_id": "D7",
+        "description": "Denormalize purchasing.purchaseorderheader and purchasing.purchaseorderdetail into a single purchasing fact table"
+      },
+      {
+        "decision_id": "D8",
+        "description": "Combine sales.customer and sales.store into a single customer dimension table"
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added calculated fields like employee age, years of service, and full names to the employee dimension"
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added derived product hierarchy information (category, subcategory) directly to the product dimension"
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added full address information to the customer dimension"
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added calculated fields like order line total and discount amount to the sales fact table"
+      },
+      {
+        "decision_id": "A5",
+        "description": "Added calculated fields like received quantity percentage to the purchasing fact table"
+      },
+      {
+        "decision_id": "A6",
+        "description": "Added surrogate keys to all dimension tables for better performance"
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage space due to data duplication in favor of faster query performance"
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified queries at the cost of more complex ETL processes to maintain data consistency"
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Improved read performance but potentially slower write performance due to multiple table updates"
+      },
+      {
+        "tradeoff_id": "T4",
+        "description": "Loss of granular historical tracking in some dimensions for improved query performance"
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Sales analysis by product category, subcategory, and individual product with revenue, quantity, and discount metrics"
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Customer analysis by geography, including sales performance across different regions and countries"
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Employee performance analysis, including sales by employee, department, and time periods"
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Time-based analysis of sales trends, seasonal patterns, and year-over-year comparisons"
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Supplier performance analysis through purchasing data, including vendor comparisons and delivery performance"
+      },
+      {
+        "decision_id": "D6",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Reporting on sales orders with detailed customer, product, and employee information in a single query"
+      }
+    ]
+  }
+}
+
+```sql
+-- Denormalized schema creation script
+
+-- Date Dimension Table
+CREATE TABLE IF NOT EXISTS dwh.dim_date (
+    date_key serial NOT NULL,
+    date_value date NOT NULL,
+    day_of_week smallint NOT NULL,
+    day_name character varying(10) NOT NULL,
+    month_number smallint NOT NULL,
+    month_name character varying(10) NOT NULL,
+    quarter smallint NOT NULL,
+    year_value smallint NOT NULL,
+    is_weekend boolean NOT NULL,
+    is_holiday boolean NOT NULL DEFAULT false,
+    CONSTRAINT pk_dim_date PRIMARY KEY (date_key)
+);
+
+COMMENT ON TABLE dwh.dim_date IS 'Date dimension table for time-based analysis';
+
+-- Employee Dimension Table
+CREATE TABLE IF NOT EXISTS dwh.dim_employee (
+    employee_key serial NOT NULL,
+    employee_id integer NOT NULL,
+    employee_name character varying(150) NOT NULL,
+    job_title character varying(50) NOT NULL,
+    birth_date date NOT NULL,
+    hire_date date NOT NULL,
+    termination_date date,
+    department_name character varying(50) NOT NULL,
+    department_group character varying(50) NOT NULL,
+    shift_name character varying(50),
+    current_flag boolean NOT NULL DEFAULT true,
+    salaried_flag boolean NOT NULL DEFAULT true,
+    vacation_hours smallint NOT NULL DEFAULT 0,
+    sick_leave_hours smallint NOT NULL DEFAULT 0,
+    gender character(1) NOT NULL,
+    marital_status character(1) NOT NULL,
+    employee_age integer NOT NULL,
+    years_of_service integer NOT NULL,
+    current_salary numeric,
+    pay_frequency smallint,
+    modified_date timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT pk_dim_employee PRIMARY KEY (employee_key)
+);
+
+COMMENT ON TABLE dwh.dim_employee IS 'Employee dimension with department and pay history information';
+
+-- Product Dimension Table
+CREATE TABLE IF NOT EXISTS dwh.dim_product (
+    product_key serial NOT NULL,
+    product_id integer NOT NULL,
+    product_name character varying(50) NOT NULL,
+    product_number character varying(25) NOT NULL,
+    color character varying(15),
+    size character varying(5),
+    weight numeric(8, 2),
+    standard_cost numeric NOT NULL,
+    list_price numeric NOT NULL,
+    product_category character varying(50),
+    product_subcategory character varying(50),
+    product_line character(2),
+    product_class character(2),
+    product_style character(2),
+    make_flag boolean NOT NULL DEFAULT true,
+    finished_goods_flag boolean NOT NULL DEFAULT true,
+    safety_stock_level smallint NOT NULL,
+    reorder_point smallint NOT NULL,
+    days_to_manufacture integer NOT NULL,
+    sell_start_date date NOT NULL,
+    sell_end_date date,
+    discontinued_date date,
+    modified_date timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT pk_dim_product PRIMARY KEY (product_key)
+);
+
+COMMENT ON TABLE dwh.dim_product IS 'Product dimension with category and subcategory information';
+
+-- Customer Dimension Table
+CREATE TABLE IF NOT EXISTS dwh.dim_customer (
+    customer_key serial NOT NULL,
+    customer_id integer NOT NULL,
+    customer_type character varying(20) NOT NULL, -- Individual or Store
+    customer_name character varying(150) NOT NULL,
+    email_address character varying(50),
+    phone_number character varying(25),
+    address_line1 character varying(60),
+    address_line2 character varying(60),
+    city character varying(30),
+    state_province character varying(50),
+    country_region character varying(50),
+    postal_code character varying(15),
+    territory_name character varying(50),
+    sales_person_name character varying(150),
+    store_demographics xml,
+    email_promotion integer NOT NULL DEFAULT 0,
+    modified_date timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT pk_dim_customer PRIMARY KEY (customer_key)
+);
+
+COMMENT ON TABLE dwh.dim_customer IS 'Customer dimension combining individual customers and stores';
+
+-- Geography Dimension Table
+CREATE TABLE IF NOT EXISTS dwh.dim_geography (
+    geography_key serial NOT NULL,
+    address_id integer NOT NULL,
+    address_line1 character varying(60) NOT NULL,
+    address_line2 character varying(60),
+    city character varying(30) NOT NULL,
+    state_province_code character(3) NOT NULL,
+    state_province_name character varying(50) NOT NULL,
+    country_region_code character varying(3) NOT NULL,
+    country_region_name character varying(50) NOT NULL,
+    postal_code character varying(15) NOT NULL,
+    territory_id integer NOT NULL,
+    territory_name character varying(50) NOT NULL,
+    modified_date timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT pk_dim_geography PRIMARY KEY (geography_key)
+);
+
+COMMENT ON TABLE dwh.dim_geography IS 'Geography dimension for location-based analysis';
+
+-- Vendor Dimension Table
+CREATE TABLE IF NOT EXISTS dwh.dim_vendor (
+    vendor_key serial NOT NULL,
+    vendor_id integer NOT NULL,
+    vendor_name character varying(50) NOT NULL,
+    account_number character varying(15) NOT NULL,
+    credit_rating smallint NOT NULL,
+    preferred_vendor_status boolean NOT NULL DEFAULT true,
+    active_flag boolean NOT NULL DEFAULT true,
+    purchasing_web_service_url character varying(1024),
+    modified_date timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT pk_dim_vendor PRIMARY KEY (vendor_key)
+);
+
+COMMENT ON TABLE dwh.dim_vendor IS 'Vendor dimension for purchasing analysis';
+
+-- Sales Fact Table
+CREATE TABLE IF NOT EXISTS dwh.fact_sales (
+    sales_key serial NOT NULL,
+    sales_order_id integer NOT NULL,
+    sales_order_detail_id integer NOT NULL,
+    order_date_key integer NOT NULL,
+    due_date_key integer NOT NULL,
+    ship_date_key integer,
+    customer_key integer NOT NULL,
+    product_key integer NOT NULL,
+    employee_key integer NOT NULL,
+    territory_id integer NOT NULL,
+    bill_to_geography_key integer NOT NULL,
+    ship_to_geography_key integer NOT NULL,
+    order_quantity smallint NOT NULL,
+    unit_price numeric NOT NULL,
+    unit_price_discount numeric NOT NULL DEFAULT 0.0,
+    line_total numeric NOT NULL,
+    discount_amount numeric NOT NULL,
+    tax_amount numeric NOT NULL,
+    freight numeric NOT NULL,
+    total_due numeric,
+    carrier_tracking_number character varying(25),
+    order_status smallint NOT NULL,
+    online_order_flag boolean NOT NULL DEFAULT true,
+    special_offer_id integer NOT NULL,
+    revision_number smallint NOT NULL DEFAULT 0,
+    modified_date timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT pk_fact_sales PRIMARY KEY (sales_key),
+    CONSTRAINT fk_fact_sales_dim_date_order FOREIGN KEY (order_date_key) REFERENCES dwh.dim_date (date_key),
+    CONSTRAINT fk_fact_sales_dim_date_due FOREIGN KEY (due_date_key) REFERENCES dwh.dim_date (date_key),
+    CONSTRAINT fk_fact_sales_dim_date_ship FOREIGN KEY (ship_date_key) REFERENCES dwh.dim_date (date_key),
+    CONSTRAINT fk_fact_sales_dim_customer FOREIGN KEY (customer_key) REFERENCES dwh.dim_customer (customer_key),
+    CONSTRAINT fk_fact_sales_dim_product FOREIGN KEY (product_key) REFERENCES dwh.dim_product (product_key),
+    CONSTRAINT fk_fact_sales_dim_employee FOREIGN KEY (employee_key) REFERENCES dwh.dim_employee (employee_key),
+    CONSTRAINT fk_fact_sales_dim_geography_bill FOREIGN KEY (bill_to_geography_key) REFERENCES dwh.dim_geography (geography_key),
+    CONSTRAINT fk_fact_sales_dim_geography_ship FOREIGN KEY (ship_to_geography_key) REFERENCES dwh.dim_geography (geography_key)
+);
+
+COMMENT ON TABLE dwh.fact_sales IS 'Sales fact table with order header and detail information';
+
+-- Purchasing Fact Table
+CREATE TABLE IF NOT EXISTS dwh.fact_purchasing (
+    purchasing_key serial NOT NULL,
+    purchase_order_id integer NOT NULL,
+    purchase_order_detail_id integer NOT NULL,
+    order_date_key integer NOT NULL,
+    due_date_key integer NOT NULL,
+    ship_date_key integer,
+    vendor_key integer NOT NULL,
+    product_key integer NOT NULL,
+    employee_key integer NOT NULL,
+    ship_method_id integer NOT NULL,
+    order_quantity smallint NOT NULL,
+    unit_price numeric NOT NULL,
+    received_quantity numeric(8, 2) NOT NULL,
+    rejected_quantity numeric(8, 2) NOT NULL,
+    received_qty_percentage numeric(8, 2),
+    line_total numeric NOT NULL,
+    tax_amount numeric NOT NULL,
+    freight numeric NOT NULL,
+    total_due numeric,
+    order_status smallint NOT NULL,
+    revision_number smallint NOT NULL DEFAULT 0,
+    modified_date timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT pk_fact_purchasing PRIMARY KEY (purchasing_key),
+    CONSTRAINT fk_fact_purchasing_dim_date_order FOREIGN KEY (order_date_key) REFERENCES dwh.dim_date (date_key),
+    CONSTRAINT fk_fact_purchasing_dim_date_due FOREIGN KEY (due_date_key) REFERENCES dwh.dim_date (date_key),
+    CONSTRAINT fk_fact_purchasing_dim_date_ship FOREIGN KEY (ship_date_key) REFERENCES dwh.dim_date (date_key),
+    CONSTRAINT fk_fact_purchasing_dim_vendor FOREIGN KEY (vendor_key) REFERENCES dwh.dim_vendor (vendor_key),
+    CONSTRAINT fk_fact_purchasing_dim_product FOREIGN KEY (product_key) REFERENCES dwh.dim_product (product_key),
+    CONSTRAINT fk_fact_purchasing_dim_employee FOREIGN KEY (employee_key) REFERENCES dwh.dim_employee (employee_key)
+);
+
+COMMENT ON TABLE dwh.fact_purchasing IS 'Purchasing fact table with order header and detail information';
+
+-- Inventory Fact Table
+CREATE TABLE IF NOT EXISTS dwh.fact_inventory (
+    inventory_key serial NOT NULL,
+    product_key integer NOT NULL,
+    location_id smallint NOT NULL,
+    shelf character varying(10) NOT NULL,
+    bin smallint NOT NULL,
+    quantity smallint NOT NULL DEFAULT 0,
+    standard_cost numeric NOT NULL,
+    modified_date timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT pk_fact_inventory PRIMARY KEY (inventory_key),
+    CONSTRAINT fk_fact_inventory_dim_product FOREIGN KEY (product_key) REFERENCES dwh.dim_product (product_key)
+);
+
+COMMENT ON TABLE dwh.fact_inventory IS 'Inventory fact table with current stock levels';
+```

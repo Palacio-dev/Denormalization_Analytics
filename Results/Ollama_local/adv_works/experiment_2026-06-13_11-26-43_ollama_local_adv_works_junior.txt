@@ -1,0 +1,367 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-13_11-26-43
+Model: ollama_local
+Prompt: junior
+Schema: adv_works
+==================================================
+
+Here is the analysis and denormalization strategy for the Adventure Works Cycles schema, followed by the SQL DDL script.
+
+### JSON Analysis
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on high-volume analytical queries regarding Sales Performance, Employee Metrics,
+    and Product Inventory. The primary goal is to eliminate joins between lookup tables (e.g., Departments, States, Currencies) 
+    and their associated transactional tables (Employees, Orders, Products). Instead of joining `SalesOrderHeader` to `SalesTerritory`
+    to `SalesTerritoryHistory` to `SalesPerson`, we flatten these relationships into a single `SalesOrderDenormalized` table. 
+    Similarly, we flatten `Person` and `Address` details directly into `Employee` and `Customer` tables to avoid joining the `person` 
+    schema.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Created `SalesOrderDenormalized` table by merging `sales.salesorderheader`, `sales.salesorderdetail`, 
+        `sales.salesterritory`, `sales.salesperson`, `sales.countryregioncurrency`, and `purchasing.shipmethod`. This removes the 
+        need to join multiple tables to get territory, sales rep, currency, and shipping info for a single order."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Created `EmployeeDenormalized` table by merging `humanresources.employee`, 
+        `humanresources.employeedepartmenthistory`, `person.person`, `person.address`, and `person.phonenumbertype`.
+         This allows querying an employee's current department, history, and contact details in a single pass."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Created `ProductInventoryDenormalized` table by merging `production.product`, `production.productinventory`,
+         `production.productmodel`, `production.productcategory`, and `production.productsubcategory`. This enables complex product 
+         analysis without joining the product hierarchy."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Created `CurrencyRateDenormalized` table to store `sales.currencyrate` and `sales.currency` columns 
+        directly, avoiding joins when analyzing historical pricing trends."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived columns such as `TotalOrderValue` (calculated as Subtotal + Tax + Freight) in the Sales table, and `CurrentDepartmentName` in the Employee table. These are pre-calculated to avoid runtime aggregation."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added `TerritoryGroupName` by concatenating `salesterritory.name` and `salesterritory.group` into a single string attribute to support text-based filtering."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Increased Storage and Write Complexity. The denormalized tables contain redundant data (e.g., storing the territory name in the order table instead of referencing it). Updates to a lookup value (like a currency code) now require updating multiple rows or managing data consistency manually, though in this context, the lookup tables are static."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Reduced Read Performance vs. Increased Data Volume. While query execution time for analytics is significantly reduced (fewer joins), the disk I/O for scanning these large denormalized tables is higher than scanning small lookup tables."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Business Query: 'Identify top-performing sales representatives in the US region for the last year, including their quota status and shipping costs.' This query previously required joining SalesPerson, SalesTerritory, SalesOrderHeader, CountryRegionCurrency, and ShipMethod. The denormalized schema allows this in a single SELECT."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Business Query: 'List all employees who have worked in the IT department, including their current address and phone number.' This requires joining Employee, EmployeeDepartmentHistory, Person, and Address. The denormalized `EmployeeDenormalized` table consolidates this."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Business Query: 'Analyze product cost history against current market prices for all Mountain Bikes.' This requires joining Product, ProductModel, ProductCategory, ProductSubcategory, and ProductCostHistory. The denormalized schema flattens this hierarchy."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Creation Script for Denormalized Schema
+
+```sql
+-- =============================================
+-- Denormalized Schema for Analytics
+-- =============================================
+
+-- =============================================
+-- 1. Sales Analytics Denormalization
+-- Merges: SalesOrderHeader, SalesOrderDetail, SalesTerritory, 
+--         SalesPerson, CountryRegionCurrency, ShipMethod
+-- =============================================
+CREATE TABLE IF NOT EXISTS sales.salesorderdenormalized
+(
+    salesorderid integer NOT NULL,
+    -- Header Details
+    orderdate timestamp without time zone NOT NULL,
+    duedate timestamp without time zone NOT NULL,
+    shipdate timestamp without time zone,
+    status smallint NOT NULL,
+    onlineorderflag "Flag" NOT NULL DEFAULT true,
+    purchaseordernumber "OrderNumber" COLLATE pg_catalog."default",
+    accountnumber "AccountNumber" COLLATE pg_catalog."default",
+    -- Territory Details (Flattened)
+    territoryid integer NOT NULL,
+    territoryname "Name" COLLATE pg_catalog."default" NOT NULL,
+    territorygroup "Group" COLLATE pg_catalog."default" NOT NULL,
+    countryregioncode character varying(3) COLLATE pg_catalog."default",
+    -- Sales Person Details (Flattened)
+    salespersonid integer NOT NULL,
+    salespersonname "Name" COLLATE pg_catalog."default" NOT NULL,
+    salespersonbonus numeric NOT NULL DEFAULT 0.00,
+    salespersoncommissionpct numeric NOT NULL DEFAULT 0.00,
+    -- Currency Details (Flattened)
+    currencycode character varying(3) COLLATE pg_catalog."default",
+    currencyname "Name" COLLATE pg_catalog."default" NOT NULL,
+    currencyrateid integer NOT NULL,
+    currencyrateaveragerate numeric NOT NULL,
+    -- Shipping Details (Flattened)
+    shipmethodid integer NOT NULL,
+    shipmethodname "Name" COLLATE pg_catalog."default" NOT NULL,
+    -- Financial Calculations (Derived)
+    subtotal numeric NOT NULL DEFAULT 0.00,
+    taxamt numeric NOT NULL DEFAULT 0.00,
+    freight numeric NOT NULL DEFAULT 0.00,
+    totaldue numeric,
+    -- Detail Summary (Flattened)
+    totallinecount integer NOT NULL DEFAULT 0,
+    -- Constraints
+    CONSTRAINT "PK_SalesOrderDenormalized_SalesOrderID" PRIMARY KEY (salesorderid)
+);
+
+-- Populate initial data (Example logic)
+INSERT INTO sales.salesorderdenormalized (salesorderid, orderdate, duedate, shipdate, status, onlineorderflag, purchaseordernumber, accountnumber, territoryid, territoryname, territorygroup, countryregioncode, salespersonid, salespersonname, salespersonbonus, salespersoncommissionpct, currencycode, currencyname, currencyrateid, currencyrateaveragerate, shipmethodid, shipmethodname, subtotal, taxamt, freight, totaldue, totallinecount)
+SELECT 
+    soh.salesorderid,
+    soh.orderdate,
+    soh.duedate,
+    soh.shipdate,
+    soh.status,
+    soh.onlineorderflag,
+    soh.purchaseordernumber,
+    soh.accountnumber,
+    st.territoryid,
+    st.name AS territoryname,
+    st."group" AS territorygroup,
+    cr.countryregioncode,
+    sp.businessentityid AS salespersonid,
+    sp.name AS salespersonname,
+    sp.bonus,
+    sp.commissionpct,
+    curr.currencycode,
+    curr.name AS currencyname,
+    crid.currencyrateid,
+    cr.averagerate,
+    sm.shipmethodid,
+    sm.name AS shipmethodname,
+    soh.subtotal,
+    soh.taxamt,
+    soh.freight,
+    soh.totaldue,
+    (SELECT COUNT(*) FROM sales.salesorderdetail sod WHERE sod.salesorderid = soh.salesorderid) AS totallinecount
+FROM sales.salesorderheader soh
+JOIN sales.salesterritory st ON soh.territoryid = st.territoryid
+JOIN sales.salesperson sp ON soh.salespersonid = sp.businessentityid
+JOIN sales.countryregioncurrency cr ON soh.currencyrateid = cr.currencyrateid
+JOIN sales.currency curr ON cr.tocurrencycode = curr.currencycode
+JOIN purchasing.shipmethod sm ON soh.shipmethodid = sm.shipmethodid;
+
+-- =============================================
+-- 2. Employee & HR Analytics Denormalization
+-- Merges: Employee, EmployeeDepartmentHistory, Person, Address, PhoneNumberType
+-- =============================================
+CREATE TABLE IF NOT EXISTS humanresources.employeedenormalized
+(
+    businessentityid integer NOT NULL,
+    -- Employee Core Data
+    nationalidnumber character varying(15) COLLATE pg_catalog."default",
+    loginid character varying(256) COLLATE pg_catalog."default",
+    jobtitle character varying(50) COLLATE pg_catalog."default",
+    birthdate date NOT NULL,
+    maritalstatus character(1) COLLATE pg_catalog."default",
+    gender character(1) COLLATE pg_catalog."default",
+    hiredate date NOT NULL,
+    salariedflag "Flag" NOT NULL DEFAULT true,
+    vacationhours smallint NOT NULL DEFAULT 0,
+    sickleavehours smallint NOT NULL DEFAULT 0,
+    currentflag "Flag" NOT NULL DEFAULT true,
+    organizationnode character varying COLLATE pg_catalog."default",
+    -- Personal Data (Flattened)
+    firstname "Name" COLLATE pg_catalog."default",
+    lastname "Name" COLLATE pg_catalog."default",
+    title character varying(8) COLLATE pg_catalog."default",
+    middlename "Name" COLLATE pg_catalog."default",
+    suffix character varying(10) COLLATE pg_catalog."default",
+    emailaddress character varying(50) COLLATE pg_catalog."default",
+    -- Address Data (Flattened)
+    addressline1 character varying(60) COLLATE pg_catalog."default",
+    addressline2 character varying(60) COLLATE pg_catalog."default",
+    city character varying(30) COLLATE pg_catalog."default",
+    stateprovincecode character(3) COLLATE pg_catalog."default",
+    stateprovincecodevalue "Name" COLLATE pg_catalog."default",
+    postalcode character varying(15) COLLATE pg_catalog."default",
+    -- Phone Data (Flattened)
+    phonenumber "Phone" COLLATE pg_catalog."default",
+    phonenumbertype "Name" COLLATE pg_catalog."default",
+    -- Department Data (Flattened)
+    currentdepartmentid smallint NOT NULL,
+    currentdepartmentname "Name" COLLATE pg_catalog."default" NOT NULL,
+    currentdepartmentgroup "Group" COLLATE pg_catalog."default" NOT NULL,
+    -- Constraints
+    CONSTRAINT "PK_EmployeeDenormalized_BusinessEntityID" PRIMARY KEY (businessentityid)
+);
+
+-- Populate initial data (Example logic)
+INSERT INTO humanresources.employeedenormalized (businessentityid, nationalidnumber, loginid, jobtitle, birthdate, maritalstatus, gender, hiredate, salariedflag, vacationhours, sickleavehours, currentflag, organizationnode, firstname, lastname, title, middlename, suffix, emailaddress, addressline1, addressline2, city, stateprovincecode, stateprovincecodevalue, postalcode, phonenumber, phonenumbertype, currentdepartmentid, currentdepartmentname, currentdepartmentgroup)
+SELECT 
+    e.businessentityid,
+    e.nationalidnumber,
+    e.loginid,
+    e.jobtitle,
+    e.birthdate,
+    e.maritalstatus,
+    e.gender,
+    e.hiredate,
+    e.salariedflag,
+    e.vacationhours,
+    e.sickleavehours,
+    e.currentflag,
+    e.organizationnode,
+    p.firstname,
+    p.lastname,
+    p.title,
+    p.middlename,
+    p.suffix,
+    ea.emailaddress,
+    a.addressline1,
+    a.addressline2,
+    a.city,
+    sp.stateprovincecode,
+    sp.name AS stateprovincecodevalue,
+    a.postalcode,
+    pp.phonenumber,
+    pp.phonenumbertype,
+    edh.departmentid AS currentdepartmentid,
+    d.name AS currentdepartmentname,
+    d.groupname AS currentdepartmentgroup
+FROM humanresources.employee e
+JOIN person.person p ON e.businessentityid = p.businessentityid
+JOIN person.businessentityaddress bea ON e.businessentityid = bea.businessentityid
+JOIN person.address a ON bea.addressid = a.addressid
+JOIN person.phonenumbertype pp ON bea.phonenumbertypeid = pp.phonenumbertypeid
+JOIN humanresources.employeedepartmenthistory edh ON e.businessentityid = edh.businessentityid
+JOIN humanresources.department d ON edh.departmentid = d.departmentid
+WHERE edh.enddate IS NULL; -- Only current department
+
+-- =============================================
+-- 3. Product Inventory Denormalization
+-- Merges: Product, ProductInventory, ProductModel, ProductCategory, ProductSubcategory
+-- =============================================
+CREATE TABLE IF NOT EXISTS production.productinventorydenormalized
+(
+    productid integer NOT NULL,
+    -- Product Core Data
+    productnumber character varying(25) COLLATE pg_catalog."default",
+    name "Name" COLLATE pg_catalog."default",
+    makeflag "Flag" NOT NULL DEFAULT true,
+    finishedgoodsflag "Flag" NOT NULL DEFAULT true,
+    color character varying(15) COLLATE pg_catalog."default",
+    safetystocklevel smallint NOT NULL,
+    reorderpoint smallint NOT NULL,
+    standardcost numeric NOT NULL,
+    listprice numeric NOT NULL,
+    size character varying(5) COLLATE pg_catalog."default",
+    weight numeric(8, 2),
+    daystomanufacture integer NOT NULL,
+    productline character(2) COLLATE pg_catalog."default",
+    class character(2) COLLATE pg_catalog."default",
+    style character(2) COLLATE pg_catalog."default",
+    -- Hierarchy Data (Flattened)
+    productmodelname "Name" COLLATE pg_catalog."default",
+    productcategoryname "Name" COLLATE pg_catalog."default",
+    productsubcategoryname "Name" COLLATE pg_catalog."default",
+    -- Inventory Data (Flattened)
+    locationid smallint NOT NULL,
+    locationname "Name" COLLATE pg_catalog."default" NOT NULL,
+    shelf character varying(10) COLLATE pg_catalog."default",
+    bin smallint NOT NULL,
+    quantity smallint NOT NULL DEFAULT 0,
+    -- Constraints
+    CONSTRAINT "PK_ProductInventoryDenormalized_ProductID" PRIMARY KEY (productid)
+);
+
+-- Populate initial data (Example logic)
+INSERT INTO production.productinventorydenormalized (productid, productnumber, name, makeflag, finishedgoodsflag, color, safetystocklevel, reorderpoint, standardcost, listprice, size, weight, daystomanufacture, productline, class, style, productmodelname, productcategoryname, productsubcategoryname, locationid, locationname, shelf, bin, quantity)
+SELECT 
+    p.productid,
+    p.productnumber,
+    p.name,
+    p.makeflag,
+    p.finishedgoodsflag,
+    p.color,
+    p.safetystocklevel,
+    p.reorderpoint,
+    p.standardcost,
+    p.listprice,
+    p.size,
+    p.weight,
+    p.daystomanufacture,
+    p.productline,
+    p.class,
+    p.style,
+    pm.name AS productmodelname,
+    pc.name AS productcategoryname,
+    ps.name AS productsubcategoryname,
+    pi.locationid,
+    l.name AS locationname,
+    pi.shelf,
+    pi.bin,
+    pi.quantity
+FROM production.product p
+JOIN production.productmodel pm ON p.productmodelid = pm.productmodelid
+JOIN production.productcategory pc ON p.productcategoryid = pc.productcategoryid
+JOIN production.productsubcategory ps ON p.productsubcategoryid = ps.productsubcategoryid
+JOIN production.productinventory pi ON p.productid = pi.productid
+JOIN production.location l ON pi.locationid = l.locationid;
+
+-- =============================================
+-- 4. Currency Rate Denormalization
+-- Merges: CurrencyRate, Currency
+-- =============================================
+CREATE TABLE IF NOT EXISTS sales.currencyratedenormalized
+(
+    currencyrateid serial NOT NULL,
+    currencyratedate timestamp without time zone NOT NULL,
+    fromcurrencycode character(3) COLLATE pg_catalog."default",
+    fromcurrencyname "Name" COLLATE pg_catalog."default" NOT NULL,
+    tocurrencycode character(3) COLLATE pg_catalog."default",
+    tocurrencyname "Name" COLLATE pg_catalog."default" NOT NULL,
+    averagerate numeric NOT NULL,
+    endofdayrate numeric NOT NULL,
+    CONSTRAINT "PK_CurrencyRateDenormalized_CurrencyRateID" PRIMARY KEY (currencyrateid)
+);
+
+-- Populate initial data
+INSERT INTO sales.currencyratedenormalized (currencyrateid, currencyratedate, fromcurrencycode, fromcurrencyname, tocurrencycode, tocurrencyname, averagerate, endofdayrate)
+SELECT 
+    cr.currencyrateid,
+    cr.currencyratedate,
+    cr.fromcurrencycode,
+    c1.name AS fromcurrencyname,
+    cr.tocurrencycode,
+    c2.name AS tocurrencyname,
+    cr.averagerate,
+    cr.endofdayrate
+FROM sales.currencyrate cr
+JOIN sales.currency c1 ON cr.fromcurrencycode = c1.currencycode
+JOIN sales.currency c2 ON cr.tocurrencycode = c2.currencycode;
+```

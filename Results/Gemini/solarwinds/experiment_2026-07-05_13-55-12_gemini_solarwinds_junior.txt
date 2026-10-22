@@ -1,0 +1,109 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-55-12
+Model: gemini
+Prompt: junior
+Schema: solarwinds
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "To optimize for analytics and reporting, the highly normalized 3NF transactional schema is transformed into a single denormalized 'One Big Table' (OBT) often used in modern OLAP data warehouses. By merging the customers, orders, products, and order_details tables into a single flat structure, we eliminate the need for complex and resource-intensive JOIN operations during analytical queries.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge the 'orders' and 'customers' tables into the 'order_details' grain. This brings customer dimensions (name, email, address) and order dimensions (date) directly into the transaction line item."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge the 'products' table into the 'order_details' grain. This brings product dimensions (name, price) directly into the transaction line item, resulting in a single denormalized table called 'denormalized_sales'."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added customer attributes (customer_name, customer_email, customer_address) and order attributes (order_date) to the new table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added product attributes (product_name, price) to the new table."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Derived a new attribute 'total_amount' (calculated as quantity * price) to pre-compute line-item revenue, speeding up financial aggregations."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage Space: Data redundancy is introduced because customer and product information is repeated for every single order detail line."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If a customer changes their address or a product name changes, the update must be applied to many rows instead of a single row. (Acceptable in OLAP where data is typically append-only)."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Total revenue and order volume grouped by customer demographics (e.g., finding top customers by revenue)."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Sales performance grouped by product and over specific time periods (e.g., daily sales per product)."
+      },
+      {
+        "decision_id": "A3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Calculating gross revenue metrics without needing to perform on-the-fly math (quantity * price) during query execution."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Creation Script
+
+The following script creates the denormalized table. It flattens the schema into a single table (`denormalized_sales`), which is optimized for fast read-heavy analytical queries.
+
+```sql
+-- Drop the table if it already exists to ensure a clean slate
+DROP TABLE IF EXISTS denormalized_sales;
+
+-- Create the denormalized "One Big Table" for analytics
+CREATE TABLE denormalized_sales (
+    -- Surrogate/Primary Key for the analytical table
+    sales_record_id SERIAL PRIMARY KEY,
+    
+    -- Order Details (Base Grain)
+    order_detail_id INT NOT NULL,
+    quantity INT NOT NULL,
+    
+    -- Order Information
+    order_id INT NOT NULL,
+    order_date DATE,
+    
+    -- Customer Information
+    customer_id INT NOT NULL,
+    customer_name VARCHAR(100),
+    customer_email VARCHAR(100),
+    customer_address TEXT,
+    
+    -- Product Information
+    product_id INT NOT NULL,
+    product_name VARCHAR(100),
+    price DECIMAL(10,2),
+    
+    -- Derived/Pre-calculated Metrics
+    total_amount DECIMAL(12,2) -- Calculated as (quantity * price) during ETL/ELT
+);
+
+-- Optional: Create indexes on commonly filtered/grouped columns for further OLAP optimization
+CREATE INDEX idx_denorm_order_date ON denormalized_sales(order_date);
+CREATE INDEX idx_denorm_customer_id ON denormalized_sales(customer_id);
+CREATE INDEX idx_denorm_product_id ON denormalized_sales(product_id);
+```

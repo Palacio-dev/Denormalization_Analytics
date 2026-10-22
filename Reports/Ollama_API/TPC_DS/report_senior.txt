@@ -1,0 +1,515 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 9
+  - Total Attributes: 96
+    * s_purchase_lineitem: 8 columns
+    * s_purchase: 8 columns
+    * s_catalog_order: 8 columns
+    * s_web_order: 8 columns
+    * s_catalog_order_lineitem: 12 columns
+    * s_web_order_lineitem: 11 columns
+    * s_store_returns: 17 columns
+    * s_catalog_returns: 20 columns
+    * s_inventory: 4 columns
+
+Denormalized Model:
+  - Tables: 11
+  - Total Attributes: 80
+    * dim_date: 11 columns
+    * dim_item: 10 columns
+    * dim_customer: 11 columns
+    * dim_store: 7 columns
+    * dim_warehouse: 5 columns
+    * dim_promotion: 7 columns
+    * dim_reason: 3 columns
+    * fact_sales: 11 columns
+    * fact_sales_lineitem: 13 columns
+    * fact_returns: 13 columns
+    * fact_inventory_snapshot: 4 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Normalized model has MORE attributes (80 vs 96)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: plin_purchase_id (INTEGER) -> item_class (VARCHAR(50))
+  - Type mismatch: plin_line_number (INTEGER) -> promotion_channel (VARCHAR(20))
+  - Type mismatch: plin_item_id (CHAR(16)) -> date_sk (INTEGER)
+  - Type mismatch: plin_promotion_id (CHAR(16)) -> promotion_sk (INTEGER)
+  - Type mismatch: plin_comment (VARCHAR(100)) -> day_of_month (INTEGER)
+  - Type mismatch: purc_store_id (CHAR(16)) -> store_sk (INTEGER)
+  - Type mismatch: purc_customer_id (CHAR(16)) -> customer_sk (INTEGER)
+  - Type mismatch: purc_purchase_date (CHAR(10)) -> promotion_end_date (DATE)
+  - Type mismatch: purc_purchase_time (INTEGER) -> customer_last_name (VARCHAR(50))
+  - Type mismatch: purc_comment (CHAR(100)) -> total_amount (NUMERIC(12, 2))
+  - Type mismatch: cord_order_date (CHAR(10)) -> customer_state (CHAR(2))
+  - Type mismatch: cord_order_comments (VARCHAR(100)) -> customer_address (VARCHAR(200))
+  - Type mismatch: word_order_date (CHAR(10)) -> warehouse_state (CHAR(2))
+  - Type mismatch: word_order_time (INTEGER) -> warehouse_name (VARCHAR(100))
+  - Type mismatch: clin_order_id (INTEGER) -> customer_zip (CHAR(5))
+  - Type mismatch: clin_item_id (CHAR(16)) -> item_sk (INTEGER)
+  - Type mismatch: clin_sales_price (NUMERIC(7, 2)) -> sales_id (INTEGER)
+  - Type mismatch: clin_coupon_amt (NUMERIC(7, 2)) -> item_color (VARCHAR(20))
+  - Type mismatch: clin_warehouse_id (CHAR(16)) -> warehouse_sk (INTEGER)
+  - Type mismatch: clin_ship_date (CHAR(10)) -> month_name (VARCHAR(10))
+  - Type mismatch: clin_ship_cost (NUMERIC(7, 2)) -> promotion_cost (NUMERIC(10, 2))
+  - Type mismatch: wlin_order_id (INTEGER) -> item_brand (VARCHAR(50))
+  - Type mismatch: wlin_promotion_id (CHAR(16)) -> promotion_name (VARCHAR(100))
+  - Type mismatch: wlin_coupon_amt (NUMERIC(7, 2)) -> day_name (VARCHAR(10))
+  - Type mismatch: wlin_ship_date (CHAR(10)) -> promotion_start_date (DATE)
+  - Type mismatch: wlin_web_page_id (CHAR(16)) -> month_actual (INTEGER)
+  - Type mismatch: sret_purchase_id (CHAR(16)) -> return_id (INTEGER)
+  - Type mismatch: sret_line_number (INTEGER) -> store_name (VARCHAR(100))
+  - Type mismatch: sret_item_id (CHAR(16)) -> sales_id (INTEGER)
+  - Type mismatch: sret_return_date (CHAR(10)) -> store_state (CHAR(2))
+  - Type mismatch: sret_return_time (CHAR(10)) -> return_flag (CHAR(1))
+  - Type mismatch: sret_ticket_number (CHAR(20)) -> customer_first_name (VARCHAR(50))
+  - Type mismatch: sret_return_qty (INTEGER) -> store_city (VARCHAR(50))
+  - Type mismatch: sret_return_tax (NUMERIC(7, 2)) -> date_actual (DATE)
+  - Type mismatch: sret_return_fee (NUMERIC(7, 2)) -> store_manager (VARCHAR(100))
+  - Type mismatch: sret_reversed_charge (NUMERIC(7, 2)) -> sales_channel (VARCHAR(10))
+  - Type mismatch: sret_reason_id (CHAR(16)) -> reason_sk (INTEGER)
+  - Type mismatch: cret_call_center_id (CHAR(16)) -> customer_gender (CHAR(1))
+  - Type mismatch: cret_order_id (INTEGER) -> store_zip (CHAR(5))
+  - Type mismatch: cret_line_number (INTEGER) -> net_sale_amount (NUMERIC(10, 2))
+  - Type mismatch: cret_item_id (CHAR(16)) -> customer_email (VARCHAR(100))
+  - Type mismatch: cret_return_date (CHAR(10)) -> customer_birth_date (DATE)
+  - Type mismatch: cret_return_time (CHAR(10)) -> reason_description (VARCHAR(100))
+  - Type mismatch: cret_return_qty (INTEGER) -> customer_city (VARCHAR(50))
+  - Type mismatch: cret_return_amt (NUMERIC(7, 2)) -> year_actual (INTEGER)
+  - Type mismatch: cret_merchant_credit (NUMERIC(7, 2)) -> item_manufacturer (VARCHAR(50))
+  - Type mismatch: cret_shipmode_id (CHAR(16)) -> sales_line_id (INTEGER)
+  - Type mismatch: cret_warehouse_id (CHAR(16)) -> warehouse_city (VARCHAR(50))
+  - Type mismatch: invn_warehouse_id (CHAR(16)) -> item_category (VARCHAR(50))
+  - Type mismatch: invn_item_id (CHAR(16)) -> item_size (VARCHAR(20))
+  - Type mismatch: invn_date (CHAR(10)) -> item_name (VARCHAR(100))
+--------------------------------------------------------------------------------
+Completeness Ratio:        0.83
+Data Type Preservation:    0.36
+Avg Levenshtein Distance:  8.31
+BLEU Score:                0.00
+ROUGE-1:                   0.35
+METEOR Score:              0.00
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: fact_sales, fact_sales_lineitem, fact_returns, fact_inventory_snapshot
+Dimension Tables Detected: dim_date, dim_item, dim_customer, dim_store, dim_warehouse, dim_promotion, dim_reason
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected 4 Fact tables. Evaluating as a GALAXY SCHEMA.
+  - GALAXY VIOLATION: Fact table 'fact_sales_lineitem' has an FK pointing to Fact 'fact_sales'. Facts must only join to Dimensions.
+  - FACT FK VIOLATION: Foreign Key 'customer_sk' in Fact 'fact_sales' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'store_sk' in Fact 'fact_sales' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'item_sk' in Fact 'fact_sales_lineitem' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'promotion_sk' in Fact 'fact_sales_lineitem' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'warehouse_sk' in Fact 'fact_sales_lineitem' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'customer_sk' in Fact 'fact_returns' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'item_sk' in Fact 'fact_returns' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'reason_sk' in Fact 'fact_returns' allows NULL values.
+  - DIMENSION NULL WARNING: Attribute 'date_actual' in 'dim_date' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'day_name' in 'dim_date' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'day_of_week' in 'dim_date' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'day_of_month' in 'dim_date' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'day_of_year' in 'dim_date' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'week_of_year' in 'dim_date' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'month_actual' in 'dim_date' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'month_name' in 'dim_date' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'quarter_actual' in 'dim_date' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'year_actual' in 'dim_date' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'item_id' in 'dim_item' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'item_name' in 'dim_item' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'item_brand' in 'dim_item' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'item_class' in 'dim_item' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'item_category' in 'dim_item' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'item_manufacturer' in 'dim_item' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'item_color' in 'dim_item' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'item_size' in 'dim_item' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'item_price' in 'dim_item' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'customer_id' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'customer_first_name' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'customer_last_name' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'customer_gender' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'customer_birth_date' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'customer_email' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'customer_address' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'customer_city' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'customer_state' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'customer_zip' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'store_id' in 'dim_store' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'store_name' in 'dim_store' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'store_city' in 'dim_store' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'store_state' in 'dim_store' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'store_zip' in 'dim_store' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'store_manager' in 'dim_store' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'warehouse_id' in 'dim_warehouse' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'warehouse_name' in 'dim_warehouse' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'warehouse_city' in 'dim_warehouse' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'warehouse_state' in 'dim_warehouse' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'promotion_id' in 'dim_promotion' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'promotion_name' in 'dim_promotion' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'promotion_channel' in 'dim_promotion' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'promotion_start_date' in 'dim_promotion' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'promotion_end_date' in 'dim_promotion' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'promotion_cost' in 'dim_promotion' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'reason_id' in 'dim_reason' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'reason_description' in 'dim_reason' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * fact_sales: 4 Numeric, 3 Text
+  * fact_sales_lineitem: 6 Numeric, 1 Text
+  * fact_returns: 8 Numeric, 0 Text
+  * fact_inventory_snapshot: 1 Numeric, 0 Text
+  * dim_date: 7 Numeric, 3 Text
+  * dim_item: 1 Numeric, 8 Text
+  * dim_customer: 0 Numeric, 10 Text
+  * dim_store: 0 Numeric, 6 Text
+  * dim_warehouse: 0 Numeric, 4 Text
+  * dim_promotion: 1 Numeric, 5 Text
+  * dim_reason: 0 Numeric, 2 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  clin_catalog_number clin_catalog_page_number clin_coupon_amt clin_item_id clin_line_number clin_order_id clin_promotion_id clin_quantity clin_sales_price clin_ship_cost clin_ship_date clin_warehouse_id cord_bill_customer_id cord_call_center_id cord_order_comments cord_order_date cord_order_id cord_order_time cord_ship_customer_id cord_ship_mode_id cret_call_center_id cret_catalog_page_id cret_item_id cret_line_number cret_merchant_credit cret_order_id cret_reason_id cret_refund_customer_id cret_refunded_cash cret_return_amt cret_return_customer_id cret_return_date cret_return_fee cret_return_qty cret_return_ship_cost cret_return_tax cret_return_time cret_reversed_charge cret_shipmode_id cret_warehouse_id invn_date invn_item_id invn_qty_on_hand invn_warehouse_id plin_comment plin_coupon_amt plin_item_id plin_line_number plin_promotion_id plin_purchase_id plin_quantity plin_sale_price purc_clerk_id purc_comment purc_customer_id purc_purchase_date purc_purchase_id purc_purchase_time purc_register_id purc_store_id sret_customer_id sret_item_id sret_line_number sret_purchase_id sret_reason_id sret_refunded_cash sret_return_amt sret_return_date sret_return_fee sret_return_qty sret_return_ship_cost sret_return_tax sret_return_time sret_reversed_charge sret_store_credit sret_store_id sret_ticket_number wlin_coupon_amt wlin_item_id wlin_line_number wlin_order_id wlin_promotion_id wlin_quantity wlin_sales_price wlin_ship_cost wlin_ship_date wlin_warehouse_id wlin_web_page_id word_bill_customer_id word_order_comments word_order_date word_order_id word_order_time word_ship_customer_id word_ship_mode_id word_web_site_id
+
+Denormalized Model (Combined Text):
+  call_center_id clerk_id coupon_amt customer_address customer_birth_date customer_city customer_email customer_first_name customer_gender customer_id customer_last_name customer_sk customer_state customer_zip date_actual date_sk day_name day_of_month day_of_week day_of_year item_brand item_category item_class item_color item_id item_manufacturer item_name item_price item_size item_sk line_number line_number month_actual month_name net_sale_amount promotion_channel promotion_cost promotion_end_date promotion_id promotion_name promotion_sk promotion_start_date qty_on_hand quantity quarter_actual reason_description reason_id reason_sk refunded_cash register_id return_amount return_fee return_flag return_id return_quantity return_tax sales_channel sales_id sales_id sales_line_id sales_price ship_cost store_city store_credit store_id store_manager store_name store_sk store_state store_zip total_amount total_quantity warehouse_city warehouse_id warehouse_name warehouse_sk warehouse_state web_site_id week_of_year year_actual
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 80 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    plin_purchase_id INTEGER
+  Denormalized:  item_class VARCHAR(50)
+
+Pair 2:
+  Relational:    plin_line_number INTEGER
+  Denormalized:  promotion_channel VARCHAR(20)
+
+Pair 3:
+  Relational:    plin_item_id CHAR(16)
+  Denormalized:  date_sk INTEGER
+
+Pair 4:
+  Relational:    plin_promotion_id CHAR(16)
+  Denormalized:  promotion_sk INTEGER
+
+Pair 5:
+  Relational:    plin_quantity INTEGER
+  Denormalized:  return_quantity INTEGER
+
+Pair 6:
+  Relational:    plin_sale_price NUMERIC(7, 2)
+  Denormalized:  item_price NUMERIC(7, 2)
+
+Pair 7:
+  Relational:    plin_coupon_amt NUMERIC(7, 2)
+  Denormalized:  coupon_amt NUMERIC(7, 2)
+
+Pair 8:
+  Relational:    plin_comment VARCHAR(100)
+  Denormalized:  day_of_month INTEGER
+
+Pair 9:
+  Relational:    purc_purchase_id INTEGER
+  Denormalized:  quarter_actual INTEGER
+
+Pair 10:
+  Relational:    purc_store_id CHAR(16)
+  Denormalized:  store_sk INTEGER
+
+Pair 11:
+  Relational:    purc_customer_id CHAR(16)
+  Denormalized:  customer_sk INTEGER
+
+Pair 12:
+  Relational:    purc_purchase_date CHAR(10)
+  Denormalized:  promotion_end_date DATE
+
+Pair 13:
+  Relational:    purc_purchase_time INTEGER
+  Denormalized:  customer_last_name VARCHAR(50)
+
+Pair 14:
+  Relational:    purc_register_id INTEGER
+  Denormalized:  register_id INTEGER
+
+Pair 15:
+  Relational:    purc_clerk_id INTEGER
+  Denormalized:  clerk_id INTEGER
+
+Pair 16:
+  Relational:    purc_comment CHAR(100)
+  Denormalized:  total_amount NUMERIC(12, 2)
+
+Pair 17:
+  Relational:    cord_order_id INTEGER
+  Denormalized:  day_of_year INTEGER
+
+Pair 18:
+  Relational:    cord_order_date CHAR(10)
+  Denormalized:  customer_state CHAR(2)
+
+Pair 19:
+  Relational:    cord_order_time INTEGER
+  Denormalized:  day_of_week INTEGER
+
+Pair 20:
+  Relational:    cord_call_center_id CHAR(16)
+  Denormalized:  call_center_id CHAR(16)
+
+Pair 21:
+  Relational:    cord_order_comments VARCHAR(100)
+  Denormalized:  customer_address VARCHAR(200)
+
+Pair 22:
+  Relational:    word_order_id INTEGER
+  Denormalized:  week_of_year INTEGER
+
+Pair 23:
+  Relational:    word_order_date CHAR(10)
+  Denormalized:  warehouse_state CHAR(2)
+
+Pair 24:
+  Relational:    word_order_time INTEGER
+  Denormalized:  warehouse_name VARCHAR(100)
+
+Pair 25:
+  Relational:    word_web_site_id CHAR(16)
+  Denormalized:  web_site_id CHAR(16)
+
+Pair 26:
+  Relational:    clin_order_id INTEGER
+  Denormalized:  customer_zip CHAR(5)
+
+Pair 27:
+  Relational:    clin_line_number INTEGER
+  Denormalized:  line_number INTEGER
+
+Pair 28:
+  Relational:    clin_item_id CHAR(16)
+  Denormalized:  item_sk INTEGER
+
+Pair 29:
+  Relational:    clin_promotion_id CHAR(16)
+  Denormalized:  promotion_id CHAR(16)
+
+Pair 30:
+  Relational:    clin_quantity INTEGER
+  Denormalized:  quantity INTEGER
+
+Pair 31:
+  Relational:    clin_sales_price NUMERIC(7, 2)
+  Denormalized:  sales_id INTEGER
+
+Pair 32:
+  Relational:    clin_coupon_amt NUMERIC(7, 2)
+  Denormalized:  item_color VARCHAR(20)
+
+Pair 33:
+  Relational:    clin_warehouse_id CHAR(16)
+  Denormalized:  warehouse_sk INTEGER
+
+Pair 34:
+  Relational:    clin_ship_date CHAR(10)
+  Denormalized:  month_name VARCHAR(10)
+
+Pair 35:
+  Relational:    clin_ship_cost NUMERIC(7, 2)
+  Denormalized:  promotion_cost NUMERIC(10, 2)
+
+Pair 36:
+  Relational:    wlin_order_id INTEGER
+  Denormalized:  item_brand VARCHAR(50)
+
+Pair 37:
+  Relational:    wlin_line_number INTEGER
+  Denormalized:  line_number INTEGER
+
+Pair 38:
+  Relational:    wlin_item_id CHAR(16)
+  Denormalized:  item_id CHAR(16)
+
+Pair 39:
+  Relational:    wlin_promotion_id CHAR(16)
+  Denormalized:  promotion_name VARCHAR(100)
+
+Pair 40:
+  Relational:    wlin_quantity INTEGER
+  Denormalized:  total_quantity INTEGER
+
+Pair 41:
+  Relational:    wlin_sales_price NUMERIC(7, 2)
+  Denormalized:  sales_price NUMERIC(7, 2)
+
+Pair 42:
+  Relational:    wlin_coupon_amt NUMERIC(7, 2)
+  Denormalized:  day_name VARCHAR(10)
+
+Pair 43:
+  Relational:    wlin_warehouse_id CHAR(16)
+  Denormalized:  warehouse_id CHAR(16)
+
+Pair 44:
+  Relational:    wlin_ship_date CHAR(10)
+  Denormalized:  promotion_start_date DATE
+
+Pair 45:
+  Relational:    wlin_ship_cost NUMERIC(7, 2)
+  Denormalized:  ship_cost NUMERIC(7, 2)
+
+Pair 46:
+  Relational:    wlin_web_page_id CHAR(16)
+  Denormalized:  month_actual INTEGER
+
+Pair 47:
+  Relational:    sret_store_id CHAR(16)
+  Denormalized:  store_id CHAR(16)
+
+Pair 48:
+  Relational:    sret_purchase_id CHAR(16)
+  Denormalized:  return_id INTEGER
+
+Pair 49:
+  Relational:    sret_line_number INTEGER
+  Denormalized:  store_name VARCHAR(100)
+
+Pair 50:
+  Relational:    sret_item_id CHAR(16)
+  Denormalized:  sales_id INTEGER
+
+Pair 51:
+  Relational:    sret_customer_id CHAR(16)
+  Denormalized:  customer_id CHAR(16)
+
+Pair 52:
+  Relational:    sret_return_date CHAR(10)
+  Denormalized:  store_state CHAR(2)
+
+Pair 53:
+  Relational:    sret_return_time CHAR(10)
+  Denormalized:  return_flag CHAR(1)
+
+Pair 54:
+  Relational:    sret_ticket_number CHAR(20)
+  Denormalized:  customer_first_name VARCHAR(50)
+
+Pair 55:
+  Relational:    sret_return_qty INTEGER
+  Denormalized:  store_city VARCHAR(50)
+
+Pair 56:
+  Relational:    sret_return_amt NUMERIC(7, 2)
+  Denormalized:  return_amount NUMERIC(7, 2)
+
+Pair 57:
+  Relational:    sret_return_tax NUMERIC(7, 2)
+  Denormalized:  date_actual DATE
+
+Pair 58:
+  Relational:    sret_return_fee NUMERIC(7, 2)
+  Denormalized:  store_manager VARCHAR(100)
+
+Pair 59:
+  Relational:    sret_refunded_cash NUMERIC(7, 2)
+  Denormalized:  refunded_cash NUMERIC(7, 2)
+
+Pair 60:
+  Relational:    sret_reversed_charge NUMERIC(7, 2)
+  Denormalized:  sales_channel VARCHAR(10)
+
+Pair 61:
+  Relational:    sret_store_credit NUMERIC(7, 2)
+  Denormalized:  store_credit NUMERIC(7, 2)
+
+Pair 62:
+  Relational:    sret_reason_id CHAR(16)
+  Denormalized:  reason_sk INTEGER
+
+Pair 63:
+  Relational:    cret_call_center_id CHAR(16)
+  Denormalized:  customer_gender CHAR(1)
+
+Pair 64:
+  Relational:    cret_order_id INTEGER
+  Denormalized:  store_zip CHAR(5)
+
+Pair 65:
+  Relational:    cret_line_number INTEGER
+  Denormalized:  net_sale_amount NUMERIC(10, 2)
+
+Pair 66:
+  Relational:    cret_item_id CHAR(16)
+  Denormalized:  customer_email VARCHAR(100)
+
+Pair 67:
+  Relational:    cret_return_date CHAR(10)
+  Denormalized:  customer_birth_date DATE
+
+Pair 68:
+  Relational:    cret_return_time CHAR(10)
+  Denormalized:  reason_description VARCHAR(100)
+
+Pair 69:
+  Relational:    cret_return_qty INTEGER
+  Denormalized:  customer_city VARCHAR(50)
+
+Pair 70:
+  Relational:    cret_return_amt NUMERIC(7, 2)
+  Denormalized:  year_actual INTEGER
+
+Pair 71:
+  Relational:    cret_return_tax NUMERIC(7, 2)
+  Denormalized:  return_tax NUMERIC(7, 2)
+
+Pair 72:
+  Relational:    cret_return_fee NUMERIC(7, 2)
+  Denormalized:  return_fee NUMERIC(7, 2)
+
+Pair 73:
+  Relational:    cret_merchant_credit NUMERIC(7, 2)
+  Denormalized:  item_manufacturer VARCHAR(50)
+
+Pair 74:
+  Relational:    cret_reason_id CHAR(16)
+  Denormalized:  reason_id CHAR(16)
+
+Pair 75:
+  Relational:    cret_shipmode_id CHAR(16)
+  Denormalized:  sales_line_id INTEGER
+
+Pair 76:
+  Relational:    cret_warehouse_id CHAR(16)
+  Denormalized:  warehouse_city VARCHAR(50)
+
+Pair 77:
+  Relational:    invn_warehouse_id CHAR(16)
+  Denormalized:  item_category VARCHAR(50)
+
+Pair 78:
+  Relational:    invn_item_id CHAR(16)
+  Denormalized:  item_size VARCHAR(20)
+
+Pair 79:
+  Relational:    invn_date CHAR(10)
+  Denormalized:  item_name VARCHAR(100)
+
+Pair 80:
+  Relational:    invn_qty_on_hand INTEGER
+  Denormalized:  qty_on_hand INTEGER
+
+
+================================================================================

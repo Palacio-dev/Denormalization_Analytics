@@ -1,0 +1,132 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-25-58
+Model: gemini
+Prompt: OBT
+Schema: ex02
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy consolidates all 9 normalized tables into a single wide table (One-Big-Table). The original schema contains two main entities ('mutirao_de_limpeza' and 'unidade_de_conservacao') that are independent but conform on the 'regiao' (municipio) dimension. The denormalized table flattens this topology into a single view. A new surrogate primary key is introduced to uniquely identify each row, while all foreign keys are removed and dimensional attributes are embedded directly into the table.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged all 9 tables (bioma, categoria_manejo, coleta_de_lixo, esfera_administrativa, instituicao_organizadora, local_de_coleta, mutirao_de_limpeza, regiao, unidade_de_conservacao) into a single table named 'meio_ambiente_denormalizado'."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Introduced a surrogate primary key 'id_registro' to uniquely identify each row, as the grain now represents a combination of clean-up events and conservation units per region."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Removed all Foreign Key constraints and dropped the pure foreign key columns (id_municipio, id_instituicao_organizadora, id_bioma, id_manejo, id_esfera) to comply with the One-Big-Table model."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Prefixed the shared attribute 'nome' with their respective source table contexts (bioma_nome, instituicao_nome, local_coleta_nome, regiao_nome, uc_nome) to avoid column name ambiguity."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Prefixed the 'tipo' attribute from 'esfera_administrativa' to 'esfera_tipo' for better clarity in a wide-table context."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Retained the original primary keys of the main fact entities (id_mutirao, id_uc) as standard integer attributes to preserve semantic equivalence and reconstructibility, but removed their primary key constraints."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy and Storage: High duplication of dimensional data (e.g., region details, institution details, biome names) will significantly increase storage footprint."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: Modifying a dimensional attribute, such as an institution's character or a region's state, will require updating multiple rows instead of a single dimension record."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Cartesian Product Risk: Because 'mutirao_de_limpeza' and 'unidade_de_conservacao' only relate via 'regiao', regions with multiple clean-up events and multiple conservation units will generate a cartesian product of rows for that region. Analysts must handle aggregations carefully (e.g., using DISTINCT or window functions) to avoid double-counting."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical queries aggregating the volume of specific garbage types (plastico, vidro, metal) collected per region (estado, regiao_nome) and organizing institution."
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Correlating conservation unit areas (area_soma_biomas) and biome types with the frequency and scale of clean-up events (numero_aproximado_de_participantes) within the same region."
+      }
+    ]
+  }
+}
+```
+
+```sql
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS public.meio_ambiente_denormalizado
+(
+    -- Surrogate Primary Key
+    id_registro SERIAL PRIMARY KEY,
+
+    -- Original Fact Identifiers
+    id_mutirao integer,
+    id_uc integer,
+
+    -- Attributes from mutirao_de_limpeza
+    data_do_ocorrido date,
+    horario_de_inicio time without time zone,
+    numero_aproximado_de_participantes integer,
+    duracao_total time without time zone,
+
+    -- Attributes from coleta_de_lixo
+    plastico integer,
+    borracha integer,
+    madeira integer,
+    produtos_texteis integer,
+    papel integer,
+    metal integer,
+    vidro integer,
+    materiais_de_pesca integer,
+    outros_residuos integer,
+
+    -- Attributes from local_de_coleta
+    local_coleta_nome text COLLATE pg_catalog."default",
+
+    -- Attributes from instituicao_organizadora
+    instituicao_nome text COLLATE pg_catalog."default",
+    carater text COLLATE pg_catalog."default",
+
+    -- Attributes from regiao
+    regiao_nome text COLLATE pg_catalog."default",
+    estado text COLLATE pg_catalog."default",
+
+    -- Attributes from unidade_de_conservacao
+    uc_nome text COLLATE pg_catalog."default",
+    ano_de_criacao integer,
+    area_soma_biomas double precision,
+    area_soma_biomas_continentais double precision,
+    area_marinha double precision,
+
+    -- Attributes from bioma
+    bioma_nome text COLLATE pg_catalog."default",
+
+    -- Attributes from categoria_manejo
+    categoria text COLLATE pg_catalog."default",
+    categoria_iucn text COLLATE pg_catalog."default",
+    plano text COLLATE pg_catalog."default",
+
+    -- Attributes from esfera_administrativa
+    esfera_tipo text COLLATE pg_catalog."default"
+);
+
+END;
+```

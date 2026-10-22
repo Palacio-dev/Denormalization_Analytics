@@ -1,0 +1,318 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-48-44
+Model: gemini
+Prompt: RISEN
+Schema: northwind
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transforms the highly normalized (3NF) transactional schema into an analytical Star Schema. This approach optimizes heavy read workloads, such as sales aggregations and performance reporting, by minimizing the number of joins required. We collapsed related hierarchical entities into wide dimensions (e.g., merging Products, Categories, and Suppliers into a single Product dimension) and combined Orders and Order Details into a central Fact table. Additionally, we applied vertical partitioning to isolate heavy LOB (Large Object) columns like images and text notes, ensuring that sequential scans on primary dimensions remain fast and cache-efficient.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapsing Relations: Merged 'products', 'categories', and 'suppliers' tables into a single wide dimension table 'dim_product'."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapsing Relations: Merged 'orders' and 'order_details' into a single central fact table 'fact_sales'."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Collapsing Relations: Merged 'territories' and 'region' into a single dimension table 'dim_territory'."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Collapsing Relations: Merged the bridge table 'customer_customer_demo' and 'customer_demographics' into a single denormalized bridge table 'dim_customer_demographics' to reduce join overhead while preserving the M:N relationship."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Vertical Partitioning: Extracted 'picture' from categories, and 'photo', 'photo_path', 'notes' from employees into separate tables ('dim_category_media' and 'dim_employee_media') to prevent LOB data from polluting cache during analytical scans."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived attribute 'line_total' to 'fact_sales', precomputing (quantity * unit_price * (1 - discount))."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added derived attribute 'processing_days' to 'fact_sales', precomputing the date difference between 'shipped_date' and 'order_date'."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added derived attribute 'manager_name' to 'dim_employee' to resolve the self-referencing 'reports_to' hierarchy without requiring a self-join in standard queries."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy vs. Read Performance: Collapsing suppliers and categories into the product dimension duplicates supplier and category strings for every product. This increases storage requirements but significantly eliminates join overhead during analytical aggregations."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Storage Overhead vs. CPU Utilization: Adding derived attributes like 'line_total' and 'processing_days' increases the physical size of the fact table but saves CPU cycles by avoiding repetitive row-level calculations during heavy aggregations."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1",
+        "query": "SELECT p.category_name, p.supplier_company_name, SUM(f.line_total) as total_sales FROM fact_sales f JOIN dim_product p ON f.product_id = p.product_id GROUP BY p.category_name, p.supplier_company_name;"
+      },
+      {
+        "decision_id": "D3",
+        "query": "SELECT t.region_description, SUM(f.line_total) FROM fact_sales f JOIN dim_employee e ON f.employee_id = e.employee_id JOIN bridge_employee_territory bet ON e.employee_id = bet.employee_id JOIN dim_territory t ON bet.territory_id = t.territory_id GROUP BY t.region_description;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- ==============================================================================
+-- DENORMALIZED ANALYTICAL SCHEMA (STAR SCHEMA)
+-- Dialect: PostgreSQL
+-- ==============================================================================
+
+-- 1. MEDIA DIMENSIONS (Vertical Partitioning)
+-- Extracted to keep heavy bytea/text columns out of main analytical queries.
+
+CREATE TABLE IF NOT EXISTS public.dim_category_media
+(
+    category_id smallint NOT NULL,
+    picture bytea,
+    CONSTRAINT pk_dim_category_media PRIMARY KEY (category_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.dim_employee_media
+(
+    employee_id smallint NOT NULL,
+    photo bytea,
+    photo_path character varying(255) COLLATE pg_catalog."default",
+    notes text COLLATE pg_catalog."default",
+    CONSTRAINT pk_dim_employee_media PRIMARY KEY (employee_id)
+);
+
+-- 2. MAIN DIMENSIONS (Collapsing Relations)
+
+CREATE TABLE IF NOT EXISTS public.dim_product
+(
+    product_id smallint NOT NULL,
+    product_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    quantity_per_unit character varying(20) COLLATE pg_catalog."default",
+    unit_price real,
+    units_in_stock smallint,
+    units_on_order smallint,
+    reorder_level smallint,
+    discontinued integer NOT NULL,
+    
+    -- Denormalized Category Attributes
+    category_id smallint,
+    category_name character varying(15) COLLATE pg_catalog."default",
+    category_description text COLLATE pg_catalog."default",
+    
+    -- Denormalized Supplier Attributes
+    supplier_id smallint,
+    supplier_company_name character varying(40) COLLATE pg_catalog."default",
+    supplier_contact_name character varying(30) COLLATE pg_catalog."default",
+    supplier_contact_title character varying(30) COLLATE pg_catalog."default",
+    supplier_address character varying(60) COLLATE pg_catalog."default",
+    supplier_city character varying(15) COLLATE pg_catalog."default",
+    supplier_region character varying(15) COLLATE pg_catalog."default",
+    supplier_postal_code character varying(10) COLLATE pg_catalog."default",
+    supplier_country character varying(15) COLLATE pg_catalog."default",
+    supplier_phone character varying(24) COLLATE pg_catalog."default",
+    supplier_fax character varying(24) COLLATE pg_catalog."default",
+    supplier_homepage text COLLATE pg_catalog."default",
+    
+    CONSTRAINT pk_dim_product PRIMARY KEY (product_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.dim_customer
+(
+    customer_id character varying(5) COLLATE pg_catalog."default" NOT NULL,
+    company_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    contact_name character varying(30) COLLATE pg_catalog."default",
+    contact_title character varying(30) COLLATE pg_catalog."default",
+    address character varying(60) COLLATE pg_catalog."default",
+    city character varying(15) COLLATE pg_catalog."default",
+    region character varying(15) COLLATE pg_catalog."default",
+    postal_code character varying(10) COLLATE pg_catalog."default",
+    country character varying(15) COLLATE pg_catalog."default",
+    phone character varying(24) COLLATE pg_catalog."default",
+    fax character varying(24) COLLATE pg_catalog."default",
+    CONSTRAINT pk_dim_customer PRIMARY KEY (customer_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.dim_employee
+(
+    employee_id smallint NOT NULL,
+    last_name character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    first_name character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    title character varying(30) COLLATE pg_catalog."default",
+    title_of_courtesy character varying(25) COLLATE pg_catalog."default",
+    birth_date date,
+    hire_date date,
+    address character varying(60) COLLATE pg_catalog."default",
+    city character varying(15) COLLATE pg_catalog."default",
+    region character varying(15) COLLATE pg_catalog."default",
+    postal_code character varying(10) COLLATE pg_catalog."default",
+    country character varying(15) COLLATE pg_catalog."default",
+    home_phone character varying(24) COLLATE pg_catalog."default",
+    extension character varying(4) COLLATE pg_catalog."default",
+    reports_to smallint,
+    
+    -- Derived Attribute
+    manager_name character varying(31) COLLATE pg_catalog."default", 
+    
+    CONSTRAINT pk_dim_employee PRIMARY KEY (employee_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.dim_territory
+(
+    territory_id character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    territory_description character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Denormalized Region Attributes
+    region_id smallint NOT NULL,
+    region_description character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    
+    CONSTRAINT pk_dim_territory PRIMARY KEY (territory_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.dim_shipper
+(
+    shipper_id smallint NOT NULL,
+    shipper_company_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    shipper_phone character varying(24) COLLATE pg_catalog."default",
+    CONSTRAINT pk_dim_shipper PRIMARY KEY (shipper_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.dim_us_states
+(
+    state_id smallint NOT NULL,
+    state_name character varying(100) COLLATE pg_catalog."default",
+    state_abbr character varying(2) COLLATE pg_catalog."default",
+    state_region character varying(50) COLLATE pg_catalog."default",
+    CONSTRAINT pk_dim_us_states PRIMARY KEY (state_id)
+);
+
+-- 3. BRIDGE TABLES (For M:N Relationships)
+
+CREATE TABLE IF NOT EXISTS public.dim_customer_demographics
+(
+    customer_id character varying(5) COLLATE pg_catalog."default" NOT NULL,
+    customer_type_id character varying(5) COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Denormalized Demographic Attribute
+    customer_desc text COLLATE pg_catalog."default",
+    
+    CONSTRAINT pk_dim_customer_demographics PRIMARY KEY (customer_id, customer_type_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.bridge_employee_territory
+(
+    employee_id smallint NOT NULL,
+    territory_id character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT pk_bridge_employee_territory PRIMARY KEY (employee_id, territory_id)
+);
+
+-- 4. FACT TABLE (Collapsing Orders and Order Details)
+
+CREATE TABLE IF NOT EXISTS public.fact_sales
+(
+    order_id smallint NOT NULL,
+    product_id smallint NOT NULL,
+    customer_id character varying(5) COLLATE pg_catalog."default",
+    employee_id smallint,
+    shipper_id smallint,
+    
+    -- Order Header Attributes
+    order_date date,
+    required_date date,
+    shipped_date date,
+    processing_days integer, -- Derived Attribute: shipped_date - order_date
+    freight real,
+    ship_name character varying(40) COLLATE pg_catalog."default",
+    ship_address character varying(60) COLLATE pg_catalog."default",
+    ship_city character varying(15) COLLATE pg_catalog."default",
+    ship_region character varying(15) COLLATE pg_catalog."default",
+    ship_postal_code character varying(10) COLLATE pg_catalog."default",
+    ship_country character varying(15) COLLATE pg_catalog."default",
+    
+    -- Order Detail Attributes
+    unit_price real NOT NULL,
+    quantity smallint NOT NULL,
+    discount real NOT NULL,
+    line_total real, -- Derived Attribute: quantity * unit_price * (1 - discount)
+    
+    CONSTRAINT pk_fact_sales PRIMARY KEY (order_id, product_id)
+);
+
+-- ==============================================================================
+-- FOREIGN KEYS
+-- ==============================================================================
+
+ALTER TABLE IF EXISTS public.dim_product
+    ADD CONSTRAINT fk_dim_product_category_media FOREIGN KEY (category_id)
+    REFERENCES public.dim_category_media (category_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.dim_employee
+    ADD CONSTRAINT fk_dim_employee_reports_to FOREIGN KEY (reports_to)
+    REFERENCES public.dim_employee (employee_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.dim_employee_media
+    ADD CONSTRAINT fk_dim_emp_media_employee FOREIGN KEY (employee_id)
+    REFERENCES public.dim_employee (employee_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.dim_customer_demographics
+    ADD CONSTRAINT fk_dim_cust_demo_customer FOREIGN KEY (customer_id)
+    REFERENCES public.dim_customer (customer_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.bridge_employee_territory
+    ADD CONSTRAINT fk_bridge_emp_terr_employee FOREIGN KEY (employee_id)
+    REFERENCES public.dim_employee (employee_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.bridge_employee_territory
+    ADD CONSTRAINT fk_bridge_emp_terr_territory FOREIGN KEY (territory_id)
+    REFERENCES public.dim_territory (territory_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.fact_sales
+    ADD CONSTRAINT fk_fact_sales_product FOREIGN KEY (product_id)
+    REFERENCES public.dim_product (product_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.fact_sales
+    ADD CONSTRAINT fk_fact_sales_customer FOREIGN KEY (customer_id)
+    REFERENCES public.dim_customer (customer_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.fact_sales
+    ADD CONSTRAINT fk_fact_sales_employee FOREIGN KEY (employee_id)
+    REFERENCES public.dim_employee (employee_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.fact_sales
+    ADD CONSTRAINT fk_fact_sales_shipper FOREIGN KEY (shipper_id)
+    REFERENCES public.dim_shipper (shipper_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+```

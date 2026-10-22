@@ -1,0 +1,97 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-44-29
+Model: gemini
+Prompt: RISEN
+Schema: ex07
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on the 'Collapsing Relations' and 'Adding Redundant Attributes' techniques to create a One Big Table (OBT) named 'Usina_Analytics'. By merging the 'Proprietarios', 'Rios', 'Localizacoes', 'Municipios', and 'Estados' tables into the central 'Usina' fact table, we eliminate the need for up to 6 complex JOINs. This significantly accelerates read-heavy analytical queries, such as geospatial aggregations and power capacity summaries by state or river, while maintaining full semantic equivalence and reconstructibility.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapse the snowflake dimension tables ('Proprietarios', 'Rios', 'Localizacoes', 'Municipios', and 'Estados') into a single denormalized target table ('Usina_Analytics') to eliminate join bottlenecks."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant attributes from dimension tables (proprietario, rio, municipio, uf, latitude, longitude) directly into the new table. Prefixed them with their source entity names to avoid ambiguity (e.g., loc_latitude, rio_nome, municipio1_nome)."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed the 'atualizacao' column from the original 'Usina' table, as it represents an audit/logging timestamp and is excluded per the narrowing constraints."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Preserved original primary and foreign keys (id_proprietario, id_rio, id_localizacao, id_municipio1, id_municipio2) alongside the descriptive attributes to guarantee full reconstructibility and preserve entity relationships (e.g., distinguishing two owners with the same name)."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy vs. Read Performance: Storing state and municipality names for every power plant increases storage space and introduces the risk of update anomalies (e.g., renaming a municipality requires updating multiple rows), but drastically reduces query latency by eliminating joins."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1",
+        "query": "SELECT municipio1_uf, SUM(potkw) AS total_potencia_kw, COUNT(id) AS total_usinas FROM public.\"Usina_Analytics\" GROUP BY municipio1_uf ORDER BY total_potencia_kw DESC;"
+      },
+      {
+        "decision_id": "D1",
+        "query": "SELECT rio_nome, proprietario_nome, SUM(potfis) AS total_potencia_fisica FROM public.\"Usina_Analytics\" WHERE estagio = 'Operação' GROUP BY rio_nome, proprietario_nome;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- ==============================================================================
+-- DENORMALIZED ANALYTICAL SCHEMA
+-- Target Dialect: PostgreSQL
+-- Strategy: One Big Table (OBT) / Collapsed Relations
+-- ==============================================================================
+
+CREATE TABLE IF NOT EXISTS public."Usina_Analytics" (
+    -- Core Usina Attributes
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    iniciop DATE,
+    lat DOUBLE PRECISION,
+    long DOUBLE PRECISION,
+    estagio VARCHAR,
+    
+    -- Proprietarios (Owners) Attributes
+    id_proprietario INTEGER NULL,
+    proprietario_nome VARCHAR NULL,
+    
+    -- Rios (Rivers) Attributes
+    id_rio INTEGER NOT NULL,
+    rio_nome VARCHAR NOT NULL,
+    
+    -- Localizacoes (Locations) Attributes
+    id_localizacao INTEGER NOT NULL,
+    loc_latitude DOUBLE PRECISION NULL,
+    loc_longitude DOUBLE PRECISION NULL,
+    
+    -- Municipios 1 & Estados (Primary Municipality & State) Attributes
+    id_municipio1 INTEGER NOT NULL,
+    municipio1_nome VARCHAR NOT NULL,
+    municipio1_uf CHAR(2) NOT NULL,
+    
+    -- Municipios 2 & Estados (Secondary Municipality & State) Attributes
+    id_municipio2 INTEGER NULL,
+    municipio2_nome VARCHAR NULL,
+    municipio2_uf CHAR(2) NULL
+);
+
+COMMIT;
+```

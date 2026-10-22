@@ -1,0 +1,86 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-26-32
+Model: ollama_api
+Prompt: mid-level
+Schema: harperdb
+==================================================
+
+{
+  "section_1": {
+    "summary": "The normalized schema consists of three tables: entitlements, users, and user_entitlements (a bridge table). The denormalization strategy consolidates these into a single fact-like table by embedding entitlement attributes directly into the user-entitlement relationship. This eliminates the need for joins during querying, significantly improving read performance for analytical workloads. The entitlement dimension is denormalized into the bridge table, and user information is kept minimal since it's primarily used for joining or filtering.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge the user_entitlements bridge table with entitlements table to eliminate join between user_entitlements and entitlements. This creates a single table containing user_id along with all entitlement details."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Retain the users table as a lightweight dimension table since user metadata might be extended in future. However, for most queries involving only user_id, the merged fact table suffices."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added a derived field 'status' that categorizes entitlements as 'Active', 'Inactive', or 'Expired' based on activeFlag, activeDate, and inactiveDate for easier querying and filtering."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Renamed 'featureType' and 'packageType' to 'feature_type' and 'package_type' respectively for naming consistency and clarity."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Removed the separate id field from entitlements as it's no longer needed as a primary key in the denormalized structure; user_id and entitlement details together act as a natural key."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Storage overhead increases due to repeated entitlement data for each user. However, this is acceptable for analytical workloads prioritizing read performance."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Data modification operations (inserts/updates) become more complex and costly as changes to entitlement data must be propagated across all associated user records."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of strict normalization may lead to data inconsistency if updates are not handled carefully. Application-level logic or ETL processes must ensure data integrity."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Count of active users per feature type for dashboard visualization. Denormalization allows this aggregation without joining multiple tables."
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "List all entitlements for a specific user including feature and package types. Eliminating joins reduces query latency for user-specific views."
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregation of total use counts and limits by package type for reporting. Pre-joined data simplifies and accelerates such analytical queries."
+      }
+    ]
+  }
+}
+
+CREATE TABLE users (
+    id INT PRIMARY KEY
+);
+
+CREATE TABLE user_entitlements_denormalized (
+    user_id INT,
+    active_date DATE,
+    inactive_date DATE,
+    use_limit INT,
+    use_count INT,
+    feature_type VARCHAR(4),
+    package_type VARCHAR(4),
+    active_flag INT,
+    status VARCHAR(10),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);

@@ -1,0 +1,213 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-54-23
+Model: gemini
+Prompt: RISEN
+Schema: ex08
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions the highly normalized 3NF transactional schema into an analytical Star Schema. This involves collapsing 1:1 or 1:N satellite tables into their primary fact or dimension tables, reducing the total number of tables from 10 to 6. Specifically, location and remuneration data are merged directly into school and employment tables. Furthermore, three separate school performance/indicator tables are consolidated into a single annual fact table. Finally, redundant attributes are added to the enrollment fact table to prevent frequent joins with student and course dimensions during heavy analytical aggregations.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapsing Relations: Merge 'localizacao' into 'escola' to create 'dim_escola'. This eliminates a join when querying school locations."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapsing Relations: Merge 'remuneracao' and 'localizacao' into 'vinculo_empregaticio' to create 'fato_vinculo_empregaticio'. This flattens the employment data, removing two joins."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Collapsing Relations: Consolidate 'desempenho_enem', 'indicadores_escolares', and 'participacao_enem' into a single 'fato_escola_censo_anual' table based on school code and year."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Adding Redundant Attributes: Added 'aluno_idade', 'aluno_sexo', 'aluno_raca', 'curso_ds_eixo_tecnologico', and 'curso_modalidade_ensino' directly into 'fato_matricula' from the student and course tables to speed up demographic and course-type aggregations."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Adding Derived Attributes: Added 'nu_media_total' to 'fato_escola_censo_anual', which precomputes the sum of the 5 ENEM scores (CN, CH, LP, MT, RED) for faster ranking queries."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Attribute Renaming: Renamed 'uf' and 'municipio' from 'localizacao' to 'escola_uf'/'escola_municipio' in 'dim_escola' and 'vinculo_uf'/'vinculo_municipio' in 'fato_vinculo_empregaticio' to maintain clarity and avoid ambiguity."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage / Redundancy: Storing location strings (UF, municipio) in multiple tables and duplicating student/course attributes in the enrollment fact table increases disk usage."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If a location's name or a course's technological axis changes, the update must be propagated across multiple denormalized rows instead of a single dimension record."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D3",
+        "query": "SELECT co_escola_educacenso, nu_ano, nu_media_total, nu_taxa_aprovacao, nu_taxa_participacao FROM fato_escola_censo_anual WHERE nu_ano = 2022 ORDER BY nu_media_total DESC;"
+      },
+      {
+        "decision_id": "A1",
+        "query": "SELECT curso_ds_eixo_tecnologico, aluno_raca, COUNT(id_matricula) AS total_matriculas FROM fato_matricula WHERE situacao_matricula = 'Concluído' GROUP BY curso_ds_eixo_tecnologico, aluno_raca;"
+      },
+      {
+        "decision_id": "D2",
+        "query": "SELECT vinculo_uf, AVG(vl_remun_media_nom) as media_salarial FROM fato_vinculo_empregaticio WHERE indicador_vinculo_ativo = true GROUP BY vinculo_uf;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- =====================================================================================
+-- DENORMALIZED ANALYTICAL SCHEMA (STAR SCHEMA)
+-- =====================================================================================
+
+-- 1. Dimension: Aluno (Maintains original attributes for reconstructibility)
+CREATE TABLE IF NOT EXISTS public.dim_aluno
+(
+    id_aluno serial NOT NULL,
+    data_nascimento date,
+    idade integer,
+    sexo character(1) COLLATE pg_catalog."default",
+    nacionalidade character varying(50) COLLATE pg_catalog."default",
+    raca character varying(50) COLLATE pg_catalog."default",
+    portador_deficiencia boolean,
+    CONSTRAINT dim_aluno_pkey PRIMARY KEY (id_aluno)
+);
+
+-- 2. Dimension: Curso (Maintains original attributes for reconstructibility)
+CREATE TABLE IF NOT EXISTS public.dim_curso
+(
+    co_curso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    no_curso character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    co_tipo_curso character varying(10) COLLATE pg_catalog."default",
+    tipo_curso character varying(100) COLLATE pg_catalog."default",
+    co_tipo_nivel character varying(10) COLLATE pg_catalog."default",
+    ds_tipo_nivel character varying(100) COLLATE pg_catalog."default",
+    ds_eixo_tecnologico character varying(200) COLLATE pg_catalog."default",
+    modalidade_ensino character varying(100) COLLATE pg_catalog."default",
+    carga_horaria integer,
+    CONSTRAINT dim_curso_pkey PRIMARY KEY (co_curso)
+);
+
+-- 3. Dimension: Escola (Collapsed with 'localizacao')
+CREATE TABLE IF NOT EXISTS public.dim_escola
+(
+    co_escola_educacenso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    no_escola_educacenso character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    tp_dependencia_adm_escola smallint,
+    tp_localizacao_escola smallint,
+    inse character varying(10) COLLATE pg_catalog."default",
+    id_loc integer,
+    escola_uf character varying(2) COLLATE pg_catalog."default",
+    escola_municipio character varying(100) COLLATE pg_catalog."default",
+    CONSTRAINT dim_escola_pkey PRIMARY KEY (co_escola_educacenso)
+);
+
+-- 4. Fact: Escola Censo Anual (Collapsed 'desempenho_enem', 'indicadores_escolares', 'participacao_enem')
+CREATE TABLE IF NOT EXISTS public.fato_escola_censo_anual
+(
+    id_escola_censo serial NOT NULL,
+    co_escola_educacenso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    nu_ano integer NOT NULL,
+    -- Attributes from desempenho_enem
+    nu_media_cn numeric(6, 2),
+    nu_media_ch numeric(6, 2),
+    nu_media_lp numeric(6, 2),
+    nu_media_mt numeric(6, 2),
+    nu_media_red numeric(6, 2),
+    nu_media_total numeric(7, 2), -- Derived Attribute
+    -- Attributes from indicadores_escolares
+    nu_taxa_permanencia numeric(6, 2),
+    nu_taxa_aprovacao numeric(5, 2),
+    nu_taxa_reprovacao numeric(5, 2),
+    nu_taxa_abandono numeric(5, 2),
+    porte_escola character varying(50) COLLATE pg_catalog."default",
+    pc_formacao_docente numeric(5, 2),
+    -- Attributes from participacao_enem
+    nu_matriculas integer,
+    nu_participantes_nec_esp integer,
+    nu_participantes integer,
+    nu_taxa_participacao numeric(5, 2),
+    CONSTRAINT fato_escola_censo_anual_pkey PRIMARY KEY (id_escola_censo),
+    CONSTRAINT fk_escola_censo FOREIGN KEY (co_escola_educacenso)
+        REFERENCES public.dim_escola (co_escola_educacenso) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+);
+CREATE INDEX IF NOT EXISTS idx_fato_escola_censo ON public.fato_escola_censo_anual(co_escola_educacenso);
+
+-- 5. Fact: Matricula (Added redundant attributes from 'aluno_ifb' and 'curso_ifb')
+CREATE TABLE IF NOT EXISTS public.fato_matricula
+(
+    id_matricula serial NOT NULL,
+    co_ciclo_matricula character varying(50) COLLATE pg_catalog."default",
+    periodo character varying(30) COLLATE pg_catalog."default",
+    situacao_matricula character varying(50) COLLATE pg_catalog."default",
+    tipo_cota character varying(50) COLLATE pg_catalog."default",
+    atestado_baixarenda character varying(20) COLLATE pg_catalog."default",
+    ano character varying(20) COLLATE pg_catalog."default",
+    unidade_ensino character varying(100) COLLATE pg_catalog."default",
+    id_aluno integer,
+    co_curso character varying(50) COLLATE pg_catalog."default",
+    co_escola_educacenso character varying(50) COLLATE pg_catalog."default",
+    -- Redundant attributes for read performance
+    aluno_idade integer,
+    aluno_sexo character(1) COLLATE pg_catalog."default",
+    aluno_raca character varying(50) COLLATE pg_catalog."default",
+    curso_ds_eixo_tecnologico character varying(200) COLLATE pg_catalog."default",
+    curso_modalidade_ensino character varying(100) COLLATE pg_catalog."default",
+    CONSTRAINT fato_matricula_pkey PRIMARY KEY (id_matricula),
+    CONSTRAINT fk_matricula_aluno FOREIGN KEY (id_aluno)
+        REFERENCES public.dim_aluno (id_aluno) MATCH SIMPLE,
+    CONSTRAINT fk_matricula_curso FOREIGN KEY (co_curso)
+        REFERENCES public.dim_curso (co_curso) MATCH SIMPLE,
+    CONSTRAINT fk_matricula_escola FOREIGN KEY (co_escola_educacenso)
+        REFERENCES public.dim_escola (co_escola_educacenso) MATCH SIMPLE
+);
+CREATE INDEX IF NOT EXISTS idx_fato_matricula_aluno ON public.fato_matricula(id_aluno);
+CREATE INDEX IF NOT EXISTS idx_fato_matricula_curso ON public.fato_matricula(co_curso);
+CREATE INDEX IF NOT EXISTS idx_fato_matricula_escola ON public.fato_matricula(co_escola_educacenso);
+
+-- 6. Fact: Vinculo Empregaticio (Collapsed with 'remuneracao' and 'localizacao')
+CREATE TABLE IF NOT EXISTS public.fato_vinculo_empregaticio
+(
+    id_vinculo serial NOT NULL,
+    ano_rais integer,
+    razao_social character varying(200) COLLATE pg_catalog."default",
+    tipo_vinculo_empregaticio character varying(200) COLLATE pg_catalog."default",
+    data_admissao_declarada date,
+    tempo_emprego integer,
+    motivo_desligamento character varying(200) COLLATE pg_catalog."default",
+    mes_desligamento character varying(20) COLLATE pg_catalog."default",
+    indicador_vinculo_ativo boolean,
+    id_aluno integer,
+    -- Collapsed from remuneracao
+    id_remuneracao integer,
+    vl_remun_media_nom numeric(10, 2),
+    vl_remun_media_sm numeric(10, 2),
+    vl_remun_dezembro_nom numeric(10, 2),
+    vl_remun_dezembro_sm numeric(10, 2),
+    qtd_hora_contr integer,
+    vl_ultima_remuneracao_ano numeric(10, 2),
+    vl_salario_contratual numeric(10, 2),
+    -- Collapsed from localizacao
+    id_loc integer,
+    vinculo_uf character varying(2) COLLATE pg_catalog."default",
+    vinculo_municipio character varying(100) COLLATE pg_catalog."default",
+    CONSTRAINT fato_vinculo_pkey PRIMARY KEY (id_vinculo),
+    CONSTRAINT fk_vinculo_aluno FOREIGN KEY (id_aluno)
+        REFERENCES public.dim_aluno (id_aluno) MATCH SIMPLE
+);
+CREATE INDEX IF NOT EXISTS idx_fato_vinculo_aluno ON public.fato_vinculo_empregaticio(id_aluno);
+```

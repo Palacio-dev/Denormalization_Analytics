@@ -1,0 +1,211 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_10-31-57
+Model: gemini
+Prompt: RISEN
+Schema: TPC_DS
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The original schema represents a multi-channel retail environment (Store, Catalog, and Web). The heavy analytical workload in such environments typically involves aggregating sales and returns across these channels. To optimize read performance, the denormalization strategy focuses on 'Collapsing Relations' (Technique 3) by merging the Header, Line Item, and Return tables for each respective sales channel into single, wide fact tables. This eliminates the massive join overhead required to calculate basic metrics. Additionally, 'Adding Derived Attributes' (Technique 2) is used to precompute total and net sales amounts, further reducing CPU load during aggregation queries.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapse relations for Store Sales: Merge `s_purchase` (Header), `s_purchase_lineitem` (Lines), and `s_store_returns` (Returns) into a single table `denorm_store_sales` using a LEFT JOIN logic from lines to returns."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapse relations for Catalog Sales: Merge `s_catalog_order` (Header), `s_catalog_order_lineitem` (Lines), and `s_catalog_returns` (Returns) into a single table `denorm_catalog_sales`."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Collapse relations for Web Sales: Merge `s_web_order` (Header) and `s_web_order_lineitem` (Lines) into a single table `denorm_web_sales`."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived attribute `derived_total_sale_amount` to all sales tables, precomputing (quantity * sale_price) - coupon_amt."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added derived attribute `derived_net_sale_amount` to Store and Catalog sales tables, precomputing (derived_total_sale_amount - return_amt)."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Prefixed return-specific attributes (e.g., `cret_warehouse_id` to `return_warehouse_id`) when merging into the denormalized tables to avoid column name ambiguity with line-item attributes."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage footprint (Data Redundancy): Header attributes (like customer_id, order_date) are duplicated for every line item in the order."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If a header attribute (e.g., order_comments) needs to be updated, multiple rows must be modified. This is acceptable in analytical environments (OLAP) which are typically append-only."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1",
+        "query": "SELECT purchase_date, store_id, SUM(derived_net_sale_amount) as daily_net_revenue FROM denorm_store_sales GROUP BY purchase_date, store_id ORDER BY purchase_date DESC;"
+      },
+      {
+        "decision_id": "D2",
+        "query": "SELECT item_id, SUM(quantity) as total_sold, SUM(return_qty) as total_returned, SUM(derived_net_sale_amount) as net_revenue FROM denorm_catalog_sales GROUP BY item_id HAVING SUM(return_qty) > 0;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- ============================================================
+--   Table: denorm_store_sales                                 
+--   Merged from: s_purchase, s_purchase_lineitem, s_store_returns
+-- ============================================================
+CREATE TABLE denorm_store_sales
+(
+    purchase_id                 integer               not null,
+    line_number                 integer               not null,
+    
+    -- Header Attributes (s_purchase)
+    store_id                    char(16)                      ,
+    customer_id                 char(16)                      ,
+    purchase_date               char(10)                      ,
+    purchase_time               integer                       ,
+    register_id                 integer                       ,
+    clerk_id                    integer                       ,
+    purc_comment                char(100)                     ,
+    
+    -- Line Item Attributes (s_purchase_lineitem)
+    item_id                     char(16)                      ,
+    promotion_id                char(16)                      ,
+    quantity                    integer                       ,
+    sale_price                  numeric(7,2)                  ,
+    coupon_amt                  numeric(7,2)                  ,
+    plin_comment                varchar(100)                  ,
+    
+    -- Return Attributes (s_store_returns)
+    return_customer_id          char(16)                      ,
+    return_date                 char(10)                      ,
+    return_time                 char(10)                      ,
+    return_ticket_number        char(20)                      ,
+    return_qty                  integer                       ,
+    return_amt                  numeric(7,2)                  ,
+    return_tax                  numeric(7,2)                  ,
+    return_fee                  numeric(7,2)                  ,
+    return_ship_cost            numeric(7,2)                  ,
+    refunded_cash               numeric(7,2)                  ,
+    reversed_charge             numeric(7,2)                  ,
+    store_credit                numeric(7,2)                  ,
+    return_reason_id            char(16)                      ,
+    
+    -- Derived Attributes
+    derived_total_sale_amount   numeric(12,2)                 ,
+    derived_net_sale_amount     numeric(12,2)                 
+);
+
+-- ============================================================
+--   Table: denorm_catalog_sales                               
+--   Merged from: s_catalog_order, s_catalog_order_lineitem, s_catalog_returns
+-- ============================================================
+CREATE TABLE denorm_catalog_sales
+(
+    order_id                    integer               not null,
+    line_number                 integer               not null,
+    
+    -- Header Attributes (s_catalog_order)
+    bill_customer_id            char(16)                      ,
+    ship_customer_id            char(16)                      ,
+    order_date                  char(10)                      ,
+    order_time                  integer                       ,
+    ship_mode_id                char(16)                      ,
+    call_center_id              char(16)                      ,
+    order_comments              varchar(100)                  ,
+    
+    -- Line Item Attributes (s_catalog_order_lineitem)
+    item_id                     char(16)                      ,
+    promotion_id                char(16)                      ,
+    quantity                    integer                       ,
+    sales_price                 numeric(7,2)                  ,
+    coupon_amt                  numeric(7,2)                  ,
+    warehouse_id                char(16)                      ,
+    ship_date                   char(10)                      ,
+    catalog_number              integer                       ,
+    catalog_page_number         integer                       ,
+    ship_cost                   numeric(7,2)                  ,
+    
+    -- Return Attributes (s_catalog_returns)
+    return_call_center_id       char(16)                      ,
+    return_customer_id          char(16)                      ,
+    refund_customer_id          char(16)                      ,
+    return_date                 char(10)                      ,
+    return_time                 char(10)                      ,
+    return_qty                  integer                       ,
+    return_amt                  numeric(7,2)                  ,
+    return_tax                  numeric(7,2)                  ,
+    return_fee                  numeric(7,2)                  ,
+    return_ship_cost            numeric(7,2)                  ,
+    refunded_cash               numeric(7,2)                  ,
+    reversed_charge             numeric(7,2)                  ,
+    merchant_credit             numeric(7,2)                  ,
+    return_reason_id            char(16)                      ,
+    return_shipmode_id          char(16)                      ,
+    return_catalog_page_id      char(16)                      ,
+    return_warehouse_id         char(16)                      ,
+    
+    -- Derived Attributes
+    derived_total_sale_amount   numeric(12,2)                 ,
+    derived_net_sale_amount     numeric(12,2)                 
+);
+
+-- ============================================================
+--   Table: denorm_web_sales                                   
+--   Merged from: s_web_order, s_web_order_lineitem
+-- ============================================================
+CREATE TABLE denorm_web_sales
+(
+    order_id                    integer               not null,
+    line_number                 integer               not null,
+    
+    -- Header Attributes (s_web_order)
+    bill_customer_id            char(16)                      ,
+    ship_customer_id            char(16)                      ,
+    order_date                  char(10)                      ,
+    order_time                  integer                       ,
+    ship_mode_id                char(16)                      ,
+    web_site_id                 char(16)                      ,
+    order_comments              char(100)                     ,
+    
+    -- Line Item Attributes (s_web_order_lineitem)
+    item_id                     char(16)                      ,
+    promotion_id                char(16)                      ,
+    quantity                    integer                       ,
+    sales_price                 numeric(7,2)                  ,
+    coupon_amt                  numeric(7,2)                  ,
+    warehouse_id                char(16)                      ,
+    ship_date                   char(10)                      ,
+    ship_cost                   numeric(7,2)                  ,
+    web_page_id                 char(16)                      ,
+    
+    -- Derived Attributes
+    derived_total_sale_amount   numeric(12,2)                 
+);
+
+-- ============================================================
+--   Table: denorm_inventory                                   
+--   Maintained from: s_inventory (Renamed for consistency)
+-- ============================================================
+CREATE TABLE denorm_inventory
+(
+    invn_warehouse_id           char(16)              not null,
+    invn_item_id                char(16)              not null,
+    invn_date                   char(10)              not null,
+    invn_qty_on_hand            integer                       
+);
+```
