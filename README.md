@@ -3,9 +3,6 @@
 This repository is part of the project **Prompt Engineering for Data Engineering aimed at Data Analytics**, which explores how prompt engineering techniques and LLMs can help automate the denormalization of relational models and the creation of ETL pipelines to better serve analytical workloads.
 
 
-Advisor: Professor Dr. Breno Bernard Nicolau de França
-
-
 ## 📂 Repository Structure
 
 - `Experiment_schemes/`: Training, validation, and benchmark database schemas (AdventureWorks, Northwind, TPC-H, Pagila, etc.).
@@ -18,7 +15,7 @@ Advisor: Professor Dr. Breno Bernard Nicolau de França
 
 
 
-## 🚀 Key Features
+##  Key Features
 
 - **Robust SQL Parsing:** Automatically strips comments, handles inline/external Foreign Keys (`ALTER TABLE`), and filters out system metadata exhaust (`rowguid`, `modified_date`).
 - **Advanced Metrics for evaluating denormalized schemas:** Computes attribute completeness, type correctness, mean Levenshtein distance, and NLP similarity metrics (BLEU, ROUGE, METEOR).
@@ -82,7 +79,7 @@ pip install -r requirements.txt
 	GEMINI_API_KEY="your_gemini_api_key_here"
 ```
 
-- You can also run the experiment locally with free models available at Ollama. There are two possibilites, running locally with the model qwen3.5:9b or running via the Ollama's API with the model qwen3-coder:480b-cloud. For running locally, you need to download the model on your machine. It can be done with the command in the terminal:
+- You can also run the experiment locally with free models available at Ollama. There are two possibilites, running locally with the model qwen3.5:4b or running via the Ollama's API with the model qwen3-coder:480b-cloud. For running locally, you need to download the model on your machine. It can be done with the command in the terminal:
 
 ```bash
  ollama pull qwen3.5:9b
@@ -204,8 +201,8 @@ bash run_all_evaluations.sh
 ### Completeness
 
 - **Ratio = 1.0**: Same amount of attributes between relational and denormalized schemas.
-- **Ratio > 1.0**: Information may have been lost.
-- **Ratio < 1.0**: New information may have been added.
+- **Ratio < 1.0**: Information may have been lost.
+- **Ratio > 1.0**: New information may have been added.
 
 ### Correctness
 
@@ -228,6 +225,7 @@ The script generates a detailed report with:
 3. Correctness evaluation with issue detection
 4. Pair-by-pair metric comparison
 5. Overall metrics summary
-6. Final conclusion and recommendations
+
+
 
 
