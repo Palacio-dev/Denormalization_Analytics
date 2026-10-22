@@ -3,7 +3,7 @@
 This repository is part of the project **Prompt Engineering for Data Engineering aimed at Data Analytics**, which explores how prompt engineering techniques and LLMs can help automate the denormalization of relational models and the creation of ETL pipelines to better serve analytical workloads.
 
 
-## 📂 Repository Structure
+##  Repository Structure
 
 - `Experiment_schemes/`: Training, validation, and benchmark database schemas (AdventureWorks, Northwind, TPC-H, Pagila, etc.).
 - `Prompts/`: Structured prompt templates (RISEN framework, OBT, and seniority-based prompts).
@@ -13,17 +13,7 @@ This repository is part of the project **Prompt Engineering for Data Engineering
 
 
 
-
-
-##  Key Features
-
-- **Robust SQL Parsing:** Automatically strips comments, handles inline/external Foreign Keys (`ALTER TABLE`), and filters out system metadata exhaust (`rowguid`, `modified_date`).
-- **Advanced Metrics for evaluating denormalized schemas:** Computes attribute completeness, type correctness, mean Levenshtein distance, and NLP similarity metrics (BLEU, ROUGE, METEOR).
-- **OLAP Compliance Router:** Automatically classifies generated schemas (Star Schema, Snowflake, or One-Big-Table) following Kimball's Data Warehouse Toolkit principles.
-
-
-
-## ⚙️ Available Options
+##  Available Options
 
 **Models (3 options):**
 1. Gemini 3.1-Pro (API) - requires GEMINI_API_KEY
