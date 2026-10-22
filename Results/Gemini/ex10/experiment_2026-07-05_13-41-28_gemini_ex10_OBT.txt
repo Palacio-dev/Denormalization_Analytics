@@ -1,0 +1,89 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-41-28
+Model: gemini
+Prompt: OBT
+Schema: ex10
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy adopts a One-Big-Table (OBT) model, consolidating a snowflake-like relational schema into a single wide table. The grain of this new table is defined by the combination of Country, Year, and Energy Source, which represents the highest level of granularity among the source tables. All foreign keys have been removed, and shared attributes (like 'ano' and 'nome') have been merged or prefixed to ensure semantic clarity and avoid ambiguity. This approach eliminates the need for complex JOINs during heavy analytical reads.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged 'paises' and 'continente' to flatten the geographical hierarchy into the main table."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Consolidated 'populacao', 'emissao_g_efeito_estufa', and 'consumo_anual' by aligning them on the
+        shared dimensions of Country and Year."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Integrated 'fonte_energia' directly into the denormalized table to provide energy source details 
+        alongside annual consumption percentages."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Dropped all Foreign Key columns (id_paises, continente, tipo_energia) as relationships are now implicitly represented in the flat structure."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Renamed the 'nome' attribute from 'paises', 'continente', and 'fonte_energia' to 'paises_nome', 
+        'continente_nome', and 'fonte_energia_nome' respectively to prevent column name ambiguity."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Merged the 'ano' column from 'consumo_anual', 'emissao_g_efeito_estufa', and 'populacao' into a
+        single 'ano' column."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added a new surrogate primary key 'id_record' (SERIAL) to uniquely identify each row in the denormalized table, fulfilling the single Primary Key requirement."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "High Data Redundancy: Country-level and Year-level metrics (such as 'fundacao', 'quantidade_hab', and 'quantidade_emitida') will be duplicated for every energy source a country uses in a given year."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Risk of Update Anomalies: Modifying a country's population or greenhouse gas emissions for a specific year now requires updating multiple rows (one for each energy source)."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Time-series analytical queries comparing a country's population growth ('quantidade_hab') against its greenhouse gas emissions ('quantidade_emitida') over the years."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregated OLAP queries analyzing the energy matrix ('fonte_energia_nome' and 'porcentagem') grouped by continent ('continente_nome') and year ('ano')."
+      }
+    ]
+  }
+}
+```
+
+```sql
+CREATE TABLE IF NOT EXISTS public.denormalized_country_metrics
+(
+    id_record SERIAL PRIMARY KEY,
+    paises_nome character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    fundacao integer NOT NULL,
+    continente_nome character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    ano integer NOT NULL,
+    quantidade_hab integer,
+    quantidade_emitida bigint,
+    fonte_energia_nome character varying(50)[] COLLATE pg_catalog."default",
+    porcentagem integer
+);
+```

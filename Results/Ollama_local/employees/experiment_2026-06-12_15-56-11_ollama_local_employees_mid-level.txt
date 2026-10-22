@@ -1,0 +1,202 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_15-56-11
+Model: ollama_local
+Prompt: mid-level
+Schema: employees
+==================================================
+
+### Analysis and Redesign Strategy
+
+#### Section 1: Analysis and Structural Decisions
+
+**Summary:**
+The original schema follows a strict Third Normal Form (3NF) structure typical of transactional OLTP systems. It separates entities (Employee, Department) from relationships (Department_Employee, Department_Manager) and attributes (Salary, Title). For read-heavy analytical workloads (OLAP), this results in excessive JOINs, complex date-range logic across multiple tables, and potential data duplication during reporting. The strategy here is to adopt a **Star Schema** approach, consolidating related attributes into dimension tables and aggregating measures into fact tables where appropriate, while heavily denormalizing the dimension tables to include all necessary attributes for common analytical queries.
+
+**Structural Decisions:**
+1.  **Consolidate Department Dimensions**: Merged `department` and the `department_id` columns from `department_employee` and `department_manager` into a single `dim_department` table. This eliminates the need to join three separate tables to get department details.
+2.  **Consolidate Employee Dimensions**: Merged `employee` and `employee_id` columns from `department_employee`, `department_manager`, `salary`, and `title` into a single `dim_employee` table. This is critical for reporting on "Who is in which department?" without joining back to the main employee table.
+3.  **Create Aggregated Fact Tables**:
+    *   Created `fact_employee_dept_history` to track the overlap of employees and departments over time.
+    *   Created `fact_employee_salary` to track salary changes.
+    *   Created `fact_employee_title` to track title changes.
+4.  **Flatten Attribute Logic**: Removed `from_date`/`to_date` columns from the dimension tables (`dim_employee`, `dim_department`) where they are static or rarely queried in isolation, pushing the date logic to the Fact tables.
+
+**Attribute-Level Changes:**
+1.  **Added Derived Attributes**: Added `is_manager` flag to `dim_employee` by checking if the employee exists in the `fact_employee_dept_history` table (indicating a manager role).
+2.  **Added Current Status**: Added `current_department_id` and `current_title` to `dim_employee` by joining with Fact tables where `to_date` is NULL (indicating active status).
+3.  **Removed Redundant Columns**: Removed `gender` from the Fact tables as it is only relevant at the employee level.
+
+**Trade-offs:**
+1.  **Data Freshness vs. Query Speed**: The fact tables (`fact_employee_dept_history`, etc.) act as snapshots. If the source data updates frequently, these fact tables must be rebuilt or updated. This introduces a latency between data ingestion and availability in the analytical model, but it drastically speeds up query execution.
+2.  **Storage Overhead**: The denormalized dimensions store data that technically belongs to the employee (e.g., manager status), increasing storage usage slightly, but the reduction in JOINs outweighs this cost for analytical queries.
+3.  **Complexity in Updates**: Changing an employee's manager relationship requires updating the Fact table and potentially re-calculating the `is_manager` flag in the dimension, which is more complex than a simple foreign key update in the normalized schema.
+
+---
+
+#### Section 2: Query Patterns
+
+**Query Patterns:**
+1.  **Pattern: "List all employees with their current department and title"**
+    *   *Motivation*: A common dashboard requirement to see the organizational structure.
+    *   *Benefit*: In the original schema, this requires joining `employee`, `department_employee`, `department`, and `title` (handling NULLs for non-managers or non-titled employees). In the new schema, it requires only a simple JOIN between `dim_employee` and `dim_department` (and potentially `dim_title`), as the "current" status is pre-calculated in the dimensions.
+2.  **Pattern: "Show the history of department changes for a specific employee"**
+    *   *Motivation*: HR reporting on career paths.
+    *   *Benefit*: Direct aggregation on `fact_employee_dept_history` allows for time-series analysis without complex date-range logic across multiple normalized tables.
+3.  **Pattern: "Calculate average salary per department over time"**
+    *   *Motivation*: Budget analysis.
+    *   *Benefit*: The `fact_employee_salary` table allows grouping by `department_id` and `date` (or year) efficiently, avoiding the need to join back to the `employee` table to get department info.
+
+---
+
+### SQL DDL Creation Script
+
+```sql
+-- Drop existing tables if they exist to ensure a clean slate
+DROP TABLE IF EXISTS fact_employee_dept_history;
+DROP TABLE IF EXISTS fact_employee_salary;
+DROP TABLE IF EXISTS fact_employee_title;
+DROP TABLE IF EXISTS dim_employee;
+DROP TABLE IF EXISTS dim_department;
+
+-- ==========================================
+-- DIMENSION TABLES (Denormalized for Read Performance)
+-- ==========================================
+
+-- Dimension: Department
+-- Consolidated from 'department' table and 'department_id' columns in relation tables.
+CREATE TABLE IF NOT EXISTS dim_department (
+    dept_id character(4) COLLATE pg_catalog."default" NOT NULL,
+    dept_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT dim_department_pk PRIMARY KEY (dept_id)
+);
+
+-- Dimension: Employee
+-- Consolidated from 'employee' table and 'employee_id' columns in relation tables.
+-- Includes derived attributes for 'is_manager' and 'current_department_id'.
+CREATE TABLE IF NOT EXISTS dim_employee (
+    emp_id bigint NOT NULL,
+    first_name character varying(14) COLLATE pg_catalog."default" NOT NULL,
+    last_name character varying(16) COLLATE pg_catalog."default" NOT NULL,
+    birth_date date NOT NULL,
+    hire_date date NOT NULL,
+    is_manager boolean NOT NULL DEFAULT false,
+    current_department_id character(4) COLLATE pg_catalog."default",
+    CONSTRAINT dim_employee_pk PRIMARY KEY (emp_id)
+);
+
+-- ==========================================
+-- FACT TABLES (Normalized for Atomicity, Denormalized for Joining)
+-- ==========================================
+
+-- Fact: Employee Department History
+-- Tracks the relationship between employees and departments over time.
+-- Used to derive 'is_manager' and 'current_department_id' in the dimension.
+CREATE TABLE IF NOT EXISTS fact_employee_dept_history (
+    emp_id bigint NOT NULL,
+    dept_id character(4) COLLATE pg_catalog."default" NOT NULL,
+    from_date date NOT NULL,
+    to_date date, -- NULL indicates current assignment
+    fact_id bigint GENERATED ALWAYS AS (
+        MAX(COALESCE(MAX(ROW_NUMBER() OVER (PARTITION BY emp_id ORDER BY from_date)), 0)) 
+        OVER (PARTITION BY emp_id ORDER BY from_date)
+    ) STORED, -- Simple unique ID per employee-dept pair
+    CONSTRAINT fact_emp_dept_pk PRIMARY KEY (emp_id, dept_id, from_date)
+);
+
+-- Fact: Employee Salary History
+-- Tracks salary changes over time.
+CREATE TABLE IF NOT EXISTS fact_employee_salary (
+    emp_id bigint NOT NULL,
+    amount bigint NOT NULL,
+    from_date date NOT NULL,
+    to_date date, -- NULL indicates current salary
+    fact_id bigint GENERATED ALWAYS AS (
+        MAX(COALESCE(MAX(ROW_NUMBER() OVER (PARTITION BY emp_id ORDER BY from_date)), 0)) 
+        OVER (PARTITION BY emp_id ORDER BY from_date)
+    ) STORED,
+    CONSTRAINT fact_emp_salary_pk PRIMARY KEY (emp_id, from_date)
+);
+
+-- Fact: Employee Title History
+-- Tracks title changes over time.
+CREATE TABLE IF NOT EXISTS fact_employee_title (
+    emp_id bigint NOT NULL,
+    title character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    from_date date NOT NULL,
+    to_date date, -- NULL indicates current title
+    fact_id bigint GENERATED ALWAYS AS (
+        MAX(COALESCE(MAX(ROW_NUMBER() OVER (PARTITION BY emp_id ORDER BY from_date)), 0)) 
+        OVER (PARTITION BY emp_id ORDER BY from_date)
+    ) STORED,
+    CONSTRAINT fact_emp_title_pk PRIMARY KEY (emp_id, title, from_date)
+);
+
+-- ==========================================
+-- POPULATION SCRIPT (One-time load to initialize the model)
+-- ==========================================
+
+-- Populate Dimension: Department
+INSERT INTO dim_department (dept_id, dept_name)
+SELECT id, dept_name FROM employees.department;
+
+-- Populate Dimension: Employee
+-- Base data from employees.employee
+INSERT INTO dim_employee (emp_id, first_name, last_name, birth_date, hire_date, is_manager, current_department_id)
+SELECT 
+    e.id,
+    e.first_name,
+    e.last_name,
+    e.birth_date,
+    e.hire_date,
+    -- Determine if the employee is a manager by checking if they have any dept assignments
+    CASE 
+        WHEN EXISTS (
+            SELECT 1 FROM fact_employee_dept_history f WHERE f.emp_id = e.id
+        ) THEN true 
+        ELSE false 
+    END,
+    -- Determine current department (where to_date is NULL)
+    (SELECT f.dept_id 
+     FROM fact_employee_dept_history f 
+     WHERE f.emp_id = e.id AND f.to_date IS NULL 
+     LIMIT 1)
+FROM employees.employee e;
+
+-- Populate Fact: Employee Department History
+-- This effectively denormalizes the relationship data for easy querying.
+INSERT INTO fact_employee_dept_history (emp_id, dept_id, from_date, to_date)
+SELECT 
+    e.employee_id,
+    d.id,
+    de.from_date,
+    de.to_date
+FROM employees.employee e
+JOIN employees.department_employee de ON e.id = de.employee_id
+JOIN dim_department d ON de.department_id = d.dept_id;
+
+-- Populate Fact: Employee Salary History
+INSERT INTO fact_employee_salary (emp_id, amount, from_date, to_date)
+SELECT 
+    e.employee_id,
+    s.amount,
+    s.from_date,
+    s.to_date
+FROM employees.employee e
+JOIN employees.salary s ON e.id = s.employee_id;
+
+-- Populate Fact: Employee Title History
+INSERT INTO fact_employee_title (emp_id, title, from_date, to_date)
+SELECT 
+    e.employee_id,
+    t.title,
+    t.from_date,
+    t.to_date
+FROM employees.employee e
+JOIN employees.title t ON e.id = t.employee_id;
+
+-- Create Indexes for common analytical queries
+CREATE INDEX idx_fact_emp_dept_emp ON fact_employee_dept_history(emp_id);
+CREATE INDEX idx_fact_emp_dept_dept ON fact_employee_dept_history(dept_id);
+CREATE INDEX idx_fact_emp_salary_emp ON fact_employee_salary(emp_id);
+CREATE INDEX idx_fact_emp_title_emp ON fact_employee_title(emp_id);
+```

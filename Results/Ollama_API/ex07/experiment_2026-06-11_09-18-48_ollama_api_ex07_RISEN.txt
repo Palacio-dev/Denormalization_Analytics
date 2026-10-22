@@ -1,0 +1,99 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-18-48
+Model: ollama_api
+Prompt: RISEN
+Schema: ex07
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy involves collapsing relations to reduce the number of joins required for frequent queries. The 'Usina' table is the central entity, and all related lookup tables (Proprietarios, Rios, Localizacoes, Municipios, Estados) are merged into it. This reduces query complexity by eliminating foreign key joins while preserving all original data. Redundant attributes like proprietario, rio, municipio, uf, latitude, longitude are added directly into the Usina table.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapse the 'Proprietarios' table into 'Usina' by adding the 'proprietario' column to eliminate FK join on id_proprietario."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapse the 'Rios' table into 'Usina' by adding the 'rio' column to eliminate FK join on id_rio."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Collapse the 'Localizacoes' table into 'Usina' by adding longitude, latitude, and municipality IDs to eliminate FK join on id_localizacao."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Collapse the 'Municipios' and 'Estados' tables into 'Usina' by adding municipio and uf columns to eliminate joins from Localizacoes to Municipios and then to Estados."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant attribute 'proprietario' from Proprietarios table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added redundant attribute 'rio' from Rios table."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added derived attributes 'latitude' and 'longitude' from Localizacoes table."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added derived attributes 'municipio' and 'uf' from Municipios and Estados tables."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved read performance at the cost of increased storage and write complexity. Updates to proprietario, rio, or location info must propagate to all related Usina rows."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Loss of normalization benefits like data consistency and reduced redundancy, but gains significant performance for analytical read-heavy workloads."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Frequent analytical queries that retrieve usina details along with owner name, river name, and geographic location require multiple joins. Denormalization reduces this to a single table scan."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Geospatial and regional analysis queries that filter or group by municipality or state benefit from collapsing location hierarchy into the main Usina table."
+      }
+    ]
+  }
+}
+
+```sql
+CREATE TABLE IF NOT EXISTS public."UsinaDenormalized" (
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    iniciop DATE,
+    atualizacao DATE,
+    lat DOUBLE PRECISION,
+    long DOUBLE PRECISION,
+    estagio VARCHAR,
+    id_proprietario INTEGER NULL,
+    proprietario VARCHAR,
+    id_rio INTEGER NOT NULL,
+    rio VARCHAR NOT NULL,
+    id_localizacao INTEGER NOT NULL,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    id_municipio1 INTEGER,
+    municipio VARCHAR,
+    uf CHAR(2)
+);
+
+-- Note: The following tables are now obsolete in the denormalized schema:
+-- Proprietarios, Municipios, Estados, Rios, Localizacoes
+```

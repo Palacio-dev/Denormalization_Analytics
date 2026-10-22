@@ -1,0 +1,340 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_09-21-27
+Model: ollama_local
+Prompt: junior
+Schema: ex04
+==================================================
+
+### Analysis and Denormalization Strategy
+
+As a Data Engineer, my goal is to optimize this schema for **analytics and reporting** (OLAP workloads) rather than transactional integrity (OLTP). In analytical contexts, frequent joins between small, granular tables (like `demography`, `employment`, `education`) on the same `year` and `country_code` can be expensive.
+
+#### 1. Relational Schema Analysis
+*   **Fact Table:** `survey` acts as the central "Fact" table containing the primary metrics (welfare, poverty, Gini) indexed by `id_survey`.
+*   **Dimension/Context Tables:**
+    *   `country` and `region`: Hierarchical context.
+    *   `demography`, `employment`, `education`, `economy`, `health`: These are highly granular, year-specific tables that share the same foreign key structure (`country_code`, `year`, `id_...`).
+    *   `decile`, `population`, `life_expectancy`: Supporting details often linked via `id_survey` or `id_demography`.
+*   **Relationships:** The current schema requires multiple joins to reconstruct a complete profile for a specific country-year combination (e.g., joining `survey`, `demography`, `employment`, `economy`, `health` to get a full picture).
+
+#### 2. Denormalization Strategy
+To reduce joins, I will adopt a **Star Schema** approach where the `survey` table becomes the central hub, and all year-specific attributes are denormalized directly into it.
+
+**Key Decisions:**
+1.  **Merge Year-Specific Tables:** Instead of keeping `demography`, `employment`, `education`, `economy`, and `health` as separate tables, I will flatten their relevant columns into the `survey` table. Since `survey` already has `survey_year`, this allows grouping by year without joining.
+2.  **Remove Redundant Dimensions:** The `region` table can be kept as a small lookup table, but `country` details (name, region_code) will be flattened into `survey`. The `decile` table is often part of the survey data itself; if it's not a separate entity, it can be flattened.
+3.  **Handle Many-to-Many/One-to-Many:**
+    *   `population` and `life_expectancy` are linked to `demography` (which links to `country`). To avoid complex joins, I will assume that for a given `survey_year` and `country_code`, the population and life expectancy data are representative or aggregated. If granular age/gender data is strictly required, it might need a separate "lookup" table, but for high-level reporting, flattening the `value` columns into `survey` is usually sufficient.
+    *   `health` is already linked to `country` and `year`.
+4.  **Primary Key Change:** The `survey` table will remain the single source of truth with `id_survey` as the PK. All other tables will be dropped or merged.
+
+**Trade-offs:**
+*   **Write Performance:** Inserting data will become significantly slower because every new record in `demography` or `employment` will require an insert/update into the massive `survey` table.
+*   **Data Integrity:** We lose the ability to update a specific year's employment data without touching the survey record (though this is acceptable for read-heavy analytics).
+*   **Storage:** Slightly increased storage due to redundancy, but negligible compared to the I/O savings from eliminating joins.
+
+---
+
+### JSON Output
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy involves transforming the existing normalized star schema into a highly denormalized 'wide' table. The `survey` table is promoted to be the single central table containing all attributes. Year-specific tables (`demography`, `employment`, `education`, `economy`, `health`) and dimension tables (`country`, `region`) are flattened. This eliminates the need for complex multi-table joins during query execution, drastically improving read performance for reporting.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge `demography`, `employment`, `education`, `economy`, `health`, `population`, and `life_expectancy` tables into the `survey` table. Their columns are added to `survey` using `survey_year` and `country_code` as grouping keys.",
+        "source_tables": [
+          "demography",
+          "employment",
+          "education",
+          "economy",
+          "health",
+          "population",
+          "life_expectancy"
+        ],
+        "target_table": "survey"
+      },
+      {
+        "decision_id": "D2",
+        "description": "Flatten `country` and `region` tables. Move `country_name`, `region_code`, and `region_name` directly into the `survey` table to avoid joining with the `country` and `region` lookup tables.",
+        "source_tables": [
+          "country",
+          "region"
+        ],
+        "target_table": "survey"
+      },
+      {
+        "decision_id": "D3",
+        "description": "Remove the `decile` table. Assuming decile data is intrinsic to the survey or can be derived from the main metrics, it is removed to simplify the schema. If distinct decile data exists, it would be added as columns to `survey`.",
+        "source_tables": [
+          "decile"
+        ],
+        "target_table": "survey"
+      },
+      {
+        "decision_id": "D4",
+        "description": "Remove the `population` and `life_expectancy` tables. Since they are linked to `demography` (which is merged), their values are now part of the `survey` record for that specific year and country.",
+        "source_tables": [
+          "population",
+          "life_expectancy"
+        ],
+        "target_table": "survey"
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added columns from `demography` (pop_density, urban_pop, rural_pop, net_migration, death_rate, birth_rate) to `survey`.",
+        "table": "survey",
+        "columns_added": [
+          "pop_density",
+          "urban_pop",
+          "rural_pop",
+          "net_migration",
+          "death_rate",
+          "birth_rate"
+        ]
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added columns from `employment` (child_emp, unemp, vulnerable_emp, part_time, employers, labor_force_total, labor_force_fem) to `survey`.",
+        "table": "survey",
+        "columns_added": [
+          "child_emp",
+          "unemp",
+          "vulnerable_emp",
+          "part_time",
+          "employers",
+          "labor_force_total",
+          "labor_force_fem"
+        ]
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added columns from `education` (child_out_of_school, progression_to_sec, expenditure, preprim_enroll, prim_enrol, sec_enrol, terti_enrol) to `survey`.",
+        "table": "survey",
+        "columns_added": [
+          "child_out_of_school",
+          "progression_to_sec",
+          "expenditure",
+          "preprim_enroll",
+          "prim_enrol",
+          "sec_enrol",
+          "terti_enrol"
+        ]
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added columns from `economy` (gdp, inflation, tax_revenue) to `survey`.",
+        "table": "survey",
+        "columns_added": [
+          "gdp",
+          "inflation",
+          "tax_revenue"
+        ]
+      },
+      {
+        "decision_id": "A5",
+        "description": "Added columns from `health` (hospital_beds, physicians, expenditure) to `survey`.",
+        "table": "survey",
+        "columns_added": [
+          "hospital_beds",
+          "physicians",
+          "expenditure"
+        ]
+      },
+      {
+        "decision_id": "A6",
+        "description": "Added columns from `population` (pop_ages, gender, number) to `survey`.",
+        "table": "survey",
+        "columns_added": [
+          "pop_ages",
+          "gender",
+          "number"
+        ]
+      },
+      {
+        "decision_id": "A7",
+        "description": "Added columns from `life_expectancy` (gender, value) to `survey`.",
+        "table": "survey",
+        "columns_added": [
+          "life_expectancy_gender",
+          "life_expectancy_value"
+        ]
+      },
+      {
+        "decision_id": "A8",
+        "description": "Added columns from `country` (country_name) and `region` (region_name) to `survey`.",
+        "table": "survey",
+        "columns_added": [
+          "country_name",
+          "region_name"
+        ]
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Write performance will degrade significantly because every update to a year-specific table (e.g., adding a new year of employment data) requires an update to the large `survey` table.",
+        "impact": "High Write Latency"
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Data redundancy increases storage usage, but this is negligible compared to the I/O savings of avoiding multiple table scans and joins.",
+        "impact": "Increased Storage"
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of fine-grained data isolation. Updating employment data for 2023 will inadvertently change the employment column in the `survey` table for all countries if the logic is not careful, though in this design, the `year` column acts as the natural discriminator.",
+        "impact": "Data Consistency Risk (Mitigated by Year Column)"
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Business users frequently request a 'Country Profile' by year, requiring data from Employment, Education, Economy, and Health simultaneously. Previously, this required 5-6 JOINs. Now, a simple GROUP BY on `country_code` and `survey_year` retrieves all data in one scan.",
+        "example_query_logic": "SELECT country_name, survey_year, unemp, gdp, hospital_beds FROM survey GROUP BY country_name, survey_year"
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Reporting dashboards need to compare poverty lines against GDP and life expectancy across regions. The denormalized schema allows filtering by `region_name` and joining `survey` with a small `region` lookup table only if region-specific filtering is needed, rather than joining every fact table.",
+        "example_query_logic": "SELECT region_name, avg(pop_density), avg(unemp) FROM survey WHERE region_name = 'X' GROUP BY region_name"
+      }
+    ]
+  }
+}
+```
+
+### Complete SQL DDL Creation Script
+
+This script creates the single denormalized `survey` table and drops the original redundant tables. It assumes the original data has been backed up or migrated first.
+
+```sql
+-- Drop original tables to prevent conflicts (in a real environment, do this in a transaction or after migration)
+DROP TABLE IF EXISTS public.population;
+DROP TABLE IF EXISTS public.life_expectancy;
+DROP TABLE IF EXISTS public.health;
+DROP TABLE IF EXISTS public.economy;
+DROP TABLE IF EXISTS public.education;
+DROP TABLE IF EXISTS public.employment;
+DROP TABLE IF EXISTS public.demography;
+DROP TABLE IF EXISTS public.decile;
+DROP TABLE IF EXISTS public.region;
+DROP TABLE IF EXISTS public.country;
+DROP TABLE IF EXISTS public.survey;
+
+-- Create the Denormalized Survey Table
+CREATE TABLE IF NOT EXISTS public.survey
+(
+    id_survey serial NOT NULL,
+    country_code character varying NOT NULL,
+    country_name character varying,
+    region_code character varying NOT NULL,
+    region_name character varying,
+    welfare_type character varying,
+    survey_acronym character varying,
+    survey_comparability integer,
+    comparable_spell character varying,
+    poverty_line double precision,
+    headcount double precision,
+    poverty_gap double precision,
+    poverty_severity double precision,
+    gini double precision,
+    reporting_pop integer,
+    reporting_pce double precision,
+    distribution_type character varying,
+    spl double precision,
+    survey_year integer NOT NULL,
+    survey_coverage character varying,
+    reporting_level character varying,
+    -- Demography Attributes
+    pop_density double precision,
+    urban_pop double precision,
+    rural_pop double precision,
+    net_migration double precision,
+    death_rate double precision,
+    birth_rate double precision,
+    -- Employment Attributes
+    child_emp double precision,
+    unemp double precision,
+    vulnerable_emp double precision,
+    part_time double precision,
+    employers double precision,
+    labor_force_total double precision,
+    labor_force_fem double precision,
+    -- Education Attributes
+    child_out_of_school double precision,
+    progression_to_sec double precision,
+    expenditure double precision,
+    preprim_enroll double precision,
+    prim_enrol double precision,
+    sec_enrol double precision,
+    terti_enrol double precision,
+    -- Economy Attributes
+    gdp double precision,
+    inflation double precision,
+    tax_revenue double precision,
+    -- Health Attributes
+    hospital_beds double precision,
+    physicians double precision,
+    expenditure double precision,
+    -- Population Attributes (Flattened)
+    pop_ages character varying,
+    gender character varying,
+    number double precision,
+    -- Life Expectancy Attributes (Flattened)
+    life_expectancy_gender character varying,
+    life_expectancy_value double precision,
+    PRIMARY KEY (id_survey)
+);
+
+-- Create Indexes for common analytical filters
+CREATE INDEX idx_survey_country_year ON public.survey (country_code, survey_year);
+CREATE INDEX idx_survey_region_year ON public.survey (region_code, survey_year);
+CREATE INDEX idx_survey_year ON public.survey (survey_year);
+
+-- Optional: Create a small lookup table for Regions if region_name is needed for joins
+-- (Though ideally, region_name is stored in the main table, keeping a small lookup is fine for strict normalization of the region concept)
+CREATE TABLE IF NOT EXISTS public.region_lookup
+(
+    region_code character varying NOT NULL,
+    region_name character varying NOT NULL,
+    PRIMARY KEY (region_code)
+);
+
+-- Populate the denormalized table (Example logic assuming data exists in original tables)
+-- Note: In a real migration, you would use INSERT INTO ... SELECT ... FROM original_tables
+-- Here is a representative INSERT structure:
+
+-- INSERT INTO public.survey (
+--     id_survey, country_code, country_name, region_code, region_name,
+--     survey_year, unemp, gdp, hospital_beds,
+--     pop_density, labor_force_total,
+--     ... [all other columns]
+-- )
+-- SELECT 
+--     s.id_survey,
+--     c.country_code, c.country_name, c.region_code, r.region_name,
+--     s.survey_year,
+--     e.unemp, e.labor_force_total, e.employers,
+--     h.hospital_beds, h.physicians, h.expenditure,
+--     d.pop_density, d.urban_pop, d.rural_pop,
+--     ... [all other columns from original tables]
+-- FROM public.survey s
+-- JOIN public.country c ON s.country_code = c.country_code
+-- JOIN public.region r ON c.region_code = r.region_code
+-- LEFT JOIN public.employment e ON s.survey_year = e.year AND s.country_code = e.country_code
+-- LEFT JOIN public.economy econ ON s.survey_year = econ.year AND s.country_code = econ.country_code
+-- LEFT JOIN public.health h ON s.survey_year = h.year AND s.country_code = h.country_code
+-- LEFT JOIN public.demography d ON s.survey_year = d.year AND s.country_code = d.country_code
+-- LEFT JOIN public.population p ON d.id_demography = p.id_demography
+-- LEFT JOIN public.life_expectancy le ON d.id_demography = le.id_demography
+-- LEFT JOIN public.education edu ON s.survey_year = edu.year AND s.country_code = edu.country_code
+-- LEFT JOIN public.decile dec ON s.id_survey = dec.id_survey;
+```

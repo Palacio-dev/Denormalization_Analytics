@@ -1,0 +1,156 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-03_23-23-07
+Model: ollama_api
+Prompt: OBT
+Schema: adv_works
+==================================================
+
+{
+"section_1": {
+"summary": "The denormalization strategy involves creating a single denormalized table that consolidates all employee-related information from multiple normalized tables. This approach eliminates the need for complex JOIN operations when querying employee data, significantly improving read performance for analytical workloads. The strategy focuses on the core employee entity and merges related department, pay, address, and personal information into one comprehensive table.",
+"structural_decisions": [
+{
+"decision_id": "D1",
+"description": "Merged humanresources.employee, humanresources.employeedepartmenthistory, and humanresources.employeedepartmenthistory to create a comprehensive employee record with current department information"
+},
+{
+"decision_id": "D2",
+"description": "Integrated humanresources.employeepayhistory to include current pay rate information in the employee record"
+},
+{
+"decision_id": "D3",
+"description": "Combined person.person, person.businessentity, person.emailaddress, and person.personphone into the employee record to include complete personal information"
+},
+{
+"decision_id": "D4",
+"description": "Merged person.businessentityaddress, person.address, person.addresstype, person.stateprovince, and person.countryregion to include complete address information with type classification"
+},
+{
+"decision_id": "D5",
+"description": "Integrated humanresources.department information to include department name and group in the employee record"
+},
+{
+"decision_id": "D6",
+"description": "Combined humanresources.shift information to include shift details in the employee record"
+}
+],
+"attribute_level_changes": [
+{
+"decision_id": "A1",
+"description": "Added derived attribute 'is_current_employee' to indicate if an employee is currently active"
+},
+{
+"decision_id": "A2",
+"description": "Added derived attribute 'current_department' based on employeedepartmenthistory where enddate is NULL"
+},
+{
+"decision_id": "A3",
+"description": "Added derived attribute 'current_pay_rate' based on the most recent rate from employeepayhistory"
+},
+{
+"decision_id": "A4",
+"description": "Prefixed ambiguous column names with source table names to avoid conflicts (e.g., person_first_name, employee_job_title)"
+},
+{
+"decision_id": "A5",
+"description": "Flattened hierarchical address information including country, state, city, and postal code in separate columns"
+},
+{
+"decision_id": "A6",
+"description": "Added multiple email addresses as separate columns (email_address_1, email_address_2) to accommodate multiple contact methods"
+}
+],
+"tradeoffs": [
+{
+"tradeoff_id": "T1",
+"description": "Storage space increase due to denormalization and duplication of reference data (department names, address details) for each employee record"
+},
+{
+"tradeoff_id": "T2",
+"description": "Write performance degradation as updates to reference data (department names, address types) require changes across multiple rows"
+},
+{
+"tradeoff_id": "T3",
+"description": "Loss of update normalization - changes to shared reference data must be propagated to all related records"
+},
+{
+"tradeoff_id": "T4",
+"description": "Increased complexity in data maintenance processes as a single logical update might require multiple physical updates"
+}
+]
+},
+"section_2": {
+"query_patterns": [
+{
+"decision_id": "D1",
+"query_pattern_type": "inferred",
+"query_pattern_description": "Employee directory queries requiring personal information, job title, department, and contact details in a single result set"
+},
+{
+"decision_id": "D2",
+"query_pattern_type": "inferred",
+"query_pattern_description": "Payroll reporting queries needing employee information along with current salary rates without joining multiple tables"
+},
+{
+"decision_id": "D3",
+"query_pattern_type": "inferred",
+"query_pattern_description": "HR analytics queries for workforce analysis by department, location, and demographic characteristics"
+},
+{
+"decision_id": "D4",
+"query_pattern_type": "inferred",
+"query_pattern_description": "Organizational reporting queries requiring hierarchical view of employees with their departments and locations"
+}
+]
+}
+}
+
+CREATE TABLE IF NOT EXISTS employee_denormalized (
+businessentityid integer NOT NULL,
+employee_nationalidnumber character varying(15) COLLATE pg_catalog."default" NOT NULL,
+employee_loginid character varying(256) COLLATE pg_catalog."default" NOT NULL,
+employee_jobtitle character varying(50) COLLATE pg_catalog."default" NOT NULL,
+employee_birthdate date NOT NULL,
+employee_maritalstatus character(1) COLLATE pg_catalog."default" NOT NULL,
+employee_gender character(1) COLLATE pg_catalog."default" NOT NULL,
+employee_hiredate date NOT NULL,
+employee_salariedflag boolean NOT NULL DEFAULT true,
+employee_vacationhours smallint NOT NULL DEFAULT 0,
+employee_sickleavehours smallint NOT NULL DEFAULT 0,
+employee_currentflag boolean NOT NULL DEFAULT true,
+employee_organizationnode character varying COLLATE pg_catalog."default" DEFAULT '/'::character varying,
+employee_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+person_persontype character(2) COLLATE pg_catalog."default" NOT NULL,
+person_title character varying(8) COLLATE pg_catalog."default",
+person_firstname character varying(50) COLLATE pg_catalog."default" NOT NULL,
+person_middlename character varying(50) COLLATE pg_catalog."default",
+person_lastname character varying(50) COLLATE pg_catalog."default" NOT NULL,
+person_suffix character varying(10) COLLATE pg_catalog."default",
+person_emailpromotion integer NOT NULL DEFAULT 0,
+email_address_1 character varying(50) COLLATE pg_catalog."default",
+email_address_2 character varying(50) COLLATE pg_catalog."default",
+email_address_3 character varying(50) COLLATE pg_catalog."default",
+phone_number_1 character varying(25) COLLATE pg_catalog."default",
+phone_number_2 character varying(25) COLLATE pg_catalog."default",
+phone_number_3 character varying(25) COLLATE pg_catalog."default",
+phone_type_1 character varying(50) COLLATE pg_catalog."default",
+phone_type_2 character varying(50) COLLATE pg_catalog."default",
+phone_type_3 character varying(50) COLLATE pg_catalog."default",
+address_line_1 character varying(60) COLLATE pg_catalog."default" NOT NULL,
+address_line_2 character varying(60) COLLATE pg_catalog."default",
+address_city character varying(30) COLLATE pg_catalog."default" NOT NULL,
+address_postalcode character varying(15) COLLATE pg_catalog."default" NOT NULL,
+state_name character varying(50) COLLATE pg_catalog."default" NOT NULL,
+country_name character varying(50) COLLATE pg_catalog."default" NOT NULL,
+address_type character varying(50) COLLATE pg_catalog."default",
+department_name character varying(50) COLLATE pg_catalog."default" NOT NULL,
+department_groupname character varying(50) COLLATE pg_catalog."default" NOT NULL,
+shift_name character varying(50) COLLATE pg_catalog."default" NOT NULL,
+shift_starttime time without time zone NOT NULL,
+shift_endtime time without time zone NOT NULL,
+current_pay_rate numeric,
+pay_frequency smallint,
+current_department boolean NOT NULL DEFAULT true,
+is_current_employee boolean NOT NULL DEFAULT true,
+CONSTRAINT "PK_EmployeeDenormalized_BusinessEntityID" PRIMARY KEY (businessentityid)
+);

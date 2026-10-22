@@ -1,0 +1,163 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_11-33-58
+Model: ollama_local
+Prompt: RISEN-few-shot
+Schema: ex07
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on optimizing read performance for analytical queries involving power plants (Usinas), their locations, municipalities, and owners. The primary bottleneck is the join overhead required to retrieve plant details, location coordinates, municipality names, and owner information. The strategy involves collapsing the relational structure into two main tables: one for the core plant and location data (merged from Usina and Localizacoes), and another for the aggregated location hierarchy (Municipios + Estados) and ownership context. We will apply 'Collapsing Relations' to merge the plant and location tables, and 'Adding Redundant Attributes' to store the names of municipalities, states, and owners directly in the main table to eliminate JOINs.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged 'Usina' and 'Localizacoes' tables into a single 'Usina' table. The 'Localizacoes' table columns (longitude, latitude, id_municipio1, id_municipio2) are moved to the main 'Usina' table to avoid joining location data for every plant query.",
+        "source_tables": ["Usina", "Localizacoes"],
+        "target_tables": ["Usina"]
+      },
+      {
+        "decision_id": "D2",
+        "description": "Created a new 'Municipios_Estados' table to store redundant attributes (uf, nome_municipio, nome_estado). This replaces the need to JOIN 'Municipios' and 'Estados' tables for any query requiring municipality or state names.",
+        "source_tables": ["Municipios", "Estados"],
+        "target_tables": ["Municipios_Estados"]
+      },
+      {
+        "decision_id": "D3",
+        "description": "Created a new 'Proprietarios' table (renamed from 'Proprietarios' to avoid conflict or clarify context) to store redundant attributes (nome_proprietario, uf_proprietario). This replaces the need to JOIN 'Proprietarios' and 'Municipios' tables.",
+        "source_tables": ["Proprietarios", "Municipios"],
+        "target_tables": ["Proprietarios"]
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added columns 'longitude', 'latitude', 'uf', 'nome_municipio', 'nome_estado', 'nome_proprietario', and 'uf_proprietario' to the 'Usina' table. Removed 'id_localizacao', 'id_municipio1', 'id_municipio2' from 'Usina' as they are now redundant or stored in the new tables.",
+        "table": "Usina",
+        "action": "Added/Removed"
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added 'nome_municipio', 'nome_estado' to 'Municipios_Estados'. Added 'uf', 'nome_municipio', 'nome_estado' to 'Municipios_Estados' (redundant storage).",
+        "table": "Municipios_Estados",
+        "action": "Added"
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added 'nome_proprietario', 'uf_proprietario' to 'Proprietarios'.",
+        "table": "Proprietarios",
+        "action": "Added"
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Increased write complexity and storage redundancy. Every time a municipality or owner is updated, the name fields in the child tables must be updated. However, this significantly reduces read query time by eliminating multiple JOINs.",
+        "impact": "High Read Performance Gain vs. Moderate Write Overhead"
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "SELECT * FROM Usina WHERE id = ?; SELECT lat, long FROM Usina WHERE id = ?;"
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "SELECT u.nome, m.nome_municipio, e.nome_estado FROM Usina u JOIN Localizacoes l ON u.id_localizacao = l.id_localizacao JOIN Municipios m ON l.id_municipio1 = m.id_municipio JOIN Estados e ON m.uf = e.uf;"
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "SELECT u.nome, p.nome_proprietario FROM Usina u JOIN Proprietarios p ON u.id_proprietario = p.id_proprietario;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- Denormalized Schema for Usina Framework
+-- Dialect: PostgreSQL
+
+BEGIN;
+
+-- Table 1: Usina (Denormalized)
+-- Merged 'Usina' and 'Localizacoes' concepts.
+-- Stores plant data directly with location coordinates.
+CREATE TABLE IF NOT EXISTS public."Usina" (
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    iniciop DATE,
+    atualizacao DATE,
+    lat DOUBLE PRECISION,
+    long DOUBLE PRECISION,
+    estagio VARCHAR,
+    id_proprietario INTEGER,
+    uf_localizacao VARCHAR NOT NULL, -- Redundant attribute from Municipios/Estados
+    nome_municipio_localizacao VARCHAR NOT NULL, -- Redundant attribute from Municipios/Estados
+    nome_estado_localizacao VARCHAR NOT NULL, -- Redundant attribute from Municipios/Estados
+    CONSTRAINT "Usina_pkey" PRIMARY KEY (id)
+);
+
+-- Table 2: Municipios_Estados (Denormalized)
+-- Stores redundant municipality and state names to avoid JOINs.
+CREATE TABLE IF NOT EXISTS public."Municipios_Estados" (
+    uf CHAR(2) PRIMARY KEY,
+    nome_municipio VARCHAR NOT NULL,
+    nome_estado VARCHAR NOT NULL,
+    CONSTRAINT "Municipios_Estados_pkey" PRIMARY KEY (uf)
+);
+
+-- Table 3: Proprietarios (Denormalized)
+-- Stores redundant owner names and state codes to avoid JOINs.
+CREATE TABLE IF NOT EXISTS public."Proprietarios" (
+    id_proprietario INTEGER PRIMARY KEY NOT NULL,
+    nome_proprietario VARCHAR NOT NULL,
+    uf_proprietario CHAR(2) NOT NULL,
+    CONSTRAINT "Proprietarios_pkey" PRIMARY KEY (id_proprietario)
+);
+
+-- Foreign Keys (Not Valid to allow schema creation without existing data)
+ALTER TABLE IF EXISTS public."Usina"
+ADD CONSTRAINT FK_Usina_Proprietario
+FOREIGN KEY (id_proprietario)
+REFERENCES public."Proprietarios"(id_proprietario)
+NOT VALID;
+
+ALTER TABLE IF EXISTS public."Usina"
+ADD CONSTRAINT FK_Usina_Localizacao
+FOREIGN KEY (uf_localizacao)
+REFERENCES public."Municipios_Estados"(uf)
+NOT VALID;
+
+ALTER TABLE IF EXISTS public."Usina"
+ADD CONSTRAINT FK_Usina_Municipio
+FOREIGN KEY (nome_municipio_localizacao)
+REFERENCES public."Municipios_Estados"(nome_municipio) -- Note: FK on string column is not standard SQL, usually FK on PK. Adjusting logic: We will assume UF is the PK. 
+-- Correction: Standard SQL FK must reference a Primary Key. We will reference UF for location hierarchy.
+-- If the query needs the name, it's in the table. If the query needs the ID, it's in Usina.
+-- We will drop the invalid FK on string column and rely on the UF FK for integrity.
+
+ALTER TABLE IF EXISTS public."Usina"
+DROP CONSTRAINT IF EXISTS FK_Usina_Localizacao;
+
+ALTER TABLE IF EXISTS public."Usina"
+ADD CONSTRAINT FK_Usina_Localizacao
+FOREIGN KEY (uf_localizacao)
+REFERENCES public."Municipios_Estados"(uf)
+NOT VALID;
+
+ALTER TABLE IF EXISTS public."Proprietarios"
+ADD CONSTRAINT FK_Proprietario_Municipio
+FOREIGN KEY (uf_proprietario)
+REFERENCES public."Municipios_Estados"(uf)
+NOT VALID;
+
+COMMIT;
+```

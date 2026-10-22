@@ -1,0 +1,181 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-48-41
+Model: gemini
+Prompt: senior
+Schema: ex07
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The transformation strategy shifts the highly normalized (snowflake) OLTP schema into a denormalized Star Schema optimized for OLAP workloads. The source schema requires up to 6 joins to resolve a single power plant's complete profile (Plant -> Owner, River, Location -> 2x Municipalities -> States). The target architecture consolidates these into a central Snapshot Fact table containing the measures (potkw, potfis) and foreign keys to three heavily denormalized dimensions: Geography, Plant Profile (absorbing tiny lookups), and Date. This reduces query complexity, eliminates snowflake branches, and prevents double-counting in aggregations involving border locations.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Flatten Geographic Hierarchy: Merged 'Localizacoes', 'Municipios', and 'Estados' into a single 'dim_geografia' dimension."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Absorb Lookup Tables: Absorbed 'Proprietarios' and 'Rios' directly into a new 'dim_usina' dimension to eliminate low-cardinality joins."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Core Fact Separation: Created 'fact_usina_capacidade' to isolate numerical measures (potkw, potfis) and foreign keys, acting as an accumulating snapshot fact."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Introduce Date Dimension: Replaced raw dates (iniciop, atualizacao) with surrogate keys pointing to a standard 'dim_data' (Date Dimension) to enable consistent time-series analysis."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Pivoted dual municipalities (id_municipio1, id_municipio2) into explicit primary and secondary 
+        columns (municipio_principal, uf_principal, municipio_secundario, uf_secundario) within dim_geografia to avoid complex 
+        many-to-many bridge tables."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Introduced Surrogate Keys (SKs) for all dimension tables to insulate the analytical model from source 
+        system key changes and support potential Slowly Changing Dimensions (SCD Type 2) in the future."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Consolidated and renamed coordinate columns to distinguish between plant-specific coordinates 
+        (lat_usina, long_usina) and general location coordinates (lat_localizacao, long_localizacao)."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy vs. Read Performance: Denormalizing state and municipality names into dim_geografia increases storage requirements slightly, but eliminates 3-4 joins per query, drastically improving read performance for BI tools."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Flattened Geography vs. Bridge Table: Flattening the dual-municipality logic into primary/secondary columns prevents double-counting of power capacity in simple SUM() aggregations, but requires BI users to use OR conditions if they want to filter for a plant touching *any* specific municipality."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregating total power capacity (potkw) by State (UF) or Municipality. The denormalized geography dimension allows this with a single join to the fact table."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Filtering or grouping average physical capacity (potfis) by River or Owner. Absorbing these into dim_usina allows slice-and-dice without extra lookup joins."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Year-over-year or Quarter-over-Quarter analysis of plant operational start dates (iniciop). The dim_data table enables standard BI time-intelligence functions."
+      }
+    ]
+  }
+}
+```
+
+### Analytical Physical Model Design (SQL DDL)
+
+The following script creates the optimized Star Schema. It includes surrogate keys, denormalized dimensions, and a central snapshot fact table. Indexing and clustering strategies are included as comments, assuming a modern columnar or PostgreSQL-based OLAP engine (like Redshift or standard Postgres tuned for analytics).
+
+```sql
+-- ==============================================================================
+-- TARGET ANALYTICAL SCHEMA (OLAP STAR SCHEMA)
+-- ==============================================================================
+
+-- 1. DATE DIMENSION
+-- Enables robust time-series analysis and standard BI time hierarchies.
+CREATE TABLE IF NOT EXISTS public.dim_data (
+    sk_data INTEGER PRIMARY KEY, -- Format: YYYYMMDD
+    data_completa DATE NOT NULL,
+    ano INTEGER NOT NULL,
+    trimestre INTEGER NOT NULL,
+    mes INTEGER NOT NULL,
+    nome_mes VARCHAR(20) NOT NULL,
+    dia INTEGER NOT NULL,
+    dia_semana VARCHAR(20) NOT NULL,
+    flag_fim_semana BOOLEAN NOT NULL
+);
+
+-- 2. GEOGRAPHY DIMENSION (Denormalized Localizacoes + Municipios + Estados)
+-- Flattens the snowflake hierarchy and handles the dual-municipality complexity.
+CREATE TABLE IF NOT EXISTS public.dim_geografia (
+    sk_geografia SERIAL PRIMARY KEY,
+    id_localizacao_nk INTEGER NOT NULL, -- Natural Key from source
+    lat_localizacao DOUBLE PRECISION,
+    long_localizacao DOUBLE PRECISION,
+    
+    -- Primary Municipality (id_municipio1)
+    municipio_principal VARCHAR NOT NULL,
+    uf_principal CHAR(2) NOT NULL,
+    
+    -- Secondary Municipality (id_municipio2) - Nullable for non-border locations
+    municipio_secundario VARCHAR,
+    uf_secundario CHAR(2)
+);
+
+-- 3. USINA (PLANT) DIMENSION (Denormalized Usina + Proprietarios + Rios)
+-- Absorbs low-cardinality lookup tables to create a rich, flat dimension.
+CREATE TABLE IF NOT EXISTS public.dim_usina (
+    sk_usina SERIAL PRIMARY KEY,
+    id_usina_nk INTEGER NOT NULL, -- Natural Key from source
+    nome_usina VARCHAR NOT NULL,
+    estagio VARCHAR,
+    lat_usina DOUBLE PRECISION,
+    long_usina DOUBLE PRECISION,
+    
+    -- Absorbed Lookups
+    nome_proprietario VARCHAR,
+    nome_rio VARCHAR
+);
+
+-- 4. USINA CAPACITY FACT TABLE (Snapshot Fact)
+-- Isolates measures and foreign keys. 
+CREATE TABLE IF NOT EXISTS public.fact_usina_capacidade (
+    sk_usina INTEGER NOT NULL,
+    sk_geografia INTEGER NOT NULL,
+    sk_data_iniciop INTEGER,     -- FK to dim_data
+    sk_data_atualizacao INTEGER, -- FK to dim_data
+    
+    -- Measures
+    potkw FLOAT,
+    potfis FLOAT,
+    
+    -- Constraints
+    CONSTRAINT fk_fact_usina FOREIGN KEY (sk_usina) REFERENCES public.dim_usina(sk_usina),
+    CONSTRAINT fk_fact_geografia FOREIGN KEY (sk_geografia) REFERENCES public.dim_geografia(sk_geografia),
+    CONSTRAINT fk_fact_data_inicio FOREIGN KEY (sk_data_iniciop) REFERENCES public.dim_data(sk_data),
+    CONSTRAINT fk_fact_data_atualizacao FOREIGN KEY (sk_data_atualizacao) REFERENCES public.dim_data(sk_data)
+);
+
+-- ==============================================================================
+-- OPTIMIZATION & PHYSICAL DESIGN RECOMMENDATIONS
+-- ==============================================================================
+
+-- Partitioning: 
+-- If the dataset grows significantly and is often queried by the start date, 
+-- partitioning the fact table by year/month of 'sk_data_iniciop' is recommended.
+-- Example (PostgreSQL native partitioning):
+-- PARTITION BY RANGE (sk_data_iniciop);
+
+-- Indexing / Clustering:
+-- In a traditional PostgreSQL environment used for OLAP, B-Tree indexes on Surrogate Keys are vital.
+CREATE INDEX idx_fact_usina_sk ON public.fact_usina_capacidade(sk_usina);
+CREATE INDEX idx_fact_geografia_sk ON public.fact_usina_capacidade(sk_geografia);
+CREATE INDEX idx_fact_data_inicio_sk ON public.fact_usina_capacidade(sk_data_iniciop);
+
+-- For Cloud Data Warehouses (e.g., Snowflake, BigQuery, Redshift):
+-- 1. Redshift: 
+--    DISTKEY(sk_usina) 
+--    SORTKEY(sk_geografia, sk_data_iniciop)
+-- 2. BigQuery: 
+--    CLUSTER BY sk_geografia, sk_usina
+-- 3. Snowflake: 
+--    CLUSTER BY (sk_geografia, sk_data_iniciop)
+
+COMMIT;
+```

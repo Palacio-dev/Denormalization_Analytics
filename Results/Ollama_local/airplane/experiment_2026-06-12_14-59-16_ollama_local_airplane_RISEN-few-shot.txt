@@ -1,0 +1,258 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_14-59-16
+Model: ollama_local
+Prompt: RISEN-few-shot
+Schema: airplane
+==================================================
+
+{
+    "section_1": {
+        "summary": "The denormalization strategy focuses on optimizing read-heavy analytical queries involving flight itineraries, passenger details, and booking metadata. The primary bottleneck is the repeated JOIN operations between `flights`, `aircrafts_data`, `airports_data`, `tickets`, `bookings`, and `boarding_passes`. The strategy involves collapsing these relationships into a single 'Flight_Passenger_Billing' table to eliminate join overhead, while retaining separate reference tables for immutable entity data (Aircrafts, Airports) to ensure data integrity and maintainability.",
+        "structural_decisions": [
+            {
+                "decision_id": "D1",
+                "description": "Creation of a denormalized 'Flight_Passenger_Billing' table that merges data from 'flights', 'tickets', 'bookings', and 'boarding_passes'. This table includes flight details (flight_no, scheduled times, departure/arrival airports), aircraft info (model, range), passenger details (name, contact), and billing info (ticket_no, seat_no, fare_conditions, total_amount, boarding_no).",
+                "source_tables": ["bookings.flights", "bookings.tickets", "bookings.bookings", "bookings.boarding_passes"],
+                "target_tables": ["Flight_Passenger_Billing"]
+            },
+            {
+                "decision_id": "D2",
+                "description": "Retention of 'aircrafts_data' and 'airports_data' as separate reference tables. While 'aircraft_code' and 'airport_code' are redundant in the main table, keeping them as separate tables with JSON columns for model/name and coordinates allows for efficient point-in-time queries and updates without affecting the massive denormalized billing table.",
+                "source_tables": ["bookings.aircrafts_data", "bookings.airports_data"],
+                "target_tables": ["aircrafts_data", "airports_data"]
+            },
+            {
+                "decision_id": "D3",
+                "description": "Removal of 'seats' and 'ticket_flights' tables from the active schema. Their data is fully captured in the denormalized 'Flight_Passenger_Billing' table. The 'seats' table is removed because seat mapping is 1:1 per ticket/flight segment in this context, and 'ticket_flights' is absorbed.",
+                "source_tables": ["bookings.seats", "bookings.ticket_flights"],
+                "target_tables": []
+            }
+        ],
+        "attribute_level_changes": [
+            {
+                "decision_id": "A1",
+                "description": "Added redundant attributes to 'Flight_Passenger_Billing': 'flight_no', 'scheduled_departure', 'scheduled_arrival', 'departure_airport_name', 'arrival_airport_name', 'aircraft_model', 'aircraft_range', 'passenger_name', 'passenger_contact_data', 'seat_no', 'boarding_no', 'ticket_no', 'fare_conditions', 'total_amount'. These replace the need for JOINs.",
+                "attributes_added": ["flight_no", "scheduled_departure", "scheduled_arrival", "departure_airport_name", "arrival_airport_name", "aircraft_model", "aircraft_range", "passenger_name", "passenger_contact_data", "seat_no", "boarding_no", "ticket_no", "fare_conditions", "total_amount"]
+            },
+            {
+                "decision_id": "A2",
+                "description": "Removed 'aircraft_code' and 'airport_code' columns from 'Flight_Passenger_Billing' to reduce storage redundancy, relying instead on the lookup tables. Alternatively, if strict denormalization requires them for speed, they can be kept; however, given the JSON nature of the lookup tables, the primary key is sufficient for resolution.",
+                "attributes_removed": ["aircraft_code", "airport_code"]
+            }
+        ],
+        "tradeoffs": [
+            {
+                "tradeoff_id": "T1",
+                "description": "Trade-off between Write Performance and Read Performance. The denormalized 'Flight_Passenger_Billing' table simplifies reads but increases write complexity and storage size. Updates to flight schedules or passenger details require updating the main table, which is now larger and potentially more complex. The separate lookup tables allow for independent updates to aircraft models or airport coordinates without locking the massive billing table.",
+                "impact": "Read performance improved significantly (eliminated joins); Write performance slightly degraded due to larger table size and potential index bloat, but managed by separating reference data."
+            }
+        ]
+    },
+    "section_2": {
+        "query_patterns": [
+            {
+                "decision_id": "D1",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Complex analytical query: 'Retrieve all passengers flying on Flight 123, including their seat assignments, boarding times, total paid, and aircraft model details.' Previously required 4-5 table joins; now executes on a single table scan."
+            },
+            {
+                "decision_id": "D1",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Reporting query: 'List all bookings for a specific passenger ID with their associated flight itineraries, aircraft ranges, and total costs.' Eliminated the need to join 'tickets', 'bookings', 'flights', 'seats', and 'aircrafts_data'."
+            },
+            {
+                "decision_id": "D2",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Aggregation query: 'Calculate the average range of aircraft used for flights departing from JFK.' While 'aircrafts_data' remains separate, the denormalized table can be joined with it, or if 'aircraft_model' and 'aircraft_range' were added to the main table (Alternative D1), this would be a single-table aggregate."
+            }
+        ]
+    }
+}
+
+-- ============================================================================
+-- DENORMALIZED SCHEMA: FLIGHT BOOKING ANALYTICS
+-- Dialect: PostgreSQL
+-- Strategy: Collapsing Relations + Adding Redundant Attributes
+-- ============================================================================
+
+BEGIN;
+
+-- Drop existing tables if they exist to ensure clean state
+DROP TABLE IF EXISTS bookings.Flight_Passenger_Billing;
+DROP TABLE IF EXISTS bookings.aircrafts_data;
+DROP TABLE IF EXISTS bookings.airports_data;
+
+-- ============================================================================
+-- 1. REFERENCE TABLES (Immutable Entity Data)
+-- These tables store aircraft and airport details. They are kept separate 
+-- to allow independent updates and maintain referential integrity via 
+-- foreign keys in the denormalized table if needed (though we rely on 
+-- redundant data in the main table for reads).
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS bookings.aircrafts_data
+(
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    model jsonb NOT NULL,
+    range integer NOT NULL,
+    CONSTRAINT aircrafts_pkey PRIMARY KEY (aircraft_code)
+);
+
+COMMENT ON TABLE bookings.aircrafts_data IS 'Aircrafts (Reference Data)';
+COMMENT ON COLUMN bookings.aircrafts_data.aircraft_code IS 'Aircraft code, IATA';
+COMMENT ON COLUMN bookings.aircrafts_data.model IS 'Aircraft model';
+COMMENT ON COLUMN bookings.aircrafts_data.range IS 'Maximal flying distance, km';
+
+CREATE TABLE IF NOT EXISTS bookings.airports_data
+(
+    airport_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    airport_name jsonb NOT NULL,
+    city jsonb NOT NULL,
+    coordinates point NOT NULL,
+    timezone text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT airports_data_pkey PRIMARY KEY (airport_code)
+);
+
+COMMENT ON TABLE bookings.airports_data IS 'Airports (Reference Data)';
+COMMENT ON COLUMN bookings.airports_data.airport_code IS 'Airport code';
+COMMENT ON COLUMN bookings.airports_data.airport_name IS 'Airport name';
+COMMENT ON COLUMN bookings.airports_data.city IS 'City';
+COMMENT ON COLUMN bookings.airports_data.coordinates IS 'Airport coordinates (longitude and latitude)';
+COMMENT ON COLUMN bookings.airports_data.timezone IS 'Airport time zone';
+
+-- ============================================================================
+-- 2. DENORMALIZED MAIN TABLE
+-- This table merges Flight, Ticket, Booking, and Boarding Pass data.
+-- It includes redundant attributes for aircraft and airports to eliminate 
+-- JOINs for analytical queries.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS bookings.Flight_Passenger_Billing
+(
+    -- Primary Key: Unique Ticket Number
+    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Flight Itinerary Data (Redundant from flights table)
+    flight_no character(6) COLLATE pg_catalog."default" NOT NULL,
+    scheduled_departure timestamp with time zone NOT NULL,
+    scheduled_arrival timestamp with time zone NOT NULL,
+    departure_airport_name jsonb NOT NULL,
+    arrival_airport_name jsonb NOT NULL,
+    aircraft_model jsonb NOT NULL,
+    aircraft_range integer NOT NULL,
+    
+    -- Passenger Data (Redundant from tickets table)
+    passenger_id character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    passenger_name text COLLATE pg_catalog."default" NOT NULL,
+    passenger_contact_data jsonb NOT NULL,
+    
+    -- Booking & Billing Data (Redundant from bookings and ticket_flights)
+    book_ref character(6) COLLATE pg_catalog."default" NOT NULL,
+    total_amount numeric(10, 2) NOT NULL,
+    fare_conditions character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Boarding Data (Redundant from boarding_passes)
+    seat_no character varying(4) COLLATE pg_catalog."default" NOT NULL,
+    boarding_no integer NOT NULL,
+    
+    -- Primary Key Constraint
+    CONSTRAINT Flight_Passenger_Billing_pkey PRIMARY KEY (ticket_no),
+    
+    -- Unique Constraints to prevent duplicate bookings for same ticket/flight
+    CONSTRAINT Flight_Passenger_Billing_flight_ticket_uq UNIQUE (flight_no, ticket_no),
+    CONSTRAINT Flight_Passenger_Billing_seat_ticket_uq UNIQUE (seat_no, ticket_no)
+);
+
+COMMENT ON TABLE bookings.Flight_Passenger_Billing IS 'Denormalized Flight, Passenger, and Billing Data for High-Performance Reads';
+COMMENT ON COLUMN bookings.Flight_Passenger_Billing.ticket_no IS 'Ticket number (Primary Key)';
+COMMENT ON COLUMN bookings.Flight_Passenger_Billing.flight_no IS 'Flight number (Redundant)';
+COMMENT ON COLUMN bookings.Flight_Passenger_Billing.scheduled_departure IS 'Scheduled departure time (Redundant)';
+COMMENT ON COLUMN bookings.Flight_Passenger_Billing.scheduled_arrival IS 'Scheduled arrival time (Redundant)';
+COMMENT ON COLUMN bookings.Flight_Passenger_Billing.departure_airport_name IS 'Airport of departure name (Redundant)';
+COMMENT ON COLUMN bookings.Flight_Passenger_Billing.arrival_airport_name IS 'Airport of arrival name (Redundant)';
+COMMENT ON COLUMN bookings.Flight_Passenger_Billing.aircraft_model IS 'Aircraft model (Redundant)';
+COMMENT ON COLUMN bookings.Flight_Passenger_Billing.aircraft_range IS 'Aircraft range in km (Redundant)';
+COMMENT ON COLUMN bookings.Flight_Passenger_Billing.passenger_id IS 'Passenger ID (Redundant)';
+COMMENT ON COLUMN bookings.Flight_Passenger_Billing.passenger_name IS 'Passenger name (Redundant)';
+COMMENT ON COLUMN bookings.Flight_Passenger_Billing.passenger_contact_data IS 'Passenger contact info (Redundant)';
+COMMENT ON COLUMN bookings.Flight_Passenger_Billing.book_ref IS 'Booking reference (Redundant)';
+COMMENT ON COLUMN bookings.Flight_Passenger_Billing.total_amount IS 'Total booking cost (Redundant)';
+COMMENT ON COLUMN bookings.Flight_Passenger_Billing.fare_conditions IS 'Travel class (Redundant)';
+COMMENT ON COLUMN bookings.Flight_Passenger_Billing.seat_no IS 'Seat number (Redundant)';
+COMMENT ON COLUMN bookings.Flight_Passenger_Billing.boarding_no IS 'Boarding pass number (Redundant)';
+
+-- ============================================================================
+-- 3. FOREIGN KEY CONSTRAINTS (Optional Integrity)
+-- While the main table is denormalized for reads, we can add FKs to 
+-- the reference tables to allow data validation if the application layer 
+-- enforces it. Note: These are NOT VALID initially as they are not 
+-- part of the denormalization goal but ensure consistency.
+-- ============================================================================
+
+ALTER TABLE IF EXISTS bookings.Flight_Passenger_Billing
+    ADD CONSTRAINT Flight_Passenger_Billing_aircraft_code_fkey FOREIGN KEY (aircraft_code)
+    REFERENCES bookings.aircrafts_data (aircraft_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+ALTER TABLE IF EXISTS bookings.Flight_Passenger_Billing
+    ADD CONSTRAINT Flight_Passenger_Billing_departure_airport_fkey FOREIGN KEY (departure_airport_code)
+    REFERENCES bookings.airports_data (airport_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+ALTER TABLE IF EXISTS bookings.Flight_Passenger_Billing
+    ADD CONSTRAINT Flight_Passenger_Billing_arrival_airport_fkey FOREIGN KEY (arrival_airport_code)
+    REFERENCES bookings.airports_data (airport_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+ALTER TABLE IF EXISTS bookings.Flight_Passenger_Billing
+    ADD CONSTRAINT Flight_Passenger_Billing_ticket_flights_fkey FOREIGN KEY (ticket_no, flight_id)
+    REFERENCES bookings.ticket_flights (ticket_no, flight_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+ALTER TABLE IF EXISTS bookings.Flight_Passenger_Billing
+    ADD CONSTRAINT Flight_Passenger_Billing_bookings_fkey FOREIGN KEY (book_ref)
+    REFERENCES bookings.bookings (book_ref) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+ALTER TABLE IF EXISTS bookings.Flight_Passenger_Billing
+    ADD CONSTRAINT Flight_Passenger_Billing_tickets_fkey FOREIGN KEY (passenger_id)
+    REFERENCES bookings.tickets (passenger_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+ALTER TABLE IF EXISTS bookings.Flight_Passenger_Billing
+    ADD CONSTRAINT Flight_Passenger_Billing_seats_fkey FOREIGN KEY (seat_no)
+    REFERENCES bookings.seats (seat_no) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+-- ============================================================================
+-- 4. INDEXES
+-- Critical for performance on the denormalized table.
+-- ============================================================================
+
+CREATE INDEX IF NOT EXISTS Flight_Passenger_Billing_idx_passenger_name
+    ON bookings.Flight_Passenger_Billing (passenger_name);
+
+CREATE INDEX IF NOT EXISTS Flight_Passenger_Billing_idx_flight_no
+    ON bookings.Flight_Passenger_Billing (flight_no);
+
+CREATE INDEX IF NOT EXISTS Flight_Passenger_Billing_idx_aircraft_model
+    ON bookings.Flight_Passenger_Billing (aircraft_model);
+
+CREATE INDEX IF NOT EXISTS Flight_Passenger_Billing_idx_total_amount
+    ON bookings.Flight_Passenger_Billing (total_amount);
+
+COMMIT;

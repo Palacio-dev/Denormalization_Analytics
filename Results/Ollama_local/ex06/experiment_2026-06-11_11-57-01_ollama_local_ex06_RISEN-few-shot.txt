@@ -1,0 +1,171 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_11-57-01
+Model: ollama_local
+Prompt: RISEN-few-shot
+Schema: ex06
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on eliminating the 'ANO' (Year) table and the intermediate 'IES' and 
+    'ESCOLA' lookup tables. The primary bottleneck identified is the frequent need to join the 'ANO' table with 'ENADE', 'SAEB', 
+    'IDEB', and 'MUNICIPIO' to retrieve time-series data for specific educational entities. By materializing the relationship between 
+    a specific year, a specific entity (via its ID), and its indicators, we can create a single wide table representing 
+    'Entity-Year-Indicator' snapshots. This allows analytical queries to retrieve data for multiple years or entities without complex multi-table joins, significantly improving read performance. The 'IES' and 'ESCOLA' tables are also denormalized by embedding their attributes directly into the main indicator table, as these attributes are rarely changed and are frequently accessed alongside the indicators.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Created a single denormalized table 'INDICADORES_ESCOLA_ANO' that merges data from 'ANO', 'MUNICIPIO', 'IES', 'ESCOLA', 'CURSO', 'IDEB', 'ENADE', and 'SAEB'. The primary key is now a composite of (id_curso, id_ano) to represent the unique snapshot of a course in a specific year.",
+        "source_tables": ["ANO", "MUNICIPIO", "IES", "ESCOLA", "CURSO", "IDEB", "ENADE", "SAEB"],
+        "target_tables": ["INDICADORES_ESCOLA_ANO"]
+      },
+      {
+        "decision_id": "D2",
+        "description": "Removed the 'UF', 'MUNICIPIO', 'IES', 'ESCOLA', and 'CURSO' tables as standalone lookup tables. Their attributes are now redundant but stored in the main indicator table to avoid joins.",
+        "source_tables": ["UF", "MUNICIPIO", "IES", "ESCOLA", "CURSO"],
+        "target_tables": ["INDICADORES_ESCOLA_ANO"]
+      },
+      {
+        "decision_id": "D3",
+        "description": "Removed the 'ANO' table. The year information is now stored directly in the main table alongside the entity and indicator data.",
+        "source_tables": ["ANO"],
+        "target_tables": ["INDICADORES_ESCOLA_ANO"]
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant attributes: 'nome_municipio', 'sigla_uf', 'nome_ies', 'sigla_ies', 'codigo_ies', 'rede_ies', 'nome_escola', 'cod_escola', 'nome_curso', 'sigla_curso', 'ano', 'rend_1' through 'rend_4', 'ind_rend', 'nota_ideb', 'total_inscritos', 'total_concluintes', 'nota_bruta_ce', 'nota_padronizada_ce', 'nota_bruta_fg', 'nota_padronizada_fg', 'nota_enade_continua', 'nota_enade_faixa', 'nota_mat', 'nota_port', 'nota_padrao'.",
+        "action": "Added",
+        "affected_tables": ["INDICADORES_ESCOLA_ANO"]
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed attributes 'id_uf', 'id_municipio', 'id_ies', 'id_escola', 'id_curso', 'id_enade', 'id_saeb', 'id_ideb' from the original tables and replaced them with the composite primary key logic in the new table.",
+        "action": "Removed",
+        "affected_tables": ["UF", "MUNICIPIO", "IES", "ESCOLA", "CURSO", "ANO"]
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Increased Write Complexity vs. Improved Read Performance. The new schema requires more columns and complex composite keys for insertion, but it eliminates the overhead of joining 5-6 tables for any analytical query involving time-series data for educational indicators.",
+        "impact": "High Read Performance Gain, Moderate Write Overhead"
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Storage Size. The denormalized table will be significantly larger in terms of disk usage due to redundant string data (names, codes). However, this is an acceptable tradeoff for an analytical environment where storage is typically less of a bottleneck than query latency.",
+        "impact": "Increased Storage, Reduced I/O Latency"
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical report: 'Show the average IDEB score and ENADE pass rate for all public schools in the state of SP between 2018 and 2022, grouped by year.' (Requires joining ANO, MUNICIPIO, IES, ESCOLA, CURSO, IDEB, ENADE)."
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Comparative analysis: 'Compare the evolution of total participants in ENADE and SAEB notes for the top 10 municipalities in Brazil over the last 5 years.' (Requires joining multiple dimension tables)."
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Entity lookup: 'List all courses offered by IES X in year Y along with their municipality name and IDEB score.' (Previously required joining IES, MUNICIPIO, ANO, IDEB, CURSO)."
+      }
+    ]
+  }
+}
+
+-- ==========================================
+-- DENORMALIZED SCHEMA: EDUCATIONAL INDICATORS
+-- Dialect: PostgreSQL (compatible with input)
+-- Strategy: Full Denormalization of Time-Series Indicators
+-- ==========================================
+
+BEGIN;
+
+-- Drop old tables to ensure clean slate
+DROP TABLE IF EXISTS UF CASCADE;
+DROP TABLE IF EXISTS MUNICIPIO CASCADE;
+DROP TABLE IF EXISTS IDEB CASCADE;
+DROP TABLE IF EXISTS ENADE CASCADE;
+DROP TABLE IF EXISTS SAEB CASCADE;
+DROP TABLE IF EXISTS IES CASCADE;
+DROP TABLE IF EXISTS ESCOLA CASCADE;
+DROP TABLE IF EXISTS CURSO CASCADE;
+DROP TABLE IF EXISTS ANO CASCADE;
+DROP TABLE IF EXISTS INDICADORES_ESCOLA_ANO CASCADE;
+
+-- ==========================================
+-- NEW DENORMALIZED TABLE
+-- Represents a snapshot of an educational entity (Course) 
+-- with all its associated indicators for a specific year.
+-- Primary Key: (id_curso, id_ano)
+-- ==========================================
+
+CREATE TABLE INDICADORES_ESCOLA_ANO (
+    id_curso INT NOT NULL,
+    id_ano INT NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    nome_ies VARCHAR(100) NOT NULL,
+    sigla_ies VARCHAR(20),
+    codigo_ies INT UNIQUE NOT NULL,
+    rede_ies VARCHAR(100) NOT NULL,
+    nome_escola VARCHAR(100) NOT NULL,
+    cod_escola INTEGER UNIQUE NOT NULL,
+    nome_curso VARCHAR(100) NOT NULL,
+    
+    -- IDEB Indicators
+    rend_1 REAL,
+    rend_2 REAL,
+    rend_3 REAL,
+    rend_4 REAL,
+    ind_rend REAL,
+    nota_ideb REAL,
+    
+    -- ENADE Indicators
+    total_inscritos INT CHECK (total_inscritos >= 0),
+    total_concluintes INT CHECK (total_concluintes >= 0),
+    nota_bruta_ce REAL,
+    nota_padronizada_ce REAL,
+    nota_bruta_fg REAL,
+    nota_padronizada_fg REAL,
+    nota_enade_continua REAL,
+    nota_enade_faixa REAL,
+    
+    -- SAEB Indicators
+    nota_mat REAL,
+    nota_port REAL,
+    nota_padrao REAL,
+    
+    -- Business Logic Constraints
+    CONSTRAINT pk_indicadores_escola_ano PRIMARY KEY (id_curso, id_ano),
+    CONSTRAINT chk_ano_positive CHECK (id_ano > 0),
+    CONSTRAINT chk_qtd_positive CHECK (
+        total_inscritos >= 0 AND 
+        total_concluintes >= 0 AND
+        total_inscritos >= total_concluintes
+    )
+);
+
+-- ==========================================
+-- FOREIGN KEY RELATIONSHIPS (Optional for Denormalized)
+-- In a purely denormalized analytical schema, FKs are often removed 
+-- to prevent update anomalies on redundant data. 
+-- However, we keep them only to enforce referential integrity 
+-- on the 'id_curso' if it were ever derived from a lookup, 
+-- though here 'id_curso' is the primary key of the snapshot.
+-- We assume 'id_curso' is generated or managed externally.
+-- ==========================================
+
+-- Note: In a strict denormalized design, we do not enforce FKs on the 
+-- redundant columns (sigla_uf, nome_municipio, etc.) because they are 
+-- independent snapshots. If data consistency is critical, application 
+-- logic should ensure the 'id_curso' corresponds to a valid course.
+
+COMMIT;

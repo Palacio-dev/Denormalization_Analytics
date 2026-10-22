@@ -1,0 +1,234 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_08-50-51
+Model: ollama_api
+Prompt: senior
+Schema: HFC
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on transforming the OLTP schema into a star schema with denormalized dimensions and a central fact table. The tombos table is treated as the central fact table due to its transactional nature and rich set of foreign key relationships. Dimensions like herbarios, coletores, especies, generos, familias, and locais_coleta are denormalized to include related attributes, reducing join complexity. Hierarchical taxonomic data (reino, familia, genero, especie) is flattened into a single Taxonomy dimension. Date-related fields are extracted into a Date dimension. Reference data like tipos, solos, relevos, and vegetacoes are embedded into the fact table to minimize joins. This approach optimizes for read-heavy analytical workloads by pre-joining data and reducing query complexity.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Transform the 'tombos' table into a central fact table, capturing the core specimen data and measurements."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Denormalize the 'herbarios' dimension by including 'endereco' details directly in the herbario record."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Create a flattened 'Taxonomy' dimension by joining 'reinos', 'familias', 'generos', 'especies', 'sub_especies', and 'variedades' into a single table with hierarchical keys."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Denormalize the 'locais_coleta' dimension by including 'cidade', 'estado', and 'pais' names directly."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Embed reference data (tipos, solos, relevos, vegetacoes, fase_sucessional) directly into the fact table as descriptive attributes."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Create a Date dimension to handle all date-related fields for efficient time-series analysis."
+      },
+      {
+        "decision_id": "D7",
+        "description": "Absorb 'coletores' and 'coletores_complementares' into a single denormalized collector attribute in the fact table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Add surrogate keys to all dimension tables for better handling of slowly changing dimensions and improved join performance."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Derive date keys (e.g., data_coleta_sk) in the fact table to link to the Date dimension."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Add calculated fields like 'full_scientific_name' in the Taxonomy dimension by concatenating taxonomic ranks."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Remove redundant 'created_at' and 'updated_at' fields from the fact table to reduce its width."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Denormalization introduces data redundancy, increasing storage requirements but significantly improving query performance by reducing the number of joins."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Embedding reference data simplifies queries but makes the schema less flexible to changes in reference data, requiring ETL updates for any changes."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Using surrogate keys improves performance and handles SCDs but adds complexity to the ETL process for maintaining key mappings."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregate the count of specimens by family, genus, and species to analyze collection diversity."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze the geographical distribution of collections by country, state, and city."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Report on collection activities over time, grouped by year, month, and collector."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Study the ecological context of collections by joining with soil, relief, and vegetation types."
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Track the history of specimen identifications and alterations for auditing purposes."
+      }
+    ]
+  }
+}
+
+```sql
+-- Dimension Tables
+
+-- Date Dimension
+CREATE TABLE public.dim_date (
+    date_sk INTEGER NOT NULL,
+    date_actual DATE NOT NULL,
+    year_actual INTEGER NOT NULL,
+    quarter_actual INTEGER NOT NULL,
+    month_actual INTEGER NOT NULL,
+    day_of_month INTEGER NOT NULL,
+    day_of_week INTEGER NOT NULL,
+    day_name VARCHAR(20) NOT NULL,
+    month_name VARCHAR(20) NOT NULL,
+    CONSTRAINT pk_dim_date PRIMARY KEY (date_sk)
+);
+
+-- Herbaria Dimension
+CREATE TABLE public.dim_herbarium (
+    herbarium_sk BIGSERIAL NOT NULL,
+    herbarium_id BIGINT NOT NULL,
+    herbarium_name VARCHAR(200) NOT NULL,
+    herbarium_acronym VARCHAR(80) NOT NULL,
+    herbarium_email VARCHAR(200),
+    herbarium_address_street VARCHAR(200),
+    herbarium_address_number VARCHAR(10),
+    herbarium_address_complement TEXT,
+    herbarium_address_city VARCHAR(255),
+    herbarium_address_state VARCHAR(255),
+    herbarium_address_country VARCHAR(255),
+    CONSTRAINT pk_dim_herbarium PRIMARY KEY (herbarium_sk)
+);
+
+-- Location Dimension
+CREATE TABLE public.dim_location (
+    location_sk BIGSERIAL NOT NULL,
+    location_id BIGINT NOT NULL,
+    location_description TEXT,
+    city_name VARCHAR(255),
+    state_name VARCHAR(255),
+    state_acronym CHAR(4),
+    country_name VARCHAR(255),
+    country_acronym CHAR(4),
+    successional_stage_name VARCHAR(200),
+    CONSTRAINT pk_dim_location PRIMARY KEY (location_sk)
+);
+
+-- Taxonomy Dimension
+CREATE TABLE public.dim_taxonomy (
+    taxonomy_sk BIGSERIAL NOT NULL,
+    kingdom_id BIGINT,
+    kingdom_name VARCHAR(200),
+    family_id BIGINT,
+    family_name VARCHAR(200),
+    genus_id BIGINT,
+    genus_name VARCHAR(200),
+    species_id BIGINT,
+    species_name VARCHAR(200),
+    species_author VARCHAR(200),
+    subspecies_id BIGINT,
+    subspecies_name VARCHAR(255),
+    variety_id BIGINT,
+    variety_name VARCHAR(200),
+    full_scientific_name TEXT, -- Derived field
+    taxon_rank VARCHAR(45), -- e.g., 'Species', 'Subspecies', 'Variety'
+    CONSTRAINT pk_dim_taxonomy PRIMARY KEY (taxonomy_sk)
+);
+
+-- Fact Table
+
+-- Specimen Fact Table
+CREATE TABLE public.fact_specimen (
+    specimen_sk BIGSERIAL NOT NULL,
+    specimen_id BIGINT NOT NULL, -- hcf from tombos
+    
+    -- Date Foreign Keys
+    collection_date_sk INTEGER,
+    identification_date_sk INTEGER,
+    specimen_entry_date_sk INTEGER, -- data_tombo
+    
+    -- Dimension Foreign Keys
+    herbarium_sk BIGINT,
+    location_sk BIGINT,
+    taxonomy_sk BIGINT,
+    
+    -- Descriptive Attributes (Denormalized References)
+    specimen_type VARCHAR(250),
+    soil_type VARCHAR(300),
+    relief_type VARCHAR(300),
+    vegetation_type VARCHAR(300),
+    successional_stage VARCHAR(200),
+    collection_anexa_type VARCHAR(50), -- Assuming enum type can be converted to string
+    
+    -- Collector Information (Denormalized)
+    main_collector_name VARCHAR(255),
+    complementary_collectors VARCHAR(1000),
+    
+    -- Specimen Details
+    collection_number BIGINT,
+    popular_names TEXT,
+    scientific_name TEXT,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    altitude DOUBLE PRECISION,
+    observation TEXT,
+    description TEXT,
+    is_unique BOOLEAN, -- unicata
+    situation VARCHAR(50), -- Assuming enum type can be converted to string
+    is_active BOOLEAN,
+    is_draft BOOLEAN,
+    
+    -- Measures
+    number_of_photos INTEGER, -- Derived from tombos_fotos
+    number_of_identifiers INTEGER, -- Derived from tombos_identificadores
+    
+    CONSTRAINT pk_fact_specimen PRIMARY KEY (specimen_sk),
+    CONSTRAINT fk_fact_specimen_date_collection FOREIGN KEY (collection_date_sk) REFERENCES public.dim_date(date_sk),
+    CONSTRAINT fk_fact_specimen_date_identification FOREIGN KEY (identification_date_sk) REFERENCES public.dim_date(date_sk),
+    CONSTRAINT fk_fact_specimen_date_entry FOREIGN KEY (specimen_entry_date_sk) REFERENCES public.dim_date(date_sk),
+    CONSTRAINT fk_fact_specimen_herbarium FOREIGN KEY (herbarium_sk) REFERENCES public.dim_herbarium(herbarium_sk),
+    CONSTRAINT fk_fact_specimen_location FOREIGN KEY (location_sk) REFERENCES public.dim_location(location_sk),
+    CONSTRAINT fk_fact_specimen_taxonomy FOREIGN KEY (taxonomy_sk) REFERENCES public.dim_taxonomy(taxonomy_sk)
+);
+
+-- Indexes for Fact Table (Example)
+CREATE INDEX idx_fact_specimen_herbarium_sk ON public.fact_specimen(herbarium_sk);
+CREATE INDEX idx_fact_specimen_location_sk ON public.fact_specimen(location_sk);
+CREATE INDEX idx_fact_specimen_taxonomy_sk ON public.fact_specimen(taxonomy_sk);
+CREATE INDEX idx_fact_specimen_collection_date_sk ON public.fact_specimen(collection_date_sk);
+```

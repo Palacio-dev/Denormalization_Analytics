@@ -1,0 +1,147 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_15-50-17
+Model: ollama_local
+Prompt: RISEN
+Schema: employees
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on eliminating the repetitive JOIN operations between employees, departments, and their temporal attributes (hire_date, tenure, salary history). The primary bottleneck is the frequent need to retrieve employee details alongside their department assignments and historical salary data without joining multiple tables. The strategy employs 'Collapsing Relations' to merge employee-department relationships into a single denormalized fact table, and 'Adding Redundant Attributes' to duplicate department and employee core attributes directly into the salary and title tables to avoid joins for common analytical queries.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidate 'department_employee' and 'department_manager' into a single 'department_assignments' table. This table now holds the core relationship (employee_id, department_id) along with temporal dates, removing the need to join these two separate tables."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Create a new 'employee_salary' table that merges data from 'salary' and 'title' tables. It includes employee_id, amount, title, and temporal dates (from_date, to_date) to allow a single table lookup for compensation and role history."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Create a denormalized 'employee_core' table that duplicates the primary attributes from 'employees' (id, first_name, last_name, birth_date, gender, hire_date) and 'department' (dept_name) to serve as a lookup for any query needing basic employee info."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant attributes 'dept_name' to 'department_assignments' and 'employee_core'. Added 'first_name', 'last_name', 'gender', 'birth_date' to 'department_assignments' and 'employee_core'. Added 'title' and 'amount' to 'employee_salary'."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed foreign key constraints and unique constraints on composite keys in the new denormalized tables to reflect the analytical model where data integrity is managed via application logic or application-level constraints, not physical FKs."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Increased Write Performance vs. Read Performance. While reads are optimized by eliminating joins, writes will require updating multiple redundant columns (e.g., updating an employee's department name requires updating both 'employee_core' and 'department_assignments')."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Storage Overhead. The denormalized schema stores duplicate data (department names, employee names), increasing storage requirements and requiring synchronization logic to keep redundant attributes up-to-date."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Identify all employees who work in 'Sales' department, including their first name, last name, and hire date."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Calculate the average salary and current title for employees in the 'Engineering' department."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "List all employees who have ever held a title of 'Manager' and their birth dates."
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- ==========================================
+-- DENORMALIZED SCHEMA: EMPLOYEES_ANALYTICS
+-- ==========================================
+-- This schema is designed for high-read analytical workloads.
+-- It eliminates JOINs by pre-materializing common attributes.
+-- Note: Foreign Key constraints are removed to reflect the denormalized nature 
+-- and potential for out-of-order data in analytical queries.
+
+-- 1. Employee Core (Denormalized lookup for basic info)
+CREATE TABLE IF NOT EXISTS employees.employee_core (
+    id bigint NOT NULL,
+    first_name character varying(14) COLLATE pg_catalog."default" NOT NULL,
+    last_name character varying(16) COLLATE pg_catalog."default" NOT NULL,
+    gender character varying(1) COLLATE pg_catalog."default" NOT NULL,
+    birth_date date NOT NULL,
+    hire_date date NOT NULL,
+    PRIMARY KEY (id)
+);
+
+-- 2. Department Core (Denormalized lookup for department name)
+CREATE TABLE IF NOT EXISTS employees.department_core (
+    id character(4) COLLATE pg_catalog."default" NOT NULL,
+    dept_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    PRIMARY KEY (id)
+);
+
+-- 3. Department Assignments (Merged department_employee & department_manager)
+-- Combines relationship data with department name for easy lookup
+CREATE TABLE IF NOT EXISTS employees.department_assignments (
+    employee_id bigint NOT NULL,
+    department_id character(4) COLLATE pg_catalog."default" NOT NULL,
+    dept_name character varying(40) COLLATE pg_catalog."default" NOT NULL, -- Redundant attribute
+    from_date date NOT NULL,
+    to_date date NOT NULL,
+    PRIMARY KEY (employee_id, department_id, from_date) -- Composite PK to handle multiple roles over time
+);
+
+-- 4. Employee Compensation & Roles (Merged salary & title)
+-- Combines salary and title data to avoid joins
+CREATE TABLE IF NOT EXISTS employees.employee_compensation (
+    employee_id bigint NOT NULL,
+    amount bigint NOT NULL,
+    title character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    from_date date NOT NULL,
+    to_date date,
+    PRIMARY KEY (employee_id, from_date) -- Composite PK based on salary history
+);
+
+-- ==========================================
+-- DATA LOADING LOGIC (Optional for context)
+-- ==========================================
+-- In a production environment, you would populate these tables as follows:
+-- 
+-- -- Load Core Data
+-- INSERT INTO employees.employee_core (id, first_name, last_name, gender, birth_date, hire_date)
+-- SELECT id, first_name, last_name, gender, birth_date, hire_date FROM employees.employee;
+--
+-- INSERT INTO employees.department_core (id, dept_name)
+-- SELECT id, dept_name FROM employees.department;
+--
+-- -- Load Relationships (Merging Dept Emp and Dept Manager)
+-- INSERT INTO employees.department_assignments (employee_id, department_id, dept_name, from_date, to_date)
+-- SELECT e.id, d.id, d.dept_name, fe.from_date, fe.to_date FROM employees.employee e
+-- JOIN employees.department_employee fe ON e.id = fe.employee_id
+-- JOIN employees.department d ON fe.department_id = d.id;
+--
+-- INSERT INTO employees.department_assignments (employee_id, department_id, dept_name, from_date, to_date)
+-- SELECT e.id, d.id, d.dept_name, dm.from_date, dm.to_date FROM employees.employee e
+-- JOIN employees.department_manager dm ON e.id = dm.employee_id
+-- JOIN employees.department d ON dm.department_id = d.id;
+--
+-- -- Load Compensation & Titles
+-- INSERT INTO employees.employee_compensation (employee_id, amount, title, from_date, to_date)
+-- SELECT e.id, s.amount, t.title, s.from_date, s.to_date 
+-- FROM employees.employee e
+-- JOIN employees.salary s ON e.id = s.employee_id
+-- LEFT JOIN employees.title t ON e.id = t.employee_id AND s.from_date <= t.from_date; -- Simplified logic
+```

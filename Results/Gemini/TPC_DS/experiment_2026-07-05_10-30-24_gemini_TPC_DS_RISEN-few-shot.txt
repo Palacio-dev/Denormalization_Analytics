@@ -1,0 +1,146 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_10-30-24
+Model: gemini
+Prompt: RISEN-few-shot
+Schema: TPC_DS
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The original schema represents a multi-channel retail environment (Store, Catalog, Web) with normalized transactional tables for sales headers, sales line items, returns, and inventory. To optimize for analytical workloads (e.g., Data Warehousing), the denormalization strategy focuses on 'Collapsing Relations' to eliminate heavy JOINs between headers and line items, and to consolidate the three distinct sales channels into a unified omnichannel view. 'Adding Derived Attributes' is also applied to precompute critical financial metrics, reducing CPU overhead during aggregations.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapse Sales Relations and Consolidate Channels: Merged `s_purchase`, `s_purchase_lineitem`, `s_catalog_order`, `s_catalog_order_lineitem`, `s_web_order`, and `s_web_order_lineitem` into a single wide `fact_sales` table. A new `channel_type` column is introduced to distinguish the source."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Consolidate Returns Channels: Merged `s_store_returns` and `s_catalog_returns` into a single `fact_returns` table, using a `channel_type` column to differentiate between store and catalog returns."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived attribute `net_paid_amt` to `fact_sales` to precompute the effective revenue per line item (considering quantity, sales price, coupon amounts, and shipping costs)."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added derived attribute `net_refund_amt` to `fact_returns` to precompute the effective loss per returned item (considering return amount, taxes, fees, and shipping costs)."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Standardized overlapping column names across channels (e.g., `purc_purchase_date`, `cord_order_date`, and `word_order_date` mapped to `order_date`) while preserving channel-specific attributes with prefixes (e.g., `store_order_comment`, `web_site_id`) to avoid ambiguity."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage footprint: Header attributes (like `order_date`, `customer_id`) are now repeated for every line item in the sales and returns tables, consuming more disk space."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Sparse columns: Consolidating channels creates wide tables where channel-specific columns (e.g., `web_site_id` for store sales) will be NULL, which relies on the database's columnar compression to handle efficiently."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1",
+        "query": "SELECT channel_type, order_date, SUM(net_paid_amt) AS total_net_revenue FROM fact_sales GROUP BY channel_type, order_date ORDER BY order_date DESC;"
+      },
+      {
+        "decision_id": "D2",
+        "query": "SELECT channel_type, reason_id, SUM(net_refund_amt) AS total_refund_cost FROM fact_returns GROUP BY channel_type, reason_id ORDER BY total_refund_cost DESC;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- ============================================================
+--   Table: fact_sales
+--   Denormalized from: s_purchase, s_purchase_lineitem, 
+--   s_catalog_order, s_catalog_order_lineitem, 
+--   s_web_order, s_web_order_lineitem
+-- ============================================================
+CREATE TABLE fact_sales
+(
+    channel_type               VARCHAR(10)           NOT NULL,
+    order_id                   INTEGER               NOT NULL,
+    line_number                INTEGER               NOT NULL,
+    item_id                    CHAR(16)                      ,
+    customer_id                CHAR(16)                      ,
+    ship_customer_id           CHAR(16)                      ,
+    order_date                 CHAR(10)                      ,
+    order_time                 INTEGER                       ,
+    promotion_id               CHAR(16)                      ,
+    quantity                   INTEGER                       ,
+    sales_price                NUMERIC(7,2)                  ,
+    coupon_amt                 NUMERIC(7,2)                  ,
+    ship_cost                  NUMERIC(7,2)                  ,
+    ship_date                  CHAR(10)                      ,
+    ship_mode_id               CHAR(16)                      ,
+    warehouse_id               CHAR(16)                      ,
+    store_id                   CHAR(16)                      ,
+    register_id                INTEGER                       ,
+    clerk_id                   INTEGER                       ,
+    call_center_id             CHAR(16)                      ,
+    catalog_number             INTEGER                       ,
+    catalog_page_number        INTEGER                       ,
+    web_site_id                CHAR(16)                      ,
+    web_page_id                CHAR(16)                      ,
+    store_order_comment        CHAR(100)                     ,
+    store_line_comment         VARCHAR(100)                  ,
+    catalog_order_comment      VARCHAR(100)                  ,
+    web_order_comment          CHAR(100)                     ,
+    net_paid_amt               NUMERIC(9,2)                  
+);
+
+-- ============================================================
+--   Table: fact_returns
+--   Denormalized from: s_store_returns, s_catalog_returns
+-- ============================================================
+CREATE TABLE fact_returns
+(
+    channel_type               VARCHAR(10)           NOT NULL,
+    order_id                   VARCHAR(16)           NOT NULL,
+    line_number                INTEGER               NOT NULL,
+    item_id                    CHAR(16)              NOT NULL,
+    return_customer_id         CHAR(16)                      ,
+    refund_customer_id         CHAR(16)                      ,
+    return_date                CHAR(10)                      ,
+    return_time                CHAR(10)                      ,
+    return_qty                 INTEGER                       ,
+    return_amt                 NUMERIC(7,2)                  ,
+    return_tax                 NUMERIC(7,2)                  ,
+    return_fee                 NUMERIC(7,2)                  ,
+    return_ship_cost           NUMERIC(7,2)                  ,
+    refunded_cash              NUMERIC(7,2)                  ,
+    reversed_charge            NUMERIC(7,2)                  ,
+    store_credit               NUMERIC(7,2)                  ,
+    merchant_credit            NUMERIC(7,2)                  ,
+    reason_id                  CHAR(16)                      ,
+    store_id                   CHAR(16)                      ,
+    ticket_number              CHAR(20)                      ,
+    call_center_id             CHAR(16)                      ,
+    shipmode_id                CHAR(16)                      ,
+    catalog_page_id            CHAR(16)                      ,
+    warehouse_id               CHAR(16)                      ,
+    net_refund_amt             NUMERIC(9,2)                  
+);
+
+-- ============================================================
+--   Table: fact_inventory
+--   Denormalized from: s_inventory
+-- ============================================================
+CREATE TABLE fact_inventory
+(
+    warehouse_id               CHAR(16)              NOT NULL,
+    item_id                    CHAR(16)              NOT NULL,
+    invn_date                  CHAR(10)              NOT NULL,
+    qty_on_hand                INTEGER                       
+);
+```

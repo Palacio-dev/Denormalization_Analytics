@@ -1,0 +1,64 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_10-12-56
+Model: ollama_local
+Prompt: RISEN
+Schema: harperdb
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on eliminating the join between `users`, `user_entitlements`, and `entitlements` by creating a single, wide denormalized table. This approach assumes a heavy read workload where queries frequently require user-specific entitlement details (features, packages, limits, counts) without needing to look up the `users` table or traverse the junction table. We utilize 'Collapsing Relations' to merge the three tables into one, and 'Adding Redundant Attributes' to store the `user_id` directly in the entitlement details to avoid the join operation.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged `users`, `user_entitlements`, and `entitlements` into a single denormalized table named `denormalized_user_entitlements`. The `user_id` from the junction table is now redundant in the source `users` table but is kept in the new table to allow single-table lookups."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant columns `user_id`, `activeDate`, `inactiveDate`, `useLimit`, `useCount`, `featureType`, `packageType`, and `activeFlag` to the new table. The `id` (entitlement_id) serves as the primary key, while `user_id` is a non-key attribute duplicated for query efficiency."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Write Performance vs. Read Performance. The denormalized schema introduces write contention because every update to an entitlement (e.g., changing `useCount` or `activeFlag`) requires updating the row in the new table, which includes the `user_id`. If the system handles millions of distinct user-entitlement combinations, the write amplification and potential lock contention on the single large table could degrade update performance compared to the original normalized three-table structure."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Frequent analytical queries of the form: 'List all features for User X including their usage stats and package type' or 'Get usage statistics for all active entitlements.' These queries previously required: SELECT * FROM user_entitlements ue JOIN entitlements e ON ue.entitlement_id = e.id JOIN users u ON ue.user_id = u.id WHERE ... . The new schema allows: SELECT * FROM denormalized_user_entitlements WHERE user_id = X."
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- Denormalized Schema for Improved Read Performance
+-- Dialect: PostgreSQL (Compatible with MySQL syntax provided)
+-- Strategy: Collapsing Relations + Adding Redundant Attributes
+
+CREATE TABLE denormalized_user_entitlements (
+    id INT PRIMARY KEY,
+    user_id INT NOT NULL,
+    activeDate DATE,
+    inactiveDate DATE,
+    useLimit INT,
+    useCount INT,
+    featureType VARCHAR(4),
+    packageType VARCHAR(4),
+    activeFlag INT
+);
+
+-- Indexes for common read patterns
+CREATE INDEX idx_denormalized_user_id ON denormalized_user_entitlements(user_id);
+CREATE INDEX idx_denormalized_active ON denormalized_user_entitlements(activeFlag);
+CREATE INDEX idx_denormalized_feature ON denormalized_user_entitlements(featureType);
+```

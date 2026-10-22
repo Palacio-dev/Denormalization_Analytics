@@ -1,0 +1,120 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-04_00-58-15
+Model: ollama_local
+Prompt: OBT
+Schema: employees
+==================================================
+
+{
+    "section_1": {
+        "summary": "The denormalization strategy utilizes the 'One-Big-Table' approach to transform the relational Employee schema into a single, wide table. This eliminates all Foreign Keys, joins, and intermediate lookup tables. Instead, every attribute from `employees`, `department`, `department_employee`, `department_manager`, `salary`, `title`, and `department` is consolidated into a single table with a composite primary key. This strategy is chosen to maximize read performance for analytical queries involving complex joins (e.g., 'Get all employees in Dept X with their salaries and titles'), reducing I/O operations and network latency between tables.",
+        "structural_decisions": [
+            {
+                "decision_id": "D1",
+                "description": "Merged all 7 source tables (`employees`, `department`, `department_employee`, `department_manager`, `salary`, `title`, `department`) into a single table named `employees_flat`."
+            },
+            {
+                "decision_id": "D2",
+                "description": "Removed all Foreign Key constraints and references. The original relationships (e.g., `department_employee` referencing `employee`) are now represented by direct columns in the single table."
+            },
+            {
+                "decision_id": "D3",
+                "description": "Replaced the composite Primary Keys of the source tables (e.g., `(employee_id, department_id)` in `department_employee`) with a composite Primary Key consisting of `employee_id` and `department_id` in the new schema. This allows for efficient indexing and grouping without requiring JOINs."
+            }
+        ],
+        "attribute_level_changes": [
+            {
+                "decision_id": "A1",
+                "description": "Added derived columns to the new schema: `emp_dept_type` (to distinguish between direct employment and management roles), `is_manager` (boolean flag), and `is_employee` (boolean flag) to facilitate filtering without complex CASE logic."
+            },
+            {
+                "decision_id": "A2",
+                "description": "Prefixes for ambiguous attributes were added where necessary (e.g., `emp_first_name`, `dept_name`) to ensure semantic clarity, although the constraints dictate unique column names per table."
+            },
+            {
+                "decision_id": "A3",
+                "description": "Standardized date columns (`from_date`, `to_date`) to ensure consistency across salary and title records for the same employee."
+            }
+        ],
+        "tradeoffs": [
+            {
+                "tradeoff_id": "T1",
+                "description": "Tradeoff: Write Performance vs. Read Performance. While reads are significantly faster due to the elimination of JOINs, the single large table may suffer from write contention and higher locking overhead during bulk inserts or updates compared to a normalized schema."
+            },
+            {
+                "tradeoff_id": "T2",
+                "description": "Tradeoff: Storage vs. Query Flexibility. The denormalized schema requires storing redundant data (e.g., `employee_id` repeated for each salary and title record). This increases storage footprint slightly but drastically reduces query execution time."
+            }
+        ]
+    },
+    "section_2": {
+        "query_patterns": [
+            {
+                "decision_id": "D1",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Analytical query requiring a full employee profile including their current department, role (manager vs employee), salary history, and titles. In the normalized model, this requires 4-5 JOINs. In the denormalized model, it is a simple `SELECT *` with a `WHERE` clause."
+            },
+            {
+                "decision_id": "D2",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Reporting query to find 'All employees who were managers in Department Y between dates X and Z'. This avoids the need to join `department_manager` with `employee` and `department` tables."
+            },
+            {
+                "decision_id": "D3",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Salary analysis query: 'Calculate average salary for employees in Department Z'. Eliminates the join between `salary` and `department_employee` to filter by department."
+            }
+        ]
+    }
+}
+
+-- ================================================
+-- DENORMALIZED SCHEMA: EMPLOYEES (ONE-BIG-TABLE)
+-- Dialect: PostgreSQL
+-- Strategy: One-Big-Table Model
+-- ================================================
+
+CREATE TABLE IF NOT EXISTS employees_flat (
+    -- Composite Primary Key to represent the relationship between Employee and Department
+    employee_id bigint NOT NULL,
+    department_id character(4) COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Employee Attributes (from employees.employee)
+    birth_date date NOT NULL,
+    first_name character varying(14) COLLATE pg_catalog."default" NOT NULL,
+    last_name character varying(16) COLLATE pg_catalog."default" NOT NULL,
+    gender employees.employee_gender NOT NULL,
+    hire_date date NOT NULL,
+    
+    -- Department Attributes (from employees.department)
+    dept_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Employment Relationship Attributes (from employees.department_employee)
+    from_date date NOT NULL,
+    to_date date NOT NULL,
+    emp_dept_type character varying(20) COLLATE pg_catalog."default" NOT NULL DEFAULT 'EMPLOYEE', -- Derived: 'EMPLOYEE' or 'MANAGER'
+    
+    -- Management Relationship Attributes (from employees.department_manager)
+    manager_from_date date NOT NULL,
+    manager_to_date date NOT NULL,
+    is_manager boolean NOT NULL DEFAULT false, -- Derived: true if manager role exists
+    
+    -- Salary Attributes (from employees.salary)
+    salary_amount bigint NOT NULL,
+    salary_from_date date NOT NULL,
+    salary_to_date date NOT NULL,
+    
+    -- Title Attributes (from employees.title)
+    title_name character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    title_from_date date NOT NULL,
+    title_to_date date,
+    
+    -- Constraints
+    CONSTRAINT pk_employees_flat PRIMARY KEY (employee_id, department_id)
+);
+
+-- Indexes for common analytical queries
+CREATE INDEX IF NOT EXISTS idx_employees_flat_dept_name ON employees_flat(dept_name);
+CREATE INDEX IF NOT EXISTS idx_employees_flat_employee_id ON employees_flat(employee_id);
+CREATE INDEX IF NOT EXISTS idx_employees_flat_manager_flag ON employees_flat(is_manager);
+CREATE INDEX IF NOT EXISTS idx_employees_flat_salary_amount ON employees_flat(salary_amount);

@@ -1,0 +1,128 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 4
+  - Total Attributes: 11
+    * customers: 4 columns
+    * orders: 3 columns
+    * products: 3 columns
+    * order_details: 4 columns
+
+Denormalized Model:
+  - Tables: 6
+  - Total Attributes: 21
+    * dim_customers: 4 columns
+    * dim_orders: 3 columns
+    * dim_products: 4 columns
+    * dim_order_items: 3 columns
+    * fact_orders: 6 columns
+    * fact_order_items: 6 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Denormalized model has MORE attributes (11 vs 21)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: customer_id (SERIAL) -> customer_sk (INT)
+  - Type mismatch: order_id (SERIAL) -> order_id (INT)
+  - Type mismatch: product_id (SERIAL) -> product_id (INT)
+  - Type mismatch: order_detail_id (SERIAL) -> order_item_id (INT)
+--------------------------------------------------------------------------------
+Completeness Ratio:        1.91
+Data Type Preservation:    0.64
+Avg Levenshtein Distance:  0.64
+BLEU Score:                0.43
+ROUGE-1:                   0.62
+METEOR Score:              0.64
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: fact_orders, fact_order_items
+Dimension Tables Detected: dim_customers, dim_orders, dim_products, dim_order_items
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected 2 Fact tables. Evaluating as a GALAXY SCHEMA.
+  - DIMENSION NULL WARNING: Attribute 'customer_name' in 'dim_customers' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'customer_email' in 'dim_customers' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'customer_address' in 'dim_customers' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'order_date' in 'dim_orders' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'product_name' in 'dim_products' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'price' in 'dim_products' allows NULLs. Consider demanding default values.
+  - SNOWFLAKE VIOLATION: Dimension 'dim_order_items' contains 1 Foreign Key(s). It is not fully flattened.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * fact_orders: 2 Numeric, 1 Text
+  * fact_order_items: 3 Numeric, 0 Text
+  * dim_customers: 0 Numeric, 3 Text
+  * dim_orders: 1 Numeric, 1 Text
+  * dim_products: 2 Numeric, 1 Text
+  * dim_order_items: 2 Numeric, 0 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  customer_address customer_email customer_id customer_name order_date order_detail_id order_id price product_id product_name quantity
+
+Denormalized Model (Combined Text):
+  customer_address customer_email customer_name customer_sk event_timestamp item_fact_id item_sk line_total order_date order_fact_id order_id order_item_id order_quantity order_sk order_total price product_id product_name product_sk quantity unit_price
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 11 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    customer_id SERIAL
+  Denormalized:  customer_sk INT
+
+Pair 2:
+  Relational:    customer_name VARCHAR(100)
+  Denormalized:  customer_name VARCHAR(100)
+
+Pair 3:
+  Relational:    customer_email VARCHAR(100)
+  Denormalized:  customer_email VARCHAR(100)
+
+Pair 4:
+  Relational:    customer_address TEXT
+  Denormalized:  customer_address TEXT
+
+Pair 5:
+  Relational:    order_id SERIAL
+  Denormalized:  order_id INT
+
+Pair 6:
+  Relational:    order_date DATE
+  Denormalized:  order_date DATE
+
+Pair 7:
+  Relational:    product_id SERIAL
+  Denormalized:  product_id INT
+
+Pair 8:
+  Relational:    product_name VARCHAR(100)
+  Denormalized:  product_name VARCHAR(100)
+
+Pair 9:
+  Relational:    price DECIMAL(10, 2)
+  Denormalized:  price DECIMAL(10, 2)
+
+Pair 10:
+  Relational:    order_detail_id SERIAL
+  Denormalized:  order_item_id INT
+
+Pair 11:
+  Relational:    quantity INT
+  Denormalized:  quantity INT
+
+
+================================================================================

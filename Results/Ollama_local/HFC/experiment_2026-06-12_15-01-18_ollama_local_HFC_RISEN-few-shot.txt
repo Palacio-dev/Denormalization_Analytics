@@ -1,0 +1,331 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_17-01-18
+Model: ollama_local
+Prompt: RISEN-few-shot
+Schema: HFC
+==================================================
+
+{
+    "section_1": {
+        "summary": "The denormalization strategy focuses on the 'Tombos' (Specimens) table, which acts as the central entity for specimen data. In the original schema, a query retrieving a specimen's details (name, coordinates, date) along with its species, genus, family, collector, location, and herbario information requires a complex 10+ table JOIN. To optimize read performance for analytical reporting and web interfaces, we collapse these relationships into a single denormalized 'tombos_denormalizado' table. We also add a denormalized 'herbarios_denormalizados' table to avoid joining back to the herbarios table for user-facing data like names and emails.",
+        "structural_decisions": [
+            {
+                "decision_id": "D1",
+                "description": "Created a new table 'tombos_denormalizado' that includes all columns from 'tombos' plus redundant columns from 'especies', 'generos', 'familias', 'sub_familias', 'sub_especies', 'colecoes_anexas', 'locais_coleta', 'relevo', 'solo', 'vegetacoes', 'autores', 'tipos', 'tombos_identificadores', 'herbarios', and 'usuarios'."
+            },
+            {
+                "decision_id": "D2",
+                "description": "Created a new table 'herbarios_denormalizados' containing all columns from 'herbarios' and 'enderecos' to eliminate the need for joining these tables when fetching specimen metadata."
+            },
+            {
+                "decision_id": "D3",
+                "description": "Created a new table 'autores_denormalizados' containing columns from 'autores' to simplify queries involving specimen authorship."
+            }
+        ],
+        "attribute_level_changes": [
+            {
+                "decision_id": "A1",
+                "description": "Added redundant attributes to 'tombos_denormalizado': 'nome_cientifico', 'nome_populares', 'nome_especie', 'nome_genero', 'nome_familia', 'nome_sub_familia', 'nome_sub_especie', 'nome_colecao_anexa', 'descricao_local_coleta', 'nome_relevo', 'nome_solo', 'nome_vegetacao', 'nome_tipo', 'nome_tombo_identificador', 'nome_herbario', 'email_herbario', 'nome_endereco', 'nome_logradouro', 'nome_cidade', 'nome_estado', 'nome_pais', 'nome_tipo_usuario', 'nome_usuario', 'ra_usuario', 'telefone_usuario', 'observacao_tombo', 'observacao_local_coleta', 'nome_fase_sucessional', 'observacao_tombo_antiga', 'observacao_tombo_antiga_descricao'."
+            },
+            {
+                "decision_id": "A2",
+                "description": "Added redundant attributes to 'herbarios_denormalizados': 'nome', 'sigla', 'email', 'nome_endereco', 'logradouro', 'numero', 'complemento', 'cidade_nome', 'estado_nome', 'pais_nome'."
+            },
+            {
+                "decision_id": "A3",
+                "description": "Added redundant attributes to 'autores_denormalizados': 'nome', 'observacao'."
+            }
+        ],
+        "tradeoffs": [
+            {
+                "tradeoff_id": "T1",
+                "description": "Write performance degradation: Inserting a specimen now requires populating multiple redundant columns (species name, genus name, etc.), increasing the number of SET operations per transaction. This is acceptable for analytical read-heavy workloads."
+            },
+            {
+                "tradeoff_id": "T2",
+                "description": "Storage overhead: The denormalized tables consume significantly more disk space due to repeated strings (e.g., 'Fabaceae' appears in every specimen record). However, this is outweighed by the reduction in JOIN complexity and CPU usage for SELECT queries."
+            },
+            {
+                "tradeoff_id": "T3",
+                "description": "Data Consistency Risk: The denormalized data is not automatically synchronized with the source tables. If 'nome_especie' is updated in 'especies' but not propagated to 'tombos_denormalizado', the view will show stale data. A trigger or application-layer logic must be implemented to keep these redundant columns in sync."
+            }
+        ]
+    },
+    "section_2": {
+        "query_patterns": [
+            {
+                "decision_id": "D1",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "SELECT * FROM tombos WHERE hcf = ? ORDER BY created_at DESC. This pattern is heavily used in web applications to display specimen lists. The original schema requires joining tombos, especies, generos, familias, autores, locais_coleta, herbarios, and usuarios. The denormalized table allows this query to execute with a single table scan."
+            },
+            {
+                "decision_id": "D1",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "SELECT DISTINCT nome_familia FROM tombos WHERE especie_id = ?. Analytical queries to group specimens by taxonomy. Denormalization eliminates the need to join with familias and generos tables."
+            },
+            {
+                "decision_id": "D2",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "SELECT nome_herbario, email FROM tombos WHERE herbario_id = ?. Queries to find contact info for a specific collection. The new 'herbarios_denormalizados' table allows this to be a simple WHERE clause on tombos_denormalizado."
+            }
+        ]
+    }
+}
+
+BEGIN;
+
+-- Drop tables if they exist to ensure clean state
+DROP TABLE IF EXISTS public.tombos_denormalizado CASCADE;
+DROP TABLE IF EXISTS public.herbarios_denormalizados CASCADE;
+DROP TABLE IF EXISTS public.autores_denormalizados CASCADE;
+
+-- ============================================================================
+-- Table: tombos_denormalizado
+-- Purpose: Denormalized view of specimens with all related taxonomy, location,
+--          and user data embedded to avoid complex JOINs.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.tombos_denormalizado (
+    -- Core Tombos Data
+    hcf bigserial NOT NULL,
+    data_tombo timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    data_coleta_dia bigint,
+    observacao text COLLATE pg_catalog."default",
+    nomes_populares text COLLATE pg_catalog."default",
+    numero_coleta bigint,
+    latitude double precision,
+    longitude double precision,
+    altitude double precision,
+    entidade_id bigint,
+    local_coleta_id bigint,
+    variedade_id bigint,
+    tipo_id bigint,
+    data_identificacao_dia smallint,
+    data_identificacao_mes smallint,
+    data_identificacao_ano integer,
+    situacao tombos_situacao DEFAULT 'REGULAR'::tombos_situacao,
+    especie_id bigint,
+    genero_id bigint,
+    familia_id bigint,
+    sub_familia_id bigint,
+    sub_especie_id bigint,
+    nome_cientifico text COLLATE pg_catalog."default",
+    colecao_anexa_id bigint,
+    data_coleta_mes bigint,
+    data_coleta_ano bigint,
+    solo_id bigint,
+    relevo_id bigint,
+    vegetacao_id bigint,
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ativo boolean DEFAULT true,
+    taxon character varying(45) COLLATE pg_catalog."default" DEFAULT NULL::character varying,
+    rascunho boolean DEFAULT false,
+    coletor_id bigint,
+    descricao text COLLATE pg_catalog."default",
+    unicata boolean,
+    cidade_id bigint,
+    fase_sucessional_id bigint,
+    -- Redundant: Species & Taxonomy
+    nome_especie character varying(200) COLLATE pg_catalog."default",
+    nome_genero character varying(200) COLLATE pg_catalog."default",
+    nome_familia character varying(200) COLLATE pg_catalog."default",
+    nome_sub_familia character varying(300) COLLATE pg_catalog."default",
+    nome_sub_especie character varying(255) COLLATE pg_catalog."default",
+    -- Redundant: Author
+    nome_autor character varying(200) COLLATE pg_catalog."default",
+    -- Redundant: Types
+    nome_tipo character varying(250) COLLATE pg_catalog."default",
+    -- Redundant: Locals
+    descricao_local_coleta text COLLATE pg_catalog."default",
+    nome_local_coleta character varying(200) COLLATE pg_catalog."default",
+    nome_cidade character varying(255) COLLATE pg_catalog."default",
+    nome_estado character varying(255) COLLATE pg_catalog."default",
+    nome_pais character varying(255) COLLATE pg_catalog."default",
+    -- Redundant: Environment
+    nome_relevo character varying(300) COLLATE pg_catalog."default",
+    nome_solo character varying(300) COLLATE pg_catalog."default",
+    nome_vegetacao character varying(300) COLLATE pg_catalog."default",
+    -- Redundant: Annex Collection
+    nome_colecao_anexa character varying(200) COLLATE pg_catalog."default",
+    -- Redundant: Identifiers
+    nome_tombo_identificador character varying(255) COLLATE pg_catalog."default",
+    -- Redundant: Herbario & User
+    nome_herbario character varying(200) COLLATE pg_catalog."default",
+    email_herbario character varying(200) COLLATE pg_catalog."default",
+    nome_endereco character varying(200) COLLATE pg_catalog."default",
+    logradouro character varying(200) COLLATE pg_catalog."default",
+    numero character varying(10) COLLATE pg_catalog."default",
+    complemento text COLLATE pg_catalog."default",
+    nome_cidade_herbario character varying(255) COLLATE pg_catalog."default",
+    nome_estado_herbario character varying(255) COLLATE pg_catalog."default",
+    nome_pais_herbario character varying(255) COLLATE pg_catalog."default",
+    nome_tipo_usuario character varying(100) COLLATE pg_catalog."default",
+    nome_usuario character varying(200) COLLATE pg_catalog."default",
+    ra_usuario character varying(45) COLLATE pg_catalog."default",
+    telefone_usuario character varying(45) COLLATE pg_catalog."default",
+    observacao_tombo_antiga text COLLATE pg_catalog."default",
+    data_tombo_antiga date,
+    sequencia_antiga bigint,
+    -- Redundant: Phase
+    nome_fase_sucessional character varying(200) COLLATE pg_catalog."default",
+    CONSTRAINT tombos_denormalizado_pkey PRIMARY KEY (hcf)
+);
+
+-- ============================================================================
+-- Table: herbarios_denormalizados
+-- Purpose: Denormalized view of herbaria with address and contact details.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.herbarios_denormalizados (
+    id bigserial NOT NULL,
+    nome character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    caminho_logotipo text COLLATE pg_catalog."default",
+    sigla character varying(80) COLLATE pg_catalog."default" NOT NULL,
+    email character varying(200) COLLATE pg_catalog."default" DEFAULT NULL::character varying,
+    endereco_id bigint,
+    -- Redundant: Address Details
+    nome_endereco character varying(200) COLLATE pg_catalog."default",
+    logradouro character varying(200) COLLATE pg_catalog."default",
+    numero character varying(10) COLLATE pg_catalog."default",
+    complemento text COLLATE pg_catalog."default",
+    nome_cidade character varying(255) COLLATE pg_catalog."default",
+    nome_estado character varying(255) COLLATE pg_catalog."default",
+    nome_pais character varying(255) COLLATE pg_catalog."default",
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT herbarios_denormalizados_pkey PRIMARY KEY (id)
+);
+
+-- ============================================================================
+-- Table: autores_denormalizados
+-- Purpose: Denormalized view of authors.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.autores_denormalizados (
+    id bigserial NOT NULL,
+    nome character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    observacao character varying(500) COLLATE pg_catalog."default",
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT autores_denormalizados_pkey PRIMARY KEY (id)
+);
+
+-- ============================================================================
+-- Foreign Keys and Constraints
+-- ============================================================================
+
+-- Tombos Denormalized FKs (Pointers to source tables)
+ALTER TABLE IF EXISTS public.tombos_denormalizado
+    ADD CONSTRAINT fk_tombos_denormalizado_especie FOREIGN KEY (especie_id)
+    REFERENCES public.especies (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.tombos_denormalizado
+    ADD CONSTRAINT fk_tombos_denormalizado_genero FOREIGN KEY (genero_id)
+    REFERENCES public.generos (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.tombos_denormalizado
+    ADD CONSTRAINT fk_tombos_denormalizado_familia FOREIGN KEY (familia_id)
+    REFERENCES public.familias (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.tombos_denormalizado
+    ADD CONSTRAINT fk_tombos_denormalizado_sub_familia FOREIGN KEY (sub_familia_id)
+    REFERENCES public.sub_familias (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.tombos_denormalizado
+    ADD CONSTRAINT fk_tombos_denormalizado_sub_especie FOREIGN KEY (sub_especie_id)
+    REFERENCES public.sub_especies (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.tombos_denormalizado
+    ADD CONSTRAINT fk_tombos_denormalizado_colecao_anexa FOREIGN KEY (colecao_anexa_id)
+    REFERENCES public.colecoes_anexas (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.tombos_denormalizado
+    ADD CONSTRAINT fk_tombos_denormalizado_local_coleta FOREIGN KEY (local_coleta_id)
+    REFERENCES public.locais_coleta (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.tombos_denormalizado
+    ADD CONSTRAINT fk_tombos_denormalizado_relevo FOREIGN KEY (relevo_id)
+    REFERENCES public.relevos (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.tombos_denormalizado
+    ADD CONSTRAINT fk_tombos_denormalizado_solo FOREIGN KEY (solo_id)
+    REFERENCES public.solos (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.tombos_denormalizado
+    ADD CONSTRAINT fk_tombos_denormalizado_vegetacao FOREIGN KEY (vegetacao_id)
+    REFERENCES public.vegetacoes (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.tombos_denormalizado
+    ADD CONSTRAINT fk_tombos_denormalizado_tipo FOREIGN KEY (tipo_id)
+    REFERENCES public.tipos (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.tombos_denormalizado
+    ADD CONSTRAINT fk_tombos_denormalizado_cidade FOREIGN KEY (cidade_id)
+    REFERENCES public.enderecos (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.tombos_denormalizado
+    ADD CONSTRAINT fk_tombos_denormalizado_fase FOREIGN KEY (fase_sucessional_id)
+    REFERENCES public.fase_sucessional (numero) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.tombos_denormalizado
+    ADD CONSTRAINT fk_tombos_denormalizado_entidade FOREIGN KEY (entidade_id)
+    REFERENCES public.herbarios (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.tombos_denormalizado
+    ADD CONSTRAINT fk_tombos_denormalizado_coletor FOREIGN KEY (coletor_id)
+    REFERENCES public.coletores (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+ALTER TABLE IF EXISTS public.tombos_denormalizado
+    ADD CONSTRAINT fk_tombos_denormalizado_usuario FOREIGN KEY (coletor_id)
+    REFERENCES public.usuarios (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+-- Herbarios Denormalized FKs
+ALTER TABLE IF EXISTS public.herbarios_denormalizados
+    ADD CONSTRAINT fk_herbarios_denormalizados_endereco FOREIGN KEY (endereco_id)
+    REFERENCES public.enderecos (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+-- Autores Denormalized FKs
+ALTER TABLE IF EXISTS public.autores_denormalizados
+    ADD CONSTRAINT fk_autores_denormalizados_especies FOREIGN KEY (id)
+    REFERENCES public.especies (autor_id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE RESTRICT;
+
+-- Note: To maintain data consistency, a trigger could be implemented here to update
+-- tombos_denormalizado when species/generic/family data changes, but for the
+-- schema definition, we assume the application handles propagation or we use
+-- triggers. Here we define the structure.
+
+END;

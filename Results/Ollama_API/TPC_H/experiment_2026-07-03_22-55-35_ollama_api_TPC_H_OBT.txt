@@ -1,0 +1,139 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-03_22-55-35
+Model: ollama_api
+Prompt: OBT
+Schema: TPC_H
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy follows the ONE-BIG-TABLE model, consolidating all normalized tables into a single denormalized table. This approach eliminates joins by embedding related data directly into each row, optimizing read-heavy analytical queries typical in data warehouse environments.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged all normalized tables (NATION, REGION, PART, SUPPLIER, PARTSUPP, CUSTOMER, ORDERS, LINEITEM) into one wide table to eliminate the need for JOINs during query execution."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Preserved all non-key attributes from the original schema to maintain semantic equivalence and full reconstructibility of the data."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Chose LINEITEM as the central fact table around which all other entities are denormalized, as it typically represents the most granular level of transactional data in TPC-H-like schemas."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "All foreign key columns have been removed as they are no longer needed for relationships in the denormalized structure."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Columns with identical names across different source tables were prefixed with their source table name to avoid ambiguity (e.g., PS_COMMENT from PARTSUPP becomes PARTSUPP_PS_COMMENT)."
+      },
+      {
+        "decision_id": "A3",
+        "description": "No attributes were dropped; all original columns are preserved in the final schema."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved read performance at the cost of increased storage space due to data duplication."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified querying and faster aggregations in exchange for more complex ETL processes and potential update anomalies."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Reduced normalization benefits like reduced redundancy and better data integrity in favor of optimized analytical query execution."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical queries that aggregate line item sales by customer demographics, order details, part information, supplier details, and regional/national context. These often require multiple JOINs in the normalized schema."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting queries analyzing order fulfillment, shipping performance, discounts, and pricing trends across time periods, customers, parts, and suppliers."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Supply chain analysis combining supplier availability (PARTSUPP), part characteristics (PART), and order fulfillment (LINEITEM, ORDERS) metrics."
+      }
+    ]
+  }
+}
+
+```sql
+CREATE TABLE TPCH_DENORMALIZED (
+    L_ORDERKEY INTEGER NOT NULL,
+    L_PARTKEY INTEGER NOT NULL,
+    L_SUPPKEY INTEGER NOT NULL,
+    L_LINENUMBER INTEGER NOT NULL,
+    L_QUANTITY DECIMAL(15,2) NOT NULL,
+    L_EXTENDEDPRICE DECIMAL(15,2) NOT NULL,
+    L_DISCOUNT DECIMAL(15,2) NOT NULL,
+    L_TAX DECIMAL(15,2) NOT NULL,
+    L_RETURNFLAG CHAR(1) NOT NULL,
+    L_LINESTATUS CHAR(1) NOT NULL,
+    L_SHIPDATE DATE NOT NULL,
+    L_COMMITDATE DATE NOT NULL,
+    L_RECEIPTDATE DATE NOT NULL,
+    L_SHIPINSTRUCT CHAR(25) NOT NULL,
+    L_SHIPMODE CHAR(10) NOT NULL,
+    L_COMMENT VARCHAR(44) NOT NULL,
+    
+    O_CUSTKEY INTEGER NOT NULL,
+    O_ORDERSTATUS CHAR(1) NOT NULL,
+    O_TOTALPRICE DECIMAL(15,2) NOT NULL,
+    O_ORDERDATE DATE NOT NULL,
+    O_ORDERPRIORITY CHAR(15) NOT NULL,
+    O_CLERK CHAR(15) NOT NULL,
+    O_SHIPPRIORITY INTEGER NOT NULL,
+    O_COMMENT VARCHAR(79) NOT NULL,
+    
+    C_NAME VARCHAR(25) NOT NULL,
+    C_ADDRESS VARCHAR(40) NOT NULL,
+    C_PHONE CHAR(15) NOT NULL,
+    C_ACCTBAL DECIMAL(15,2) NOT NULL,
+    C_MKTSEGMENT CHAR(10) NOT NULL,
+    C_COMMENT VARCHAR(117) NOT NULL,
+    
+    C_NATION_NAME CHAR(25) NOT NULL,
+    C_NATION_COMMENT VARCHAR(152),
+    C_REGION_NAME CHAR(25) NOT NULL,
+    C_REGION_COMMENT VARCHAR(152),
+    
+    P_NAME VARCHAR(55) NOT NULL,
+    P_MFGR CHAR(25) NOT NULL,
+    P_BRAND CHAR(10) NOT NULL,
+    P_TYPE VARCHAR(25) NOT NULL,
+    P_SIZE INTEGER NOT NULL,
+    P_CONTAINER CHAR(10) NOT NULL,
+    P_RETAILPRICE DECIMAL(15,2) NOT NULL,
+    P_COMMENT VARCHAR(23) NOT NULL,
+    
+    S_NAME CHAR(25) NOT NULL,
+    S_ADDRESS VARCHAR(40) NOT NULL,
+    S_PHONE CHAR(15) NOT NULL,
+    S_ACCTBAL DECIMAL(15,2) NOT NULL,
+    S_COMMENT VARCHAR(101) NOT NULL,
+    
+    S_NATION_NAME CHAR(25) NOT NULL,
+    S_NATION_COMMENT VARCHAR(152),
+    S_REGION_NAME CHAR(25) NOT NULL,
+    S_REGION_COMMENT VARCHAR(152),
+    
+    PS_AVAILQTY INTEGER NOT NULL,
+    PS_SUPPLYCOST DECIMAL(15,2) NOT NULL,
+    PARTSUPP_PS_COMMENT VARCHAR(199) NOT NULL
+);
+```

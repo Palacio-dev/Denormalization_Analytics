@@ -1,0 +1,148 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-24-57
+Model: ollama_api
+Prompt: senior
+Schema: ex10
+==================================================
+
+{
+  "section_1": {
+    "summary": "The original OLTP schema is normalized with multiple related tables. The analytical model is designed as a star schema, with a central fact table 'fact_energy_consumption_emission' that consolidates energy consumption and emission data. Dimensions include 'dim_country', 'dim_energy_source', and 'dim_continent'. Reference data like continent and energy source are absorbed into dimension tables to reduce joins. Country hierarchy (country → continent) is preserved through denormalization. Time is treated as a conformed dimension (dim_time).",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge fact-like tables 'consumo_anual' and 'emissao_g_efeito_estufa' into a single fact table 'fact_energy_consumption_emission' to reduce query complexity and join paths."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Denormalize 'paises' with 'continente' to create a single 'dim_country' table to reduce joins for continent-based analysis."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Absorb 'fonte_energia' into 'fact_energy_consumption_emission' as a dimension to reduce lookup joins for energy source names."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Introduce a conformed time dimension 'dim_time' to support consistent temporal analysis and reduce redundancy in year-based columns."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Integrate 'populacao' into 'fact_energy_consumption_emission' as a measure to support per-capita analysis without additional joins."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added surrogate keys (e.g., sk_country, sk_energy_source) to dimension tables for improved analytical performance and to decouple from OLTP primary keys."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Derived a new measure 'per_capita_emission' (quantity_emitida / quantidade_hab) in the fact table for analytical convenience."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Removed redundant primary keys from fact tables (e.g., id_consumo, id_emissao) to simplify schema and reduce storage overhead."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Denormalization increases storage due to data duplication but significantly reduces query complexity and join overhead."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Merging multiple fact tables into one may increase ETL complexity but improves analytical flexibility and performance."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Use of surrogate keys adds ETL overhead but improves query performance and schema evolution flexibility."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries analyzing total emissions or energy consumption by country, continent, or year. Merging facts reduces the need for complex unions or joins."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries slicing emissions or consumption by continent. Denormalizing country and continent avoids costly joins."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries filtering or grouping by energy source name. Absorbing reference data into dimensions improves performance."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Time-based analysis such as YoY trends or rolling averages. A conformed time dimension enables consistent temporal grouping and filtering."
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Per-capita analysis of emissions or consumption. Embedding population in the fact table avoids extra joins."
+      }
+    ]
+  }
+}
+
+-- Denormalized Analytical Schema DDL
+
+-- Dimension: Time
+CREATE TABLE IF NOT EXISTS public.dim_time (
+    sk_time SERIAL PRIMARY KEY,
+    year INTEGER NOT NULL UNIQUE
+);
+
+-- Dimension: Continent
+CREATE TABLE IF NOT EXISTS public.dim_continent (
+    sk_continent SERIAL PRIMARY KEY,
+    continent_id INTEGER NOT NULL UNIQUE,
+    continent_name VARCHAR(50) NOT NULL
+);
+
+-- Dimension: Country
+CREATE TABLE IF NOT EXISTS public.dim_country (
+    sk_country SERIAL PRIMARY KEY,
+    country_id INTEGER NOT NULL UNIQUE,
+    country_name VARCHAR(50) NOT NULL,
+    foundation_year INTEGER,
+    continent_id INTEGER,
+    continent_name VARCHAR(50),
+    FOREIGN KEY (continent_id) REFERENCES public.dim_continent(continent_id)
+);
+
+-- Dimension: Energy Source
+CREATE TABLE IF NOT EXISTS public.dim_energy_source (
+    sk_energy_source SERIAL PRIMARY KEY,
+    energy_source_id INTEGER NOT NULL UNIQUE,
+    energy_source_name VARCHAR(50) NOT NULL
+);
+
+-- Fact Table: Energy Consumption and Emission
+CREATE TABLE IF NOT EXISTS public.fact_energy_consumption_emission (
+    sk_fact SERIAL PRIMARY KEY,
+    sk_country INTEGER NOT NULL,
+    sk_time INTEGER NOT NULL,
+    sk_energy_source INTEGER,
+    energy_percentage INTEGER,
+    emission_quantity BIGINT,
+    population_quantity INTEGER,
+    per_capita_emission DECIMAL(18, 6),
+    FOREIGN KEY (sk_country) REFERENCES public.dim_country(sk_country),
+    FOREIGN KEY (sk_time) REFERENCES public.dim_time(sk_time),
+    FOREIGN KEY (sk_energy_source) REFERENCES public.dim_energy_source(sk_energy_source)
+);
+
+-- Indexes for performance
+CREATE INDEX idx_fact_sk_country ON public.fact_energy_consumption_emission(sk_country);
+CREATE INDEX idx_fact_sk_time ON public.fact_energy_consumption_emission(sk_time);
+CREATE INDEX idx_fact_sk_energy_source ON public.fact_energy_consumption_emission(sk_energy_source);
+
+-- Partitioning recommendation: Partition fact table by year (via sk_time) for large-scale data
+-- Example (PostgreSQL 10+):
+-- ALTER TABLE public.fact_energy_consumption_emission PARTITION BY RANGE (sk_time);

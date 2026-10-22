@@ -1,0 +1,124 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-23-31
+Model: ollama_api
+Prompt: RISEN
+Schema: ex10
+==================================================
+
+{
+  "section_1": {
+    "summary": "The original normalized schema involves multiple tables with several join relationships. The main performance bottlenecks are likely due to frequent joins between `consumo_anual`, `paises`, `continente`, `fonte_energia`, and `emissao_g_efeito_estufa`. To optimize read-heavy analytical queries, we collapse several tables into fewer denormalized tables, embed derived and redundant attributes, and avoid complex joins. The resulting schema preserves all original data and semantics while optimizing for read performance.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapse `paises`, `continente` into a single denormalized dimension table `dim_pais_continente` to eliminate joins between them."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge `consumo_anual`, `fonte_energia` into a single denormalized fact table `fact_consumo_energia` to avoid joins during energy consumption queries."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Embed redundant attributes (e.g., country name, continent name, energy type) into `fact_consumo_energia` to reduce join overhead."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Keep `emissao_g_efeito_estufa` and `populacao` as separate fact tables but add redundant country names to reduce joins with `paises`."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant attributes: `nome_pais`, `nome_continente` in `fact_consumo_energia` and `fact_emissao`."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added redundant attribute: `nome_fonte_energia` in `fact_consumo_energia`."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added redundant attribute: `nome_pais` in `fact_populacao`."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage overhead due to redundant attributes, but improved query performance by reducing joins."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Updates to country or energy names now require propagation to multiple tables, increasing write complexity."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Schema becomes less normalized, increasing the risk of data inconsistency if not carefully maintained."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries analyzing energy consumption by country and continent over time, requiring joins between `consumo_anual`, `paises`, and `continente`."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries aggregating emissions data by country, requiring joins between `emissao_g_efeito_estufa` and `paises`."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries correlating population with energy consumption or emissions, requiring joins between `populacao`, `paises`, and other fact tables."
+      }
+    ]
+  }
+}
+
+```sql
+-- Denormalized schema for improved read performance
+
+CREATE TABLE IF NOT EXISTS public.dim_pais_continente
+(
+    id_paises integer NOT NULL,
+    nome_pais character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    fundacao integer NOT NULL,
+    id_continente integer NOT NULL,
+    nome_continente character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT dim_pais_continente_pkey PRIMARY KEY (id_paises)
+);
+
+CREATE TABLE IF NOT EXISTS public.fact_consumo_energia
+(
+    id_consumo integer NOT NULL,
+    id_paises integer NOT NULL,
+    nome_pais character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    nome_continente character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    ano integer NOT NULL,
+    porcentagem integer NOT NULL,
+    id_fonte_energia integer NOT NULL,
+    nome_fonte_energia character varying(50)[] COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT fact_consumo_energia_pkey PRIMARY KEY (id_consumo)
+);
+
+CREATE TABLE IF NOT EXISTS public.fact_emissao
+(
+    id_emissao integer NOT NULL,
+    id_paises integer NOT NULL,
+    nome_pais character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    ano integer NOT NULL,
+    quantidade_emitida bigint NOT NULL,
+    CONSTRAINT fact_emissao_pkey PRIMARY KEY (id_emissao)
+);
+
+CREATE TABLE IF NOT EXISTS public.fact_populacao
+(
+    id_pop integer NOT NULL,
+    id_paises integer NOT NULL,
+    nome_pais character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    ano integer NOT NULL,
+    quantidade_hab integer NOT NULL,
+    CONSTRAINT fact_populacao_pkey PRIMARY KEY (id_pop)
+);
+```

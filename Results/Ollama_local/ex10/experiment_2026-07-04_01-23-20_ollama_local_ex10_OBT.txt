@@ -1,0 +1,133 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-04_01-23-20
+Model: ollama_local
+Prompt: OBT
+Schema: ex10
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy adopts the 'One Big Table' approach to eliminate join overhead and improve read performance for analytical queries involving consumption, emissions, demographics, and energy sources. By flattening the schema, the model removes all Foreign Keys and consolidates data from `consumo_anual`, `emissao_g_efeito_estufa`, `populacao`, `paises`, `continente`, `fonte_energia`, and `fontes_energia` into a single table. The primary key is derived from a composite of the business dimensions (Country, Year, Energy Type) to ensure uniqueness for analytical rows, rather than a sequential ID.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidated all 7 original tables into a single denormalized table named `denormalized_energy_data`."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Removed all Foreign Key constraints. Replaced `id_paises` with `nome_paises` and `id_continente` with `nome_continente` to enable direct filtering on descriptive attributes."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Replaced `tipo_energia` (integer FK) with `nome_fonte_energia` (text) to allow queries without joining the `fonte_energia` table."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Created a composite Primary Key (`nome_paises`, `ano`, `nome_fonte_energia`) to represent the unique business entity of 'Consumption per Country per Year per Energy Source', serving as the anchor for denormalized rows."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived attributes `continente_nome` (from `paises.continente` -> `continente.nome`) and `fonte_nome` (from `fonte_energia.nome`) to avoid joins."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added `populacao_quantidade` (from `populacao.quantidade_hab`) to the main table to support year-over-year analysis without joining `populacao`."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added `emissao_quantidade` (from `emissao_g_efeito_estufa.quantidade_emitida`) to the main table."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added `consumo_porcentagem` (from `consumo_anual.porcentagem`) to the main table."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Added `paises_fundacao` (from `paises.fundacao`) to provide context on country age."
+      },
+      {
+        "decision_id": "A6",
+        "description": "Renamed `id_pop` to `ano_populacao` (conceptual rename for clarity, though semantically it's the year; kept as `ano` in PK to avoid duplication conflict, but included `ano_populacao` in the data row if needed, or simply relied on the PK `ano` covering the dimension)."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Loss of referential integrity: The schema no longer prevents invalid combinations (e.g., a non-existent country or energy source) at the database level. This is mitigated by application-level validation or data quality checks."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Write Performance: Inserting data now requires calculating derived fields (like `continente_nome`) for every row, potentially slowing down bulk loads compared to a normalized model where these are computed on-demand."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Storage Bloat: The single table is significantly wider, which may impact index efficiency if a massive index is created on the new composite primary key."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical queries aggregating consumption, emissions, and population by country and year, previously requiring multiple JOINs on `paises`, `continente`, `populacao`, and `fonte_energia`."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries filtering by specific country name or continent name to group energy consumption data, which was previously slow due to the need to join `paises` and `continente`."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Comparing energy mix (solar vs oil) across different years for a specific country, requiring joins between `consumo_anual`, `emissao_g_efeito_estufa`, and `fonte_energia`."
+      }
+    ]
+  }
+}
+
+-- Denormalized Schema: One Big Table Model
+-- Strategy: Eliminate joins by flattening all entities into a single table.
+-- Primary Key: Composite (Country, Year, Energy Source) to ensure uniqueness of the analytical row.
+
+CREATE TABLE IF NOT EXISTS public.denormalized_energy_data (
+    -- Primary Key: Represents the unique business entity for analysis
+    -- (Country, Year, Energy Source) combination
+    nome_paises character varying(50) NOT NULL,
+    ano integer NOT NULL,
+    nome_fonte_energia character varying(50) NOT NULL,
+    PRIMARY KEY (nome_paises, ano, nome_fonte_energia),
+
+    -- Core Metrics (Directly from consumo_anual and emissao_g_efeito_estufa)
+    consumo_porcentagem integer NOT NULL,
+    quantidade_emitida bigint NOT NULL,
+
+    -- Demographic Data (Flattened from populacao)
+    -- Note: We assume a unique population record per country/year exists in the source.
+    -- If multiple populations exist for the same country/year, this row represents one of them.
+    -- To handle this in a "Big Table" without complex grouping logic in the DDL,
+    -- we include the population value directly.
+    quantidade_hab integer NOT NULL,
+
+    -- Contextual Data (Flattened from paises and continente)
+    -- Derived: Continente Name (from paises.continente -> continente.nome)
+    continente_nome character varying(50) NOT NULL,
+    -- Original: paises.fundacao
+    fundacao integer NOT NULL,
+
+    -- Energy Context (Flattened from fonte_energia)
+    -- Original: fonte_energia.nome
+    nome_fonte_energia_original character varying(50) NOT NULL,
+
+    -- Additional Metadata
+    -- Note: 'ano_populacao' is redundant if 'ano' is the primary key dimension,
+    -- but included for semantic clarity if the source data had a specific column distinction.
+    -- Given the constraints, we treat 'ano' as the universal year.
+    
+    -- Constraints: No Foreign Keys allowed per ONE-BIG-TABLE MODEL
+);
+
+-- Note: Data insertion logic would normally handle the joins to populate these columns,
+-- but the schema itself is now a single, wide table ready for fast scanning.

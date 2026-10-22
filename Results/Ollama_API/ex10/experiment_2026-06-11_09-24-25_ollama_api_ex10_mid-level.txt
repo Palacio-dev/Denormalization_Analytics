@@ -1,0 +1,139 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-24-25
+Model: ollama_api
+Prompt: mid-level
+Schema: ex10
+==================================================
+
+{
+  "section_1": {
+    "summary": "The original schema consists of normalized tables representing countries, continents, energy consumption, greenhouse gas emissions, energy sources, and population data. The goal is to denormalize this structure for analytical workloads by reducing the number of joins and consolidating related entities into fewer, wider tables optimized for read-heavy operations. The approach involves creating a central fact table for energy and emission metrics with embedded dimensional attributes like country, continent, and energy source names.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidated the 'paises', 'continente' into a single dimension table called 'dim_pais' which includes country name, foundation year, and continent name."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merged 'consumo_anual' and 'fonte_energia' into a unified fact table 'fato_consumo_energia' by embedding the energy source name directly."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Created a separate fact table 'fato_emissao' for greenhouse gas emissions that includes country-level details to reduce joins during querying."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Denormalized 'populacao' into its own fact table 'fato_populacao' including country name and continent to support demographic analysis without joins."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Removed foreign key constraints from the new schema to improve ingestion performance and simplify query execution paths."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added 'nome_continente' to the country dimension to eliminate joins with the 'continente' table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Replaced 'tipo_energia' integer ID in 'consumo_anual' with the actual 'nome_fonte_energia' string value."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Included 'nome_pais', 'fundacao', and 'nome_continente' in both 'fato_emissao' and 'fato_populacao' to avoid referencing an external dimension table in most queries."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data redundancy increases due to repeated inclusion of country and continent names across multiple fact tables, but this improves query performance by reducing joins."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Loss of referential integrity through removal of foreign keys may lead to data inconsistency if not managed carefully during ETL processes."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Updates to country or energy source names require propagation to multiple tables, increasing ETL complexity compared to normalized models."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries analyzing energy consumption by continent or country will benefit from pre-joined dimensional data in the fact tables."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting on emissions over time by country or region requires minimal joins due to embedded country metadata in the emissions fact table."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "BI dashboards correlating population, energy usage, and emissions can leverage simplified schemas for faster aggregations."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Users want to filter and aggregate energy consumption data by energy source type without requiring additional joins."
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Analytical queries comparing emissions and population growth trends by country or continent should execute efficiently without complex joins."
+      }
+    ]
+  }
+}
+
+```sql
+-- Denormalized Analytical Schema
+
+-- Dimension Table: dim_pais
+CREATE TABLE IF NOT EXISTS public.dim_pais (
+    id_paises INTEGER NOT NULL,
+    nome_pais VARCHAR(50) NOT NULL,
+    fundacao INTEGER NOT NULL,
+    nome_continente VARCHAR(50) NOT NULL,
+    CONSTRAINT dim_pais_pkey PRIMARY KEY (id_paises)
+);
+
+-- Fact Table: fato_consumo_energia
+CREATE TABLE IF NOT EXISTS public.fato_consumo_energia (
+    id_consumo INTEGER NOT NULL,
+    id_paises INTEGER NOT NULL,
+    nome_pais VARCHAR(50) NOT NULL,
+    nome_continente VARCHAR(50) NOT NULL,
+    ano INTEGER NOT NULL,
+    porcentagem INTEGER NOT NULL,
+    id_fonte_energia INTEGER NOT NULL,
+    nome_fonte_energia VARCHAR(50) NOT NULL,
+    CONSTRAINT fato_consumo_energia_pkey PRIMARY KEY (id_consumo)
+);
+
+-- Fact Table: fato_emissao
+CREATE TABLE IF NOT EXISTS public.fato_emissao (
+    id_emissao INTEGER NOT NULL,
+    id_paises INTEGER NOT NULL,
+    nome_pais VARCHAR(50) NOT NULL,
+    nome_continente VARCHAR(50) NOT NULL,
+    ano INTEGER NOT NULL,
+    quantidade_emitida BIGINT NOT NULL,
+    CONSTRAINT fato_emissao_pkey PRIMARY KEY (id_emissao)
+);
+
+-- Fact Table: fato_populacao
+CREATE TABLE IF NOT EXISTS public.fato_populacao (
+    id_pop INTEGER NOT NULL,
+    id_paises INTEGER NOT NULL,
+    nome_pais VARCHAR(50) NOT NULL,
+    nome_continente VARCHAR(50) NOT NULL,
+    ano INTEGER NOT NULL,
+    quantidade_hab INTEGER NOT NULL,
+    CONSTRAINT fato_populacao_pkey PRIMARY KEY (id_pop)
+);
+```

@@ -1,0 +1,283 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-03-18
+Model: ollama_api
+Prompt: RISEN-few-shot
+Schema: airplane
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on collapsing relations and adding redundant attributes 
+    to improve read performance for common analytical queries. The approach reduces JOIN complexity by 
+    merging related entities into fewer tables while preserving all original data. Three main denormalized 
+    tables are created: 
+    1 A comprehensive flights table that includes aircraft and airport details, 
+    2 A complete ticketing table that consolidates booking, ticket, and passenger information with flight details, and
+    3 A boarding passes table that maintains seat information along with flight context.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapse the flights, aircrafts_data, and airports_data tables into a single denormalized flights table 
+        to eliminate joins when querying flight schedules with aircraft and airport information."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge bookings, tickets, ticket_flights, and seats information into a comprehensive ticketing table to 
+        support passenger analytics and revenue reporting without complex joins."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Retain boarding_passes as a separate table but add flight context (flight_no, departure/arrival airports) to enable seat occupancy analysis without joining to flights table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant attributes: aircraft model, range, departure/arrival airport names, cities, coordinates, 
+        and timezones directly into the flights table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added derived attributes: passenger count per booking (from ticket count) and fare class description in the ticketing table for analytical convenience."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Preserved all original attributes across the denormalized schema, moving them to appropriate tables 
+        based on query patterns while maintaining data types and constraints."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Storage overhead increases due to redundant data (aircraft models, airport details repeated for each flight) but significantly improves read performance for analytical queries."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Write performance may decrease as updates to aircraft or airport information require changes in multiple flight records, but this is acceptable for an analytical workload focused on reads."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Data consistency becomes more complex as referential integrity must be maintained across denormalized copies, but this is mitigated by using the denormalized schema primarily for reads."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Frequent analytical queries about flight schedules with aircraft capabilities and route information (e.g., 'Show all flights between cities with aircraft range > 5000km')"
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Revenue analysis and passenger reporting queries joining bookings, tickets, flights, and seats (e.g., 'Total revenue by route and fare class')"
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Occupancy and seating analytics requiring boarding pass data with flight context (e.g., 'Show seat occupancy rates by aircraft type')"
+      }
+    ]
+  }
+}
+
+```sql
+CREATE TABLE IF NOT EXISTS bookings.denormalized_flights
+(
+    flight_id integer NOT NULL,
+    flight_no character(6) COLLATE pg_catalog."default" NOT NULL,
+    scheduled_departure timestamp with time zone NOT NULL,
+    scheduled_arrival timestamp with time zone NOT NULL,
+    departure_airport character(3) COLLATE pg_catalog."default" NOT NULL,
+    departure_airport_name jsonb NOT NULL,
+    departure_city jsonb NOT NULL,
+    departure_coordinates point NOT NULL,
+    departure_timezone text COLLATE pg_catalog."default" NOT NULL,
+    arrival_airport character(3) COLLATE pg_catalog."default" NOT NULL,
+    arrival_airport_name jsonb NOT NULL,
+    arrival_city jsonb NOT NULL,
+    arrival_coordinates point NOT NULL,
+    arrival_timezone text COLLATE pg_catalog."default" NOT NULL,
+    status character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    aircraft_model jsonb NOT NULL,
+    aircraft_range integer NOT NULL,
+    actual_departure timestamp with time zone,
+    actual_arrival timestamp with time zone,
+    CONSTRAINT denormalized_flights_pkey PRIMARY KEY (flight_id)
+);
+
+COMMENT ON TABLE bookings.denormalized_flights
+    IS 'Denormalized flights with aircraft and airport details';
+
+COMMENT ON COLUMN bookings.denormalized_flights.flight_id
+    IS 'Flight ID';
+
+COMMENT ON COLUMN bookings.denormalized_flights.flight_no
+    IS 'Flight number';
+
+COMMENT ON COLUMN bookings.denormalized_flights.scheduled_departure
+    IS 'Scheduled departure time';
+
+COMMENT ON COLUMN bookings.denormalized_flights.scheduled_arrival
+    IS 'Scheduled arrival time';
+
+COMMENT ON COLUMN bookings.denormalized_flights.departure_airport
+    IS 'Airport of departure';
+
+COMMENT ON COLUMN bookings.denormalized_flights.departure_airport_name
+    IS 'Departure airport name';
+
+COMMENT ON COLUMN bookings.denormalized_flights.departure_city
+    IS 'Departure city';
+
+COMMENT ON COLUMN bookings.denormalized_flights.departure_coordinates
+    IS 'Departure airport coordinates (longitude and latitude)';
+
+COMMENT ON COLUMN bookings.denormalized_flights.departure_timezone
+    IS 'Departure airport time zone';
+
+COMMENT ON COLUMN bookings.denormalized_flights.arrival_airport
+    IS 'Airport of arrival';
+
+COMMENT ON COLUMN bookings.denormalized_flights.arrival_airport_name
+    IS 'Arrival airport name';
+
+COMMENT ON COLUMN bookings.denormalized_flights.arrival_city
+    IS 'Arrival city';
+
+COMMENT ON COLUMN bookings.denormalized_flights.arrival_coordinates
+    IS 'Arrival airport coordinates (longitude and latitude)';
+
+COMMENT ON COLUMN bookings.denormalized_flights.arrival_timezone
+    IS 'Arrival airport time zone';
+
+COMMENT ON COLUMN bookings.denormalized_flights.status
+    IS 'Flight status';
+
+COMMENT ON COLUMN bookings.denormalized_flights.aircraft_code
+    IS 'Aircraft code, IATA';
+
+COMMENT ON COLUMN bookings.denormalized_flights.aircraft_model
+    IS 'Aircraft model';
+
+COMMENT ON COLUMN bookings.denormalized_flights.aircraft_range
+    IS 'Maximal flying distance, km';
+
+COMMENT ON COLUMN bookings.denormalized_flights.actual_departure
+    IS 'Actual departure time';
+
+COMMENT ON COLUMN bookings.denormalized_flights.actual_arrival
+    IS 'Actual arrival time';
+
+CREATE TABLE IF NOT EXISTS bookings.denormalized_ticketing
+(
+    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL,
+    book_ref character(6) COLLATE pg_catalog."default" NOT NULL,
+    book_date timestamp with time zone NOT NULL,
+    total_amount numeric(10, 2) NOT NULL,
+    passenger_id character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    passenger_name text COLLATE pg_catalog."default" NOT NULL,
+    contact_data jsonb,
+    flight_id integer NOT NULL,
+    flight_no character(6) COLLATE pg_catalog."default" NOT NULL,
+    scheduled_departure timestamp with time zone NOT NULL,
+    scheduled_arrival timestamp with time zone NOT NULL,
+    departure_airport character(3) COLLATE pg_catalog."default" NOT NULL,
+    arrival_airport character(3) COLLATE pg_catalog."default" NOT NULL,
+    fare_conditions character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    amount numeric(10, 2) NOT NULL,
+    seat_no character varying(4) COLLATE pg_catalog."default",
+    CONSTRAINT denormalized_ticketing_pkey PRIMARY KEY (ticket_no, flight_id)
+);
+
+COMMENT ON TABLE bookings.denormalized_ticketing
+    IS 'Denormalized ticketing information with flight and booking details';
+
+COMMENT ON COLUMN bookings.denormalized_ticketing.ticket_no
+    IS 'Ticket number';
+
+COMMENT ON COLUMN bookings.denormalized_ticketing.book_ref
+    IS 'Booking number';
+
+COMMENT ON COLUMN bookings.denormalized_ticketing.book_date
+    IS 'Booking date';
+
+COMMENT ON COLUMN bookings.denormalized_ticketing.total_amount
+    IS 'Total booking cost';
+
+COMMENT ON COLUMN bookings.denormalized_ticketing.passenger_id
+    IS 'Passenger ID';
+
+COMMENT ON COLUMN bookings.denormalized_ticketing.passenger_name
+    IS 'Passenger name';
+
+COMMENT ON COLUMN bookings.denormalized_ticketing.contact_data
+    IS 'Passenger contact information';
+
+COMMENT ON COLUMN bookings.denormalized_ticketing.flight_id
+    IS 'Flight ID';
+
+COMMENT ON COLUMN bookings.denormalized_ticketing.flight_no
+    IS 'Flight number';
+
+COMMENT ON COLUMN bookings.denormalized_ticketing.scheduled_departure
+    IS 'Scheduled departure time';
+
+COMMENT ON COLUMN bookings.denormalized_ticketing.scheduled_arrival
+    IS 'Scheduled arrival time';
+
+COMMENT ON COLUMN bookings.denormalized_ticketing.departure_airport
+    IS 'Airport of departure';
+
+COMMENT ON COLUMN bookings.denormalized_ticketing.arrival_airport
+    IS 'Airport of arrival';
+
+COMMENT ON COLUMN bookings.denormalized_ticketing.fare_conditions
+    IS 'Travel class';
+
+COMMENT ON COLUMN bookings.denormalized_ticketing.amount
+    IS 'Travel cost';
+
+COMMENT ON COLUMN bookings.denormalized_ticketing.seat_no
+    IS 'Seat number';
+
+CREATE TABLE IF NOT EXISTS bookings.denormalized_boarding_passes
+(
+    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL,
+    flight_id integer NOT NULL,
+    flight_no character(6) COLLATE pg_catalog."default" NOT NULL,
+    departure_airport character(3) COLLATE pg_catalog."default" NOT NULL,
+    arrival_airport character(3) COLLATE pg_catalog."default" NOT NULL,
+    boarding_no integer NOT NULL,
+    seat_no character varying(4) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT denormalized_boarding_passes_pkey PRIMARY KEY (ticket_no, flight_id),
+    CONSTRAINT denormalized_boarding_passes_flight_id_boarding_no_key UNIQUE (flight_id, boarding_no),
+    CONSTRAINT denormalized_boarding_passes_flight_id_seat_no_key UNIQUE (flight_id, seat_no)
+);
+
+COMMENT ON TABLE bookings.denormalized_boarding_passes
+    IS 'Denormalized boarding passes with flight context';
+
+COMMENT ON COLUMN bookings.denormalized_boarding_passes.ticket_no
+    IS 'Ticket number';
+
+COMMENT ON COLUMN bookings.denormalized_boarding_passes.flight_id
+    IS 'Flight ID';
+
+COMMENT ON COLUMN bookings.denormalized_boarding_passes.flight_no
+    IS 'Flight number';
+
+COMMENT ON COLUMN bookings.denormalized_boarding_passes.departure_airport
+    IS 'Airport of departure';
+
+COMMENT ON COLUMN bookings.denormalized_boarding_passes.arrival_airport
+    IS 'Airport of arrival';
+
+COMMENT ON COLUMN bookings.denormalized_boarding_passes.boarding_no
+    IS 'Boarding pass number';
+
+COMMENT ON COLUMN bookings.denormalized_boarding_passes.seat_no
+    IS 'Seat number';
+```

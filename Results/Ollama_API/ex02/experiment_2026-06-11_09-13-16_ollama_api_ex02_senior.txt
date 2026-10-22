@@ -1,0 +1,166 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-13-16
+Model: ollama_api
+Prompt: senior
+Schema: ex02
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy involves transforming the normalized OLTP schema into a star schema optimized for analytical workloads. This includes identifying two primary fact tables (one for cleanup events and one for conservation units) and flattening relevant dimension data into them. The approach reduces query complexity by pre-joining lookup tables, embedding hierarchical data, and optimizing for common analytical access patterns.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidate mutirao_de_limpeza, coleta_de_lixo, and local_de_coleta into a single fact table 'fact_cleanup_event' to represent cleanup events with embedded location names and collected waste metrics."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Create a fact table 'fact_conservation_unit' from unidade_de_conservacao, embedding descriptive attributes from bioma, categoria_manejo, esfera_administrativa, and regiao to support conservation unit analytics."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Flatten regiao into a dimension table 'dim_region' with surrogate keys and include it in both fact tables to support geographic drill-downs."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Flatten instituicao_organizadora into a dimension table 'dim_organizer' to support organizer-based analytics."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Add surrogate keys to dimension tables (dim_region, dim_organizer) to support slowly changing dimensions and ensure stable joins."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Derive date attributes (year, quarter, month) from data_do_ocorrido in fact_cleanup_event for time-based aggregations."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Include textual descriptions (categoria_iucn, plano, tipo, estado) directly in fact tables to avoid joins in reporting."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Denormalization introduces redundancy by duplicating textual fields (e.g., organizer name, region name) in multiple tables, increasing storage but reducing query-time joins."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Pre-aggregating descriptive fields improves read performance but increases ETL complexity and may require incremental update strategies for freshness."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Fact tables are wide and may become wider with new attributes, which can affect columnar storage efficiency but simplifies BI modeling."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting on total waste collected by type, grouped by organizer or region, over time."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyzing conservation unit creation trends, area coverage, and management categories by region and bioma."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Comparing cleanup participation and duration across different locations and organizers."
+      }
+    ]
+  }
+}
+
+-- SQL DDL for Denormalized Analytical Schema
+
+-- Dimension Tables
+
+CREATE TABLE IF NOT EXISTS public.dim_region (
+    sk_region INTEGER NOT NULL,
+    id_municipio INTEGER NOT NULL,
+    nome TEXT NOT NULL,
+    estado TEXT NOT NULL,
+    CONSTRAINT dim_region_pkey PRIMARY KEY (sk_region)
+);
+
+CREATE TABLE IF NOT EXISTS public.dim_organizer (
+    sk_organizer INTEGER NOT NULL,
+    id_instituicao_organizadora INTEGER NOT NULL,
+    nome TEXT NOT NULL,
+    carater TEXT NOT NULL,
+    CONSTRAINT dim_organizer_pkey PRIMARY KEY (sk_organizer)
+);
+
+-- Fact Tables
+
+CREATE TABLE IF NOT EXISTS public.fact_cleanup_event (
+    id_mutirao INTEGER NOT NULL,
+    data_do_ocorrido DATE NOT NULL,
+    ano INTEGER,
+    mes INTEGER,
+    trimestre INTEGER,
+    horario_de_inicio TIME WITHOUT TIME ZONE,
+    duracao_total TIME WITHOUT TIME ZONE,
+    numero_aproximado_de_participantes INTEGER,
+    local_nome TEXT,
+    plastico INTEGER,
+    borracha INTEGER,
+    madeira INTEGER,
+    produtos_texteis INTEGER,
+    papel INTEGER,
+    metal INTEGER,
+    vidro INTEGER,
+    materiais_de_pesca INTEGER,
+    outros_residuos INTEGER,
+    sk_region INTEGER,
+    sk_organizer INTEGER,
+    CONSTRAINT fact_cleanup_event_pkey PRIMARY KEY (id_mutirao),
+    CONSTRAINT fact_cleanup_event_sk_region_fkey FOREIGN KEY (sk_region) REFERENCES public.dim_region(sk_region),
+    CONSTRAINT fact_cleanup_event_sk_organizer_fkey FOREIGN KEY (sk_organizer) REFERENCES public.dim_organizer(sk_organizer)
+);
+
+CREATE TABLE IF NOT EXISTS public.fact_conservation_unit (
+    id_uc INTEGER NOT NULL,
+    nome TEXT NOT NULL,
+    ano_de_criacao INTEGER,
+    area_soma_biomas DOUBLE PRECISION,
+    area_soma_biomas_continentais DOUBLE PRECISION,
+    area_marinha DOUBLE PRECISION,
+    bioma_nome TEXT,
+    categoria_manejo TEXT,
+    categoria_iucn TEXT,
+    plano TEXT,
+    esfera_tipo TEXT,
+    sk_region INTEGER,
+    CONSTRAINT fact_conservation_unit_pkey PRIMARY KEY (id_uc),
+    CONSTRAINT fact_conservation_unit_sk_region_fkey FOREIGN KEY (sk_region) REFERENCES public.dim_region(sk_region)
+);
+
+-- Index Recommendations
+
+CREATE INDEX idx_fact_cleanup_event_sk_region ON public.fact_cleanup_event(sk_region);
+CREATE INDEX idx_fact_cleanup_event_sk_organizer ON public.fact_cleanup_event(sk_organizer);
+CREATE INDEX idx_fact_cleanup_event_data ON public.fact_cleanup_event(data_do_ocorrido);
+
+CREATE INDEX idx_fact_conservation_unit_sk_region ON public.fact_conservation_unit(sk_region);
+CREATE INDEX idx_fact_conservation_unit_bioma ON public.fact_conservation_unit(bioma_nome);
+CREATE INDEX idx_fact_conservation_unit_categoria ON public.fact_conservation_unit(categoria_manejo);
+
+-- Partitioning Recommendations (Optional for large datasets)
+
+-- For fact_cleanup_event, partition by data_do_ocorrido (e.g., monthly or yearly)
+-- For fact_conservation_unit, partitioning may be less critical unless very large
+
+-- Example for partitioning fact_cleanup_event by year (requires PostgreSQL 10+):
+-- CREATE TABLE public.fact_cleanup_event_partitioned (
+--     LIKE public.fact_cleanup_event INCLUDING ALL
+-- ) PARTITION BY RANGE (ano);
+-- CREATE TABLE public.fact_cleanup_event_2023 PARTITION OF public.fact_cleanup_event_partitioned
+--     FOR VALUES FROM (2023) TO (2024);
+-- CREATE TABLE public.fact_cleanup_event_2024 PARTITION OF public.fact_cleanup_event_partitioned
+--     FOR VALUES FROM (2024) TO (2025);

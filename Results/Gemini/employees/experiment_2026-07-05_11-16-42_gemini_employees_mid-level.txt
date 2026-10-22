@@ -1,0 +1,181 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-16-42
+Model: gemini
+Prompt: mid-level
+Schema: employees
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The source schema is a highly normalized 3NF relational model designed to track the historical changes of employee attributes (salaries, titles, and department assignments) across separate tables. To optimize for read-heavy BI workloads, the denormalization strategy transitions this into a Dimensional Model (Star Schema). The core of this strategy is consolidating the overlapping historical tables (`salary`, `title`, and `department_employee`) into a single, unified Periodic/State Fact table (`fact_employee_history`). This reduces the need for complex, date-overlapping joins during query execution. Dimensions are created for `employee` and `department`, flattening static attributes to serve as filtering and grouping criteria.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidate `salary`, `title`, and `department_employee` into a single unified fact table named `fact_employee_history`. This table will represent a continuous timeline of an employee's state, where each row represents a period during which the employee's department, title, and salary remained constant."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Create a denormalized `dim_employee` table from the `employee` table, utilizing a surrogate key (`employee_sk`) to isolate the analytical model from source system key changes."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Create a `dim_department` table from the `department` table, using a surrogate key (`department_sk`)."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Retain a separate `fact_department_manager` table. Since manager assignments are sparse and represent a different business process (organizational hierarchy rather than individual compensation), keeping it separate avoids polluting the granular employee history fact table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Derived attribute added: `full_name` in `dim_employee` by concatenating `first_name` and `last_name` to simplify reporting."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Derived attributes added: `is_current` (boolean) and `record_duration_days` (integer) in `fact_employee_history` to allow BI tools to easily filter for active employees and calculate tenure without complex date math."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Denormalization: The `title` attribute is stored directly in `fact_employee_history` as a string rather than creating a separate `dim_title` table. Since titles have no additional hierarchical attributes, a separate dimension would introduce an unnecessary join."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Standardization: Replaced the custom `employee_gender` ENUM with a standard `VARCHAR(10)` in `dim_employee` to maximize compatibility with downstream BI tools."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased ETL Complexity: Building `fact_employee_history` requires complex date-range overlapping logic (interval intersections) during the ETL process to align the disparate `from_date` and `to_date` ranges from the source salary, title, and department tables."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Data Redundancy and Storage: Storing the `job_title` string repeatedly in the fact table, along with generating new rows every time *any* of the three attributes (salary, title, dept) changes, will increase the overall row count and storage footprint compared to the normalized schema."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Point-in-time reporting: 'What was the average salary by department and job title on Dec 31, 2020?' The unified fact table allows this with a simple WHERE clause (`'2020-12-31' BETWEEN effective_from_date AND effective_to_date`) without joining three historical tables."
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Current State Analysis: 'Show me the current headcount and total payroll by department.' Solved instantly by filtering on `is_current = TRUE`."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Organizational Reporting: 'Who is the current manager of the Sales department, and how many employees report to them?' Solved by joining `fact_department_manager` with `fact_employee_history` via the department dimension."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Creation Script
+
+```sql
+-- Create a dedicated schema for the analytical model
+CREATE SCHEMA IF NOT EXISTS analytics;
+
+-- ==========================================
+-- DIMENSIONS
+-- ==========================================
+
+-- 1. Employee Dimension
+-- Contains static and slowly changing (Type 1) employee details.
+CREATE TABLE IF NOT EXISTS analytics.dim_employee
+(
+    employee_sk BIGSERIAL NOT NULL,
+    employee_id BIGINT NOT NULL,
+    first_name VARCHAR(14) NOT NULL,
+    last_name VARCHAR(16) NOT NULL,
+    full_name VARCHAR(31) NOT NULL, -- Derived attribute for BI convenience
+    birth_date DATE NOT NULL,
+    gender VARCHAR(10) NOT NULL,    -- Converted from ENUM for BI compatibility
+    hire_date DATE NOT NULL,
+    CONSTRAINT pk_dim_employee PRIMARY KEY (employee_sk),
+    CONSTRAINT uk_dim_employee_id UNIQUE (employee_id)
+);
+
+CREATE INDEX idx_dim_employee_hire_date ON analytics.dim_employee(hire_date);
+
+-- 2. Department Dimension
+-- Contains department attributes.
+CREATE TABLE IF NOT EXISTS analytics.dim_department
+(
+    department_sk BIGSERIAL NOT NULL,
+    department_id CHAR(4) NOT NULL,
+    department_name VARCHAR(40) NOT NULL,
+    CONSTRAINT pk_dim_department PRIMARY KEY (department_sk),
+    CONSTRAINT uk_dim_department_id UNIQUE (department_id)
+);
+
+-- ==========================================
+-- FACTS
+-- ==========================================
+
+-- 3. Employee History Fact (Unified State/Periodic Snapshot Fact)
+-- Consolidates salary, title, and department assignments into a single timeline.
+-- A new row is generated in this table whenever an employee's salary, title, or department changes.
+CREATE TABLE IF NOT EXISTS analytics.fact_employee_history
+(
+    employee_history_sk BIGSERIAL NOT NULL,
+    employee_sk BIGINT NOT NULL,
+    department_sk BIGINT NOT NULL,
+    job_title VARCHAR(50) NOT NULL,     -- Denormalized from title table
+    salary_amount BIGINT NOT NULL,      -- Measure
+    effective_from_date DATE NOT NULL,  -- Start of this specific state
+    effective_to_date DATE NOT NULL,    -- End of this specific state (use '9999-12-31' for active)
+    is_current BOOLEAN NOT NULL,        -- True if this is the employee's current state
+    record_duration_days INT,           -- Derived measure: effective_to_date - effective_from_date
+    
+    CONSTRAINT pk_fact_employee_history PRIMARY KEY (employee_history_sk),
+    CONSTRAINT fk_fact_emp_hist_employee FOREIGN KEY (employee_sk)
+        REFERENCES analytics.dim_employee (employee_sk) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION,
+    CONSTRAINT fk_fact_emp_hist_department FOREIGN KEY (department_sk)
+        REFERENCES analytics.dim_department (department_sk) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+);
+
+-- Indexes optimized for BI query patterns (filtering by current status, department, and date ranges)
+CREATE INDEX idx_fact_emp_hist_current ON analytics.fact_employee_history(is_current) WHERE is_current = TRUE;
+CREATE INDEX idx_fact_emp_hist_emp_sk ON analytics.fact_employee_history(employee_sk);
+CREATE INDEX idx_fact_emp_hist_dept_sk ON analytics.fact_employee_history(department_sk);
+CREATE INDEX idx_fact_emp_hist_dates ON analytics.fact_employee_history(effective_from_date, effective_to_date);
+
+
+-- 4. Department Manager Fact
+-- Tracks the historical and current managers of departments.
+CREATE TABLE IF NOT EXISTS analytics.fact_department_manager
+(
+    department_manager_sk BIGSERIAL NOT NULL,
+    department_sk BIGINT NOT NULL,
+    manager_employee_sk BIGINT NOT NULL,
+    effective_from_date DATE NOT NULL,
+    effective_to_date DATE NOT NULL,
+    is_current BOOLEAN NOT NULL,
+    
+    CONSTRAINT pk_fact_department_manager PRIMARY KEY (department_manager_sk),
+    CONSTRAINT fk_fact_dept_mgr_department FOREIGN KEY (department_sk)
+        REFERENCES analytics.dim_department (department_sk) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION,
+    CONSTRAINT fk_fact_dept_mgr_employee FOREIGN KEY (manager_employee_sk)
+        REFERENCES analytics.dim_employee (employee_sk) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+);
+
+CREATE INDEX idx_fact_dept_mgr_current ON analytics.fact_department_manager(is_current) WHERE is_current = TRUE;
+CREATE INDEX idx_fact_dept_mgr_dept_sk ON analytics.fact_department_manager(department_sk);
+```

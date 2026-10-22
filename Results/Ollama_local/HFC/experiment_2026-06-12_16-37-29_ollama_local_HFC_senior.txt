@@ -1,0 +1,376 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_16-37-29
+Model: ollama_local
+Prompt: senior
+Schema: HFC
+==================================================
+
+# Phase 1 – Schema Assessment
+
+### Entity Relationships & Cardinalities
+The source schema is a classic hybrid of an OLTP system (managing herbarium records, users, and collections) and an OLTP system for biological taxonomy (species, families, genera).
+*   **Fact Table:** `tombos` is the central fact table containing specimen data. It has a 1-to-many relationship with `tombos_fotos`, `tombos_identificadores`, `remessas` (via `retirada_exsiccata_tombos`), and `alteracoes`.
+*   **Dimension Tables:**
+    *   **Location:** `herbarios`, `enderecos`, `locais_coleta`, `estados`, `paises`, `solos`, `relevos`, `vegetacoes`.
+    *   **Taxonomy:** `especies`, `sub_especies`, `variedades`, `generos`, `familias`, `sub_familias`, `reinos`.
+    *   **Organization:** `usuarios`, `tipos_usuarios`, `autores`, `colecoes_anexas`.
+    *   **Time/Status:** `fase_sucessional`, `tipos` (collection types), `configuracao`.
+
+### Hierarchical Structures
+*   **Taxonomy Hierarchy:** Reino -> Família -> Gênero -> Espécie (with Sub-espécie and Variedades as leaf or intermediate nodes).
+*   **Location Hierarchy:** País -> Estado -> Cidade (implied via `cidade_id` though not explicitly shown as a separate table in the snippet, likely a lookup or part of `enderecos` context) -> Local de Coleta.
+*   **Specimen Hierarchy:** Espécie -> Variedades -> Sub-espécies (many-to-many or many-to-one depending on biological definition, likely one-to-many per species).
+
+### Fact-like vs Dimension-like
+*   **Fact:** `tombos` (Specimens), `alteracoes` (Changes), `remessas` (Shipments), `retirada_exsiccata_tombos` (Exsiccata removals).
+*   **Dimensions:** All other tables are dimensions. Note that `tombos` contains significant dimension attributes (latitude, longitude, date components) that should be denormalized.
+
+### Query Access Patterns
+1.  **Aggregation by Geography:** Count specimens per State/City/Region, grouped by Vegetation type.
+2.  **Taxonomic Analysis:** Count specimens per Family/Genus, filtered by Collection Year and Status.
+3.  **Temporal Trends:** Aggregate specimen counts by month/year, filtered by Successional Phase.
+4.  **User/Colector Performance:** Sum of specimens collected per User/Collector, grouped by Herbarium and Date.
+5.  **Complex Joins:** Queries joining Tombos with full hierarchy (Reino -> Família) and location details.
+
+---
+
+# Phase 2 - Analytical Modeling Strategy
+
+### Chosen Architecture: **Star Schema with Reference Data Absorption**
+
+**Justification:**
+The primary analytical workload involves aggregating specimen data (`tombos`) across multiple dimensions (Location, Taxonomy, Time, Organization).
+1.  **Join Reduction:** The `tombos` table currently has ~20 foreign keys pointing to different dimension tables. A Star Schema consolidates these into a single central fact table (`tombos_facts`) with denormalized columns. This eliminates the need for deep join trees (e.g., `Tombos` -> `Especies` -> `Genero` -> `Familia` -> `Reino`).
+2.  **Read Performance:** BI tools (Tableau, PowerBI, Looker) and large aggregations benefit immensely from flat fact tables. Deep joins in Postgres are expensive; a denormalized fact table allows `GROUP BY` operations on all dimension attributes in a single pass.
+3.  **Reference Data Absorption:** Small lookup tables like `tipos`, `tipos_usuarios`, `configuracao`, and `fase_sucessional` are absorbed into the fact tables to avoid joining against a central dimension table for these attributes.
+4.  **Data Marts:** While a full data mart architecture (separate schemas per domain) is possible, given the interconnected nature of the biological and logistical data, a single unified Star Schema is more appropriate for cross-domain analysis (e.g., "Specimens in Brazil collected by collectors in São Paulo").
+
+### Denormalization Decisions
+
+| Decision ID | Decision Description | Performance Objective | Expected Join Reduction | Data Redundancy | Maintenance Implications |
+| :--- | :--- | :--- | :--- :--- | :--- |
+| **D1** | **Consolidate Taxonomy:** Move `genero`, `familia`, `sub_familia`, `sub_especie`, `especie`, `variedade`, `reino` columns directly into `tombos_facts`. | Eliminates 5+ joins required for taxonomic hierarchy queries. Enables instant aggregation by taxon. | ~90% reduction in join depth for taxonomic reports. | High. Stores repeated names for every specimen. | Requires careful validation to ensure taxonomy changes (e.g., renaming a family) propagate to all historical records. |
+| **D2** | **Absorb Location Hierarchy:** Add `estado`, `sigla`, `cidade`, `endereco_logradouro`, `latitude`, `longitude` directly to `tombos_facts`. | Eliminates joins to `estados`, `enderecos`, `locais_coleta`. Enables geo-spatial filtering without spatial joins. | ~60% reduction in location-related joins. | Medium. Location names are static; duplicates are minimal but exist. | Updates to state names affect all records; versioning logic needed if historical names must be preserved. |
+| **D3** | **Absorb Temporal Attributes:** Add `data_coleta_ano`, `data_coleta_mes`, `fase_sucessional_nome` to `tombos_facts`. | Enables `GROUP BY YEAR/MONTH` without joining `tombos` to `locais_coleta` (which holds the phase ID). | ~30% reduction in temporal filtering. | Low. Dates are derived; phase names are static. | Phase names are stable; date derivation is safe. |
+| **D4** | **Absorb Organization & User Data:** Add `usuario_nome`, `coletores_nome`, `herbario_nome`, `tipo_usuario` to `tombos_facts`. | Eliminates joins to `usuarios`, `coletores`, `herbarios`, `tipos_usuarios`. | ~40% reduction in organizational queries. | Medium. User names change; herbarium names change. | Requires audit trails or a separate "Fact Version" table if strict historical accuracy is needed. |
+| **D5** | **Create `tombos_facts` Table:** New wide table with all attributes from `tombos` + denormalized dimensions. | Primary target for all analytical queries. | N/A (Base table) | N/A | High write load (inserts all columns), but reads are fast. |
+| **D6** | **Maintain Source `tombos`:** Keep original schema for OLTP transactions and point queries. | Preserves ACID properties for transactional integrity. | N/A (OLTP) | N/A | Requires a sync mechanism (CDC or ETL) to keep `tombos_facts` updated. |
+
+---
+
+# Phase 3 – Analytical Physical Model Design
+
+**Table: `tombos_facts` (The Central Fact Table)**
+*   **PK:** `tombos_hcf` (Surrogate key from source, mapped to bigserial).
+*   **Dimensions (Denormalized):**
+    *   *Taxonomy:* `nome_cientifico`, `nome_genero`, `nome_familia`, `nome_sub_familia`, `nome_sub_especie`, `nome_variedade`, `nome_reino`.
+    *   *Location:* `nome_estado`, `sigla_estado`, `nome_cidade`, `logradouro`, `latitude`, `longitude`, `altitude`, `nome_vegetacao`, `nome_solo`, `nome_relevo`, `nome_fase_sucessional`.
+    *   *Organization:* `nome_usuario`, `nome_coletor`, `nome_herbario`, `sigla_herbario`, `tipo_usuario`, `email_coletor`.
+    *   *Time/Status:* `data_coleta_ano`, `data_coleta_mes`, `data_coleta_dia`, `data_identificacao_ano`, `fase_sucessional_nome`.
+    *   *Collection:* `nome_colecao_anexa`, `nome_tipo`.
+    *   *Media/Metadata:* `codigo_barra`, `num_barra`, `em_vivo`, `observacao`.
+*   **Indexes:** Composite B-Tree on `(data_coleta_ano, data_coleta_mes)`, `(nome_estado, nome_vegetacao)`, `(nome_genero, nome_familia)`.
+*   **Partitioning:** Range partition by `data_coleta_ano` (optional, depending on volume; recommended for >10M rows).
+
+**Table: `tombos_fotos_facts`**
+*   **PK:** `id` (Surrogate).
+*   **FK:** `tombos_hcf` (Foreign key to `tombos_facts`).
+*   **Dimensions:** `nome_tombo` (from fact), `caminho_foto`, `codigo_barra`, `sequencia`, `em_vivo`.
+*   **Indexes:** Composite on `(tombos_hcf, em_vivo)`.
+
+**Table: `tombos_identificadores_facts`**
+*   **PK:** `id` (Surrogate).
+*   **FK:** `tombos_hcf`, `nome_identificador`.
+*   **Indexes:** Composite on `(tombos_hcf, ordem)`.
+
+**Table: `alteracoes_facts`**
+*   **PK:** `id` (Surrogate).
+*   **FK:** `tombos_hcf` (Foreign key to `tombos_facts`), `nome_usuario`.
+*   **Dimensions:** `status_nome`, `nome_observacao`, `data_observacao`.
+*   **Indexes:** Composite on `(tombos_hcf, status_nome)`.
+
+**Table: `remessas_facts`**
+*   **PK:** `id` (Surrogate).
+*   **FK:** `tombos_hcf` (via `retirada_exsiccata_tombos`), `nome_herbario`, `nome_entidade_destino`.
+*   **Indexes:** Composite on `(data_envio, nome_herbario)`.
+
+*(Note: For the purpose of this response, the detailed DDL for the fact tables is provided below, focusing on the primary `tombos_facts` as it is the core analytical asset.)*
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transforms the source schema from a normalized OLTP structure into a Star Schema centered around a wide 'tombos_facts' table. Key decisions include absorbing the full taxonomic hierarchy (Reino to Sub-especie), complete location hierarchy (País to Endereço), and organizational attributes directly into the fact table. This eliminates the need for deep join trees, significantly reducing query latency for BI dashboards. Reference data tables (like tipos, fases) are flattened into columns within the fact table.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Creation of 'tombos_facts' table by selecting all columns from 'tombos' and adding denormalized columns for taxonomy (genero, familia, sub_familia, sub_especie, especie, variedade, reino), location (estado, cidade, logradouro, latitude, longitude, vegetacao, solo, relevo, fase_sucessional), and organization (usuario, coletor, herbario, tipo_usuario)."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Flattening of 'locais_coleta', 'estados', 'paises', 'vegetacoes', 'solos', 'relevos' into the 'tombos_facts' table to remove the need for joining multiple dimension tables for location and environmental context."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Flattening of 'especies', 'generos', 'familias', 'sub_familias', 'sub_especies', 'variedades', 'reinos' into 'tombos_facts' to allow direct aggregation by taxonomic rank without hierarchical joins."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Flattening of 'usuarios', 'coletores', 'herbarios', 'tipos_usuarios', 'colecoes_anexas', 'tipos' into 'tombos_facts' to enable user-centric and collection-centric reporting."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Creation of specialized fact tables 'tombos_fotos_facts', 'tombos_identificadores_facts', 'alteracoes_facts', and 'remessas_facts' that include their specific fact keys and denormalized dimension attributes."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived columns: 'data_coleta_ano', 'data_coleta_mes', 'data_identificacao_ano' calculated from timestamp fields. Added string columns for all taxonomy levels (e.g., 'nome_genero') and location levels (e.g., 'sigla_estado')."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed 'id' (bigserial) from the fact tables, replacing them with surrogate keys (e.g., 'tombos_hcf' for the main fact, 'id' for sub-facts) to avoid type mismatches and ensure consistency with the denormalized structure."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "A1",
+        "description": "Tradeoff: Increased storage volume due to repeated dimension data vs. drastically improved query performance (fewer joins) and simplified data modeling for end-users."
+      },
+      {
+        "tradeoff_id": "A2",
+        "description": "Tradeoff: Potential data inconsistency if source dimension data changes (e.g., a state name changes) without a synchronization mechanism. Mitigation: Implement an ETL process that validates and updates the fact table based on the source of truth."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregation of specimen counts by Year/Month, filtered by State and Vegetation Type. Example: SELECT COUNT(*) FROM tombos_facts WHERE data_coleta_ano = 2023 GROUP BY nome_estado, nome_vegetacao;"
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Taxonomic distribution analysis. Example: SELECT nome_genero, nome_familia, COUNT(*) FROM tombos_facts GROUP BY nome_genero, nome_familia ORDER BY COUNT(*) DESC;"
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "User/Colector performance metrics. Example: SELECT nome_coletor, nome_herbario, SUM(numeric_col) FROM tombos_facts GROUP BY nome_coletor;"
+      }
+    ]
+  }
+}
+```
+
+### Complete SQL DDL for the Denormalized Schema
+
+```sql
+-- Drop existing tables if they exist to ensure clean migration
+DROP TABLE IF EXISTS public.tombos_fotos_facts;
+DROP TABLE IF EXISTS public.tombos_identificadores_facts;
+DROP TABLE IF EXISTS public.alteracoes_facts;
+DROP TABLE IF EXISTS public.remessas_facts;
+DROP TABLE IF EXISTS public.tombos_facts;
+
+-- ============================================================================
+-- 1. FACT TABLE: TOMBOS_FACTS (Central Analytical Asset)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.tombos_facts (
+    tombos_hcf bigserial NOT NULL,
+    
+    -- --- TAXONOMY DIMENSIONS (Denormalized) ---
+    nome_cientifico text COLLATE pg_catalog."default",
+    nome_genero text COLLATE pg_catalog."default",
+    nome_familia text COLLATE pg_catalog."default",
+    nome_sub_familia text COLLATE pg_catalog."default",
+    nome_sub_especie text COLLATE pg_catalog."default",
+    nome_variedade text COLLATE pg_catalog."default",
+    nome_reino text COLLATE pg_catalog."default",
+    
+    -- --- LOCATION DIMENSIONS (Denormalized) ---
+    nome_estado text COLLATE pg_catalog."default",
+    sigla_estado character(4) COLLATE pg_catalog."default",
+    nome_cidade text COLLATE pg_catalog."default",
+    logradouro text COLLATE pg_catalog."default",
+    numero character varying(10) COLLATE pg_catalog."default",
+    latitude double precision,
+    longitude double precision,
+    altitude double precision,
+    nome_vegetacao text COLLATE pg_catalog."default",
+    nome_solo text COLLATE pg_catalog."default",
+    nome_relevo text COLLATE pg_catalog."default",
+    nome_fase_sucessional text COLLATE pg_catalog."default",
+    
+    -- --- ORGANIZATION DIMENSIONS (Denormalized) ---
+    nome_usuario text COLLATE pg_catalog."default",
+    ra character varying(45) COLLATE pg_catalog."default",
+    email character varying(200) COLLATE pg_catalog."default",
+    nome_coletor text COLLATE pg_catalog."default",
+    nome_herbario text COLLATE pg_catalog."default",
+    sigla_herbario character varying(80) COLLATE pg_catalog."default",
+    tipo_usuario text COLLATE pg_catalog."default",
+    
+    -- --- COLLECTION & STATUS DIMENSIONS (Denormalized) ---
+    nome_colecao_anexa text COLLATE pg_catalog."default",
+    nome_tipo text COLLATE pg_catalog."default",
+    status_nome text COLLATE pg_catalog."default",
+    
+    -- --- TIME & METADATA (Denormalized) ---
+    data_coleta_ano integer,
+    data_coleta_mes integer,
+    data_coleta_dia bigint,
+    data_identificacao_ano integer,
+    data_identificacao_mes smallint,
+    data_identificacao_ano smallint,
+    fase_sucessional_nome text COLLATE pg_catalog."default",
+    
+    -- --- ORIGINAL FACT ATTRIBUTES ---
+    observacao text COLLATE pg_catalog."default",
+    nomes_populares text COLLATE pg_catalog."default",
+    numero_coleta bigint,
+    ativo boolean DEFAULT true,
+    taxon character varying(45) COLLATE pg_catalog."default",
+    rascunho boolean DEFAULT false,
+    descricao text COLLATE pg_catalog."default",
+    unicata boolean DEFAULT false,
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    CONSTRAINT idx_41310_tombos_facts_hcf PRIMARY KEY (tombos_hcf),
+    CONSTRAINT idx_41310_tombos_facts_year_month 
+        INCLUDE (nome_estado, nome_vegetacao, data_coleta_ano)
+    ) PARTITION BY RANGE (data_coleta_ano);
+
+-- Partitioning Strategy: Range partition by year for efficient time-based queries
+ALTER TABLE public.tombos_facts
+    ADD CONSTRAINT partition_tombos_2023 PARTITION FOR VALUES IN (2023);
+ALTER TABLE public.tombos_facts
+    ADD CONSTRAINT partition_tombos_2024 PARTITION FOR VALUES IN (2024);
+ALTER TABLE public.tombos_facts
+    ADD CONSTRAINT partition_tombos_2025 PARTITION FOR VALUES IN (2025);
+
+-- Indexes for common analytical patterns
+CREATE INDEX IF NOT EXISTS idx_41310_tombos_facts_geo ON public.tombos_facts (nome_estado, latitude, longitude);
+CREATE INDEX IF NOT EXISTS idx_41310_tombos_facts_taxon ON public.tombos_facts (nome_genero, nome_familia);
+CREATE INDEX IF NOT EXISTS idx_41310_tombos_facts_org ON public.tombos_facts (nome_coletor, nome_herbario);
+
+-- ============================================================================
+-- 2. FACT TABLE: TOMBOS_FOTOS_FACTS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.tombos_fotos_facts (
+    id bigserial NOT NULL,
+    tombos_hcf bigint NOT NULL,
+    nome_tombo text COLLATE pg_catalog."default", -- Denormalized from tombos_facts join
+    codigo_barra character varying(45) COLLATE pg_catalog."default",
+    num_barra character varying(45) COLLATE pg_catalog."default",
+    caminho_foto text COLLATE pg_catalog."default",
+    em_vivo boolean NOT NULL DEFAULT false,
+    sequencia bigint,
+    
+    CONSTRAINT idx_41320_tombos_fotos_facts_pk PRIMARY KEY (id),
+    CONSTRAINT idx_41320_tombos_fotos_facts_hcf 
+        INCLUDE (em_vivo, codigo_barra)
+) PARTITION BY RANGE (id);
+
+CREATE INDEX IF NOT EXISTS idx_41320_tombos_fotos_facts_hcf ON public.tombos_fotos_facts (tombos_hcf);
+
+-- ============================================================================
+-- 3. FACT TABLE: TOMBOS_IDENTIFICADORES_FACTS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.tombos_identificadores_facts (
+    id bigserial NOT NULL,
+    tombos_hcf bigint NOT NULL,
+    nome_identificador text COLLATE pg_catalog."default", -- Denormalized
+    ordem smallint DEFAULT '1'::smallint,
+    
+    CONSTRAINT idx_41330_tombos_identificadores_facts_pk PRIMARY KEY (id),
+    CONSTRAINT idx_41330_tombos_identificadores_facts_hcf 
+        INCLUDE (ordem)
+) PARTITION BY RANGE (id);
+
+CREATE INDEX IF NOT EXISTS idx_41330_tombos_identificadores_facts_hcf ON public.tombos_identificadores_facts (tombos_hcf);
+
+-- ============================================================================
+-- 4. FACT TABLE: ALTERACOES_FACTS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.alteracoes_facts (
+    id bigserial NOT NULL,
+    tombos_hcf bigint NOT NULL,
+    nome_usuario text COLLATE pg_catalog."default",
+    status_nome text COLLATE pg_catalog."default",
+    observacao text COLLATE pg_catalog."default",
+    data_observacao timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    CONSTRAINT idx_41340_alteracoes_facts_pk PRIMARY KEY (id),
+    CONSTRAINT idx_41340_alteracoes_facts_hcf 
+        INCLUDE (status_nome, data_observacao)
+) PARTITION BY RANGE (id);
+
+CREATE INDEX IF NOT EXISTS idx_41340_alteracoes_facts_hcf ON public.alteracoes_facts (tombos_hcf);
+
+-- ============================================================================
+-- 5. FACT TABLE: REMESSAS_FACTS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.remessas_facts (
+    id bigserial NOT NULL,
+    tombos_hcf bigint NOT NULL,
+    nome_herbario text COLLATE pg_catalog."default",
+    nome_entidade_destino text COLLATE pg_catalog."default",
+    data_envio timestamp with time zone,
+    observacao text COLLATE pg_catalog."default",
+    
+    CONSTRAINT idx_41350_remessas_facts_pk PRIMARY KEY (id),
+    CONSTRAINT idx_41350_remessas_facts_hcf 
+        INCLUDE (data_envio)
+) PARTITION BY RANGE (id);
+
+CREATE INDEX IF NOT EXISTS idx_41350_remessas_facts_hcf ON public.remessas_facts (tombos_hcf);
+
+-- ============================================================================
+-- 6. VIEWS FOR REFERENCE DATA (Optional, for quick lookups)
+-- ============================================================================
+-- Note: In a true Star Schema, these are usually dimension tables, 
+-- but if we chose Reference Data Absorption, we might keep these for 
+-- occasional direct queries or as a fallback.
+
+-- View to simulate dimension lookup for 'Estados'
+CREATE OR REPLACE VIEW public.vw_estados AS
+SELECT 
+    e.id,
+    e.nome,
+    e.sigla,
+    p.nome AS pais_nome
+FROM public.estados e
+LEFT JOIN public.paises p ON e.pais_id = p.id;
+
+-- View to simulate dimension lookup for 'Generos'
+CREATE OR REPLACE VIEW public.vw_generos AS
+SELECT 
+    g.id,
+    g.nome,
+    f.nome AS familia_nome
+FROM public.generos g
+LEFT JOIN public.familias f ON g.familia_id = f.id;
+
+-- ============================================================================
+-- 7. MIGRATION SCRIPT TO POPULATE FACT TABLE
+-- ============================================================================
+-- This logic is pseudo-code representation of the ETL process.
+-- In production, use a dedicated ETL tool (Airflow, Prefect, etc.) or a pg_dump/pg_restore 
+-- with data transformation scripts.
+
+-- Example: Populate tombos_facts
+-- INSERT INTO public.tombos_facts (...)
+-- SELECT 
+--     t.hcf,
+--     t.nome_cientifico,
+--     g.nome, -- Join logic handled in SELECT
+--     ...
+-- FROM public.tombos t
+-- JOIN public.especies e ON t.especie_id = e.id
+-- JOIN public.generos g ON e.genero_id = g.id
+-- ... (and so on for all dimensions)
+```

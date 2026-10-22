@@ -1,0 +1,151 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 6
+  - Total Attributes: 16
+    * consumo_anual: 5 columns
+    * continente: 2 columns
+    * emissao_g_efeito_estufa: 4 columns
+    * fonte_energia: 2 columns
+    * paises: 4 columns
+    * populacao: 4 columns
+
+Denormalized Model:
+  - Tables: 4
+  - Total Attributes: 17
+    * dim_geography: 6 columns
+    * dim_energy: 3 columns
+    * fact_country_yearly_metrics: 6 columns
+    * fact_energy_consumption: 5 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Denormalized model has MORE attributes (16 vs 17)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: id_consumo (INTEGER) -> consumption_sk (BIGSERIAL)
+  - Type mismatch: porcentagem (INTEGER) -> energy_source_name (CHARACTER)
+  - Type mismatch: nome (CHARACTER) -> year (INTEGER)
+  - Type mismatch: id_emissao (INTEGER) -> emission_amount (BIGINT)
+  - Type mismatch: ano (INTEGER) -> geo_sk (SERIAL)
+  - Type mismatch: quantidade_emitida (BIGINT) -> energy_source_id (INTEGER)
+  - Type mismatch: id_fonte_energia (INTEGER) -> emissions_per_capita (NUMERIC(15, 4))
+  - Type mismatch: nome (CHARACTER) -> energy_sk (SERIAL)
+  - Type mismatch: id_paises (INTEGER) -> metric_sk (BIGSERIAL)
+  - Type mismatch: id_pop (INTEGER) -> population_count (BIGINT)
+  - Type mismatch: quantidade_hab (INTEGER) -> continent_name (CHARACTER)
+--------------------------------------------------------------------------------
+Completeness Ratio:        1.06
+Data Type Preservation:    0.31
+Avg Levenshtein Distance:  9.31
+BLEU Score:                0.00
+ROUGE-1:                   0.10
+METEOR Score:              0.00
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: fact_energy_consumption
+Dimension Tables Detected: dim_geography, dim_energy, fact_country_yearly_metrics
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected exactly 1 Fact table. Evaluating as a standard STAR SCHEMA.
+  - DIMENSION NULL WARNING: Attribute 'foundation_year' in 'dim_geography' allows NULLs. Consider demanding default values.
+  - SNOWFLAKE VIOLATION: Dimension 'fact_country_yearly_metrics' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'population_count' in 'fact_country_yearly_metrics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'emission_amount' in 'fact_country_yearly_metrics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'emissions_per_capita' in 'fact_country_yearly_metrics' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * fact_energy_consumption: 3 Numeric, 0 Text
+  * dim_geography: 4 Numeric, 2 Text
+  * dim_energy: 2 Numeric, 1 Text
+  * fact_country_yearly_metrics: 6 Numeric, 0 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  ano ano ano fundacao id_consumo id_continente id_emissao id_fonte_energia id_paises id_pop nome nome nome porcentagem quantidade_emitida quantidade_hab
+
+Denormalized Model (Combined Text):
+  consumption_percentage consumption_sk continent_id continent_name country_id country_name emission_amount emissions_per_capita energy_sk energy_source_id energy_source_name foundation_year geo_sk metric_sk population_count year year
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 16 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id_consumo INTEGER
+  Denormalized:  consumption_sk BIGSERIAL
+
+Pair 2:
+  Relational:    ano INTEGER
+  Denormalized:  year INTEGER
+
+Pair 3:
+  Relational:    porcentagem INTEGER
+  Denormalized:  energy_source_name CHARACTER
+
+Pair 4:
+  Relational:    id_continente INTEGER
+  Denormalized:  continent_id INTEGER
+
+Pair 5:
+  Relational:    nome CHARACTER
+  Denormalized:  year INTEGER
+
+Pair 6:
+  Relational:    id_emissao INTEGER
+  Denormalized:  emission_amount BIGINT
+
+Pair 7:
+  Relational:    ano INTEGER
+  Denormalized:  geo_sk SERIAL
+
+Pair 8:
+  Relational:    quantidade_emitida BIGINT
+  Denormalized:  energy_source_id INTEGER
+
+Pair 9:
+  Relational:    id_fonte_energia INTEGER
+  Denormalized:  emissions_per_capita NUMERIC(15, 4)
+
+Pair 10:
+  Relational:    nome CHARACTER
+  Denormalized:  energy_sk SERIAL
+
+Pair 11:
+  Relational:    id_paises INTEGER
+  Denormalized:  metric_sk BIGSERIAL
+
+Pair 12:
+  Relational:    nome CHARACTER
+  Denormalized:  country_name CHARACTER
+
+Pair 13:
+  Relational:    fundacao INTEGER
+  Denormalized:  foundation_year INTEGER
+
+Pair 14:
+  Relational:    id_pop INTEGER
+  Denormalized:  population_count BIGINT
+
+Pair 15:
+  Relational:    ano INTEGER
+  Denormalized:  country_id INTEGER
+
+Pair 16:
+  Relational:    quantidade_hab INTEGER
+  Denormalized:  continent_name CHARACTER
+
+
+================================================================================

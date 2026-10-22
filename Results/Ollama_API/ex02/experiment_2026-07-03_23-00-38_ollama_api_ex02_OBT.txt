@@ -1,0 +1,126 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-03_23-00-38
+Model: ollama_api
+Prompt: OBT
+Schema: ex02
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy adopted follows the ONE-BIG-TABLE MODEL, which consolidates all tables into a single wide table. This approach eliminates JOIN operations during read queries by pre-joining related data, significantly improving read performance at the expense of increased storage and write complexity. The new schema includes all attributes from the original normalized schema, with foreign key columns replaced by their corresponding descriptive values to maintain semantic integrity.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge all tables into one denormalized table, eliminating foreign keys and including descriptive fields directly."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Primary key is maintained as 'id_mutirao' since it uniquely identifies each cleanup event across the entire dataset."
+      },
+      {
+        "decision_id": "D3",
+        "description": "All lookup/reference tables (bioma, categoria_manejo, esfera_administrativa, instituicao_organizadora, regiao) are merged by bringing in their descriptive fields instead of IDs."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Foreign key columns like id_bioma, id_manejo, etc., are removed and replaced with their respective descriptive text fields (nome_bioma, categoria_manejo, etc.)."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Columns from different tables with the same name are prefixed with the source table name to avoid ambiguity (e.g., 'nome' becomes 'nome_local_de_coleta' and 'nome_instituicao_organizadora')."
+      },
+      {
+        "decision_id": "A3",
+        "description": "All columns from the original normalized schema are preserved in the denormalized version to ensure full semantic equivalence."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved read performance due to elimination of JOINs vs. increased storage requirements and potential data redundancy."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified querying for analytics and reporting vs. more complex ETL processes required to maintain consistency during writes or updates."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Reduced query execution time for frequent analytical patterns vs. potential update anomalies if not properly managed through ETL logic."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "Q1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical queries aggregating waste collection data by region, institution, or conservation unit would benefit from having all relevant dimensions in a single table."
+      },
+      {
+        "decision_id": "Q2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting on cleanup events including participant numbers, duration, location, and collected waste types requires joining multiple tables; denormalization avoids this overhead."
+      },
+      {
+        "decision_id": "Q3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries filtering or grouping by bioma, management category, administrative sphere, or institution type can be executed without JOINs."
+      }
+    ]
+  }
+}
+
+```sql
+CREATE TABLE IF NOT EXISTS public.mutirao_denormalizado
+(
+    id_mutirao integer NOT NULL,
+    data_do_ocorrido date NOT NULL,
+    horario_de_inicio time without time zone NOT NULL,
+    numero_aproximado_de_participantes integer,
+    duracao_total time without time zone NOT NULL,
+    
+    -- Local de Coleta
+    nome_local_de_coleta text COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Coleta de Lixo
+    plastico integer,
+    borracha integer,
+    madeira integer,
+    produtos_texteis integer,
+    papel integer,
+    metal integer,
+    vidro integer,
+    materiais_de_pesca integer,
+    outros_residuos integer,
+    
+    -- Instituição Organizadora
+    nome_instituicao_organizadora text COLLATE pg_catalog."default" NOT NULL,
+    carater text COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Região (Município)
+    nome_municipio text COLLATE pg_catalog."default" NOT NULL,
+    estado text COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Unidade de Conservação
+    nome_unidade_de_conservacao text COLLATE pg_catalog."default" NOT NULL,
+    ano_de_criacao integer,
+    area_soma_biomas double precision,
+    area_soma_biomas_continentais double precision,
+    area_marinha double precision,
+    
+    -- Bioma
+    nome_bioma text COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Categoria de Manejo
+    categoria_manejo text COLLATE pg_catalog."default" NOT NULL,
+    categoria_iucn text COLLATE pg_catalog."default" NOT NULL,
+    plano text COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Esfera Administrativa
+    tipo_esfera text COLLATE pg_catalog."default" NOT NULL,
+    
+    CONSTRAINT mutirao_denormalizado_pkey PRIMARY KEY (id_mutirao)
+);
+```

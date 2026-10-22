@@ -1,0 +1,272 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-33-55
+Model: gemini
+Prompt: senior
+Schema: ex04
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions the highly normalized OLTP schema into a Star Schema optimized for OLAP workloads. The core approach involves consolidating entities that share the same grain (Country + Year) into wide fact tables, flattening hierarchical lookup tables into conformed dimensions, and removing bridge/header tables to allow direct querying of lower-grain facts. This minimizes complex multi-table joins, aligns with columnar storage paradigms, and maximizes compatibility with BI tools like Tableau or PowerBI.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Flattened 'region' and 'country' tables into a single conformed dimension 'dim_location'. This eliminates the need to join country and region tables for geographical rollups."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merged 'demography', 'employment', 'education', 'economy', and 'health' into a single wide fact table 'fact_country_indicators'. All these source tables share the exact same grain (country_code + year)."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Bypassed the 'demography' header table for 'population' and 'life_expectancy'. Created 'fact_population' and 'fact_life_expectancy' that link directly to 'dim_location' and 'year', removing an unnecessary bridge join."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Converted 'survey' into 'fact_welfare_survey' and 'decile' into 'fact_welfare_decile'. Propagated 'year' and 'location_key' down to 'fact_welfare_decile' to allow slice-and-dice without joining back to the survey fact."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Introduced surrogate keys (e.g., location_key, survey_key) to isolate the data warehouse from source system primary key changes and optimize join performance."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Standardized 'year' as an integer across all fact tables to serve as a degenerate dimension and primary partitioning key."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Renamed ambiguous columns (e.g., 'value' in decile to 'decile_value', 'number' in population to 'population_count') to ensure semantic clarity in the BI layer."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Wide Fact Table Sparsity: Merging 5 indicator tables into 'fact_country_indicators' may introduce NULLs if a country reports health data but not education data in a given year. Tradeoff accepted for the massive reduction in join complexity."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Storage Redundancy in Deciles: Propagating location and year into 'fact_welfare_decile' increases storage footprint. Tradeoff accepted because storage is cheap, and avoiding a Fact-to-Fact join significantly improves query performance."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Cross-domain macroeconomic analysis (e.g., 'Show me the correlation between GDP, education expenditure, and unemployment rate by country over the last 10 years'). Previously required 4 joins; now requires 0 joins (single table scan)."
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Regional rollups (e.g., 'Average poverty headcount by Region'). The flattened dim_location allows direct aggregation without traversing the country hierarchy."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Population pyramids (e.g., 'Population distribution by age group and gender for a specific country'). Direct link to location and year avoids the demography header table bottleneck."
+      }
+    ]
+  }
+}
+```
+
+### Analytical Physical Model DDL (PostgreSQL)
+
+```sql
+-- ==============================================================================
+-- PRINCIPAL DATA ARCHITECT: ANALYTICAL PHYSICAL MODEL (OLAP)
+-- Target Platform: PostgreSQL (or Postgres-compatible MPP like Redshift/Citus)
+-- Strategy: Star Schema, Wide Fact Tables, Partitioning by Year
+-- ==============================================================================
+
+-- 1. CONFORMED DIMENSIONS
+-- ------------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.dim_location
+(
+    location_key serial NOT NULL,
+    country_code character varying NOT NULL,
+    country_name character varying,
+    region_code character varying NOT NULL,
+    region_name character varying NOT NULL,
+    PRIMARY KEY (location_key)
+);
+
+-- Index for lookup performance
+CREATE UNIQUE INDEX idx_dim_location_country_code ON public.dim_location(country_code);
+CREATE INDEX idx_dim_location_region ON public.dim_location(region_code);
+
+
+-- 2. FACT TABLES
+-- ------------------------------------------------------------------------------
+
+-- FACT: COUNTRY INDICATORS
+-- Combines demography, employment, education, economy, and health.
+-- Grain: 1 row per Country per Year
+CREATE TABLE IF NOT EXISTS public.fact_country_indicators
+(
+    indicator_key serial NOT NULL,
+    location_key integer NOT NULL,
+    year integer NOT NULL,
+    
+    -- Demography metrics
+    pop_density double precision,
+    urban_pop double precision,
+    rural_pop double precision,
+    net_migration double precision,
+    death_rate double precision,
+    birth_rate double precision,
+    
+    -- Employment metrics
+    child_emp double precision,
+    unemp double precision,
+    vulnerable_emp double precision,
+    part_time double precision,
+    employers double precision,
+    labor_force_total double precision,
+    labor_force_fem double precision,
+    
+    -- Education metrics
+    child_out_of_school double precision,
+    progression_to_sec double precision,
+    edu_expenditure double precision,
+    preprim_enroll double precision,
+    prim_enrol double precision,
+    sec_enrol double precision,
+    terti_enrol double precision,
+    
+    -- Economy metrics
+    gdp double precision,
+    inflation double precision,
+    tax_revenue double precision,
+    
+    -- Health metrics
+    hospital_beds double precision,
+    physicians double precision,
+    health_expenditure double precision,
+    
+    PRIMARY KEY (indicator_key, year)
+) PARTITION BY RANGE (year);
+
+-- FACT: WELFARE SURVEY
+-- Grain: 1 row per Survey (typically Country + Year + Survey Type)
+CREATE TABLE IF NOT EXISTS public.fact_welfare_survey
+(
+    survey_key serial NOT NULL,
+    location_key integer NOT NULL,
+    year integer NOT NULL,
+    
+    -- Survey Metadata (Degenerate dimensions/attributes)
+    welfare_type character varying,
+    survey_acronym character varying,
+    survey_comparability integer,
+    comparable_spell character varying,
+    distribution_type character varying,
+    survey_coverage character varying,
+    reporting_level character varying,
+    
+    -- Survey Metrics
+    poverty_line double precision,
+    headcount double precision,
+    poverty_gap double precision,
+    poverty_severity double precision,
+    gini double precision,
+    reporting_pop integer,
+    reporting_pce double precision,
+    spl double precision,
+    
+    PRIMARY KEY (survey_key, year)
+) PARTITION BY RANGE (year);
+
+-- FACT: WELFARE DECILE
+-- Grain: 1 row per Survey per Decile
+CREATE TABLE IF NOT EXISTS public.fact_welfare_decile
+(
+    decile_key serial NOT NULL,
+    survey_key integer NOT NULL,
+    location_key integer NOT NULL, -- Denormalized for direct slicing
+    year integer NOT NULL,         -- Denormalized for direct slicing
+    decile_name character varying,
+    decile_value double precision,
+    
+    PRIMARY KEY (decile_key, year)
+) PARTITION BY RANGE (year);
+
+-- FACT: POPULATION
+-- Grain: 1 row per Country per Year per Age Group per Gender
+CREATE TABLE IF NOT EXISTS public.fact_population
+(
+    population_key serial NOT NULL,
+    location_key integer NOT NULL,
+    year integer NOT NULL,
+    pop_ages character varying,
+    gender character varying,
+    population_count double precision,
+    
+    PRIMARY KEY (population_key, year)
+) PARTITION BY RANGE (year);
+
+-- FACT: LIFE EXPECTANCY
+-- Grain: 1 row per Country per Year per Gender
+CREATE TABLE IF NOT EXISTS public.fact_life_expectancy
+(
+    life_exp_key serial NOT NULL,
+    location_key integer NOT NULL,
+    year integer NOT NULL,
+    gender character varying,
+    life_expectancy_value double precision,
+    
+    PRIMARY KEY (life_exp_key, year)
+) PARTITION BY RANGE (year);
+
+
+-- 3. FOREIGN KEYS & CONSTRAINTS
+-- ------------------------------------------------------------------------------
+
+ALTER TABLE public.fact_country_indicators
+    ADD CONSTRAINT fk_fci_location FOREIGN KEY (location_key) REFERENCES public.dim_location (location_key);
+
+ALTER TABLE public.fact_welfare_survey
+    ADD CONSTRAINT fk_fws_location FOREIGN KEY (location_key) REFERENCES public.dim_location (location_key);
+
+ALTER TABLE public.fact_welfare_decile
+    ADD CONSTRAINT fk_fwd_location FOREIGN KEY (location_key) REFERENCES public.dim_location (location_key);
+
+ALTER TABLE public.fact_population
+    ADD CONSTRAINT fk_fp_location FOREIGN KEY (location_key) REFERENCES public.dim_location (location_key);
+
+ALTER TABLE public.fact_life_expectancy
+    ADD CONSTRAINT fk_fle_location FOREIGN KEY (location_key) REFERENCES public.dim_location (location_key);
+
+
+-- 4. PARTITION CREATION (Example for recent years)
+-- ------------------------------------------------------------------------------
+-- Note: In a production environment, partition creation would be automated via scripts or pg_partman.
+
+CREATE TABLE fact_country_indicators_2020_2029 PARTITION OF public.fact_country_indicators FOR VALUES FROM (2020) TO (2030);
+CREATE TABLE fact_welfare_survey_2020_2029 PARTITION OF public.fact_welfare_survey FOR VALUES FROM (2020) TO (2030);
+CREATE TABLE fact_welfare_decile_2020_2029 PARTITION OF public.fact_welfare_decile FOR VALUES FROM (2020) TO (2030);
+CREATE TABLE fact_population_2020_2029 PARTITION OF public.fact_population FOR VALUES FROM (2020) TO (2030);
+CREATE TABLE fact_life_expectancy_2020_2029 PARTITION OF public.fact_life_expectancy FOR VALUES FROM (2020) TO (2030);
+
+
+-- 5. CLUSTERING & INDEXING RECOMMENDATIONS
+-- ------------------------------------------------------------------------------
+-- Optimizing for the most common analytical access patterns: Time (Year) and Geography (Location)
+
+CREATE INDEX idx_fci_location_year ON public.fact_country_indicators(location_key, year);
+CREATE INDEX idx_fws_location_year ON public.fact_welfare_survey(location_key, year);
+CREATE INDEX idx_fwd_survey ON public.fact_welfare_decile(survey_key);
+CREATE INDEX idx_fp_location_year ON public.fact_population(location_key, year);
+CREATE INDEX idx_fle_location_year ON public.fact_life_expectancy(location_key, year);
+
+-- CLUSTER commands physically reorder the data on disk based on the index. 
+-- Highly recommended for OLAP read-heavy workloads.
+CLUSTER public.fact_country_indicators USING idx_fci_location_year;
+CLUSTER public.fact_welfare_survey USING idx_fws_location_year;
+CLUSTER public.fact_population USING idx_fp_location_year;
+```

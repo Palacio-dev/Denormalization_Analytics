@@ -1,0 +1,193 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-04_01-09-22
+Model: ollama_local
+Prompt: OBT
+Schema: ex06
+==================================================
+
+Based on the **RISEN FRAMEWORK**, here is the analysis and design for the denormalized schema.
+
+### <Steps>
+
+#### 1. Analysis of the Provided SQL Creation Script
+The input schema defines a hierarchical educational data model with the following entities:
+*   **UF (State):** Top-level administrative division.
+*   **MUNICIPIO (Municipality):** Child of UF, containing basic stats (IES count, Schools count, IEB/SAEB/ENADE averages).
+*   **IDES (Higher Education Institutions):** Child of Municipality.
+*   **ESCOLA (School):** Child of Municipality.
+*   **CURSO (Course):** Child of IES.
+*   **INDICATORS (Idea, Enade, Saeb):** Master tables containing raw metrics (Rendimentos, Notas Brutas/Padronizadas, Totais).
+*   **ANO (Year):** The linking entity connecting Courses to specific Indicator years.
+
+**Key Observations:**
+*   **Redundancy:** The `MUNICIPIO` table holds aggregated data (`media_ideb`, `qtd_habitantes`), while `UF` holds population. `IES` and `ESCOLA` are structurally similar (both have `nome`, `rede`, `cod`), but `IES` has specific IDs (`sigla_ies`, `codigo_ies`) and `ESCOLA` does not (uses `cod_escola`).
+*   **Join Complexity:** Queries typically involve joining `UF` -> `MUNICIPIO` -> `IES/ESCOLA` -> `CURSO` -> `ANO` -> `INDICATORS`.
+*   **Data Types:** Mix of `INT`, `VARCHAR`, `REAL`, and `CHECK` constraints ensuring non-negative numbers.
+
+#### 2. Analysis of 'Frequent Queries / Workload Context'
+Since no specific queries were provided, we infer the heavy read workloads based on the domain (Educational Analytics):
+1.  **State-Level Aggregation:** "Get total number of schools and IES in UF [X] for year [Y]". This requires joining `UF` -> `MUNICIPIO` -> `IES`/`ESCOLA` -> `ANO`.
+2.  **School/IES Profile:** "List all schools in Municipality [X] with their network type and average IEB score". Requires joining `MUNICIPIO` -> `IES`/`ESCOLA` -> `ANO` -> `IDEB`.
+3.  **Course Performance:** "Show average ENADE score for Course [Z] in Year [Y]". Requires deep joins through `CURSO` -> `ANO` -> `ENADE`.
+4.  **Demographic Correlation:** "Compare population growth vs. IEB trends in UF [X]".
+
+**Bottleneck:** The `ANO` table acts as a many-to-many bridge between `CURSO` and the indicator tables (`IDEB`, `ENADE`, `SAEB`). In a normalized model, calculating a specific year's average for a specific course requires multiple joins to traverse up to the municipality and down to the indicators, which is expensive on large datasets.
+
+#### 3. Design of the New Denormalized Schema
+Following the **ONE-BIG-TABLE MODEL** strategy:
+*   **Single Table:** All data from `UF`, `MUNICIPIO`, `IES`, `ESCOLA`, `CURSO`, `ANO`, `IDEB`, `ENADE`, `SAEB` will be flattened into one massive table.
+*   **Primary Key:** A composite key `(id_uf, id_municipio, id_ies, id_escola, id_curso, id_ano)` is selected as the Primary Key to uniquely identify every row. This covers the full path from State to Year.
+*   **Foreign Keys:** Removed entirely. Relationships are implied by the presence of IDs.
+*   **Attributes:**
+    *   All columns from source tables are included.
+    *   To avoid ambiguity (e.g., `nota_bruta_ce` exists in `ENADE` and `IDEB`), we prefix ambiguous columns with the source table name (e.g., `ideb_nota_bruta_ce`, `enade_nota_bruta_ce`).
+    *   `id_uf` is added to the main table to link municipalities back to states, even though `MUNICIPIO` references `UF` directly.
+
+---
+
+### <Expectation>
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy collapses the 9 distinct tables into a single 'EDUCATIONAL_DATA' table. This eliminates JOIN operations for any query requiring data across hierarchy levels (UF -> MUNICIPIO -> IES/ESCOLA -> CURSO -> ANO -> INDICATORS). The primary key is a composite of all entity IDs to ensure uniqueness, and all attributes are prefixed with their source entity name to resolve naming conflicts.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidation of all 9 source tables (UF, MUNICIPIO, IDEB, ENADE, SAEB, IES, ESCOLA, CURSO, ANO) into a single table named 'EDUCATIONAL_DATA'."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Removal of all FOREIGN KEY constraints. Relationships are now implicit based on the presence of ID columns (id_uf, id_municipio, id_ies, id_escola, id_curso, id_ano)."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Creation of a Composite Primary Key consisting of: id_uf, id_municipio, id_ies, id_escola, id_curso, id_ano. This ensures that a specific entity in a specific year is uniquely identified."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Inclusion of 'id_uf' in the main table's primary key to maintain state-level context, even though MUNICIPIO already references UF."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Prefixing of all attribute names with their source table name to resolve ambiguity. Examples: 'nota_bruta_ce' becomes 'ideb_nota_bruta_ce' and 'enade_nota_bruta_ce'. Columns like 'qtd_habitantes' (UF) and 'qtd_habitantes' (MUNICIPIO - inferred from context or kept as is if distinct) are kept as is, but 'qtd_IES' and 'qtd_ESCOLAS' remain in MUNICIPIO context."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Preservation of all CHECK constraints logic in the column definitions (e.g., qtd >= 0)."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Addition of 'sigla_uf' to the main table to facilitate direct state lookups without needing to join back up from municipality."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Increased write complexity (INSERT/UPDATE must handle the full row) vs. Drastically improved read performance (zero JOINs). This is optimal for analytical dashboards where reads far outweigh writes."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Loss of referential integrity enforcement (no CASCADE delete on FKs). Data consistency must be managed via application logic or application-level triggers if strict referential integrity is required."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Tradeoff: Larger table size and potential index bloat due to the composite key and redundant ID columns, though modern columnar databases handle this efficiently."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Get the total number of schools (qtd_ESCOLAS) and IES (qtd_IES) for a specific UF, along with the average IEB score for that UF in a specific year."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Retrieve the average ENADE score (nota_bruta_ce) for a specific Course (id_curso) across all years."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "List all schools in a specific Municipality, including their network type (rede) and the corresponding IEB note for the year."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Creation Script
+
+```sql
+CREATE TABLE EDUCATIONAL_DATA (
+    -- Composite Primary Key to ensure uniqueness of Entity + Year
+    id_uf INT NOT NULL,
+    id_municipio INT NOT NULL,
+    id_ies INT NOT NULL,
+    id_escola INT NOT NULL,
+    id_curso INT NOT NULL,
+    id_ano INT NOT NULL,
+    
+    -- UF Attributes
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    qtd_habitantes INT CHECK (qtd_habitantes >= 0),
+    
+    -- MUNICIPIO Attributes
+    nome_municipio VARCHAR(100) NOT NULL,
+    qtd_ies INT CHECK (qtd_ies >= 0),
+    qtd_escolas INT CHECK (qtd_escolas >= 0),
+    media_ideb REAL,
+    media_saeb REAL,
+    media_enade REAL,
+    total_participantes INT CHECK (total_participantes >= 0),
+    
+    -- IES Attributes
+    nome_ies VARCHAR(100) NOT NULL,
+    sigla_ies VARCHAR(20),
+    codigo_ies INT NOT NULL,
+    rede VARCHAR(100) NOT NULL,
+    
+    -- ESCOLA Attributes
+    nome_escola VARCHAR(100) NOT NULL,
+    cod_escola INTEGER NOT NULL,
+    
+    -- CURSO Attributes
+    nome_curso VARCHAR(100) NOT NULL,
+    
+    -- ANO Attributes
+    ano INT NOT NULL,
+    
+    -- IDEB Attributes (Prefixed to avoid ambiguity with ENADE/Saeb)
+    ideb_rend_1 REAL,
+    ideb_rend_2 REAL,
+    ideb_rend_3 REAL,
+    ideb_rend_4 REAL,
+    ideb_ind_rend REAL,
+    ideb_nota_ideb REAL,
+    
+    -- ENADE Attributes (Prefixed)
+    enade_total_inscritos INT CHECK (enade_total_inscritos >= 0),
+    enade_total_concluintes INT CHECK (enade_total_concluintes >= 0),
+    enade_nota_bruta_ce REAL,
+    enade_nota_padronizada_ce REAL,
+    enade_nota_bruta_fg REAL,
+    enade_nota_padronizada_fg REAL,
+    enade_nota_enade_continua REAL,
+    enade_nota_enade_faixa REAL,
+    
+    -- SAEB Attributes (Prefixed)
+    saeb_nota_mat REAL,
+    saeb_nota_port REAL,
+    saeb_nota_padrao REAL,
+    
+    -- CONSTRAINTS
+    PRIMARY KEY (id_uf, id_municipio, id_ies, id_escola, id_curso, id_ano),
+    -- Note: No FOREIGN KEY constraints are applied per the ONE-BIG-TABLE MODEL requirement.
+    -- Data integrity is maintained via the composite primary key and application logic.
+);
+```

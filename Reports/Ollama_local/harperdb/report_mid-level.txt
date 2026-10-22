@@ -1,0 +1,114 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 3
+  - Total Attributes: 9
+    * entitlements: 8 columns
+    * users: 1 columns
+    * user_entitlements: 2 columns (junction table - excluded from attribute analysis)
+
+  Note: 1 junction table(s) detected and excluded from attribute analysis:
+    - user_entitlements
+
+Denormalized Model:
+  - Tables: 3
+  - Total Attributes: 15
+    * dim_users: 1 columns
+    * dim_entitlements: 7 columns
+    * fact_user_entitlements: 9 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Denormalized model has MORE attributes (9 vs 15)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+✓ No type mismatches found
+--------------------------------------------------------------------------------
+Completeness Ratio:        1.67
+Data Type Preservation:    1.00
+Avg Levenshtein Distance:  3.00
+BLEU Score:                0.00
+ROUGE-1:                   0.10
+METEOR Score:              0.00
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: fact_user_entitlements
+Dimension Tables Detected: dim_users, dim_entitlements
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected exactly 1 Fact table. Evaluating as a standard STAR SCHEMA.
+  - FACT FK VIOLATION: Foreign Key 'user_id' in Fact 'fact_user_entitlements' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'entitlement_id' in Fact 'fact_user_entitlements' allows NULL values.
+  - PAYLOAD WARNING: Fact table 'fact_user_entitlements' contains more text attributes (4) than numeric measures (3).
+  - DIMENSION NULL WARNING: Attribute 'feature_type' in 'dim_entitlements' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'package_type' in 'dim_entitlements' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'use_limit' in 'dim_entitlements' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'active_date' in 'dim_entitlements' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'inactive_date' in 'dim_entitlements' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'active_flag' in 'dim_entitlements' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * fact_user_entitlements: 3 Numeric, 4 Text
+  * dim_users: 0 Numeric, 0 Text
+  * dim_entitlements: 2 Numeric, 4 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  activeDate activeFlag featureType id id inactiveDate packageType useCount useLimit
+
+Denormalized Model (Combined Text):
+  active_date active_date active_flag active_flag entitlement_id feature_type feature_type inactive_date inactive_date package_type package_type use_count use_limit use_limit user_id
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 9 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id INT
+  Denormalized:  user_id INT
+
+Pair 2:
+  Relational:    activeDate DATE
+  Denormalized:  active_date DATE
+
+Pair 3:
+  Relational:    inactiveDate DATE
+  Denormalized:  inactive_date DATE
+
+Pair 4:
+  Relational:    useLimit INT
+  Denormalized:  use_limit INT
+
+Pair 5:
+  Relational:    useCount INT
+  Denormalized:  use_count INT
+
+Pair 6:
+  Relational:    featureType VARCHAR(4)
+  Denormalized:  feature_type VARCHAR(4)
+
+Pair 7:
+  Relational:    packageType VARCHAR(4)
+  Denormalized:  package_type VARCHAR(4)
+
+Pair 8:
+  Relational:    activeFlag INT
+  Denormalized:  active_flag INT
+
+Pair 9:
+  Relational:    id INT
+  Denormalized:  use_limit INT
+
+
+================================================================================

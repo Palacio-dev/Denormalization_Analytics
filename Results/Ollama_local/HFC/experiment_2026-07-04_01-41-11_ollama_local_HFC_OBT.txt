@@ -1,0 +1,199 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-04_01-41-11
+Model: ollama_local
+Prompt: OBT
+Schema: HFC
+==================================================
+
+{
+    "section_1": {
+        "summary": "The denormalization strategy adopts the 'One Big Table' approach to eliminate JOIN bottlenecks in the 'tombos' (specimens) and 'especies' (species) hierarchy, which are the primary read-heavy entities. By flattening the taxonomy (Reino -> Familia -> Genero -> Especie -> Subespecie) and related entities (Herbario, Autor, Endereco, Solo, Relevo, Vegetacao) into a single wide table, we maximize cache hit rates and reduce query latency for complex biological queries.",
+        "structural_decisions": [
+            {
+                "decision_id": "D1",
+                "description": "Merged all 36 original tables into a single physical table named 'denormalized_biodata_archive'. The original Foreign Keys (e.g., fk_tombos_especie, fk_especies_autor) are removed as they are no longer needed in the denormalized model."
+            },
+            {
+                "decision_id": "D2",
+                "description": "Introduced a composite Primary Key ('hcf', 'taxon_name', 'taxon_level') to uniquely identify rows. This replaces the original single-column PKs (like 'id' in tombos) and prevents duplicate rows where the same specimen has multiple valid scientific names at different taxonomic levels."
+            },
+            {
+                "decision_id": "D3",
+                "description": "Flattened the taxonomy hierarchy by adding columns for 'reino_nome', 'familia_nome', 'genero_nome', 'especie_nome', 'sub_especie_nome' directly to the main table, removing the need to join 'reinos', 'familias', 'generos', 'especies', and 'sub_especies'."
+            },
+            {
+                "decision_id": "D4",
+                "description": "Flattened entity and location data by adding 'herbario_nome', 'herbario_sigla', 'endereco_logradouro', 'cidade_nome', 'solo_nome', 'relevo_nome', 'vegetacao_nome' to the main table."
+            },
+            {
+                "decision_id": "D5",
+                "description": "Flattened temporal and administrative data by adding 'autor_nome', 'fase_sucessional_nome', 'tipo_nome', 'variedade_nome'."
+            }
+        ],
+        "attribute_level_changes": [
+            {
+                "decision_id": "A1",
+                "description": "Removed all 'id' columns that served as primary keys in the original tables (e.g., 'especies.id', 'herbarios.id'). These are replaced by a composite key or derived from the business logic (hcf + taxon)."
+            },
+            {
+                "decision_id": "A2",
+                "description": "Removed all 'created_at' and 'updated_at' columns from the main table. Since this is a denormalized archive for analytical read performance, temporal tracking of row creation is secondary to data retrieval. If audit is required, these can be added as a separate 'audit_log' table without impacting the main read path."
+            },
+            {
+                "decision_id": "A3",
+                "description": "Removed 'FOREIGN KEY' constraints entirely. The schema is now a flat data lake style table."
+            },
+            {
+                "decision_id": "A4",
+                "description": "Added 'taxon_level' column (VARCHAR) to distinguish between 'ESPECIE', 'SUB_ESPECIE', 'VARIEDADE', and 'SUB_FAMILIA' levels to avoid ambiguity in the composite key."
+            }
+        ],
+        "tradeoffs": [
+            {
+                "tradeoff_id": "T1",
+                "description": "Write performance will decrease significantly due to the high cardinality of the composite key and the need to insert/update many columns per transaction. However, this is acceptable as the primary use case is read-heavy."
+            },
+            {
+                "tradeoff_id": "T2",
+                "description": "Data integrity is managed via application logic rather than database constraints. The application must ensure that a unique (hcf, taxon_name, taxon_level) combination exists."
+            }
+        ]
+    },
+    "section_2": {
+        "query_patterns": [
+            {
+                "decision_id": "D1",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Complex biological queries: 'SELECT nome_cientifico, genero_nome, familia_nome, especie_nome FROM tombos WHERE hcf = 12345'. The original schema required a JOIN between tombos, especies, generos, and familias. The denormalized schema executes this in a single table scan."
+            },
+            {
+                "decision_id": "D2",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Location and Taxonomy correlation: 'SELECT herbario_sigla, cidade_nome, solo_nome, relevo_nome FROM tombos WHERE hcf IN (100, 200, 300)'. The original schema required joining tombos with herbarios, enderecos, solos, and relevos."
+            }
+        ]
+    }
+}
+
+-- ============================================================
+-- DENORMALIZED SCHEMA: ONE-BIG-TABLE MODEL
+-- Dialect: PostgreSQL
+-- Purpose: Maximize read performance for analytical queries on biodiversity data.
+-- Strategy: Flattened taxonomy, entities, and locations into a single wide table.
+-- ============================================================
+
+DROP TABLE IF EXISTS public.denormalized_biodata_archive CASCADE;
+
+CREATE TABLE IF NOT EXISTS public.denormalized_biodata_archive (
+    -- Composite Primary Key: Unique Specimen + Taxon Name + Taxon Level
+    -- This replaces the original 'id' in tombos and ensures uniqueness across taxonomic levels
+    hcf bigint NOT NULL,
+    taxon_name character varying(45) NOT NULL,
+    taxon_level character varying(20) NOT NULL, -- 'ESPECIE', 'SUB_ESPECIE', 'VARIEDADE', 'SUB_FAMILIA'
+
+    -- Core Specimen Data (from public.tombos)
+    latitude double precision,
+    longitude double precision,
+    altitude double precision,
+    observacao text COLLATE pg_catalog."default",
+    nomes_populares text COLLATE pg_catalog."default",
+    numero_coleta bigint,
+    data_tombo timestamp with time zone,
+    data_coleta_dia bigint,
+    data_coleta_mes bigint,
+    data_coleta_ano bigint,
+    situacao character varying(20) DEFAULT 'REGULAR',
+    rascunho boolean DEFAULT false,
+    ativo boolean DEFAULT true,
+    taxon character varying(45) COLLATE pg_catalog."default",
+    unicata boolean DEFAULT false,
+    descricao text COLLATE pg_catalog."default",
+    coletor_id bigint,
+    especie_id bigint,
+    genero_id bigint,
+    familia_id bigint,
+    sub_familia_id bigint,
+    sub_especie_id bigint,
+    variedade_id bigint,
+    tipo_id bigint,
+    local_coleta_id bigint,
+    solo_id bigint,
+    relevo_id bigint,
+    vegetacao_id bigint,
+    colecao_anexa_id bigint,
+    data_identificacao_dia smallint,
+    data_identificacao_mes smallint,
+    data_identificacao_ano integer,
+    data_coleta_mes bigint, -- Duplicate from tombos but kept for consistency with other tables
+    data_coleta_ano bigint,
+
+    -- Taxonomy Hierarchy (Flattened from reinos, familias, generos, especies, sub_especies, sub_familias, variedades)
+    -- These columns replace the need for JOINs on these tables
+    reino_nome character varying(200),
+    familia_nome character varying(200),
+    genero_nome character varying(200),
+    especie_nome character varying(200),
+    sub_especie_nome character varying(255),
+    sub_familia_nome character varying(300),
+    variedade_nome character varying(200),
+
+    -- Entity Data (Flattened from herbarios, enderecos, paises, estados)
+    herbario_id bigint,
+    herbario_nome character varying(200),
+    herbario_sigla character varying(80),
+    herbario_email character varying(200),
+    endereco_id bigint,
+    logradouro character varying(200),
+    numero character varying(10),
+    complemento text COLLATE pg_catalog."default",
+    cidade_id bigint,
+    cidade_nome character varying(255),
+    pais_id integer,
+    sigla character(4),
+    nome_pais character varying(255),
+    estado_id bigint,
+    nome_estado character varying(255),
+
+    -- Location & Environment (Flattened from locais_coleta, solos, relevos, vegetacoes, fases_sucessional)
+    fase_sucessional_id bigint,
+    fase_sucessional_nome character varying(200),
+    local_coleta_nome text COLLATE pg_catalog."default",
+    solo_nome character varying(300),
+    relevo_nome character varying(300),
+    vegetacao_nome character varying(300),
+
+    -- Author & Type (Flattened from autores, tipos)
+    autor_id bigint,
+    autor_nome character varying(200),
+    tipo_id bigint,
+    tipo_nome character varying(250),
+    variedade_nome character varying(200),
+
+    -- Collection & Modifications (Flattened from colecoes_anexas, alteracoes)
+    colecao_anexa_nome text COLLATE pg_catalog."default",
+    observacoes_colecao_anexa text COLLATE pg_catalog."default",
+    tombo_hcf bigint, -- Reference to tombos for alteracoes
+    observacao_alteracao text COLLATE pg_catalog."default",
+    status_alteracao alteracoes_status,
+    usuario_id bigint,
+    usuario_nome character varying(200),
+    observacao_usuario character varying(500),
+    tombo_json text COLLATE pg_catalog."default",
+    ja_comparou boolean DEFAULT false,
+    ja_requisitou boolean DEFAULT false,
+    nro_requisicoes bigint DEFAULT '0'::bigint,
+    cod_barra character varying(12) COLLATE pg_catalog."default",
+    tombo_json_alteracao text COLLATE pg_catalog."default",
+    ativo_alteracao boolean DEFAULT true,
+    identificacao_alteracao boolean DEFAULT false,
+    observacao_alteracao_text text COLLATE pg_catalog."default",
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    -- Constraint: Ensure uniqueness of the specimen's scientific name at a specific level
+    CONSTRAINT pk_denormalized_biodata_hcf_taxon_level PRIMARY KEY (hcf, taxon_name, taxon_level)
+);
+
+-- Note: Foreign Keys are intentionally omitted to adhere to the ONE-BIG-TABLE MODEL strategy.
+-- Data integrity is enforced via the application layer and the composite primary key.
+-- Indexes are created by the application based on frequent query patterns (e.g., hcf, taxon_name).

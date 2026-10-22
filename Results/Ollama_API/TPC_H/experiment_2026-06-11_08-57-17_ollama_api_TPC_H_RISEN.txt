@@ -1,0 +1,219 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_08-57-17
+Model: ollama_api
+Prompt: RISEN
+Schema: TPC_H
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on collapsing relations and adding redundant attributes to reduce JOIN overhead for analytical queries. We identified frequent query patterns that require joining multiple tables like ORDERS, CUSTOMER, NATION, REGION, LINEITEM, PART, SUPPLIER, and PARTSUPP. To optimize these workloads, we merge hierarchical dimension tables (REGION → NATION → CUSTOMER and REGION → NATION → SUPPLIER) into flattened dimensions, and collapse fact-centric relationships (LINEITEM with PART, SUPPLIER, PARTSUPP, ORDERS, CUSTOMER) into a single wide fact table. This reduces the number of joins and improves read performance at the cost of increased storage and write complexity.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapse NATION and REGION into CUSTOMER to eliminate joins between CUSTOMER-NATION-REGION during query execution."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapse NATION and REGION into SUPPLIER to eliminate joins between SUPPLIER-NATION-REGION during query execution."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Collapse ORDERS, CUSTOMER (with embedded nation/region), LINEITEM into a single wide fact table named ORDER_LINEITEM_FACT to reduce multi-table joins."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Embed PART and SUPPLIER details into PARTSUPP to avoid joins when analyzing supplier-part relationships."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived attribute L_DISCOUNTED_PRICE = L_EXTENDEDPRICE * (1 - L_DISCOUNT) in ORDER_LINEITEM_FACT to speed up revenue calculations."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added derived attribute L_FINAL_CHARGE = L_EXTENDEDPRICE * (1 - L_DISCOUNT) * (1 + L_TAX) in ORDER_LINEITEM_FACT for quick final cost analysis."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added N_NAME, R_NAME, R_REGIONKEY into CUSTOMER table as redundant attributes."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added N_NAME, R_NAME, R_REGIONKEY into SUPPLIER table as redundant attributes."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Added P_NAME, P_MFGR, P_BRAND, P_TYPE, P_SIZE, P_CONTAINER, P_RETAILPRICE into PARTSUPP table as redundant attributes."
+      },
+      {
+        "decision_id": "A6",
+        "description": "Added C_NAME, C_ADDRESS, C_PHONE, C_ACCTBAL, C_MKTSEGMENT, C_COMMENT, N_NAME (customer), R_NAME (customer), R_REGIONKEY (customer) into ORDER_LINEITEM_FACT as redundant attributes."
+      },
+      {
+        "decision_id": "A7",
+        "description": "Added P_NAME, P_MFGR, P_BRAND, P_TYPE, P_SIZE, P_CONTAINER, P_RETAILPRICE, PS_AVAILQTY, PS_SUPPLYCOST into ORDER_LINEITEM_FACT as redundant attributes."
+      },
+      {
+        "decision_id": "A8",
+        "description": "Added S_NAME, S_ADDRESS, S_PHONE, S_ACCTBAL, S_COMMENT, N_NAME (supplier), R_NAME (supplier), R_REGIONKEY (supplier) into ORDER_LINEITEM_FACT as redundant attributes."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage footprint due to redundant data replication across tables."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Increased ETL/write complexity to maintain consistency of denormalized fields."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of normalization benefits such as update anomaly protection and space efficiency."
+      },
+      {
+        "tradeoff_id": "T4",
+        "description": "Potential for stale data if derived or replicated values are not maintained correctly during updates."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical queries aggregating order/lineitem data by customer region and market segment, requiring joins between ORDERS, CUSTOMER, NATION, and REGION."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Supply chain analytics querying part availability and pricing by supplier region, involving PARTSUPP, SUPPLIER, NATION, and REGION."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "End-to-end order profitability analysis combining line items, parts, suppliers, customers, and order metadata, which requires joining all major tables."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries calculating total discounted prices or final charges on line items; precomputing these avoids runtime arithmetic and improves aggregation speed."
+      }
+    ]
+  }
+}
+
+```sql
+CREATE TABLE CUSTOMER (
+    C_CUSTKEY       INTEGER NOT NULL,
+    C_NAME          VARCHAR(25) NOT NULL,
+    C_ADDRESS       VARCHAR(40) NOT NULL,
+    C_NATIONKEY     INTEGER NOT NULL,
+    C_PHONE         CHAR(15) NOT NULL,
+    C_ACCTBAL       DECIMAL(15,2) NOT NULL,
+    C_MKTSEGMENT    CHAR(10) NOT NULL,
+    C_COMMENT       VARCHAR(117) NOT NULL,
+    N_NAME          CHAR(25) NOT NULL,
+    R_NAME          CHAR(25) NOT NULL,
+    R_REGIONKEY     INTEGER NOT NULL
+);
+
+CREATE TABLE SUPPLIER (
+    S_SUPPKEY       INTEGER NOT NULL,
+    S_NAME          CHAR(25) NOT NULL,
+    S_ADDRESS       VARCHAR(40) NOT NULL,
+    S_NATIONKEY     INTEGER NOT NULL,
+    S_PHONE         CHAR(15) NOT NULL,
+    S_ACCTBAL       DECIMAL(15,2) NOT NULL,
+    S_COMMENT       VARCHAR(101) NOT NULL,
+    N_NAME          CHAR(25) NOT NULL,
+    R_NAME          CHAR(25) NOT NULL,
+    R_REGIONKEY     INTEGER NOT NULL
+);
+
+CREATE TABLE PART (
+    P_PARTKEY       INTEGER NOT NULL,
+    P_NAME          VARCHAR(55) NOT NULL,
+    P_MFGR          CHAR(25) NOT NULL,
+    P_BRAND         CHAR(10) NOT NULL,
+    P_TYPE          VARCHAR(25) NOT NULL,
+    P_SIZE          INTEGER NOT NULL,
+    P_CONTAINER     CHAR(10) NOT NULL,
+    P_RETAILPRICE   DECIMAL(15,2) NOT NULL,
+    P_COMMENT       VARCHAR(23) NOT NULL
+);
+
+CREATE TABLE PARTSUPP (
+    PS_PARTKEY      INTEGER NOT NULL,
+    PS_SUPPKEY      INTEGER NOT NULL,
+    PS_AVAILQTY     INTEGER NOT NULL,
+    PS_SUPPLYCOST   DECIMAL(15,2) NOT NULL,
+    PS_COMMENT      VARCHAR(199) NOT NULL,
+    P_NAME          VARCHAR(55) NOT NULL,
+    P_MFGR          CHAR(25) NOT NULL,
+    P_BRAND         CHAR(10) NOT NULL,
+    P_TYPE          VARCHAR(25) NOT NULL,
+    P_SIZE          INTEGER NOT NULL,
+    P_CONTAINER     CHAR(10) NOT NULL,
+    P_RETAILPRICE   DECIMAL(15,2) NOT NULL
+);
+
+CREATE TABLE ORDER_LINEITEM_FACT (
+    L_ORDERKEY        INTEGER NOT NULL,
+    L_PARTKEY         INTEGER NOT NULL,
+    L_SUPPKEY         INTEGER NOT NULL,
+    L_LINENUMBER      INTEGER NOT NULL,
+    L_QUANTITY        DECIMAL(15,2) NOT NULL,
+    L_EXTENDEDPRICE   DECIMAL(15,2) NOT NULL,
+    L_DISCOUNT        DECIMAL(15,2) NOT NULL,
+    L_TAX             DECIMAL(15,2) NOT NULL,
+    L_RETURNFLAG      CHAR(1) NOT NULL,
+    L_LINESTATUS      CHAR(1) NOT NULL,
+    L_SHIPDATE        DATE NOT NULL,
+    L_COMMITDATE      DATE NOT NULL,
+    L_RECEIPTDATE     DATE NOT NULL,
+    L_SHIPINSTRUCT    CHAR(25) NOT NULL,
+    L_SHIPMODE        CHAR(10) NOT NULL,
+    L_COMMENT         VARCHAR(44) NOT NULL,
+    L_DISCOUNTED_PRICE DECIMAL(15,2) GENERATED ALWAYS AS (L_EXTENDEDPRICE * (1 - L_DISCOUNT)) STORED,
+    L_FINAL_CHARGE    DECIMAL(15,2) GENERATED ALWAYS AS (L_EXTENDEDPRICE * (1 - L_DISCOUNT) * (1 + L_TAX)) STORED,
+    O_CUSTKEY         INTEGER NOT NULL,
+    O_ORDERSTATUS     CHAR(1) NOT NULL,
+    O_TOTALPRICE      DECIMAL(15,2) NOT NULL,
+    O_ORDERDATE       DATE NOT NULL,
+    O_ORDERPRIORITY   CHAR(15) NOT NULL,
+    O_CLERK           CHAR(15) NOT NULL,
+    O_SHIPPRIORITY    INTEGER NOT NULL,
+    O_COMMENT         VARCHAR(79) NOT NULL,
+    C_NAME            VARCHAR(25) NOT NULL,
+    C_ADDRESS         VARCHAR(40) NOT NULL,
+    C_PHONE           CHAR(15) NOT NULL,
+    C_ACCTBAL         DECIMAL(15,2) NOT NULL,
+    C_MKTSEGMENT      CHAR(10) NOT NULL,
+    C_COMMENT_CUST    VARCHAR(117) NOT NULL,
+    C_NATIONKEY       INTEGER NOT NULL,
+    C_NATION_NAME     CHAR(25) NOT NULL,
+    C_REGION_NAME     CHAR(25) NOT NULL,
+    C_REGIONKEY       INTEGER NOT NULL,
+    P_NAME            VARCHAR(55) NOT NULL,
+    P_MFGR            CHAR(25) NOT NULL,
+    P_BRAND           CHAR(10) NOT NULL,
+    P_TYPE            VARCHAR(25) NOT NULL,
+    P_SIZE            INTEGER NOT NULL,
+    P_CONTAINER       CHAR(10) NOT NULL,
+    P_RETAILPRICE     DECIMAL(15,2) NOT NULL,
+    PS_AVAILQTY       INTEGER NOT NULL,
+    PS_SUPPLYCOST     DECIMAL(15,2) NOT NULL,
+    S_NAME            CHAR(25) NOT NULL,
+    S_ADDRESS         VARCHAR(40) NOT NULL,
+    S_PHONE           CHAR(15) NOT NULL,
+    S_ACCTBAL         DECIMAL(15,2) NOT NULL,
+    S_COMMENT_SUPP    VARCHAR(101) NOT NULL,
+    S_NATIONKEY       INTEGER NOT NULL,
+    S_NATION_NAME     CHAR(25) NOT NULL,
+    S_REGION_NAME     CHAR(25) NOT NULL,
+    S_REGIONKEY       INTEGER NOT NULL
+);
+```

@@ -1,0 +1,531 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_10-56-07
+Model: gemini
+Prompt: OBT
+Schema: adv_works
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy applies the ONE-BIG-TABLE (OBT) model, completely flattening the highly normalized AdventureWorks relational schema (comprising 68 tables across HR, Person, Production, Purchasing, and Sales) into a single wide table. This approach eliminates the need for complex JOIN operations by pre-joining all dimensions and facts, optimizing the schema for heavy read-analytical workloads at the expense of massive data redundancy and storage overhead.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged all 68 tables from the relational model into a single table named 'adventureworks_obt'."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Removed all Foreign Key constraints and dropped all columns that served purely as Primary Keys or Foreign Keys in the normalized model to comply with the OBT constraint."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Created a single surrogate Primary Key ('obt_id') for the new denormalized table to uniquely identify each flattened record."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Retained every non-key attribute from the original 68 tables to ensure zero data loss and full semantic equivalence."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Prefixed every column with its source table name (e.g., 'department_name', 'employee_jobtitle') to guarantee that each column name appears exactly once and prevents ambiguity between shared column names like 'modifieddate' or 'rowguid'."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Massive Storage Overhead: Flattening 68 tables into one creates a massive Cartesian product effect, leading to extreme data duplication (e.g., repeating company and department info for every single sales line item)."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: Modifying a single dimension attribute (like a product's name or an employee's job title) now requires updating millions of rows instead of a single row in a dimension table."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Nullability Constraints: While the original NOT NULL constraints were preserved to maintain exact semantics as requested, in a real-world OBT, most columns would need to be nullable since a single row might not contain data for every single entity (e.g., a purchase order row won't have shopping cart data)."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "Q1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Enterprise-wide analytical aggregations, such as 'Total Sales and Production Costs by Territory, Product Category, and Salesperson over Time', which previously required joining 15+ tables, can now be executed with a simple SELECT and GROUP BY on the OBT."
+      },
+      {
+        "decision_id": "Q2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Comprehensive Employee History reports (joining HR, Person, Pay History, and Department History) are now instantaneous full-table scans without nested loop or hash join bottlenecks."
+      }
+    ]
+  }
+}
+```
+
+```sql
+CREATE TABLE IF NOT EXISTS public.adventureworks_obt
+(
+    obt_id serial NOT NULL,
+    
+    -- humanresources.department
+    department_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    department_groupname "Name" COLLATE pg_catalog."default" NOT NULL,
+    department_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- humanresources.employee
+    employee_nationalidnumber character varying(15) COLLATE pg_catalog."default" NOT NULL,
+    employee_loginid character varying(256) COLLATE pg_catalog."default" NOT NULL,
+    employee_jobtitle character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    employee_birthdate date NOT NULL,
+    employee_maritalstatus character(1) COLLATE pg_catalog."default" NOT NULL,
+    employee_gender character(1) COLLATE pg_catalog."default" NOT NULL,
+    employee_hiredate date NOT NULL,
+    employee_salariedflag "Flag" NOT NULL DEFAULT true,
+    employee_vacationhours smallint NOT NULL DEFAULT 0,
+    employee_sickleavehours smallint NOT NULL DEFAULT 0,
+    employee_currentflag "Flag" NOT NULL DEFAULT true,
+    employee_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    employee_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    employee_organizationnode character varying COLLATE pg_catalog."default" DEFAULT '/'::character varying,
+    
+    -- humanresources.employeedepartmenthistory
+    employeedepartmenthistory_startdate date NOT NULL,
+    employeedepartmenthistory_enddate date,
+    employeedepartmenthistory_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- humanresources.employeepayhistory
+    employeepayhistory_ratechangedate timestamp without time zone NOT NULL,
+    employeepayhistory_rate numeric NOT NULL,
+    employeepayhistory_payfrequency smallint NOT NULL,
+    employeepayhistory_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- humanresources.jobcandidate
+    jobcandidate_resume xml,
+    jobcandidate_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- humanresources.shift
+    shift_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    shift_starttime time without time zone NOT NULL,
+    shift_endtime time without time zone NOT NULL,
+    shift_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- person.address
+    address_addressline1 character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    address_addressline2 character varying(60) COLLATE pg_catalog."default",
+    address_city character varying(30) COLLATE pg_catalog."default" NOT NULL,
+    address_postalcode character varying(15) COLLATE pg_catalog."default" NOT NULL,
+    address_spatiallocation bytea,
+    address_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    address_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- person.addresstype
+    addresstype_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    addresstype_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    addresstype_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- person.businessentity
+    businessentity_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    businessentity_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- person.businessentityaddress
+    businessentityaddress_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    businessentityaddress_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- person.businessentitycontact
+    businessentitycontact_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    businessentitycontact_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- person.contacttype
+    contacttype_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    contacttype_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- person.countryregion
+    countryregion_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    countryregion_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- person.emailaddress
+    emailaddress_emailaddress character varying(50) COLLATE pg_catalog."default",
+    emailaddress_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    emailaddress_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- person.password
+    password_passwordhash character varying(128) COLLATE pg_catalog."default" NOT NULL,
+    password_passwordsalt character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    password_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    password_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- person.person
+    person_persontype character(2) COLLATE pg_catalog."default" NOT NULL,
+    person_namestyle "NameStyle" NOT NULL DEFAULT false,
+    person_title character varying(8) COLLATE pg_catalog."default",
+    person_firstname "Name" COLLATE pg_catalog."default" NOT NULL,
+    person_middlename "Name" COLLATE pg_catalog."default",
+    person_lastname "Name" COLLATE pg_catalog."default" NOT NULL,
+    person_suffix character varying(10) COLLATE pg_catalog."default",
+    person_emailpromotion integer NOT NULL DEFAULT 0,
+    person_additionalcontactinfo xml,
+    person_demographics xml,
+    person_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    person_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- person.personphone
+    personphone_phonenumber "Phone" COLLATE pg_catalog."default" NOT NULL,
+    personphone_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- person.phonenumbertype
+    phonenumbertype_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    phonenumbertype_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- person.stateprovince
+    stateprovince_isonlystateprovinceflag "Flag" NOT NULL DEFAULT true,
+    stateprovince_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    stateprovince_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    stateprovince_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.billofmaterials
+    billofmaterials_startdate timestamp without time zone NOT NULL DEFAULT now(),
+    billofmaterials_enddate timestamp without time zone,
+    billofmaterials_bomlevel smallint NOT NULL,
+    billofmaterials_perassemblyqty numeric(8, 2) NOT NULL DEFAULT 1.00,
+    billofmaterials_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.culture
+    culture_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    culture_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.document
+    document_title character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    document_folderflag "Flag" NOT NULL DEFAULT false,
+    document_filename character varying(400) COLLATE pg_catalog."default" NOT NULL,
+    document_fileextension character varying(8) COLLATE pg_catalog."default",
+    document_revision character(5) COLLATE pg_catalog."default" NOT NULL,
+    document_changenumber integer NOT NULL DEFAULT 0,
+    document_status smallint NOT NULL,
+    document_documentsummary text COLLATE pg_catalog."default",
+    document_document bytea,
+    document_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    document_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.illustration
+    illustration_diagram xml,
+    illustration_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.location
+    location_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    location_costrate numeric NOT NULL DEFAULT 0.00,
+    location_availability numeric(8, 2) NOT NULL DEFAULT 0.00,
+    location_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.product
+    product_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    product_productnumber character varying(25) COLLATE pg_catalog."default" NOT NULL,
+    product_makeflag "Flag" NOT NULL DEFAULT true,
+    product_finishedgoodsflag "Flag" NOT NULL DEFAULT true,
+    product_color character varying(15) COLLATE pg_catalog."default",
+    product_safetystocklevel smallint NOT NULL,
+    product_reorderpoint smallint NOT NULL,
+    product_standardcost numeric NOT NULL,
+    product_listprice numeric NOT NULL,
+    product_size character varying(5) COLLATE pg_catalog."default",
+    product_weight numeric(8, 2),
+    product_daystomanufacture integer NOT NULL,
+    product_productline character(2) COLLATE pg_catalog."default",
+    product_class character(2) COLLATE pg_catalog."default",
+    product_style character(2) COLLATE pg_catalog."default",
+    product_sellstartdate timestamp without time zone NOT NULL,
+    product_sellenddate timestamp without time zone,
+    product_discontinueddate timestamp without time zone,
+    product_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    product_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.productcategory
+    productcategory_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    productcategory_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    productcategory_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.productcosthistory
+    productcosthistory_startdate timestamp without time zone NOT NULL,
+    productcosthistory_enddate timestamp without time zone,
+    productcosthistory_standardcost numeric NOT NULL,
+    productcosthistory_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.productdescription
+    productdescription_description character varying(400) COLLATE pg_catalog."default" NOT NULL,
+    productdescription_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    productdescription_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.productdocument
+    productdocument_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.productinventory
+    productinventory_shelf character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    productinventory_bin smallint NOT NULL,
+    productinventory_quantity smallint NOT NULL DEFAULT 0,
+    productinventory_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    productinventory_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.productlistpricehistory
+    productlistpricehistory_startdate timestamp without time zone NOT NULL,
+    productlistpricehistory_enddate timestamp without time zone,
+    productlistpricehistory_listprice numeric NOT NULL,
+    productlistpricehistory_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.productmodel
+    productmodel_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    productmodel_catalogdescription xml,
+    productmodel_instructions xml,
+    productmodel_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    productmodel_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.productmodelillustration
+    productmodelillustration_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.productmodelproductdescriptionculture
+    productmodelproductdescriptionculture_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.productphoto
+    productphoto_thumbnailphoto bytea,
+    productphoto_thumbnailphotofilename character varying(50) COLLATE pg_catalog."default",
+    productphoto_largephoto bytea,
+    productphoto_largephotofilename character varying(50) COLLATE pg_catalog."default",
+    productphoto_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.productproductphoto
+    productproductphoto_primary "Flag" NOT NULL DEFAULT false,
+    productproductphoto_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.productreview
+    productreview_reviewername "Name" COLLATE pg_catalog."default" NOT NULL,
+    productreview_reviewdate timestamp without time zone NOT NULL DEFAULT now(),
+    productreview_emailaddress character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    productreview_rating integer NOT NULL,
+    productreview_comments character varying(3850) COLLATE pg_catalog."default",
+    productreview_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.productsubcategory
+    productsubcategory_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    productsubcategory_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    productsubcategory_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.scrapreason
+    scrapreason_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    scrapreason_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.transactionhistory
+    transactionhistory_referenceorderid integer NOT NULL,
+    transactionhistory_referenceorderlineid integer NOT NULL DEFAULT 0,
+    transactionhistory_transactiondate timestamp without time zone NOT NULL DEFAULT now(),
+    transactionhistory_transactiontype character(1) COLLATE pg_catalog."default" NOT NULL,
+    transactionhistory_quantity integer NOT NULL,
+    transactionhistory_actualcost numeric NOT NULL,
+    transactionhistory_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.transactionhistoryarchive
+    transactionhistoryarchive_referenceorderid integer NOT NULL,
+    transactionhistoryarchive_referenceorderlineid integer NOT NULL DEFAULT 0,
+    transactionhistoryarchive_transactiondate timestamp without time zone NOT NULL DEFAULT now(),
+    transactionhistoryarchive_transactiontype character(1) COLLATE pg_catalog."default" NOT NULL,
+    transactionhistoryarchive_quantity integer NOT NULL,
+    transactionhistoryarchive_actualcost numeric NOT NULL,
+    transactionhistoryarchive_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.unitmeasure
+    unitmeasure_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    unitmeasure_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.workorder
+    workorder_orderqty integer NOT NULL,
+    workorder_scrappedqty smallint NOT NULL,
+    workorder_startdate timestamp without time zone NOT NULL,
+    workorder_enddate timestamp without time zone,
+    workorder_duedate timestamp without time zone NOT NULL,
+    workorder_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- production.workorderrouting
+    workorderrouting_operationsequence smallint NOT NULL,
+    workorderrouting_scheduledstartdate timestamp without time zone NOT NULL,
+    workorderrouting_scheduledenddate timestamp without time zone NOT NULL,
+    workorderrouting_actualstartdate timestamp without time zone,
+    workorderrouting_actualenddate timestamp without time zone,
+    workorderrouting_actualresourcehrs numeric(9, 4),
+    workorderrouting_plannedcost numeric NOT NULL,
+    workorderrouting_actualcost numeric,
+    workorderrouting_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- purchasing.productvendor
+    productvendor_averageleadtime integer NOT NULL,
+    productvendor_standardprice numeric NOT NULL,
+    productvendor_lastreceiptcost numeric,
+    productvendor_lastreceiptdate timestamp without time zone,
+    productvendor_minorderqty integer NOT NULL,
+    productvendor_maxorderqty integer NOT NULL,
+    productvendor_onorderqty integer,
+    productvendor_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- purchasing.purchaseorderdetail
+    purchaseorderdetail_duedate timestamp without time zone NOT NULL,
+    purchaseorderdetail_orderqty smallint NOT NULL,
+    purchaseorderdetail_unitprice numeric NOT NULL,
+    purchaseorderdetail_receivedqty numeric(8, 2) NOT NULL,
+    purchaseorderdetail_rejectedqty numeric(8, 2) NOT NULL,
+    purchaseorderdetail_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- purchasing.purchaseorderheader
+    purchaseorderheader_revisionnumber smallint NOT NULL DEFAULT 0,
+    purchaseorderheader_status smallint NOT NULL DEFAULT 1,
+    purchaseorderheader_orderdate timestamp without time zone NOT NULL DEFAULT now(),
+    purchaseorderheader_shipdate timestamp without time zone,
+    purchaseorderheader_subtotal numeric NOT NULL DEFAULT 0.00,
+    purchaseorderheader_taxamt numeric NOT NULL DEFAULT 0.00,
+    purchaseorderheader_freight numeric NOT NULL DEFAULT 0.00,
+    purchaseorderheader_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- purchasing.shipmethod
+    shipmethod_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    shipmethod_shipbase numeric NOT NULL DEFAULT 0.00,
+    shipmethod_shiprate numeric NOT NULL DEFAULT 0.00,
+    shipmethod_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    shipmethod_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- purchasing.vendor
+    vendor_accountnumber "AccountNumber" COLLATE pg_catalog."default" NOT NULL,
+    vendor_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    vendor_creditrating smallint NOT NULL,
+    vendor_preferredvendorstatus "Flag" NOT NULL DEFAULT true,
+    vendor_activeflag "Flag" NOT NULL DEFAULT true,
+    vendor_purchasingwebserviceurl character varying(1024) COLLATE pg_catalog."default",
+    vendor_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- sales.countryregioncurrency
+    countryregioncurrency_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- sales.creditcard
+    creditcard_cardtype character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    creditcard_cardnumber character varying(25) COLLATE pg_catalog."default" NOT NULL,
+    creditcard_expmonth smallint NOT NULL,
+    creditcard_expyear smallint NOT NULL,
+    creditcard_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- sales.currency
+    currency_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    currency_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- sales.currencyrate
+    currencyrate_currencyratedate timestamp without time zone NOT NULL,
+    currencyrate_averagerate numeric NOT NULL,
+    currencyrate_endofdayrate numeric NOT NULL,
+    currencyrate_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- sales.customer
+    customer_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    customer_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- sales.personcreditcard
+    personcreditcard_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- sales.salesorderdetail
+    salesorderdetail_carriertrackingnumber character varying(25) COLLATE pg_catalog."default",
+    salesorderdetail_orderqty smallint NOT NULL,
+    salesorderdetail_unitprice numeric NOT NULL,
+    salesorderdetail_unitpricediscount numeric NOT NULL DEFAULT 0.0,
+    salesorderdetail_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    salesorderdetail_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- sales.salesorderheader
+    salesorderheader_revisionnumber smallint NOT NULL DEFAULT 0,
+    salesorderheader_orderdate timestamp without time zone NOT NULL DEFAULT now(),
+    salesorderheader_duedate timestamp without time zone NOT NULL,
+    salesorderheader_shipdate timestamp without time zone,
+    salesorderheader_status smallint NOT NULL DEFAULT 1,
+    salesorderheader_onlineorderflag "Flag" NOT NULL DEFAULT true,
+    salesorderheader_purchaseordernumber "OrderNumber" COLLATE pg_catalog."default",
+    salesorderheader_accountnumber "AccountNumber" COLLATE pg_catalog."default",
+    salesorderheader_creditcardapprovalcode character varying(15) COLLATE pg_catalog."default",
+    salesorderheader_subtotal numeric NOT NULL DEFAULT 0.00,
+    salesorderheader_taxamt numeric NOT NULL DEFAULT 0.00,
+    salesorderheader_freight numeric NOT NULL DEFAULT 0.00,
+    salesorderheader_totaldue numeric,
+    salesorderheader_comment character varying(128) COLLATE pg_catalog."default",
+    salesorderheader_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    salesorderheader_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- sales.salesorderheadersalesreason
+    salesorderheadersalesreason_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- sales.salesperson
+    salesperson_salesquota numeric,
+    salesperson_bonus numeric NOT NULL DEFAULT 0.00,
+    salesperson_commissionpct numeric NOT NULL DEFAULT 0.00,
+    salesperson_salesytd numeric NOT NULL DEFAULT 0.00,
+    salesperson_saleslastyear numeric NOT NULL DEFAULT 0.00,
+    salesperson_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    salesperson_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- sales.salespersonquotahistory
+    salespersonquotahistory_quotadate timestamp without time zone NOT NULL,
+    salespersonquotahistory_salesquota numeric NOT NULL,
+    salespersonquotahistory_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    salespersonquotahistory_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- sales.salesreason
+    salesreason_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    salesreason_reasontype "Name" COLLATE pg_catalog."default" NOT NULL,
+    salesreason_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- sales.salestaxrate
+    salestaxrate_taxtype smallint NOT NULL,
+    salestaxrate_taxrate numeric NOT NULL DEFAULT 0.00,
+    salestaxrate_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    salestaxrate_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    salestaxrate_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- sales.salesterritory
+    salesterritory_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    salesterritory_group character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    salesterritory_salesytd numeric NOT NULL DEFAULT 0.00,
+    salesterritory_saleslastyear numeric NOT NULL DEFAULT 0.00,
+    salesterritory_costytd numeric NOT NULL DEFAULT 0.00,
+    salesterritory_costlastyear numeric NOT NULL DEFAULT 0.00,
+    salesterritory_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    salesterritory_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- sales.salesterritoryhistory
+    salesterritoryhistory_startdate timestamp without time zone NOT NULL,
+    salesterritoryhistory_enddate timestamp without time zone,
+    salesterritoryhistory_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    salesterritoryhistory_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- sales.shoppingcartitem
+    shoppingcartitem_shoppingcartid character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    shoppingcartitem_quantity integer NOT NULL DEFAULT 1,
+    shoppingcartitem_datecreated timestamp without time zone NOT NULL DEFAULT now(),
+    shoppingcartitem_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- sales.specialoffer
+    specialoffer_description character varying(255) COLLATE pg_catalog."default" NOT NULL,
+    specialoffer_discountpct numeric NOT NULL DEFAULT 0.00,
+    specialoffer_type character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    specialoffer_category character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    specialoffer_startdate timestamp without time zone NOT NULL,
+    specialoffer_enddate timestamp without time zone NOT NULL,
+    specialoffer_minqty integer NOT NULL DEFAULT 0,
+    specialoffer_maxqty integer,
+    specialoffer_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    specialoffer_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- sales.specialofferproduct
+    specialofferproduct_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    specialofferproduct_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    -- sales.store
+    store_name "Name" COLLATE pg_catalog."default" NOT NULL,
+    store_demographics xml,
+    store_rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    store_modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    
+    CONSTRAINT "PK_adventureworks_obt" PRIMARY KEY (obt_id)
+);
+```

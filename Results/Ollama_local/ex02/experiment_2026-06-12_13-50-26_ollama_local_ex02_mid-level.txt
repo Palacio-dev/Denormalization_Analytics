@@ -1,0 +1,385 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_13-50-26
+Model: ollama_local
+Prompt: mid-level
+Schema: ex02
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The original schema follows a strict Third Normal Form (3NF) design, which is optimal for transactional 
+    integrity but suffers from high join complexity for analytical queries. The denormalization strategy transforms this 
+    into a Data Warehouse style schema (specifically a Star Schema variant) optimized for read-heavy BI workloads. 
+    Key changes include consolidating 'mutirao' related tables into a single Fact table, merging dimension attributes to reduce 
+    join points, and pre-calculating aggregate measures to avoid runtime aggregation.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidated 'coleta_de_lixo', 'local_de_coleta', and 'mutirao_de_limpeza' into a single denormalized 
+        Fact table named 'fato_mutirao_analitico'. This eliminates the need to join three tables to get location, collection data, 
+        and event details.",
+        "source_tables": ["coleta_de_lixo", "local_de_coleta", "mutirao_de_limpeza"],
+        "target_tables": ["fato_mutirao_analitico"]
+      },
+      {
+        "decision_id": "D2",
+        "description": "Expanded 'fato_mutirao_analitico' to include all dimension keys (id_bioma, id_manejo, id_esfera, id_uc) 
+        and dimension names directly in the fact table. This replaces foreign key joins with simple equality checks.",
+        "source_tables": ["bioma", "categoria_manejo", "esfera_administrativa", "unidade_de_conservacao"],
+        "target_tables": ["fato_mutirao_analitico"]
+      },
+      {
+        "decision_id": "D3",
+        "description": "Created a dedicated Dimension table 'dim_mutirao' to store static attributes like name, state, and 
+        municipality context, reducing data duplication in the fact table while keeping the core transactional data denormalized.",
+        "source_tables": ["mutirao_de_limpeza", "regiao"],
+        "target_tables": ["dim_mutirao"]
+      },
+      {
+        "decision_id": "D4",
+        "description": "Pre-calculated the sum of waste types (plastico, borracha, madeira, etc.) in the fact table to replace 
+        complex GROUP BY queries for total weight/volume metrics.",
+        "source_tables": ["coleta_de_lixo"],
+        "target_tables": ["fato_mutirao_analitico"]
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived column 'total_residuos' to the fact table by summing the individual waste types (plastico + borracha + madeira + ...).",
+        "table": "fato_mutirao_analitico",
+        "action": "Added"
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed 'carater' from 'instituicao_organizadora' and stored only 'nome' in the fact table to reduce join complexity, assuming 'carater' is rarely needed in ad-hoc reports.",
+        "table": "fato_mutirao_analitico",
+        "action": "Removed (moved to separate dim table if needed, but simplified here)"
+      },
+      {
+        "decision_id": "A3",
+        "description": "Removed 'area_soma_biomas' and other specific area fields from 'unidade_de_conservacao' as they are likely static and better suited for a dimension table or a separate lookup table, keeping the fact table focused on events.",
+        "table": "fato_mutirao_analitico",
+        "action": "Removed (moved to dim_uc)"
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Trade-off: Data Redundancy vs. Query Performance. While the fact table now contains repeated dimension names (e.g., 'nome_bioma'), this significantly reduces CPU usage during joins. The downside is increased storage requirements and the need to update dimension names in multiple places if the source data changes (e.g., renaming a municipality)."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Trade-off: Maintenance Overhead vs. Data Freshness. Pre-calculated aggregates (total_residuos) ensure instant query results but require manual re-computation if the source transactional data is updated, whereas a normalized model would calculate this on the fly (potentially slower)."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Trade-off: Granularity. The denormalized model assumes a 1:1 relationship between a 'mutirao' event and its collection data. If a single event can have multiple collection records (many-to-many), the current design forces a join or duplication, which simplifies the model but loses flexibility for complex reporting scenarios."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Business Report: 'Total Waste Collected by Municipality and Waste Type'. Previously required joining 4-5 tables (coleta, local, mutirao, regiao, bioma). Now requires a simple aggregation on the fact table with a WHERE clause on the dimension name."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "BI Dashboard: 'UC Performance by Sphere and Manager'. The inclusion of id_esfera and id_manejo directly in the fact table allows for immediate grouping without joining back to dimension tables."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical Query: 'Event Duration and Participant Count per Region'. The pre-calculated duration and participant fields in the fact table allow for immediate filtering and sorting."
+      }
+    ]
+  }
+}
+```
+
+### Complete SQL DDL Creation Script for the Denormalized Schema
+
+```sql
+-- Drop existing tables if they exist to ensure a clean migration
+DROP TABLE IF EXISTS public.fato_mutirao_analitico;
+DROP TABLE IF EXISTS public.dim_mutirao;
+DROP TABLE IF EXISTS public.dim_uc;
+DROP TABLE IF EXISTS public.bioma;
+DROP TABLE IF EXISTS public.categoria_manejo;
+DROP TABLE IF EXISTS public.coleta_de_lixo;
+DROP TABLE IF EXISTS public.esfera_administrativa;
+DROP TABLE IF EXISTS public.instituicao_organizadora;
+DROP TABLE IF EXISTS public.local_de_coleta;
+DROP TABLE IF EXISTS public.mutirao_de_limpeza;
+DROP TABLE IF EXISTS public.regiao;
+DROP TABLE IF EXISTS public.unidade_de_conservacao;
+
+-- 1. DIMENSION TABLES (Simplified for Read-Optimization)
+
+-- Dimension: Waste Types (Consolidated logic into Fact for simplicity, but kept as reference if needed)
+CREATE TABLE IF NOT EXISTS public.dim_residuos
+(
+    id_residuo integer NOT NULL,
+    nome_residuo text COLLATE pg_catalog."default" NOT NULL,
+    PRIMARY KEY (id_residuo)
+);
+
+-- Dimension: Bioma
+CREATE TABLE IF NOT EXISTS public.dim_bioma
+(
+    id_bioma integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    PRIMARY KEY (id_bioma)
+);
+
+-- Dimension: Categoria de Manejo
+CREATE TABLE IF NOT EXISTS public.dim_manejo
+(
+    id_manejo integer NOT NULL,
+    categoria text COLLATE pg_catalog."default" NOT NULL,
+    categoria_iucn text COLLATE pg_catalog."default" NOT NULL,
+    plano text COLLATE pg_catalog."default" NOT NULL,
+    PRIMARY KEY (id_manejo)
+);
+
+-- Dimension: Esfera Administrativa
+CREATE TABLE IF NOT EXISTS public.dim_esfera
+(
+    id_esfera integer NOT NULL,
+    tipo text COLLATE pg_catalog."default" NOT NULL,
+    PRIMARY KEY (id_esfera)
+);
+
+-- Dimension: Unidade de Conservacao (UC)
+CREATE TABLE IF NOT EXISTS public.dim_uc
+(
+    id_uc integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    ano_de_criacao integer,
+    area_soma_biomas double precision,
+    area_soma_biomas_continentais double precision,
+    area_marinha double precision,
+    PRIMARY KEY (id_uc)
+);
+
+-- Dimension: Instituicao Organizadora
+CREATE TABLE IF NOT EXISTS public.dim_instituicao
+(
+    id_instituicao_organizadora integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    carater text COLLATE pg_catalog."default" NOT NULL,
+    PRIMARY KEY (id_instituicao_organizadora)
+);
+
+-- Dimension: Mutirao (Location & Event Details)
+CREATE TABLE IF NOT EXISTS public.dim_mutirao
+(
+    id_mutirao integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    nome_municipio text COLLATE pg_catalog."default", -- Added for analytical convenience
+    estado text COLLATE pg_catalog."default",
+    PRIMARY KEY (id_mutirao)
+);
+
+-- Dimension: Regiao (Municipality Context)
+CREATE TABLE IF NOT EXISTS public.dim_regiao
+(
+    id_municipio integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    estado text COLLATE pg_catalog."default" NOT NULL,
+    PRIMARY KEY (id_municipio)
+);
+
+-- 2. FACT TABLE (Heavily Denormalized)
+
+CREATE TABLE IF NOT EXISTS public.fato_mutirao_analitico
+(
+    -- Primary Key
+    id_evento integer NOT NULL, -- New ID to represent the fact event
+    
+    -- Dimension Keys (Directly stored for JOIN elimination)
+    id_bioma integer,
+    id_manejo integer,
+    id_esfera integer,
+    id_uc integer,
+    id_instituicao_organizadora integer,
+    id_mutirao integer,
+    id_municipio integer,
+    
+    -- Dimension Names (Denormalized for readability)
+    nome_bioma text COLLATE pg_catalog."default",
+    categoria_manejo text COLLATE pg_catalog."default",
+    categoria_iucn text COLLATE pg_catalog."default",
+    plano_manejo text COLLATE pg_catalog."default",
+    tipo_esfera text COLLATE pg_catalog."default",
+    nome_uc text COLLATE pg_catalog."default",
+    nome_mutirao text COLLATE pg_catalog."default",
+    nome_municipio text COLLATE pg_catalog."default",
+    estado_municipio text COLLATE pg_catalog."default",
+    nome_instituicao text COLLATE pg_catalog."default",
+    
+    -- Measures (Pre-calculated or Raw)
+    data_do_ocorrido date NOT NULL,
+    horario_de_inicio time without time zone NOT NULL,
+    duracao_total time without time zone NOT NULL,
+    numero_aproximado_de_participantes integer,
+    
+    -- Waste Type Measures (Denormalized)
+    -- We assume the 'id_residuo' links to the type, and the integer value is the count/weight
+    -- For this schema, we store the raw integer value directly mapped to the dimension name
+    -- Note: In a real implementation, you might have a separate table for waste counts linked by id_evento
+    -- Here we simulate the denormalization by storing the specific counts per type
+    -- Assuming the original 'coleta_de_lixo' had a specific ID per type or we are aggregating
+    -- Let's assume we store the counts directly for the top types for simplicity in this example
+    -- In a robust model, you would join a waste_fact table, but here we inline for the "Denormalized" requirement
+    
+    -- To handle multiple waste types per event, we will create a separate fact table for the counts
+    -- OR, if the original model implies one record per event per type, we flatten it.
+    -- Given the requirement to reduce joins, we will create a 'fato_contagem_residuos' table
+    -- that links to 'fato_mutirao_analitico' via id_evento but stores the counts.
+    -- However, to strictly follow "denormalized schema", we can inline the most common types.
+    -- Let's create a separate fact table for granular waste counts to keep the main fact clean,
+    -- but the main fact will contain the 'total_residuos' as a derived column.
+    
+    -- Let's restructure: Main Fact = Event + UC + Context. 
+    -- Secondary Fact = Waste Counts per Event.
+    
+    -- We will create a 'fato_contagem_residuos' table to hold the plastic, rubber, etc.
+    -- This is a denormalized approach relative to the transactional 'coleta_de_lixo' table.
+    
+    -- Actually, to keep it as ONE denormalized block as per the prompt's spirit:
+    -- We will create a table 'fato_residuos_por_evento' that links id_evento to the counts.
+    
+    -- Let's stick to the prompt's request: "Redesign... into a denormalized analytical schema".
+    -- We will create a Fact table for the Event and Context, and a Fact table for the Waste Counts.
+    
+    -- Re-defining the Fact Tables for clarity:
+    
+    -- Fact Table 1: Event & Context (High cardinality joins removed)
+    -- Fact Table 2: Waste Counts (Pre-aggregated or raw counts)
+    
+    -- Let's execute the DDL for the main Event Fact and the Waste Fact.
+    
+    -- FACT TABLE 1: Event & Context
+    CREATE TABLE IF NOT EXISTS public.fato_evento_contexto
+    (
+        id_evento integer NOT NULL,
+        id_bioma integer,
+        id_manejo integer,
+        id_esfera integer,
+        id_uc integer,
+        id_instituicao_organizadora integer,
+        id_mutirao integer,
+        id_municipio integer,
+        
+        -- Denormalized Dimension Names
+        nome_bioma text COLLATE pg_catalog."default",
+        categoria_manejo text COLLATE pg_catalog."default",
+        categoria_iucn text COLLATE pg_catalog."default",
+        plano_manejo text COLLATE pg_catalog."default",
+        tipo_esfera text COLLATE pg_catalog."default",
+        nome_uc text COLLATE pg_catalog."default",
+        nome_mutirao text COLLATE pg_catalog."default",
+        nome_municipio text COLLATE pg_catalog."default",
+        estado_municipio text COLLATE pg_catalog."default",
+        nome_instituicao text COLLATE pg_catalog."default",
+        
+        -- Event Details
+        data_do_ocorrido date NOT NULL,
+        horario_de_inicio time without time zone NOT NULL,
+        duracao_total time without time zone NOT NULL,
+        numero_aproximado_de_participantes integer,
+        
+        -- Pre-calculated Total
+        total_residuos integer DEFAULT 0,
+        
+        PRIMARY KEY (id_evento)
+    );
+
+    -- FACT TABLE 2: Waste Counts (Denormalized from coleta_de_lixo)
+    CREATE TABLE IF NOT EXISTS public.fato_contagem_residuos
+    (
+        id_evento integer NOT NULL,
+        id_residuo integer NOT NULL, -- Links to dim_residuos
+        
+        -- Raw counts (integers)
+        plastico integer DEFAULT 0,
+        borracha integer DEFAULT 0,
+        madeira integer DEFAULT 0,
+        produtos_texteis integer DEFAULT 0,
+        papel integer DEFAULT 0,
+        metal integer DEFAULT 0,
+        vidro integer DEFAULT 0,
+        materiais_de_pesca integer DEFAULT 0,
+        outros_residuos integer DEFAULT 0,
+        
+        PRIMARY KEY (id_evento, id_residuo)
+    );
+
+    -- 3. CONSTRAINTS AND FOREIGN KEYS
+    
+    -- Constraints on Fact Event Context
+    ALTER TABLE IF EXISTS public.fato_evento_contexto
+    ADD CONSTRAINT fato_evento_contexto_pkey PRIMARY KEY (id_evento);
+    
+    ALTER TABLE IF EXISTS public.fato_evento_contexto
+    ADD CONSTRAINT fato_evento_contexto_id_bioma_fkey FOREIGN KEY (id_bioma) REFERENCES public.dim_bioma (id_bioma);
+    
+    ALTER TABLE IF EXISTS public.fato_evento_contexto
+    ADD CONSTRAINT fato_evento_contexto_id_manejo_fkey FOREIGN KEY (id_manejo) REFERENCES public.dim_manejo (id_manejo);
+    
+    ALTER TABLE IF EXISTS public.fato_evento_contexto
+    ADD CONSTRAINT fato_evento_contexto_id_esfera_fkey FOREIGN KEY (id_esfera) REFERENCES public.dim_esfera (id_esfera);
+    
+    ALTER TABLE IF EXISTS public.fato_evento_contexto
+    ADD CONSTRAINT fato_evento_contexto_id_uc_fkey FOREIGN KEY (id_uc) REFERENCES public.dim_uc (id_uc);
+    
+    ALTER TABLE IF EXISTS public.fato_evento_contexto
+    ADD CONSTRAINT fato_evento_contexto_id_instituicao_fkey FOREIGN KEY (id_instituicao_organizadora) REFERENCES public.dim_instituicao (id_instituicao_organizadora);
+    
+    ALTER TABLE IF EXISTS public.fato_evento_contexto
+    ADD CONSTRAINT fato_evento_contexto_id_mutirao_fkey FOREIGN KEY (id_mutirao) REFERENCES public.dim_mutirao (id_mutirao);
+    
+    ALTER TABLE IF EXISTS public.fato_evento_contexto
+    ADD CONSTRAINT fato_evento_contexto_id_municipio_fkey FOREIGN KEY (id_municipio) REFERENCES public.dim_regiao (id_municipio);
+
+    -- Constraints on Fact Waste Counts
+    ALTER TABLE IF EXISTS public.fato_contagem_residuos
+    ADD CONSTRAINT fato_contagem_residuos_pkey PRIMARY KEY (id_evento, id_residuo);
+    
+    ALTER TABLE IF EXISTS public.fato_contagem_residuos
+    ADD CONSTRAINT fato_contagem_residuos_id_evento_fkey FOREIGN KEY (id_evento) REFERENCES public.fato_evento_contexto (id_evento) ON DELETE CASCADE;
+    
+    ALTER TABLE IF EXISTS public.fato_contagem_residuos
+    ADD CONSTRAINT fato_contagem_residuos_id_residuo_fkey FOREIGN KEY (id_residuo) REFERENCES public.dim_residuos (id_residuo);
+
+    -- Indexes for Performance
+    CREATE INDEX IF NOT EXISTS idx_fato_evento_contexto_bioma ON public.fato_evento_contexto(id_bioma);
+    CREATE INDEX IF NOT EXISTS idx_fato_evento_contexto_municipio ON public.fato_evento_contexto(id_municipio);
+    CREATE INDEX IF NOT EXISTS idx_fato_evento_contexto_uc ON public.fato_evento_contexto(id_uc);
+    CREATE INDEX IF NOT EXISTS idx_fato_contagem_evento ON public.fato_contagem_residuos(id_evento);
+    CREATE INDEX IF NOT EXISTS idx_fato_contagem_residuo ON public.fato_contagem_residuos(id_residuo);
+
+    -- View for Quick Total Calculation (Optional Helper)
+    CREATE OR REPLACE VIEW public.vista_total_residuos_por_evento AS
+    SELECT 
+        fc.id_evento,
+        COALESCE(SUM(fcr.plastico), 0) as total_plastico,
+        COALESCE(SUM(fcr.borracha), 0) as total_borracha,
+        COALESCE(SUM(fcr.madeira), 0) as total_madeira,
+        COALESCE(SUM(fcr.produtos_texteis), 0) as total_produtos_texteis,
+        COALESCE(SUM(fcr.papel), 0) as total_papel,
+        COALESCE(SUM(fcr.metal), 0) as total_metal,
+        COALESCE(SUM(fcr.vidro), 0) as total_vidro,
+        COALESCE(SUM(fcr.materiais_de_pesca), 0) as total_materiais_de_pesca,
+        COALESCE(SUM(fcr.outros_residuos), 0) as total_outros,
+        fc.total_residuos
+    FROM public.fato_evento_contexto fc
+    LEFT JOIN public.fato_contagem_residuos fcr ON fc.id_evento = fcr.id_evento
+    GROUP BY fc.id_evento, fc.total_residuos;
+
+```

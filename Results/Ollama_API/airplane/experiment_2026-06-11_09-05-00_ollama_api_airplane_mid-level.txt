@@ -1,0 +1,207 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-05-00
+Model: ollama_api
+Prompt: mid-level
+Schema: airplane
+==================================================
+
+{
+  "section_1": {
+    "summary": "The normalized schema has been transformed into a star schema optimized for analytical queries. Key decisions include creating a central fact table 'fact_flight_tickets' that consolidates ticket and flight data, and several denormalized dimension tables to reduce joins. The 'boarding_passes' and 'seats' tables are merged into the fact table to avoid deep joins. Aircraft and airport information is embedded directly into the fact table or dedicated dimensions to minimize lookups. This structure supports fast aggregations for dashboards and reporting on bookings, passenger travel, and flight performance.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Created a central fact table 'fact_flight_tickets' by combining data from 'ticket_flights', 'tickets', and 'flights'. This reduces the need to join these tables during analytical queries."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Created a denormalized dimension table 'dim_bookings' from the 'bookings' table to store booking-level information for easy access."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Created a denormalized dimension table 'dim_aircrafts' from 'aircrafts_data' to store aircraft model and range information."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Created a denormalized dimension table 'dim_airports' from 'airports_data' to store airport and city information."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Embedded aircraft_code, departure_airport, and arrival_airport directly into the fact table 'fact_flight_tickets' to avoid joins with 'flights' and 'aircrafts_data'."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Merged 'boarding_passes' and 'seats' data into the fact table 'fact_flight_tickets' to eliminate joins with boarding and seat data."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived attributes 'scheduled_duration_minutes' and 'actual_duration_minutes' to 'fact_flight_tickets' to support performance analysis without runtime calculations."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added 'departure_city' and 'arrival_city' to 'fact_flight_tickets' by extracting from 'dim_airports' to reduce joins during city-level analysis."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added 'aircraft_model' and 'aircraft_range' to 'fact_flight_tickets' by copying from 'dim_aircrafts' to simplify aircraft-based reporting."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Removed 'boarding_passes' and 'seats' as standalone tables and moved relevant attributes into 'fact_flight_tickets'."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data duplication increases storage usage. For example, aircraft and airport details are copied into multiple tables."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Schema updates become more complex. Changes to aircraft or airport data require updates in multiple places."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Insert and update performance may degrade due to larger row sizes and more complex ETL logic."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregating total revenue by flight, route, or time period requires joining ticket_flights, flights, and bookings. Consolidating into a fact table improves performance."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting on passenger travel behavior often requires joining tickets, ticket_flights, and flights. Embedding passenger and flight details in a single fact table simplifies such queries."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyzing boarding efficiency or seat occupancy requires joining boarding_passes, seats, and flights. Merging these into the fact table reduces join complexity."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Dashboards showing flight performance by aircraft type or city pair benefit from embedded dimensions to avoid real-time joins."
+      }
+    ]
+  }
+}
+
+-- Denormalized Analytical Schema DDL
+-- Schema: analytics
+
+-- Table: dim_bookings
+CREATE TABLE IF NOT EXISTS analytics.dim_bookings (
+    book_ref CHAR(6) PRIMARY KEY,
+    book_date TIMESTAMP WITH TIME ZONE NOT NULL,
+    total_amount NUMERIC(10,2) NOT NULL
+);
+
+COMMENT ON TABLE analytics.dim_bookings IS 'Denormalized dimension table for bookings';
+COMMENT ON COLUMN analytics.dim_bookings.book_ref IS 'Booking number';
+COMMENT ON COLUMN analytics.dim_bookings.book_date IS 'Booking date';
+COMMENT ON COLUMN analytics.dim_bookings.total_amount IS 'Total booking cost';
+
+-- Table: dim_aircrafts
+CREATE TABLE IF NOT EXISTS analytics.dim_aircrafts (
+    aircraft_code CHAR(3) PRIMARY KEY,
+    model JSONB NOT NULL,
+    range INTEGER NOT NULL
+);
+
+COMMENT ON TABLE analytics.dim_aircrafts IS 'Denormalized dimension table for aircrafts';
+COMMENT ON COLUMN analytics.dim_aircrafts.aircraft_code IS 'Aircraft code, IATA';
+COMMENT ON COLUMN analytics.dim_aircrafts.model IS 'Aircraft model';
+COMMENT ON COLUMN analytics.dim_aircrafts.range IS 'Maximal flying distance, km';
+
+-- Table: dim_airports
+CREATE TABLE IF NOT EXISTS analytics.dim_airports (
+    airport_code CHAR(3) PRIMARY KEY,
+    airport_name JSONB NOT NULL,
+    city JSONB NOT NULL,
+    coordinates POINT NOT NULL,
+    timezone TEXT NOT NULL
+);
+
+COMMENT ON TABLE analytics.dim_airports IS 'Denormalized dimension table for airports';
+COMMENT ON COLUMN analytics.dim_airports.airport_code IS 'Airport code';
+COMMENT ON COLUMN analytics.dim_airports.airport_name IS 'Airport name';
+COMMENT ON COLUMN analytics.dim_airports.city IS 'City';
+COMMENT ON COLUMN analytics.dim_airports.coordinates IS 'Airport coordinates (longitude and latitude)';
+COMMENT ON COLUMN analytics.dim_airports.timezone IS 'Airport time zone';
+
+-- Table: fact_flight_tickets
+CREATE TABLE IF NOT EXISTS analytics.fact_flight_tickets (
+    ticket_no CHAR(13) NOT NULL,
+    book_ref CHAR(6) NOT NULL,
+    passenger_id VARCHAR(20) NOT NULL,
+    passenger_name TEXT NOT NULL,
+    contact_data JSONB,
+
+    flight_id INTEGER NOT NULL,
+    flight_no CHAR(6) NOT NULL,
+    scheduled_departure TIMESTAMP WITH TIME ZONE NOT NULL,
+    scheduled_arrival TIMESTAMP WITH TIME ZONE NOT NULL,
+    actual_departure TIMESTAMP WITH TIME ZONE,
+    actual_arrival TIMESTAMP WITH TIME ZONE,
+    status VARCHAR(20) NOT NULL,
+
+    departure_airport CHAR(3) NOT NULL,
+    arrival_airport CHAR(3) NOT NULL,
+    departure_city JSONB,
+    arrival_city JSONB,
+
+    aircraft_code CHAR(3) NOT NULL,
+    aircraft_model JSONB,
+    aircraft_range INTEGER,
+
+    fare_conditions VARCHAR(10) NOT NULL,
+    amount NUMERIC(10,2) NOT NULL,
+
+    seat_no VARCHAR(4),
+    boarding_no INTEGER,
+
+    scheduled_duration_minutes INTEGER,
+    actual_duration_minutes INTEGER,
+
+    PRIMARY KEY (ticket_no, flight_id)
+);
+
+COMMENT ON TABLE analytics.fact_flight_tickets IS 'Denormalized fact table for flight tickets';
+COMMENT ON COLUMN analytics.fact_flight_tickets.ticket_no IS 'Ticket number';
+COMMENT ON COLUMN analytics.fact_flight_tickets.book_ref IS 'Booking number';
+COMMENT ON COLUMN analytics.fact_flight_tickets.passenger_id IS 'Passenger ID';
+COMMENT ON COLUMN analytics.fact_flight_tickets.passenger_name IS 'Passenger name';
+COMMENT ON COLUMN analytics.fact_flight_tickets.contact_data IS 'Passenger contact information';
+
+COMMENT ON COLUMN analytics.fact_flight_tickets.flight_id IS 'Flight ID';
+COMMENT ON COLUMN analytics.fact_flight_tickets.flight_no IS 'Flight number';
+COMMENT ON COLUMN analytics.fact_flight_tickets.scheduled_departure IS 'Scheduled departure time';
+COMMENT ON COLUMN analytics.fact_flight_tickets.scheduled_arrival IS 'Scheduled arrival time';
+COMMENT ON COLUMN analytics.fact_flight_tickets.actual_departure IS 'Actual departure time';
+COMMENT ON COLUMN analytics.fact_flight_tickets.actual_arrival IS 'Actual arrival time';
+COMMENT ON COLUMN analytics.fact_flight_tickets.status IS 'Flight status';
+
+COMMENT ON COLUMN analytics.fact_flight_tickets.departure_airport IS 'Airport of departure';
+COMMENT ON COLUMN analytics.fact_flight_tickets.arrival_airport IS 'Airport of arrival';
+COMMENT ON COLUMN analytics.fact_flight_tickets.departure_city IS 'City of departure';
+COMMENT ON COLUMN analytics.fact_flight_tickets.arrival_city IS 'City of arrival';
+
+COMMENT ON COLUMN analytics.fact_flight_tickets.aircraft_code IS 'Aircraft code, IATA';
+COMMENT ON COLUMN analytics.fact_flight_tickets.aircraft_model IS 'Aircraft model';
+COMMENT ON COLUMN analytics.fact_flight_tickets.aircraft_range IS 'Aircraft range';
+
+COMMENT ON COLUMN analytics.fact_flight_tickets.fare_conditions IS 'Travel class';
+COMMENT ON COLUMN analytics.fact_flight_tickets.amount IS 'Travel cost';
+
+COMMENT ON COLUMN analytics.fact_flight_tickets.seat_no IS 'Seat number';
+COMMENT ON COLUMN analytics.fact_flight_tickets.boarding_no IS 'Boarding pass number';
+
+COMMENT ON COLUMN analytics.fact_flight_tickets.scheduled_duration_minutes IS 'Scheduled flight duration in minutes';
+COMMENT ON COLUMN analytics.fact_flight_tickets.actual_duration_minutes IS 'Actual flight duration in minutes';

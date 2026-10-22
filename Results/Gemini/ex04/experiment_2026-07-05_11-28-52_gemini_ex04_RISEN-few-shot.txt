@@ -1,0 +1,170 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-28-52
+Model: gemini
+Prompt: RISEN-few-shot
+Schema: ex04
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on 'Collapsing Relations' and 'Adding Redundant Attributes' to optimize the schema for heavy analytical read workloads. The original highly normalized schema (11 tables) suffers from severe JOIN bottlenecks, particularly when analyzing country-level indicators across different domains (economy, health, education, etc.) by year. To resolve this, the model is consolidated into four domain-specific wide tables. Country and Region attributes are redundantly embedded into all tables to allow independent querying without dimension joins. To avoid Cartesian products between different granularities (e.g., population age brackets vs. survey deciles), the data is logically grouped into Macro Indicators, Surveys, Population, and Life Expectancy facts. Shared column names across source tables were prefixed to maintain semantic clarity and uniqueness.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapsed 'country', 'region', 'economy', 'education', 'employment', 'health', and 'demography' into a single wide table named 'analytical_country_year_fact' to serve country-year macro indicator queries."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapsed 'country', 'region', 'survey', and 'decile' into a single wide table named 'analytical_survey_fact' to serve poverty and welfare distribution queries."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Collapsed 'country', 'region', 'demography', and 'population' into 'analytical_population_fact' to handle granular demographic breakdowns by age and gender."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Collapsed 'country', 'region', 'demography', and 'life_expectancy' into 'analytical_life_expectancy_fact' to handle life expectancy metrics by gender."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Derived unique names for the 'expenditure' attribute present in both 'education' and 'health' tables, renaming them to 'education_expenditure' and 'health_expenditure' respectively."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Prefixed 'name' and 'value' attributes from the 'decile' table as 'decile_name' and 'decile_value' to provide clear context in the flattened survey table."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Prefixed 'gender' and 'number' attributes from the 'population' table as 'population_gender' and 'population_number'."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Prefixed 'gender' and 'value' attributes from the 'life_expectancy' table as 'life_expectancy_gender' and 'life_expectancy_value'."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage Footprint: By adding redundant attributes (like country_name and region_name) across four different fact tables, the physical storage requirements will increase significantly."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If a region or country name changes, the update must be propagated across all rows in all four denormalized tables instead of a single dimension table. This is generally acceptable in OLAP environments where data is append-only."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1",
+        "query": "SELECT c.country_name, e.gdp, ed.child_out_of_school, h.hospital_beds FROM country c JOIN economy e ON c.country_code = e.country_code JOIN education ed ON c.country_code = ed.country_code AND e.year = ed.year JOIN health h ON c.country_code = h.country_code AND e.year = h.year WHERE e.year = 2020;"
+      },
+      {
+        "decision_id": "D2",
+        "query": "SELECT c.country_name, s.survey_year, s.headcount, d.name, d.value FROM survey s JOIN decile d ON s.id_survey = d.id_survey JOIN country c ON s.country_code = c.country_code WHERE s.welfare_type = 'income';"
+      }
+    ]
+  }
+}
+```
+
+```sql
+BEGIN;
+
+-- 1. Macro Indicators Wide Table (Country + Year Grain)
+DROP TABLE IF EXISTS public.analytical_country_year_fact CASCADE;
+CREATE TABLE IF NOT EXISTS public.analytical_country_year_fact
+(
+    country_code character varying NOT NULL,
+    country_name character varying,
+    region_code character varying NOT NULL,
+    region_name character varying NOT NULL,
+    year integer NOT NULL,
+    gdp double precision,
+    inflation double precision,
+    tax_revenue double precision,
+    child_out_of_school double precision,
+    progression_to_sec double precision,
+    education_expenditure double precision,
+    preprim_enroll double precision,
+    prim_enrol double precision,
+    sec_enrol double precision,
+    terti_enrol double precision,
+    child_emp double precision,
+    unemp double precision,
+    vulnerable_emp double precision,
+    part_time double precision,
+    employers double precision,
+    labor_force_total double precision,
+    labor_force_fem double precision,
+    hospital_beds double precision,
+    physicians double precision,
+    health_expenditure double precision,
+    pop_density double precision,
+    urban_pop double precision,
+    rural_pop double precision,
+    net_migration double precision,
+    death_rate double precision,
+    birth_rate double precision
+);
+
+-- 2. Survey and Poverty Wide Table (Country + Survey + Decile Grain)
+DROP TABLE IF EXISTS public.analytical_survey_fact CASCADE;
+CREATE TABLE IF NOT EXISTS public.analytical_survey_fact
+(
+    country_code character varying NOT NULL,
+    country_name character varying,
+    region_code character varying NOT NULL,
+    region_name character varying NOT NULL,
+    survey_year integer NOT NULL,
+    welfare_type character varying,
+    survey_acronym character varying,
+    survey_comparability integer,
+    comparable_spell character varying,
+    poverty_line double precision,
+    headcount double precision,
+    poverty_gap double precision,
+    poverty_severity double precision,
+    gini double precision,
+    reporting_pop integer,
+    reporting_pce double precision,
+    distribution_type character varying,
+    spl double precision,
+    survey_coverage character varying,
+    reporting_level character varying,
+    decile_name character varying,
+    decile_value double precision
+);
+
+-- 3. Population Demographics Wide Table (Country + Year + Age + Gender Grain)
+DROP TABLE IF EXISTS public.analytical_population_fact CASCADE;
+CREATE TABLE IF NOT EXISTS public.analytical_population_fact
+(
+    country_code character varying NOT NULL,
+    country_name character varying,
+    region_code character varying NOT NULL,
+    region_name character varying NOT NULL,
+    year integer NOT NULL,
+    pop_ages character varying,
+    population_gender character varying,
+    population_number double precision
+);
+
+-- 4. Life Expectancy Wide Table (Country + Year + Gender Grain)
+DROP TABLE IF EXISTS public.analytical_life_expectancy_fact CASCADE;
+CREATE TABLE IF NOT EXISTS public.analytical_life_expectancy_fact
+(
+    country_code character varying NOT NULL,
+    country_name character varying,
+    region_code character varying NOT NULL,
+    region_name character varying NOT NULL,
+    year integer NOT NULL,
+    life_expectancy_gender character varying,
+    life_expectancy_value double precision
+);
+
+END;
+```

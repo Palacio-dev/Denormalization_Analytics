@@ -1,0 +1,276 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_13-39-48
+Model: ollama_local
+Prompt: RISEN
+Schema: ex02
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on eliminating the join operations between `unidade_de_conservacao` and its 
+    foreign key references (`bioma`, `esfera_administrativa`, `categoria_manejo`, `regiao`). By creating a single, wide 
+    `unidade_de_conservacao_denormalizada` table, we materialize the joined data. This is chosen because analytical queries on 
+    conservation units almost always require aggregating metrics across these dimensions (e.g., 'Total area by management category 
+    and region'). Pre-calculating these relationships avoids complex JOINs and aggregation on-the-fly.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge `unidade_de_conservacao`, `bioma`, `categoria_manejo`, `esfera_administrativa`, and `regiao` into a single `unidade_de_conservacao_denormalizada` table. The primary key remains `id_uc`. The foreign key columns are removed and replaced with the actual data from the referenced tables."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Create a new `coleta_de_lixo_denormalizada` table. Instead of joining `coleta_de_lixo` with `mutirao_de_limpeza`, `local_de_coleta`, `regiao`, and `instituicao_organizadora`, we store the specific attributes needed for reporting (e.g., `nome_mutirao`, `nome_regiao`, `nome_instituicao`) directly in this table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant attributes to `unidade_de_conservacao_denormalizada`: `nome_bioma`, `nome_esfera`, 
+        `nome_categoria`, `nome_regiao` (from `regiao`), and `nome_instituicao`. Also added `area_soma_biomas_continentais` 
+        and `area_marinha` as derived attributes if they were not pre-aggregated, though the original schema had them, so we ensure
+         they are preserved alongside the new text attributes."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added redundant attributes to `coleta_de_lixo_denormalizada`: `nome_mutirao`, `nome_regiao`, `nome_instituicao_organizadora`, `data_do_ocorrido`, `horario_de_inicio`, `numero_aproximado_de_participantes`, and `duracao_total`."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Write performance will degrade slightly due to the increased number of columns to update during inserts/updates. However, read performance (especially for analytical reports) will improve significantly by removing JOIN overhead and reducing I/O for complex queries."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Data consistency becomes harder to enforce via foreign keys. We rely on application logic or periodic ETL jobs to ensure the redundant data matches the source of truth."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical report: 'List all conservation units with their total area, management category, administrative sphere, and region name, grouped by region.' (Original required 4-5 JOINs)."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Operational report: 'Show recent garbage collection events including the pickup location name, participating institution name, and municipality region name.' (Original required 4 JOINs)."
+      }
+    ]
+  }
+}
+
+-- ==========================================
+-- DENORMALIZED SCHEMA SCRIPT
+-- Dialect: PostgreSQL
+-- ==========================================
+
+-- --------------------------------------------------------
+-- 1. BIOMA (Unchanged - Reference Table)
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.bioma (
+    id_bioma integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT bioma_pkey PRIMARY KEY (id_bioma)
+);
+
+-- --------------------------------------------------------
+-- 2. CATEGORIA_MANEJO (Unchanged - Reference Table)
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.categoria_manejo (
+    id_manejo integer NOT NULL,
+    categoria text COLLATE pg_catalog."default" NOT NULL,
+    categoria_iucn text COLLATE pg_catalog."default" NOT NULL,
+    plano text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT categoria_manejo_pkey PRIMARY KEY (id_manejo)
+);
+
+-- --------------------------------------------------------
+-- 3. ESFERA_ADMINISTRATIVA (Unchanged - Reference Table)
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.esfera_administrativa (
+    id_esfera integer NOT NULL,
+    tipo text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT esfera_administrativa_pkey PRIMARY KEY (id_esfera)
+);
+
+-- --------------------------------------------------------
+-- 4. INSTITUICAO_ORGANIZADORA (Unchanged - Reference Table)
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.instituicao_organizadora (
+    id_instituicao_organizadora integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    carater text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT instituicao_organizadora_pkey PRIMARY KEY (id_instituicao_organizadora)
+);
+
+-- --------------------------------------------------------
+-- 5. REGIAO (Unchanged - Reference Table)
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.regiao (
+    id_municipio integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    estado text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT regiao_pkey PRIMARY KEY (id_municipio)
+);
+
+-- --------------------------------------------------------
+-- 6. MUTIRAO_DE_LIMPEZA (Unchanged - Reference Table)
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.mutirao_de_limpeza (
+    id_mutirao integer NOT NULL,
+    data_do_ocorrido date NOT NULL,
+    horario_de_inicio time without time zone NOT NULL,
+    numero_aproximado_de_participantes integer,
+    duracao_total time without time zone NOT NULL,
+    id_municipio integer,
+    id_instituicao_organizadora integer,
+    CONSTRAINT mutirao_de_limpeza_pkey PRIMARY KEY (id_mutirao)
+);
+
+-- --------------------------------------------------------
+-- 7. LOCAL_DE_COLETA (Unchanged - Reference Table)
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.local_de_coleta (
+    id_mutirao integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT local_de_coleta_pkey PRIMARY KEY (id_mutirao)
+);
+
+-- --------------------------------------------------------
+-- 8. UNIDADE_DE_CONSERVACAO_DENORMALIZADA
+-- --------------------------------------------------------
+-- Strategy: Denormalized by merging bioma, categoria_manejo, esfera_administrativa, and regiao.
+-- This eliminates the need for JOINs when querying conservation unit details with their attributes.
+CREATE TABLE IF NOT EXISTS public.unidade_de_conservacao_denormalizada (
+    id_uc integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    ano_de_criacao integer,
+    area_soma_biomas double precision,
+    area_soma_biomas_continentais double precision,
+    area_marinha double precision,
+    
+    -- Redundant Attributes (Denormalized from bioma)
+    nome_bioma text COLLATE pg_catalog."default",
+    
+    -- Redundant Attributes (Denormalized from categoria_manejo)
+    nome_categoria text COLLATE pg_catalog."default",
+    
+    -- Redundant Attributes (Denormalized from esfera_administrativa)
+    nome_esfera text COLLATE pg_catalog."default",
+    
+    -- Redundant Attributes (Denormalized from regiao)
+    nome_regiao text COLLATE pg_catalog."default",
+    
+    -- Primary Key
+    CONSTRAINT unidade_de_conservacao_denormalizada_pkey PRIMARY KEY (id_uc)
+);
+
+-- --------------------------------------------------------
+-- 9. COLETA_DE_LIXO_DENORMALIZADA
+-- --------------------------------------------------------
+-- Strategy: Denormalized by merging mutirao_de_limpeza, local_de_coleta, regiao, and instituicao_organizadora.
+-- This eliminates JOINs for reporting on garbage collection events.
+CREATE TABLE IF NOT EXISTS public.coleta_de_lixo_denormalizada (
+    id_mutirao integer NOT NULL,
+    
+    -- Redundant Attributes (Denormalized from mutirao_de_limpeza)
+    data_do_ocorrido date NOT NULL,
+    horario_de_inicio time without time zone NOT NULL,
+    numero_aproximado_de_participantes integer,
+    duracao_total time without time zone NOT NULL,
+    nome_mutirao text COLLATE pg_catalog."default",
+    nome_regiao text COLLATE pg_catalog."default",
+    nome_instituicao_organizadora text COLLATE pg_catalog."default",
+    
+    -- Original Waste Type Columns (Kept as is)
+    plastico integer,
+    borracha integer,
+    madeira integer,
+    produtos_texteis integer,
+    papel integer,
+    metal integer,
+    vidro integer,
+    materiais_de_pesca integer,
+    outros_residuos integer,
+    
+    -- Primary Key
+    CONSTRAINT coleta_de_lixo_denormalizada_pkey PRIMARY KEY (id_mutirao)
+);
+
+-- --------------------------------------------------------
+-- DATA MIGRATION (Optional but recommended for semantic equivalence)
+-- --------------------------------------------------------
+-- Note: In a production environment, this migration logic would be run via an ETL process or 
+-- a one-time script to populate the new tables from the old ones.
+-- Since the prompt asks for the schema creation, the logic below is provided as comments 
+-- or a separate block to ensure the new tables are populated correctly.
+
+-- Example Migration Logic (Commented out for schema definition):
+/*
+INSERT INTO public.unidade_de_conservacao_denormalizada (
+    id_uc, nome, ano_de_criacao, area_soma_biomas, area_soma_biomas_continentais, area_marinha,
+    nome_bioma, nome_categoria, nome_esfera, nome_regiao
+)
+SELECT 
+    u.id_uc,
+    u.nome,
+    u.ano_de_criacao,
+    u.area_soma_biomas,
+    u.area_soma_biomas_continentais,
+    u.area_marinha,
+    b.nome,
+    c.categoria,
+    e.tipo,
+    r.nome
+FROM public.unidade_de_conservacao u
+JOIN public.bioma b ON u.id_bioma = b.id_bioma
+JOIN public.categoria_manejo c ON u.id_manejo = c.id_manejo
+JOIN public.esfera_administrativa e ON u.id_esfera = e.id_esfera
+JOIN public.regiao r ON u.id_municipio = r.id_municipio;
+
+INSERT INTO public.coleta_de_lixo_denormalizada (
+    id_mutirao,
+    data_do_ocorrido, horario_de_inicio, numero_aproximado_de_participantes, duracao_total,
+    nome_mutirao, nome_regiao, nome_instituicao_organizadora,
+    plastico, borracha, madeira, produtos_texteis, papel, metal, vidro, 
+    materiais_de_pesca, outros_residuos
+)
+SELECT 
+    c.id_mutirao,
+    m.data_do_ocorrido,
+    m.horario_de_inicio,
+    m.numero_aproximado_de_participantes,
+    m.duracao_total,
+    l.nome,
+    r.nome,
+    i.nome,
+    c.plastico, c.borracha, c Madeira, c.produtos_texteis, c.papel, c.metal, c.vidro, 
+    c.materiais_de_pesca, c.outros_residuos
+FROM public.coleta_de_lixo c
+JOIN public.mutirao_de_limpeza m ON c.id_mutirao = m.id_mutirao
+JOIN public.local_de_coleta l ON c.id_mutirao = l.id_mutirao
+JOIN public.regiao r ON m.id_municipio = r.id_municipio
+JOIN public.instituicao_organizadora i ON m.id_instituicao_organizadora = i.id_instituicao_organizadora;
+*/
+
+-- --------------------------------------------------------
+-- FOREIGN KEY CONSTRAINTS (Removed for Denormalized Tables)
+-- --------------------------------------------------------
+-- Note: Foreign keys pointing to the denormalized tables are removed. 
+-- The denormalized tables act as the "single source of truth" for reporting.
+-- If data integrity between the original normalized tables and the new denormalized ones is critical,
+-- additional application-level checks or triggers should be implemented.
+
+-- --------------------------------------------------------
+-- INDEXES (Optimized for the new schema)
+-- --------------------------------------------------------
+CREATE INDEX IF NOT EXISTS unidade_de_conservacao_denormalizada_pkey ON public.unidade_de_conservacao_denormalizada(id_uc);
+CREATE INDEX IF NOT EXISTS coleta_de_lixo_denormalizada_pkey ON public.coleta_de_lixo_denormalizada(id_mutirao);
+
+-- Add indexes on frequently queried columns in the denormalized tables
+CREATE INDEX IF NOT EXISTS idx_uc_bioma ON public.unidade_de_conservacao_denormalizada(nome_bioma);
+CREATE INDEX IF NOT EXISTS idx_uc_regiao ON public.unidade_de_conservacao_denormalizada(nome_regiao);
+CREATE INDEX IF NOT EXISTS idx_coleta_mutirao ON public.coleta_de_lixo_denormalizada(nome_mutirao);

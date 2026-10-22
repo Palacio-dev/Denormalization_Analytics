@@ -1,0 +1,236 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_08-59-02
+Model: ollama_api
+Prompt: senior
+Schema: TPC_H
+==================================================
+
+{
+  "section_1": {
+    "summary": "This denormalization strategy transforms a normalized TPC-H-like OLTP schema into an analytics-optimized star schema. The approach involves creating a central fact table (FACT_LINEITEM) with denormalized dimensions for efficient querying. Key decisions include flattening the NATION and REGION into a single GEOGRAPHY dimension, merging PART and PARTSUPP into a PRODUCT_SUPPLIER dimension, and embedding customer and order attributes directly into the fact table where beneficial. The goal is to minimize joins for common analytical queries while preserving data integrity and traceability.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge NATION and REGION into a single GEOGRAPHY_DIM dimension to reduce join depth for regional analysis."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Flatten SUPPLIER and NATION into SUPPLIER_DIM to allow supplier-region analysis without intermediate joins."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Combine PART and PARTSUPP into PRODUCT_DIM to simplify product-supplier-cost analysis."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Flatten CUSTOMER and NATION into CUSTOMER_DIM to support customer-region segmentation."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Embed key ORDER attributes into FACT_LINEITEM to reduce joins for order-level analysis."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Create a central FACT_LINEITEM fact table to consolidate transactional data with foreign keys to all dimensions."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added calculated fields like LINE_EXTENDED_AMOUNT and LINE_DISCOUNTED_AMOUNT to precompute common aggregations."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Introduced surrogate keys in dimension tables for consistent joins and slowly changing dimension handling."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Duplicated descriptive fields like PART_NAME, SUPPLIER_NAME, CUSTOMER_NAME into FACT_LINEITEM for direct filtering."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added date-related attributes like ORDER_YEAR, ORDER_MONTH to FACT_LINEITEM for partitioning and time-based analysis."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage due to denormalization and duplication of descriptive fields, but significantly reduced query complexity and join overhead."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Loss of strict normalization may complicate data updates, but acceptable for batch-loaded analytical systems with infrequent changes."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Some data redundancy introduced (e.g., customer name in fact), but enables faster filtering and eliminates need for joins in most queries."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze total sales by region and nation. Original schema requires joining LINEITEM -> ORDERS -> CUSTOMER -> NATION -> REGION. Denormalized GEOGRAPHY_DIM reduces this to a single join."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze supplier performance by region. Original schema requires joining LINEITEM -> SUPPLIER -> NATION -> REGION. SUPPLIER_DIM eliminates intermediate joins."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze product sales with supplier cost. Original schema requires joining LINEITEM -> PARTSUPP -> PART. PRODUCT_DIM consolidates these into one lookup."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze customer segment performance by region. Original schema requires joining LINEITEM -> ORDERS -> CUSTOMER -> NATION -> REGION. CUSTOMER_DIM reduces this to one join."
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze order trends over time by status or priority. Embedding ORDER_STATUS, ORDER_PRIORITY, and ORDER_DATE in FACT_LINEITEM avoids joining with ORDERS table."
+      }
+    ]
+  }
+}
+
+-- Denormalized Schema DDL
+
+-- Dimension Tables
+
+CREATE TABLE GEOGRAPHY_DIM (
+    GEO_SK              BIGINT PRIMARY KEY,
+    NATION_KEY          INTEGER NOT NULL,
+    NATION_NAME         CHAR(25) NOT NULL,
+    REGION_KEY          INTEGER NOT NULL,
+    REGION_NAME         CHAR(25) NOT NULL,
+    NATION_COMMENT      VARCHAR(152),
+    REGION_COMMENT      VARCHAR(152)
+);
+
+CREATE TABLE SUPPLIER_DIM (
+    SUPPLIER_SK         BIGINT PRIMARY KEY,
+    SUPPLIER_KEY        INTEGER NOT NULL,
+    SUPPLIER_NAME       CHAR(25) NOT NULL,
+    SUPPLIER_ADDRESS    VARCHAR(40) NOT NULL,
+    NATION_KEY          INTEGER NOT NULL,
+    NATION_NAME         CHAR(25) NOT NULL,
+    REGION_KEY          INTEGER NOT NULL,
+    REGION_NAME         CHAR(25) NOT NULL,
+    SUPPLIER_PHONE      CHAR(15) NOT NULL,
+    SUPPLIER_ACCTBAL    DECIMAL(15,2) NOT NULL,
+    SUPPLIER_COMMENT    VARCHAR(101) NOT NULL
+);
+
+CREATE TABLE PRODUCT_DIM (
+    PRODUCT_SK          BIGINT PRIMARY KEY,
+    PART_KEY            INTEGER NOT NULL,
+    PART_NAME           VARCHAR(55) NOT NULL,
+    PART_MFGR           CHAR(25) NOT NULL,
+    PART_BRAND          CHAR(10) NOT NULL,
+    PART_TYPE           VARCHAR(25) NOT NULL,
+    PART_SIZE           INTEGER NOT NULL,
+    PART_CONTAINER      CHAR(10) NOT NULL,
+    RETAIL_PRICE        DECIMAL(15,2) NOT NULL,
+    PART_COMMENT        VARCHAR(23) NOT NULL,
+    SUPPLIER_KEY        INTEGER NOT NULL,
+    SUPPLIER_AVAILABLE_QTY INTEGER NOT NULL,
+    SUPPLY_COST         DECIMAL(15,2) NOT NULL,
+    SUPPLIER_COMMENT    VARCHAR(199) NOT NULL
+);
+
+CREATE TABLE CUSTOMER_DIM (
+    CUSTOMER_SK         BIGINT PRIMARY KEY,
+    CUSTOMER_KEY        INTEGER NOT NULL,
+    CUSTOMER_NAME       VARCHAR(25) NOT NULL,
+    CUSTOMER_ADDRESS    VARCHAR(40) NOT NULL,
+    NATION_KEY          INTEGER NOT NULL,
+    NATION_NAME         CHAR(25) NOT NULL,
+    REGION_KEY          INTEGER NOT NULL,
+    REGION_NAME         CHAR(25) NOT NULL,
+    CUSTOMER_PHONE      CHAR(15) NOT NULL,
+    CUSTOMER_ACCTBAL    DECIMAL(15,2) NOT NULL,
+    MKT_SEGMENT         CHAR(10) NOT NULL,
+    CUSTOMER_COMMENT    VARCHAR(117) NOT NULL
+);
+
+CREATE TABLE DATE_DIM (
+    DATE_SK             BIGINT PRIMARY KEY,
+    DATE_VALUE          DATE NOT NULL,
+    YEAR                INTEGER NOT NULL,
+    QUARTER             INTEGER NOT NULL,
+    MONTH               INTEGER NOT NULL,
+    DAY                 INTEGER NOT NULL,
+    DAY_OF_WEEK         INTEGER NOT NULL,
+    WEEK_OF_YEAR        INTEGER NOT NULL,
+    IS_WEEKEND          BOOLEAN NOT NULL
+);
+
+-- Fact Table
+
+CREATE TABLE FACT_LINEITEM (
+    LINEITEM_SK         BIGINT PRIMARY KEY,
+    ORDER_KEY           INTEGER NOT NULL,
+    LINE_NUMBER         INTEGER NOT NULL,
+    QUANTITY            DECIMAL(15,2) NOT NULL,
+    EXTENDED_PRICE      DECIMAL(15,2) NOT NULL,
+    DISCOUNT            DECIMAL(15,2) NOT NULL,
+    TAX                 DECIMAL(15,2) NOT NULL,
+    RETURN_FLAG         CHAR(1) NOT NULL,
+    LINE_STATUS         CHAR(1) NOT NULL,
+    SHIP_DATE           DATE NOT NULL,
+    COMMIT_DATE         DATE NOT NULL,
+    RECEIPT_DATE        DATE NOT NULL,
+    SHIP_INSTRUCT       CHAR(25) NOT NULL,
+    SHIP_MODE           CHAR(10) NOT NULL,
+    LINE_COMMENT        VARCHAR(44) NOT NULL,
+
+    -- Embedded ORDER attributes
+    ORDER_STATUS        CHAR(1) NOT NULL,
+    ORDER_TOTAL_PRICE   DECIMAL(15,2) NOT NULL,
+    ORDER_DATE          DATE NOT NULL,
+    ORDER_PRIORITY      CHAR(15) NOT NULL,
+    ORDER_CLERK         CHAR(15) NOT NULL,
+    SHIP_PRIORITY       INTEGER NOT NULL,
+    ORDER_COMMENT       VARCHAR(79) NOT NULL,
+
+    -- Embedded descriptive fields for fast filtering
+    PART_NAME           VARCHAR(55) NOT NULL,
+    SUPPLIER_NAME       CHAR(25) NOT NULL,
+    CUSTOMER_NAME       VARCHAR(25) NOT NULL,
+    CUSTOMER_SEGMENT    CHAR(10) NOT NULL,
+    NATION_NAME         CHAR(25) NOT NULL,
+    REGION_NAME         CHAR(25) NOT NULL,
+
+    -- Surrogate Keys for Dimensions
+    GEO_SK              BIGINT REFERENCES GEOGRAPHY_DIM(GEO_SK),
+    SUPPLIER_SK         BIGINT REFERENCES SUPPLIER_DIM(SUPPLIER_SK),
+    PRODUCT_SK          BIGINT REFERENCES PRODUCT_DIM(PRODUCT_SK),
+    CUSTOMER_SK         BIGINT REFERENCES CUSTOMER_DIM(CUSTOMER_SK),
+    DATE_SK             BIGINT REFERENCES DATE_DIM(DATE_SK),
+
+    -- Calculated Fields
+    LINE_EXTENDED_AMOUNT DECIMAL(15,2) NOT NULL,
+    LINE_DISCOUNTED_AMOUNT DECIMAL(15,2) NOT NULL
+)
+PARTITION BY RANGE (ORDER_DATE)
+(
+    PARTITION p2020 VALUES LESS THAN ('2021-01-01'),
+    PARTITION p2021 VALUES LESS THAN ('2022-01-01'),
+    PARTITION p2022 VALUES LESS THAN ('2023-01-01'),
+    PARTITION p2023 VALUES LESS THAN ('2024-01-01'),
+    PARTITION p_future VALUES LESS THAN MAXVALUE
+);
+
+-- Index Recommendations
+CREATE INDEX idx_fact_lineitem_date_sk ON FACT_LINEITEM(DATE_SK);
+CREATE INDEX idx_fact_lineitem_customer_sk ON FACT_LINEITEM(CUSTOMER_SK);
+CREATE INDEX idx_fact_lineitem_product_sk ON FACT_LINEITEM(PRODUCT_SK);
+CREATE INDEX idx_fact_lineitem_supplier_sk ON FACT_LINEITEM(SUPPLIER_SK);
+CREATE INDEX idx_fact_lineitem_geo_sk ON FACT_LINEITEM(GEO_SK);
+CREATE INDEX idx_fact_lineitem_order_date ON FACT_LINEITEM(ORDER_DATE);
+CREATE INDEX idx_fact_lineitem_ship_date ON FACT_LINEITEM(SHIP_DATE);

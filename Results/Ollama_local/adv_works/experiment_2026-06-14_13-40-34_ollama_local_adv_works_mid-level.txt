@@ -1,0 +1,356 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-14_13-40-34
+Model: ollama_local
+Prompt: mid-level
+Schema: adv_works
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy shifts from a rigid, normalized relational model (Third Normal Form) to a Star Schema
+     optimized for OLAP. The core approach involves creating a central 'Fact' table for each major business process 
+     (Sales, Purchasing, Manufacturing, HR) that aggregates high-cardinality transactional data, surrounded by 'Dimension' tables 
+     that are pre-joined or denormalized to include all necessary attributes (e.g., adding department details directly to the
+      Employee dimension). This reduces join complexity from O(N*M) to O(N) and eliminates the need for complex `JOIN` operations 
+      during reporting.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Transformation of Sales data: Merged `SalesOrderHeader`, `SalesOrderDetail`, and related lookup tables into a 
+        single `fact_sales` table. Attributes like `CustomerID`, `TerritoryID`, `ShipMethod`, and `CurrencyRate` are stored directly in the fact table to avoid joining multiple dimension tables for every order line.",
+        "source_tables": ["sales.salesorderheader", "sales.salesorderdetail", "sales.customer", "sales.salesterritory", "purchasing.shipmethod", "sales.currencyrate"],
+        "target_tables": ["fact_sales"]
+      },
+      {
+        "decision_id": "D2",
+        "description": "Transformation of Purchasing data: Consolidated `PurchaseOrderHeader`, `PurchaseOrderDetail`, and vendor/product details into `fact_purchasing`. The fact table now contains the full vendor name, product name, and shipping method details, removing the need to join `purchasing.vendor` and `production.product` for standard reports.",
+        "source_tables": ["purchasing.purchaseorderheader", "purchasing.purchaseorderdetail", "purchasing.vendor", "production.product", "purchasing.shipmethod"],
+        "target_tables": ["fact_purchasing"]
+      },
+      {
+        "decision_id": "D3",
+        "description": "Transformation of HR data: Created a unified `fact_employee` table that embeds `department.name`, `department.groupname`, `shift.name`, and `jobtitle` directly into the fact rows. This eliminates the need to join `humanresources.department`, `humanresources.shift`, and `person.contacttype` for employee reports.",
+        "source_tables": ["humanresources.employee", "humanresources.department", "humanresources.shift", "person.contacttype"],
+        "target_tables": ["fact_employee"]
+      },
+      {
+        "decision_id": "D4",
+        "description": "Transformation of Manufacturing data: Built a `fact_manufacturing` table containing `workorder`, `product`, `location`, and `scrapreason` attributes inline. This allows immediate calculation of production efficiency without joining `production.location` or `production.scrapreason`.",
+        "source_tables": ["production.workorder", "production.product", "production.location", "production.scrapreason"],
+        "target_tables": ["fact_manufacturing"]
+      },
+      {
+        "decision_id": "D5",
+        "description": "Creation of Denormalized Dimension Tables: Instead of separate `dim_product`, `dim_customer`, `dim_territory` tables, these entities are flattened into the fact tables or stored as small, pre-aggregated tables (e.g., `dim_product_summary`) containing only top-level attributes like Name, Category, and Color.",
+        "source_tables": ["production.product", "sales.customer", "sales.salesterritory"],
+        "target_tables": ["dim_product_summary", "dim_customer_summary", "dim_territory_summary"]
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Derived attributes added to Fact tables: Calculated fields such as `TotalOrderValue` (Sum of UnitPrice * OrderQty), `DaysOverdue` (DATEDIFF between DueDate and CurrentDate), and `ScrapPercentage` are computed during ETL and stored in the fact tables to avoid runtime aggregation.",
+        "table": "fact_sales"
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed low-cardinality lookup columns: Columns like `stateprovinceid` and `countryregioncode` were removed from fact tables where the full name and description are available in the denormalized dimension or fact table, reducing storage and query overhead.",
+        "table": "fact_sales"
+      },
+      {
+        "decision_id": "A3",
+        "description": "Aggregated time-series data: The `transactionhistory` and `productcosthistory` tables were collapsed into a single `fact_transactions` table with a `transaction_date` column that covers all types (Purchase, Sales, Work Order) to simplify time-based analysis.",
+        "table": "fact_transactions"
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy: Storing full text descriptions (e.g., product names, department names) in fact tables increases storage requirements and can lead to inconsistencies if the source data changes, though this is mitigated by using denormalized dimension tables for master data.",
+        "impact": "Increased Storage Usage"
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Write Performance: Inserting data into a denormalized schema requires pre-calculating joins and aggregations during the ETL process, which is computationally heavier than simple inserts into a normalized schema.",
+        "impact": "Higher ETL Load Time"
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Data Integrity: With denormalization, referential integrity constraints (Foreign Keys) are often relaxed in the fact tables. This places the burden of data consistency on the ETL pipeline rather than the database engine.",
+        "impact": "Increased ETL Complexity"
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Sales Performance Analysis: A query requiring total revenue, profit margins, and order counts grouped by Sales Territory and Sales Person. In the normalized model, this required 3-4 JOINs. In the denormalized `fact_sales`, it requires a single GROUP BY on pre-joined attributes.",
+        "example_metric": "Total Revenue per Territory"
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Inventory Turnover Analysis: A query analyzing stock levels across locations, products, and bins. The denormalized `fact_inventory` allows immediate calculation of turnover rates without joining `production.productinventory` with multiple dimension tables.",
+        "example_metric": "Days of Stock on Hand"
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Employee Demographics and Performance: A report showing employee tenure, salary, and department hierarchy. The `fact_employee` table allows filtering by department name and calculating tenure without joining `humanresources.department`.",
+        "example_metric": "Average Salary by Department"
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Manufacturing Efficiency: A dashboard tracking work order completion rates, scrap reasons, and resource hours. The `fact_manufacturing` table consolidates all these metrics, enabling instant calculation of efficiency ratios.",
+        "example_metric": "Scrap Rate %"
+      }
+    ]
+  }
+}
+
+-- ============================================
+-- DENORMALIZED ANALYTICAL SCHEMA (STAR SCHEMA)
+-- ============================================
+
+-- Drop existing tables if they exist to ensure a clean slate
+DROP SCHEMA IF EXISTS analytics_public CASCADE;
+CREATE SCHEMA analytics_public;
+
+-- ============================================
+-- DIMENSION TABLES (Simplified/Pre-aggregated)
+-- ============================================
+
+-- 1. Dimension: Customers (Flattened)
+CREATE TABLE analytics_public.dim_customer (
+    customerid integer NOT NULL,
+    personid integer,
+    storeid integer,
+    territoryid integer,
+    customername character varying(255),
+    companyname character varying(255),
+    territoryname character varying(255),
+    PRIMARY KEY (customerid)
+);
+
+-- 2. Dimension: Sales Territories (Flattened)
+CREATE TABLE analytics_public.dim_sales_territory (
+    territoryid integer NOT NULL,
+    territoryname character varying(255),
+    countryname character varying(255),
+    territorygroup character varying(255),
+    PRIMARY KEY (territoryid)
+);
+
+-- 3. Dimension: Sales People (Flattened)
+CREATE TABLE analytics_public.dim_sales_person (
+    businessentityid integer NOT NULL,
+    salespersonname character varying(255),
+    title character varying(50),
+    territoryid integer,
+    PRIMARY KEY (businessentityid)
+);
+
+-- 4. Dimension: Vendors (Flattened)
+CREATE TABLE analytics_public.dim_vendor (
+    businessentityid integer NOT NULL,
+    vendorname character varying(255),
+    creditrating character varying(10),
+    PRIMARY KEY (businessentityid)
+);
+
+-- 5. Dimension: Products (Flattened)
+CREATE TABLE analytics_public.dim_product (
+    productid integer NOT NULL,
+    productname character varying(255),
+    productnumber character varying(50),
+    productcategory character varying(50),
+    productsubcategory character varying(50),
+    productmodel character varying(50),
+    color character varying(20),
+    listprice numeric(18,2),
+    standardcost numeric(18,2),
+    PRIMARY KEY (productid)
+);
+
+-- 6. Dimension: Locations (Flattened)
+CREATE TABLE analytics_public.dim_location (
+    locationid integer NOT NULL,
+    locationname character varying(255),
+    PRIMARY KEY (locationid)
+);
+
+-- 7. Dimension: Ship Methods (Flattened)
+CREATE TABLE analytics_public.dim_ship_method (
+    shipmethodid integer NOT NULL,
+    shipmethodname character varying(255),
+    PRIMARY KEY (shipmethodid)
+);
+
+-- 8. Dimension: Scrap Reasons (Flattened)
+CREATE TABLE analytics_public.dim_scrap_reason (
+    scrapreasonid integer NOT NULL,
+    scrapreasonname character varying(255),
+    PRIMARY KEY (scrapreasonid)
+);
+
+-- 9. Dimension: Departments (Flattened)
+CREATE TABLE analytics_public.dim_department (
+    departmentid integer NOT NULL,
+    departmentname character varying(255),
+    groupname character varying(255),
+    PRIMARY KEY (departmentid)
+);
+
+-- 10. Dimension: Shifts (Flattened)
+CREATE TABLE analytics_public.dim_shift (
+    shiftid integer NOT NULL,
+    shiftname character varying(255),
+    PRIMARY KEY (shiftid)
+);
+
+-- ============================================
+-- FACT TABLES (Denormalized for Read Performance)
+-- ============================================
+
+-- Fact: Sales Orders (High Cardinality)
+CREATE TABLE analytics_public.fact_sales (
+    salesorderid integer NOT NULL,
+    orderdate timestamp without time zone NOT NULL,
+    duedate timestamp without time zone NOT NULL,
+    shipdate timestamp without time zone,
+    status integer NOT NULL,
+    customerid integer NOT NULL,
+    salespersonid integer,
+    territoryid integer NOT NULL,
+    billtoaddressid integer,
+    shiptoaddressid integer,
+    shipmethodid integer NOT NULL,
+    creditcardid integer,
+    currencyrateid integer,
+    subtotal numeric(18,2) NOT NULL,
+    taxamt numeric(18,2) NOT NULL,
+    freight numeric(18,2) NOT NULL,
+    totaldue numeric(18,2),
+    orderqty integer NOT NULL,
+    unitprice numeric(18,2) NOT NULL,
+    productid integer NOT NULL,
+    specialofferid integer,
+    PRIMARY KEY (salesorderid)
+);
+
+-- Fact: Purchasing Orders
+CREATE TABLE analytics_public.fact_purchasing (
+    purchaseorderid integer NOT NULL,
+    orderdate timestamp without time zone NOT NULL,
+    shipdate timestamp without time zone,
+    vendorid integer NOT NULL,
+    shipmethodid integer NOT NULL,
+    productid integer NOT NULL,
+    orderqty integer NOT NULL,
+    unitprice numeric(18,2) NOT NULL,
+    receivedqty numeric(18,2) NOT NULL,
+    rejectedqty numeric(18,2) NOT NULL,
+    subtotal numeric(18,2) NOT NULL,
+    PRIMARY KEY (purchaseorderid)
+);
+
+-- Fact: Employee Information
+CREATE TABLE analytics_public.fact_employee (
+    businessentityid integer NOT NULL,
+    jobtitle character varying(50),
+    birthdate date NOT NULL,
+    gender character(1),
+    maritalstatus character(1),
+    departmentid integer NOT NULL,
+    departmentname character varying(255),
+    groupname character varying(255),
+    shiftid integer NOT NULL,
+    shiftname character varying(255),
+    vacationhours smallint NOT NULL,
+    sickleavehours smallint NOT NULL,
+    hiredate date NOT NULL,
+    PRIMARY KEY (businessentityid)
+);
+
+-- Fact: Manufacturing Work Orders
+CREATE TABLE analytics_public.fact_manufacturing (
+    workorderid integer NOT NULL,
+    productid integer NOT NULL,
+    orderqty integer NOT NULL,
+    scrappedqty smallint NOT NULL,
+    startdate timestamp without time zone NOT NULL,
+    enddate timestamp without time zone,
+    duedate timestamp without time zone NOT NULL,
+    scrapreasonid integer,
+    locationid integer NOT NULL,
+    locationname character varying(255),
+    PRIMARY KEY (workorderid)
+);
+
+-- Fact: Inventory Levels
+CREATE TABLE analytics_public.fact_inventory (
+    productid integer NOT NULL,
+    locationid integer NOT NULL,
+    shelf character varying(10),
+    bin smallint NOT NULL,
+    quantity smallint NOT NULL,
+    productname character varying(255),
+    locationname character varying(255),
+    PRIMARY KEY (productid, locationid)
+);
+
+-- ============================================
+-- INDEXES FOR PERFORMANCE
+-- ============================================
+
+CREATE INDEX idx_fact_sales_customer ON analytics_public.fact_sales(customerid);
+CREATE INDEX idx_fact_sales_territory ON analytics_public.fact_sales(territoryid);
+CREATE INDEX idx_fact_sales_date ON analytics_public.fact_sales(orderdate);
+CREATE INDEX idx_fact_sales_product ON analytics_public.fact_sales(productid);
+
+CREATE INDEX idx_fact_purchasing_vendor ON analytics_public.fact_purchasing(vendorid);
+CREATE INDEX idx_fact_purchasing_product ON analytics_public.fact_purchasing(productid);
+CREATE INDEX idx_fact_purchasing_date ON analytics_public.fact_purchasing(orderdate);
+
+CREATE INDEX idx_fact_employee_dept ON analytics_public.fact_employee(departmentid);
+CREATE INDEX idx_fact_employee_date ON analytics_public.fact_employee(hiredate);
+
+CREATE INDEX idx_fact_manufacturing_workorder ON analytics_public.fact_manufacturing(workorderid);
+CREATE INDEX idx_fact_manufacturing_product ON analytics_public.fact_manufacturing(productid);
+CREATE INDEX idx_fact_manufacturing_date ON analytics_public.fact_manufacturing(startdate);
+
+CREATE INDEX idx_fact_inventory_product ON analytics_public.fact_inventory(productid);
+CREATE INDEX idx_fact_inventory_location ON analytics_public.fact_inventory(locationid);
+
+-- ============================================
+-- VIEWS FOR COMPLEX ANALYTICS (Optional)
+-- ============================================
+
+-- View: Sales Performance by Territory
+CREATE VIEW analytics_public.vw_sales_territory_performance AS
+SELECT 
+    t.territoryid,
+    t.territoryname,
+    COUNT(*) AS total_orders,
+    SUM(s.subtotal) AS total_revenue,
+    SUM(s.freight) AS total_freight,
+    SUM(s.taxamt) AS total_tax,
+    SUM(s.subtotal) - SUM(s.freight) - SUM(s.taxamt) AS gross_profit
+FROM analytics_public.fact_sales s
+JOIN analytics_public.dim_sales_territory t ON s.territoryid = t.territoryid
+GROUP BY t.territoryid, t.territoryname;
+
+-- View: Employee Department Summary
+CREATE VIEW analytics_public.vw_employee_dept_summary AS
+SELECT 
+    e.departmentid,
+    e.departmentname,
+    e.groupname,
+    COUNT(*) AS employee_count,
+    AVG(e.vacationhours) AS avg_vacation_hours,
+    AVG(e.sickleavehours) AS avg_sick_leave_hours
+FROM analytics_public.fact_employee e
+GROUP BY e.departmentid, e.departmentname, e.groupname;

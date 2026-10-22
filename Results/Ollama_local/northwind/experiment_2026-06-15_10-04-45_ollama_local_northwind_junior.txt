@@ -1,0 +1,229 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-15_10-04-45
+Model: ollama_local
+Prompt: junior
+Schema: northwind
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on the 'Northwind' dataset, a classic benchmark. The primary goal is to eliminate joins between frequently accessed related entities (Customer/Address, Employee/Location, Order/Shipper/Address, Product/Category/Supplier) to enable high-performance analytical scanning. The approach involves merging address-related tables with their parent entities, flattening hierarchy structures (like regions and territories) into single tables, and creating a unified 'Orders' fact table that includes all necessary dimension attributes to avoid joining multiple dimension tables during a single query.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge `customers` and `customer_demographics` into a single `customers` table. This eliminates the need to join on `customer_id` and `customer_type_id` to get customer descriptions.",
+        "source_tables": ["customers", "customer_demographics"],
+        "target_tables": ["customers"]
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge `employees` and `employee_territories` into a single `employees` table. This allows direct retrieval of territory assignments without joining.",
+        "source_tables": ["employees", "employee_territories"],
+        "target_tables": ["employees"]
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge `orders`, `shippers`, and `ship_address` details into a single `orders` table. This is critical for reporting order shipping details without joining three tables.",
+        "source_tables": ["orders", "shippers", "region"],
+        "target_tables": ["orders"]
+      },
+      {
+        "decision_id": "D4",
+        "description": "Merge `products`, `categories`, and `suppliers` into a single `products` table. This flattens the product hierarchy and removes the need to join category or supplier info.",
+        "source_tables": ["products", "categories", "suppliers"],
+        "target_tables": ["products"]
+      },
+      {
+        "decision_id": "D5",
+        "description": "Merge `territories` and `region` into a single `territories` table. This simplifies geographical lookups.",
+        "source_tables": ["territories", "region"],
+        "target_tables": ["territories"]
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added `customer_desc`, `customer_type_id`, and `picture` to the `customers` table.",
+        "action": "Added Attributes"
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added `territory_id`, `territory_description`, and `region_id` to the `employees` table.",
+        "action": "Added Attributes"
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added `shipper_id`, `shipper_company_name`, `shipper_phone`, `ship_address`, `ship_city`, `ship_region`, `ship_postal_code`, and `ship_country` to the `orders` table.",
+        "action": "Added Attributes"
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added `category_id`, `category_name`, `category_description`, `category_picture`, `supplier_id`, `supplier_company_name`, `supplier_contact_name`, `supplier_contact_title`, `supplier_address`, `supplier_city`, `supplier_region`, `supplier_postal_code`, `supplier_country`, `supplier_phone`, `supplier_fax`, and `supplier_homepage` to the `products` table.",
+        "action": "Added Attributes"
+      },
+      {
+        "decision_id": "A5",
+        "description": "Added `region_id` and `region_description` to the `territories` table.",
+        "action": "Added Attributes"
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Write Amplification: The denormalized tables will contain duplicate data (e.g., every product row will store category info). This increases storage requirements and potential synchronization complexity if the source data changes frequently."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Complexity: Updating a specific attribute in a denormalized table requires updating the row directly. If the same attribute exists in multiple tables (due to different joins), consistency must be manually managed or enforced via application logic, whereas the original schema handled this via database foreign key constraints."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Query Complexity: While read performance improves due to fewer joins, the resulting tables are wider. Indexing strategies must be adjusted to cover the larger column sets, and queries may become more complex to filter on the expanded attribute sets."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Customer Reporting: 'List all customers with their company details, demographic descriptions, and location.' (Originally required JOIN customers, customer_demographics)"
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Salesforce Performance: 'Find the salesperson assigned to a specific territory with their details.' (Originally required JOIN employees, employee_territories)"
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Order Fulfillment: 'Get a list of orders with full shipping details including shipper name and address.' (Originally required JOIN orders, shippers, and potentially region)"
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Product Analysis: 'Analyze sales by product, including category name, supplier name, and stock levels.' (Originally required JOIN products, categories, suppliers)"
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Regional Sales: 'Calculate total sales per region by summing order values for employees in that region.' (Originally required JOIN territories, regions, employees)"
+      }
+    ]
+  }
+}
+
+```sql
+-- ==========================================
+-- Denormalized Schema for Analytics (Northwind)
+-- ==========================================
+
+-- 1. Customers Table (Merged with customer_demographics)
+CREATE TABLE IF NOT EXISTS public.customers (
+    customer_id character varying(5) COLLATE pg_catalog."default" NOT NULL,
+    customer_type_id character varying(5) COLLATE pg_catalog."default",
+    customer_desc text COLLATE pg_catalog."default",
+    company_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    contact_name character varying(30) COLLATE pg_catalog."default",
+    contact_title character varying(30) COLLATE pg_catalog."default",
+    address character varying(60) COLLATE pg_catalog."default",
+    city character varying(15) COLLATE pg_catalog."default",
+    region character varying(15) COLLATE pg_catalog."default",
+    postal_code character varying(10) COLLATE pg_catalog."default",
+    country character varying(15) COLLATE pg_catalog."default",
+    phone character varying(24) COLLATE pg_catalog."default",
+    fax character varying(24) COLLATE pg_catalog."default",
+    picture bytea,
+    CONSTRAINT pk_customers PRIMARY KEY (customer_id)
+);
+
+-- 2. Employees Table (Merged with employee_territories)
+CREATE TABLE IF NOT EXISTS public.employees (
+    employee_id smallint NOT NULL,
+    last_name character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    first_name character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    title character varying(30) COLLATE pg_catalog."default",
+    title_of_courtesy character varying(25) COLLATE pg_catalog."default",
+    birth_date date,
+    hire_date date,
+    address character varying(60) COLLATE pg_catalog."default",
+    city character varying(15) COLLATE pg_catalog."default",
+    region character varying(15) COLLATE pg_catalog."default",
+    postal_code character varying(10) COLLATE pg_catalog."default",
+    country character varying(15) COLLATE pg_catalog."default",
+    home_phone character varying(24) COLLATE pg_catalog."default",
+    extension character varying(4) COLLATE pg_catalog."default",
+    photo bytea,
+    notes text COLLATE pg_catalog."default",
+    reports_to smallint,
+    photo_path character varying(255) COLLATE pg_catalog."default",
+    territory_id character varying(20) COLLATE pg_catalog."default",
+    territory_description character varying(60) COLLATE pg_catalog."default",
+    region_id smallint NOT NULL,
+    CONSTRAINT pk_employees PRIMARY KEY (employee_id)
+);
+
+-- 3. Orders Table (Merged with shippers and address details)
+CREATE TABLE IF NOT EXISTS public.orders (
+    order_id smallint NOT NULL,
+    customer_id character varying(5) COLLATE pg_catalog."default",
+    employee_id smallint,
+    order_date date,
+    required_date date,
+    shipped_date date,
+    ship_via smallint,
+    freight real,
+    ship_name character varying(40) COLLATE pg_catalog."default",
+    ship_address character varying(60) COLLATE pg_catalog."default",
+    ship_city character varying(15) COLLATE pg_catalog."default",
+    ship_region character varying(15) COLLATE pg_catalog."default",
+    ship_postal_code character varying(10) COLLATE pg_catalog."default",
+    ship_country character varying(15) COLLATE pg_catalog."default",
+    shipper_id smallint,
+    shipper_company_name character varying(40) COLLATE pg_catalog."default",
+    shipper_phone character varying(24) COLLATE pg_catalog."default",
+    CONSTRAINT pk_orders PRIMARY KEY (order_id)
+);
+
+-- 4. Products Table (Merged with categories and suppliers)
+CREATE TABLE IF NOT EXISTS public.products (
+    product_id smallint NOT NULL,
+    product_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    supplier_id smallint,
+    category_id smallint,
+    quantity_per_unit character varying(20) COLLATE pg_catalog."default",
+    unit_price real,
+    units_in_stock smallint,
+    units_on_order smallint,
+    reorder_level smallint,
+    discontinued integer NOT NULL,
+    category_name character varying(15) COLLATE pg_catalog."default",
+    category_description text COLLATE pg_catalog."default",
+    category_picture bytea,
+    supplier_company_name character varying(40) COLLATE pg_catalog."default",
+    supplier_contact_name character varying(30) COLLATE pg_catalog."default",
+    supplier_contact_title character varying(30) COLLATE pg_catalog."default",
+    supplier_address character varying(60) COLLATE pg_catalog."default",
+    supplier_city character varying(15) COLLATE pg_catalog."default",
+    supplier_region character varying(15) COLLATE pg_catalog."default",
+    supplier_postal_code character varying(10) COLLATE pg_catalog."default",
+    supplier_country character varying(15) COLLATE pg_catalog."default",
+    supplier_phone character varying(24) COLLATE pg_catalog."default",
+    supplier_fax character varying(24) COLLATE pg_catalog."default",
+    supplier_homepage text COLLATE pg_catalog."default",
+    CONSTRAINT pk_products PRIMARY KEY (product_id)
+);
+
+-- 5. Territories Table (Merged with region)
+CREATE TABLE IF NOT EXISTS public.territories (
+    territory_id character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    territory_description character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    region_id smallint NOT NULL,
+    region_description character varying(60) COLLATE pg_catalog."default",
+    CONSTRAINT pk_territories PRIMARY KEY (territory_id)
+);
+
+-- Note: 
+-- - 'categories' and 'region' tables are removed as their data is now embedded in 'products' and 'territories' respectively.
+-- - 'us_states' is kept separate as it is not directly denormalized into the core transactional tables above without significant duplication logic, but typically in a full denormalized view, it might be merged if queried frequently against orders. For this specific schema reduction, we focus on the core Northwind entities.
+```

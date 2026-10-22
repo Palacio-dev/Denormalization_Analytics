@@ -1,0 +1,198 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_10-40-49
+Model: gemini
+Prompt: junior
+Schema: TPC_H
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions the highly normalized 3NF TPC-H schema into a Star Schema optimized for OLAP (Online Analytical Processing). By pre-joining hierarchical lookup tables (Nation, Region) into their respective dimension tables (Customer, Supplier) and flattening the parent-child transaction tables (Orders, Lineitem) into a single fact table, we drastically reduce the number of expensive joins required at query time. This allows analytical queries to aggregate large volumes of data efficiently.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge ORDERS and LINEITEM tables into a single FACT_SALES table. LINEITEM is the lowest grain of a transaction, and every line item belongs to exactly one order."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge CUSTOMER, NATION, and REGION into a single DIM_CUSTOMER table. This flattens the geographical hierarchy for customers."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge SUPPLIER, NATION, and REGION into a single DIM_SUPPLIER table. This flattens the geographical hierarchy for suppliers."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Retain PART as DIM_PART and PARTSUPP as FACT_INVENTORY. PARTSUPP acts as a secondary fact table (snapshot/bridge) for inventory and supply costs."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added N_NAME (as C_NATION_NAME) and R_NAME (as C_REGION_NAME) to DIM_CUSTOMER. Removed N_COMMENT and R_COMMENT to save space as they hold little analytical value."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added N_NAME (as S_NATION_NAME) and R_NAME (as S_REGION_NAME) to DIM_SUPPLIER. Removed N_COMMENT and R_COMMENT."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added O_CUSTKEY, O_ORDERDATE, O_ORDERSTATUS, O_ORDERPRIORITY, O_SHIPPRIORITY, and O_CLERK to FACT_SALES. Dropped O_TOTALPRICE as it can be dynamically aggregated from line items."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Derived a new attribute NET_REVENUE in FACT_SALES calculated as L_EXTENDEDPRICE * (1 - L_DISCOUNT) to prevent redundant calculations during analytical queries."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage Space: Flattening ORDERS into LINEITEM means order-level attributes (like order date and customer key) are repeated for every line item."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If a region or nation name changes, it must be updated in millions of customer and supplier records instead of a single row in the REGION table. (Acceptable in OLAP where data is mostly append-only)."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "ETL Complexity: The data loading process becomes more complex as the ETL pipeline must perform the joins to populate the denormalized tables."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Time-series revenue analysis: 'Show total revenue by order date and ship date'. Flattening Orders and Lineitem avoids a massive join between the two largest tables in the database."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Geographical sales rollups: 'Show total sales by Customer Region and Nation'. Pre-joining Region and Nation into Customer eliminates two joins per query."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Supply chain analysis: 'Find the top suppliers in a specific region'. Pre-joining Region and Nation into Supplier allows direct filtering on the Supplier dimension."
+      },
+      {
+        "decision_id": "A4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Financial reporting: 'Calculate net revenue and margins'. Pre-calculating NET_REVENUE saves CPU cycles on aggregations over billions of rows."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Creation Script for Denormalized Schema
+
+```sql
+-- ============================================================
+-- DIMENSION TABLES
+-- ============================================================
+
+-- Denormalized Customer Dimension (Includes Nation and Region)
+CREATE TABLE DIM_CUSTOMER ( 
+    C_CUSTKEY       INTEGER NOT NULL PRIMARY KEY,
+    C_NAME          VARCHAR(25) NOT NULL,
+    C_ADDRESS       VARCHAR(40) NOT NULL,
+    C_PHONE         CHAR(15) NOT NULL,
+    C_ACCTBAL       DECIMAL(15,2) NOT NULL,
+    C_MKTSEGMENT    CHAR(10) NOT NULL,
+    C_COMMENT       VARCHAR(117) NOT NULL,
+    -- Denormalized Geography Attributes
+    C_NATIONKEY     INTEGER NOT NULL,
+    C_NATION_NAME   CHAR(25) NOT NULL,
+    C_REGIONKEY     INTEGER NOT NULL,
+    C_REGION_NAME   CHAR(25) NOT NULL
+);
+
+-- Denormalized Supplier Dimension (Includes Nation and Region)
+CREATE TABLE DIM_SUPPLIER ( 
+    S_SUPPKEY       INTEGER NOT NULL PRIMARY KEY,
+    S_NAME          CHAR(25) NOT NULL,
+    S_ADDRESS       VARCHAR(40) NOT NULL,
+    S_PHONE         CHAR(15) NOT NULL,
+    S_ACCTBAL       DECIMAL(15,2) NOT NULL,
+    S_COMMENT       VARCHAR(101) NOT NULL,
+    -- Denormalized Geography Attributes
+    S_NATIONKEY     INTEGER NOT NULL,
+    S_NATION_NAME   CHAR(25) NOT NULL,
+    S_REGIONKEY     INTEGER NOT NULL,
+    S_REGION_NAME   CHAR(25) NOT NULL
+);
+
+-- Part Dimension (Remains mostly unchanged as it is already flat)
+CREATE TABLE DIM_PART ( 
+    P_PARTKEY       INTEGER NOT NULL PRIMARY KEY,
+    P_NAME          VARCHAR(55) NOT NULL,
+    P_MFGR          CHAR(25) NOT NULL,
+    P_BRAND         CHAR(10) NOT NULL,
+    P_TYPE          VARCHAR(25) NOT NULL,
+    P_SIZE          INTEGER NOT NULL,
+    P_CONTAINER     CHAR(10) NOT NULL,
+    P_RETAILPRICE   DECIMAL(15,2) NOT NULL,
+    P_COMMENT       VARCHAR(23) NOT NULL 
+);
+
+
+-- ============================================================
+-- FACT TABLES
+-- ============================================================
+
+-- Inventory/Supply Fact Table
+CREATE TABLE FACT_INVENTORY ( 
+    PS_PARTKEY      INTEGER NOT NULL,
+    PS_SUPPKEY      INTEGER NOT NULL,
+    PS_AVAILQTY     INTEGER NOT NULL,
+    PS_SUPPLYCOST   DECIMAL(15,2) NOT NULL,
+    PS_COMMENT      VARCHAR(199) NOT NULL,
+    PRIMARY KEY (PS_PARTKEY, PS_SUPPKEY)
+);
+
+-- Denormalized Sales Fact Table (Combines ORDERS and LINEITEM)
+CREATE TABLE FACT_SALES ( 
+    -- Primary Keys from Lineitem
+    L_ORDERKEY      INTEGER NOT NULL,
+    L_LINENUMBER    INTEGER NOT NULL,
+    
+    -- Foreign Keys to Dimensions
+    O_CUSTKEY       INTEGER NOT NULL,
+    L_PARTKEY       INTEGER NOT NULL,
+    L_SUPPKEY       INTEGER NOT NULL,
+    
+    -- Degenerate Dimensions / Attributes from ORDERS
+    O_ORDERDATE     DATE NOT NULL,
+    O_ORDERSTATUS   CHAR(1) NOT NULL,
+    O_ORDERPRIORITY CHAR(15) NOT NULL,  
+    O_CLERK         CHAR(15) NOT NULL, 
+    O_SHIPPRIORITY  INTEGER NOT NULL,
+    
+    -- Metrics and Attributes from LINEITEM
+    L_QUANTITY      DECIMAL(15,2) NOT NULL,
+    L_EXTENDEDPRICE DECIMAL(15,2) NOT NULL,
+    L_DISCOUNT      DECIMAL(15,2) NOT NULL,
+    L_TAX           DECIMAL(15,2) NOT NULL,
+    
+    -- Derived Analytical Metric
+    NET_REVENUE     DECIMAL(15,2) NOT NULL, -- Calculated as: L_EXTENDEDPRICE * (1 - L_DISCOUNT)
+    
+    -- Status and Dates from LINEITEM
+    L_RETURNFLAG    CHAR(1) NOT NULL,
+    L_LINESTATUS    CHAR(1) NOT NULL,
+    L_SHIPDATE      DATE NOT NULL,
+    L_COMMITDATE    DATE NOT NULL,
+    L_RECEIPTDATE   DATE NOT NULL,
+    L_SHIPINSTRUCT  CHAR(25) NOT NULL,
+    L_SHIPMODE      CHAR(10) NOT NULL,
+    
+    -- Comments
+    O_COMMENT       VARCHAR(79) NOT NULL,
+    L_COMMENT       VARCHAR(44) NOT NULL,
+    
+    PRIMARY KEY (L_ORDERKEY, L_LINENUMBER)
+);
+```

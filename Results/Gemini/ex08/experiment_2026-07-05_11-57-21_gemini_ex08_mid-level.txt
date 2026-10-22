@@ -1,0 +1,247 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-57-21
+Model: gemini
+Prompt: mid-level
+Schema: ex08
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions the highly normalized 3NF transactional schema into a Star Schema optimized for OLAP/BI workloads. The primary focus is reducing join complexity by consolidating 1:1 relationships and identically-grained tables, categorizing entities into Dimensions (descriptive attributes) and Facts (measurable events).",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidate 'escola' and 'localizacao' into a single 'dim_escola' dimension table. This removes the snowflake design and allows filtering schools by state/city without a join."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge 'remuneracao' directly into 'fact_vinculo_empregaticio'. Remuneration attributes are numeric measures that naturally belong to the employment fact grain, eliminating a 1:1 join."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Consolidate 'desempenho_enem', 'participacao_enem', and 'indicadores_escolares' into a single 'fact_escola_desempenho_anual' fact table. All three tables share the exact same grain (co_escola_educacenso + nu_ano), so combining them creates a comprehensive annual school performance fact."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Transform 'aluno_ifb' and 'curso_ifb' into standard dimensions ('dim_aluno' and 'dim_curso') and 'matricula_ifb' into 'fact_matricula', establishing a clear star schema for student enrollments."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added 'uf' and 'municipio' directly to 'dim_escola', removing the 'id_loc' foreign key from the school entity."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Moved all salary and hours measures (vl_remun_*, qtd_hora_contr) from 'remuneracao' to 'fact_vinculo_empregaticio'."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Standardized the representation of 'ano' (year) across fact tables to facilitate easy cross-fact filtering in BI tools."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy: Storing 'uf' and 'municipio' in both 'dim_escola' and 'dim_localizacao' increases storage space and violates 3NF."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If a municipality changes its name, it must be updated in multiple places (dim_escola and dim_localizacao) instead of a single location table."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Wide Fact Tables: 'fact_escola_desempenho_anual' contains many columns (grades, rates, participation metrics). While optimal for columnar analytical databases, it may consume more memory for 'SELECT *' queries."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze the correlation between a school's ENEM performance (grades) and its dropout/approval rates over the years. Consolidating the school metrics fact table prevents complex full outer joins between three separate metric tables."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Calculate the average contractual salary and employment duration of students by course and year. Merging remuneration into the employment fact avoids an extra join per employment record."
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Count total enrollments and average school performance grouped by State (UF) and Municipality. Denormalizing location into the school dimension allows direct aggregation without traversing a snowflake schema."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Script
+
+```sql
+-- ==============================================================================
+-- ANALYTICAL SCHEMA (STAR SCHEMA)
+-- Optimized for read-heavy BI workloads
+-- ==============================================================================
+
+-- ------------------------------------------------------------------------------
+-- 1. DIMENSIONS
+-- ------------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.dim_aluno
+(
+    id_aluno serial NOT NULL,
+    data_nascimento date,
+    idade integer,
+    sexo character(1) COLLATE pg_catalog."default",
+    nacionalidade character varying(50) COLLATE pg_catalog."default",
+    raca character varying(50) COLLATE pg_catalog."default",
+    portador_deficiencia boolean,
+    CONSTRAINT dim_aluno_pkey PRIMARY KEY (id_aluno)
+);
+
+CREATE TABLE IF NOT EXISTS public.dim_curso
+(
+    co_curso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    no_curso character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    co_tipo_curso character varying(10) COLLATE pg_catalog."default",
+    tipo_curso character varying(100) COLLATE pg_catalog."default",
+    co_tipo_nivel character varying(10) COLLATE pg_catalog."default",
+    ds_tipo_nivel character varying(100) COLLATE pg_catalog."default",
+    ds_eixo_tecnologico character varying(200) COLLATE pg_catalog."default",
+    modalidade_ensino character varying(100) COLLATE pg_catalog."default",
+    carga_horaria integer,
+    CONSTRAINT dim_curso_pkey PRIMARY KEY (co_curso)
+);
+
+-- Denormalized School Dimension (Includes Location Data)
+CREATE TABLE IF NOT EXISTS public.dim_escola
+(
+    co_escola_educacenso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    no_escola_educacenso character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    tp_dependencia_adm_escola smallint,
+    tp_localizacao_escola smallint,
+    inse character varying(10) COLLATE pg_catalog."default",
+    uf character varying(2) COLLATE pg_catalog."default",
+    municipio character varying(100) COLLATE pg_catalog."default",
+    CONSTRAINT dim_escola_pkey PRIMARY KEY (co_escola_educacenso)
+);
+
+-- Kept for Employment Location Analysis (since employments can be outside school cities)
+CREATE TABLE IF NOT EXISTS public.dim_localizacao
+(
+    id_loc serial NOT NULL,
+    uf character varying(2) COLLATE pg_catalog."default" NOT NULL,
+    municipio character varying(100) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT dim_localizacao_pkey PRIMARY KEY (id_loc)
+);
+
+-- ------------------------------------------------------------------------------
+-- 2. FACT TABLES
+-- ------------------------------------------------------------------------------
+
+-- Fact: Student Enrollments
+CREATE TABLE IF NOT EXISTS public.fact_matricula
+(
+    id_matricula serial NOT NULL,
+    id_aluno integer NOT NULL,
+    co_curso character varying(50) COLLATE pg_catalog."default",
+    co_escola_educacenso character varying(50) COLLATE pg_catalog."default",
+    ano character varying(20) COLLATE pg_catalog."default",
+    periodo character varying(30) COLLATE pg_catalog."default",
+    co_ciclo_matricula character varying(50) COLLATE pg_catalog."default",
+    situacao_matricula character varying(50) COLLATE pg_catalog."default",
+    tipo_cota character varying(50) COLLATE pg_catalog."default",
+    atestado_baixarenda character varying(20) COLLATE pg_catalog."default",
+    unidade_ensino character varying(100) COLLATE pg_catalog."default",
+    CONSTRAINT fact_matricula_pkey PRIMARY KEY (id_matricula),
+    CONSTRAINT fk_fact_mat_aluno FOREIGN KEY (id_aluno) REFERENCES public.dim_aluno (id_aluno),
+    CONSTRAINT fk_fact_mat_curso FOREIGN KEY (co_curso) REFERENCES public.dim_curso (co_curso),
+    CONSTRAINT fk_fact_mat_escola FOREIGN KEY (co_escola_educacenso) REFERENCES public.dim_escola (co_escola_educacenso)
+);
+
+-- Fact: Student Employment (Consolidated with Remuneration)
+CREATE TABLE IF NOT EXISTS public.fact_vinculo_empregaticio
+(
+    id_vinculo serial NOT NULL,
+    id_aluno integer NOT NULL,
+    id_loc integer,
+    ano_rais integer,
+    razao_social character varying(200) COLLATE pg_catalog."default",
+    tipo_vinculo_empregaticio character varying(200) COLLATE pg_catalog."default",
+    data_admissao_declarada date,
+    tempo_emprego integer,
+    motivo_desligamento character varying(200) COLLATE pg_catalog."default",
+    mes_desligamento character varying(20) COLLATE pg_catalog."default",
+    indicador_vinculo_ativo boolean,
+    -- Denormalized Measures from Remuneracao
+    vl_remun_media_nom numeric(10, 2),
+    vl_remun_media_sm numeric(10, 2),
+    vl_remun_dezembro_nom numeric(10, 2),
+    vl_remun_dezembro_sm numeric(10, 2),
+    qtd_hora_contr integer,
+    vl_ultima_remuneracao_ano numeric(10, 2),
+    vl_salario_contratual numeric(10, 2),
+    CONSTRAINT fact_vinculo_empregaticio_pkey PRIMARY KEY (id_vinculo),
+    CONSTRAINT fk_fact_vinc_aluno FOREIGN KEY (id_aluno) REFERENCES public.dim_aluno (id_aluno),
+    CONSTRAINT fk_fact_vinc_loc FOREIGN KEY (id_loc) REFERENCES public.dim_localizacao (id_loc)
+);
+
+-- Fact: Annual School Performance (Consolidates ENEM Performance, Participation, and Indicators)
+CREATE TABLE IF NOT EXISTS public.fact_escola_desempenho_anual
+(
+    id_desempenho_anual serial NOT NULL,
+    co_escola_educacenso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    nu_ano integer NOT NULL,
+    
+    -- Measures from desempenho_enem
+    nu_media_cn numeric(6, 2),
+    nu_media_ch numeric(6, 2),
+    nu_media_lp numeric(6, 2),
+    nu_media_mt numeric(6, 2),
+    nu_media_red numeric(6, 2),
+    
+    -- Measures from participacao_enem
+    nu_matriculas integer,
+    nu_participantes_nec_esp integer,
+    nu_participantes integer,
+    nu_taxa_participacao numeric(5, 2),
+    
+    -- Measures from indicadores_escolares
+    nu_taxa_permanencia numeric(6, 2),
+    nu_taxa_aprovacao numeric(5, 2),
+    nu_taxa_reprovacao numeric(5, 2),
+    nu_taxa_abandono numeric(5, 2),
+    porte_escola character varying(50) COLLATE pg_catalog."default",
+    pc_formacao_docente numeric(5, 2),
+    
+    CONSTRAINT fact_escola_desempenho_anual_pkey PRIMARY KEY (id_desempenho_anual),
+    CONSTRAINT uk_escola_ano UNIQUE (co_escola_educacenso, nu_ano),
+    CONSTRAINT fk_fact_esc_desemp_escola FOREIGN KEY (co_escola_educacenso) REFERENCES public.dim_escola (co_escola_educacenso)
+);
+
+-- ------------------------------------------------------------------------------
+-- 3. INDEXES FOR ANALYTICAL PERFORMANCE
+-- ------------------------------------------------------------------------------
+
+-- Indexes for fact_matricula
+CREATE INDEX idx_fact_mat_aluno ON public.fact_matricula(id_aluno);
+CREATE INDEX idx_fact_mat_curso ON public.fact_matricula(co_curso);
+CREATE INDEX idx_fact_mat_escola ON public.fact_matricula(co_escola_educacenso);
+CREATE INDEX idx_fact_mat_ano ON public.fact_matricula(ano);
+
+-- Indexes for fact_vinculo_empregaticio
+CREATE INDEX idx_fact_vinc_aluno ON public.fact_vinculo_empregaticio(id_aluno);
+CREATE INDEX idx_fact_vinc_loc ON public.fact_vinculo_empregaticio(id_loc);
+CREATE INDEX idx_fact_vinc_ano ON public.fact_vinculo_empregaticio(ano_rais);
+
+-- Indexes for fact_escola_desempenho_anual
+CREATE INDEX idx_fact_esc_desemp_escola ON public.fact_escola_desempenho_anual(co_escola_educacenso);
+CREATE INDEX idx_fact_esc_desemp_ano ON public.fact_escola_desempenho_anual(nu_ano);
+
+-- Indexes for common dimension filtering
+CREATE INDEX idx_dim_escola_uf ON public.dim_escola(uf);
+CREATE INDEX idx_dim_curso_modalidade ON public.dim_curso(modalidade_ensino);
+```

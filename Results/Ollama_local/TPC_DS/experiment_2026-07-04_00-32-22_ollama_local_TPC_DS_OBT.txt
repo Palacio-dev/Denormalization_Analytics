@@ -1,0 +1,194 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-04_00-32-22
+Model: ollama_local
+Prompt: OBT
+Schema: TPC_DS
+==================================================
+
+Based on the **RISEN FRAMEWORK** and the provided input, here is the analysis and design for the denormalized schema.
+
+### Section 1: Analysis and Strategy
+
+**Summary:**
+The denormalization strategy adopts the **One-Big-Table Model** to optimize read performance for complex analytical queries involving orders, line items, inventory, and returns. By eliminating foreign keys and joining relationships, the schema reduces I/O overhead during query execution, as the database engine no longer needs to resolve relationships across multiple tables. Instead, the single table acts as a wide dataset where related entities (Purchase, Catalog Order, Web Order, Line Items, Returns, Inventory) are stored as distinct rows sharing a common composite or hierarchical key structure.
+
+**Structural Decisions:**
+*   **D1 - Single Entity Table Creation:** All original tables (`s_purchase_lineitem`, `s_purchase`, `s_catalog_order`, `s_web_order`, `s_catalog_order_lineitem`, `s_web_order_lineitem`, `s_store_returns`, `s_catalog_returns`, `s_inventory`) are merged into a single table named `s_data_master`.
+*   **D2 - Composite Primary Keys:** Since the original schema relies on specific business keys (e.g., `purc_purchase_id` for purchases, `cord_order_id` for catalog orders), the new table uses a `row_id` (integer) as the single global primary key. To ensure unique identification of each row's context, a `source_type` (varchar) is added to categorize the record (e.g., 'PURCHASE', 'CATALOG_ORDER', 'INVENTORY'), and the specific business key is stored as a separate column (e.g., `purc_purchase_id`, `cord_order_id`).
+*   **D3 - Attribute Flattening:** All columns from the 9 source tables are moved to the new table. Columns that were foreign keys in the original schema (like `cord_bill_customer_id` or `sret_purchase_id`) are now treated as regular attributes.
+
+**Attribute-Level Changes:**
+*   **A1 - Prefixing for Ambiguity:** In the original schema, `item_id` and `quantity` exist in multiple tables (Purchase Line, Catalog Order Line, Web Order Line, Returns). While the original schema distinguished them by table context, the denormalized model flattens this. To maintain semantic clarity within the single table, columns are prefixed with their original table entity name (e.g., `purc_item_id`, `cord_item_id`, `inv_item_id`).
+*   **A2 - Data Type Preservation:** All original data types (`integer`, `numeric(7,2)`, `char(16)`, `varchar(100)`) are strictly preserved to ensure data integrity and compatibility with existing applications that expect these specific formats.
+
+**Tradeoffs:**
+*   **T1 - Write Performance vs. Read Performance:** This approach significantly improves **Read Performance** (fewer joins) but may degrade **Write Performance** slightly due to the larger row size and the lack of indexed foreign key relationships for referential integrity enforcement. Data integrity must be managed via application logic or triggers rather than database constraints.
+*   **T2 - Storage Overhead:** The single table approach increases storage overhead due to repeated storage of common attributes (like `item_id` or `date`) across different record types, which is a necessary trade-off for the "One-Big-Table" analytical model.
+
+---
+
+### Section 2: Query Patterns
+
+**Query Patterns:**
+*   **D1 - Omnichannel Order Analysis:** The primary workload involves joining Purchase, Catalog Order, and Web Order data to analyze customer behavior across channels. The denormalized schema allows a single `SELECT` statement to retrieve all order types without `JOIN` clauses.
+    *   *Pattern:* `SELECT * FROM s_data_master WHERE source_type IN ('PURCHASE', 'CATALOG_ORDER', 'WEB_ORDER') AND customer_id = '...'`
+*   **D2 - Inventory vs. Sales Correlation:** Queries often need to correlate sales volume with inventory levels over time. The schema allows direct comparison of `purc_quantity` (from purchase lines) with `invn_qty_on_hand` without joining the `s_inventory` table.
+    *   *Pattern:* `SELECT SUM(purc_plin_quantity) as total_sold, invn_invn_qty_on_hand FROM s_data_master WHERE purc_plin_quantity IS NOT NULL AND invn_invn_qty_on_hand IS NOT NULL ...`
+*   **D3 - Return Reason Analysis:** Analyzing return reasons across Store and Catalog channels.
+    *   *Pattern:* `SELECT source_type, reason_id, COUNT(*) FROM s_data_master WHERE source_type IN ('STORE_RETURN', 'CATALOG_RETURN') GROUP BY reason_id`
+
+---
+
+### SQL DDL Creation Script
+
+```sql
+-- ================================================================
+-- DENORMALIZED SCHEMA: s_data_master
+-- Strategy: One-Big-Table Model
+-- Purpose: Optimize read performance for analytical queries
+-- ================================================================
+
+CREATE TABLE s_data_master (
+    -- Global Primary Key
+    row_id integer NOT NULL,
+    
+    -- Source Type Identifier (Replaces Foreign Keys)
+    source_type varchar(50) NOT NULL,
+    
+    -- === PURCHASE DATA ===
+    -- Source Table: s_purchase
+    purc_purchase_id integer,
+    purc_store_id char(16),
+    purc_customer_id char(16),
+    purc_purchase_date char(10),
+    purc_purchase_time integer,
+    purc_register_id integer,
+    purc_clerk_id integer,
+    purc_comment char(100),
+    
+    -- Source Table: s_purchase_lineitem
+    purc_plin_purchase_id integer,
+    purc_plin_line_number integer,
+    purc_plin_item_id char(16),
+    purc_plin_promotion_id char(16),
+    purc_plin_quantity integer,
+    purc_plin_sale_price numeric(7,2),
+    purc_plin_coupon_amt numeric(7,2),
+    purc_plin_comment varchar(100),
+    
+    -- === CATALOG ORDER DATA ===
+    -- Source Table: s_catalog_order
+    cord_order_id integer,
+    cord_bill_customer_id char(16),
+    cord_ship_customer_id char(16),
+    cord_order_date char(10),
+    cord_order_time integer,
+    cord_ship_mode_id char(16),
+    cord_call_center_id char(16),
+    cord_order_comments varchar(100),
+    
+    -- Source Table: s_catalog_order_lineitem
+    cord_clin_order_id integer,
+    cord_clin_line_number integer,
+    cord_clin_item_id char(16),
+    cord_clin_promotion_id char(16),
+    cord_clin_quantity integer,
+    cord_clin_sales_price numeric(7,2),
+    cord_clin_coupon_amt numeric(7,2),
+    cord_clin_warehouse_id char(16),
+    cord_clin_ship_date char(10),
+    cord_clin_catalog_number integer,
+    cord_clin_catalog_page_number integer,
+    cord_clin_ship_cost numeric(7,2),
+    
+    -- === WEB ORDER DATA ===
+    -- Source Table: s_web_order
+    word_order_id integer,
+    word_bill_customer_id char(16),
+    word_ship_customer_id char(16),
+    word_order_date char(10),
+    word_order_time integer,
+    word_ship_mode_id char(16),
+    word_web_site_id char(16),
+    word_order_comments char(100),
+    
+    -- Source Table: s_web_order_lineitem
+    word_wlin_order_id integer,
+    word_wlin_line_number integer,
+    word_wlin_item_id char(16),
+    word_wlin_promotion_id char(16),
+    word_wlin_quantity integer,
+    word_wlin_sales_price numeric(7,2),
+    word_wlin_coupon_amt numeric(7,2),
+    word_wlin_warehouse_id char(16),
+    word_wlin_ship_date char(10),
+    word_wlin_ship_cost numeric(7,2),
+    word_wlin_web_page_id char(16),
+    
+    -- === STORE RETURNS DATA ===
+    -- Source Table: s_store_returns
+    sret_store_id char(16),
+    sret_purchase_id char(16),
+    sret_line_number integer,
+    sret_item_id char(16),
+    sret_customer_id char(16),
+    sret_return_date char(10),
+    sret_return_time char(10),
+    sret_ticket_number char(20),
+    sret_return_qty integer,
+    sret_return_amt numeric(7,2),
+    sret_return_tax numeric(7,2),
+    sret_return_fee numeric(7,2),
+    sret_return_ship_cost numeric(7,2),
+    sret_refunded_cash numeric(7,2),
+    sret_reversed_charge numeric(7,2),
+    sret_store_credit numeric(7,2),
+    sret_reason_id char(16),
+    
+    -- === CATALOG RETURNS DATA ===
+    -- Source Table: s_catalog_returns
+    cret_call_center_id char(16),
+    cret_order_id integer,
+    cret_line_number integer,
+    cret_item_id char(16),
+    cret_return_customer_id char(16),
+    cret_refund_customer_id char(16),
+    cret_return_date char(10),
+    cret_return_time char(10),
+    cret_return_qty integer,
+    cret_return_amt numeric(7,2),
+    cret_return_tax numeric(7,2),
+    cret_return_fee numeric(7,2),
+    cret_return_ship_cost numeric(7,2),
+    cret_refunded_cash numeric(7,2),
+    cret_reversed_charge numeric(7,2),
+    cret_merchant_credit numeric(7,2),
+    cret_reason_id char(16),
+    cret_shipmode_id char(16),
+    cret_catalog_page_id char(16),
+    cret_warehouse_id char(16),
+    
+    -- === INVENTORY DATA ===
+    -- Source Table: s_inventory
+    invn_warehouse_id char(16),
+    invn_item_id char(16),
+    invn_date char(10),
+    invn_qty_on_hand integer
+);
+
+-- Create a unique index on (source_type, business_key) to simulate logical uniqueness
+-- Note: In a true One-Big-Table model without FKs, uniqueness is enforced by application logic 
+-- or by creating composite unique constraints on specific business keys per source type.
+CREATE UNIQUE INDEX idx_purch_key ON s_data_master (source_type, purc_purchase_id);
+CREATE UNIQUE INDEX idx_catalog_key ON s_data_master (source_type, cord_order_id);
+CREATE UNIQUE INDEX idx_web_key ON s_data_master (source_type, word_order_id);
+CREATE UNIQUE INDEX idx_store_return_key ON s_data_master (source_type, sret_purchase_id);
+CREATE UNIQUE INDEX idx_catalog_return_key ON s_data_master (source_type, cret_order_id);
+CREATE UNIQUE INDEX idx_inv_key ON s_data_master (source_type, invn_warehouse_id, invn_item_id, invn_date);
+
+-- Indexes for common analytical query patterns
+CREATE INDEX idx_customer_orders ON s_data_master (source_type, purc_customer_id, cord_bill_customer_id, cord_ship_customer_id, word_bill_customer_id, word_ship_customer_id);
+CREATE INDEX idx_item_sales ON s_data_master (source_type, purc_plin_item_id, cord_clin_item_id, word_wlin_item_id);
+CREATE INDEX idx_return_reasons ON s_data_master (source_type, sret_reason_id, cret_reason_id);
+CREATE INDEX idx_ship_costs ON s_data_master (source_type, purc_plin_ship_cost, cord_clin_ship_cost, word_wlin_ship_cost, sret_return_ship_cost, cret_return_ship_cost);
+```

@@ -1,0 +1,182 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-40-49
+Model: gemini
+Prompt: senior
+Schema: ex10
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions the highly normalized 3NF OLTP schema into a Star Schema optimized for OLAP workloads. The core approach involves dimension flattening (resolving snowflake structures like country-continent into a single geography dimension) and fact consolidation. Because 'populacao' and 'emissao_g_efeito_estufa' share the exact same granularity (Country + Year), they are merged into a single consolidated fact table to prevent expensive fact-to-fact joins. 'consumo_anual' remains a separate fact table due to its deeper granularity (Country + Year + Energy Source). Surrogate keys are introduced to insulate the analytical model from source system changes, and partitioning by year is recommended for large-scale query optimization.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Flatten 'paises' and 'continente' into a single denormalized dimension table named 'dim_geography'."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Consolidate 'populacao' and 'emissao_g_efeito_estufa' into a single fact table named 'fact_country_yearly_metrics' based on their shared Country-Year grain."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Transform 'consumo_anual' into 'fact_energy_consumption' and link it to 'dim_geography' and a new 'dim_energy' dimension."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added surrogate keys (geo_sk, energy_sk) to all dimensions and facts to optimize join performance and support slowly changing dimensions (SCDs)."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Derived a new metric 'emissions_per_capita' in 'fact_country_yearly_metrics' by dividing 'quantidade_emitida' by 'quantidade_hab' during ETL to pre-calculate a heavily queried BI ratio."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Converted 'fonte_energia.nome' from an array type (varchar[]) to a standard scalar VARCHAR in 'dim_energy' to enable standard GROUP BY operations in BI tools."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy vs. Read Performance: Flattening the continent name into the geography dimension introduces redundant text storage, but eliminates a join for every geographical aggregation."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "ETL Complexity vs. Query Simplicity: Consolidating population and emissions requires a FULL OUTER JOIN during ETL to handle years where a country might have one metric but not the other, increasing pipeline complexity to drastically simplify BI queries."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregate total greenhouse gas emissions by continent over time. Flattening the geography dimension avoids joining Fact -> Country -> Continent."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze the correlation between population growth and greenhouse gas emissions per capita. Consolidating the facts avoids a massive and expensive fact-to-fact join on (country, year)."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Compare the percentage of renewable vs non-renewable energy consumption across different continents. Linking fact_energy_consumption directly to the flattened dim_geography streamlines this."
+      }
+    ]
+  }
+}
+```
+
+### Analytical Physical Model Design (SQL DDL)
+
+The following PostgreSQL script creates the optimized Star Schema. It includes surrogate keys, standardizes data types for BI compatibility, and implements table partitioning for the fact tables to support large-scale analytical queries.
+
+```sql
+-- ============================================================================
+-- DIMENSIONAL MODEL: STAR SCHEMA
+-- ============================================================================
+
+-- 1. DIMENSION: Geography (Flattened from paises and continente)
+-- Includes Surrogate Key (geo_sk) and preserves Natural Keys for traceability.
+CREATE TABLE IF NOT EXISTS public.dim_geography
+(
+    geo_sk SERIAL NOT NULL,
+    country_id integer NOT NULL,         -- Source system ID (Natural Key)
+    country_name character varying(50) NOT NULL,
+    foundation_year integer,
+    continent_id integer NOT NULL,       -- Source system ID
+    continent_name character varying(50) NOT NULL,
+    CONSTRAINT dim_geography_pkey PRIMARY KEY (geo_sk)
+);
+
+-- Index for ETL lookups
+CREATE UNIQUE INDEX idx_dim_geography_nk ON public.dim_geography(country_id);
+-- Index for BI filtering
+CREATE INDEX idx_dim_geography_continent ON public.dim_geography(continent_name);
+
+
+-- 2. DIMENSION: Energy Source (Flattened from fonte_energia)
+-- Note: Array type removed in favor of standard scalar text for BI GROUP BY compatibility.
+CREATE TABLE IF NOT EXISTS public.dim_energy
+(
+    energy_sk SERIAL NOT NULL,
+    energy_source_id integer NOT NULL,   -- Source system ID (Natural Key)
+    energy_source_name character varying(100) NOT NULL,
+    CONSTRAINT dim_energy_pkey PRIMARY KEY (energy_sk)
+);
+
+-- Index for ETL lookups
+CREATE UNIQUE INDEX idx_dim_energy_nk ON public.dim_energy(energy_source_id);
+
+
+-- ============================================================================
+-- FACT TABLES
+-- ============================================================================
+
+-- 3. FACT: Country Yearly Metrics (Consolidated from populacao & emissao_g_efeito_estufa)
+-- Grain: 1 row per Country per Year
+-- Partitioned by Year to optimize historical trend analysis and data lifecycle management.
+CREATE TABLE IF NOT EXISTS public.fact_country_yearly_metrics
+(
+    metric_sk bigserial NOT NULL,
+    geo_sk integer NOT NULL,
+    year integer NOT NULL,
+    population_count bigint,             -- Upgraded to bigint for future-proofing
+    emission_amount bigint,
+    emissions_per_capita numeric(15,4),  -- Derived metric: emission_amount / population_count
+    CONSTRAINT fact_country_yearly_metrics_pkey PRIMARY KEY (metric_sk, year)
+) PARTITION BY RANGE (year);
+
+-- Foreign Key Constraints (Often disabled or managed logically in massive OLAP environments, 
+-- but included here for strict relational integrity).
+ALTER TABLE public.fact_country_yearly_metrics
+    ADD CONSTRAINT fk_fact_metrics_geo FOREIGN KEY (geo_sk)
+    REFERENCES public.dim_geography (geo_sk);
+
+-- Clustering / Indexing recommendations
+CREATE INDEX idx_fact_metrics_geo ON public.fact_country_yearly_metrics(geo_sk);
+CREATE INDEX idx_fact_metrics_year ON public.fact_country_yearly_metrics(year);
+
+-- Example Partitions for fact_country_yearly_metrics
+CREATE TABLE fact_country_yearly_metrics_pre_2000 PARTITION OF public.fact_country_yearly_metrics FOR VALUES FROM (MINVALUE) TO (2000);
+CREATE TABLE fact_country_yearly_metrics_2000_2010 PARTITION OF public.fact_country_yearly_metrics FOR VALUES FROM (2000) TO (2010);
+CREATE TABLE fact_country_yearly_metrics_2010_2020 PARTITION OF public.fact_country_yearly_metrics FOR VALUES FROM (2010) TO (2020);
+CREATE TABLE fact_country_yearly_metrics_2020_2030 PARTITION OF public.fact_country_yearly_metrics FOR VALUES FROM (2020) TO (2030);
+
+
+-- 4. FACT: Energy Consumption (Transformed from consumo_anual)
+-- Grain: 1 row per Country per Year per Energy Source
+-- Partitioned by Year.
+CREATE TABLE IF NOT EXISTS public.fact_energy_consumption
+(
+    consumption_sk bigserial NOT NULL,
+    geo_sk integer NOT NULL,
+    energy_sk integer NOT NULL,
+    year integer NOT NULL,
+    consumption_percentage numeric(5,2) NOT NULL, -- Changed from integer to numeric for precision
+    CONSTRAINT fact_energy_consumption_pkey PRIMARY KEY (consumption_sk, year)
+) PARTITION BY RANGE (year);
+
+-- Foreign Key Constraints
+ALTER TABLE public.fact_energy_consumption
+    ADD CONSTRAINT fk_fact_energy_geo FOREIGN KEY (geo_sk)
+    REFERENCES public.dim_geography (geo_sk);
+
+ALTER TABLE public.fact_energy_consumption
+    ADD CONSTRAINT fk_fact_energy_source FOREIGN KEY (energy_sk)
+    REFERENCES public.dim_energy (energy_sk);
+
+-- Clustering / Indexing recommendations
+CREATE INDEX idx_fact_energy_geo ON public.fact_energy_consumption(geo_sk);
+CREATE INDEX idx_fact_energy_energy ON public.fact_energy_consumption(energy_sk);
+CREATE INDEX idx_fact_energy_year ON public.fact_energy_consumption(year);
+
+-- Example Partitions for fact_energy_consumption
+CREATE TABLE fact_energy_consumption_pre_2000 PARTITION OF public.fact_energy_consumption FOR VALUES FROM (MINVALUE) TO (2000);
+CREATE TABLE fact_energy_consumption_2000_2010 PARTITION OF public.fact_energy_consumption FOR VALUES FROM (2000) TO (2010);
+CREATE TABLE fact_energy_consumption_2010_2020 PARTITION OF public.fact_energy_consumption FOR VALUES FROM (2010) TO (2020);
+CREATE TABLE fact_energy_consumption_2020_2030 PARTITION OF public.fact_energy_consumption FOR VALUES FROM (2020) TO (2030);
+```

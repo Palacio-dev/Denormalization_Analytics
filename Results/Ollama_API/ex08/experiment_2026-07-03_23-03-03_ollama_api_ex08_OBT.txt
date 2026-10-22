@@ -1,0 +1,171 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-03_23-03-03
+Model: ollama_api
+Prompt: OBT
+Schema: ex08
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy involves consolidating all normalized tables into a single denormalized table to optimize read performance by eliminating costly JOIN operations. This approach is particularly effective for analytical workloads where complex queries involving multiple entities are common. The resulting schema maintains full semantic equivalence with the original normalized model while significantly reducing query complexity and execution time.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged aluno_ifb, matricula_ifb, curso_ifb, escola, localizacao, desempenho_enem, indicadores_escolares, participacao_enem, vinculo_empregaticio, and remuneracao tables into one denormalized table"
+      },
+      {
+        "decision_id": "D2",
+        "description": "Removed all foreign key constraints as relationships are now represented through column inclusion rather than referential integrity"
+      },
+      {
+        "decision_id": "D3",
+        "description": "Preserved all primary keys from source tables as regular columns in the denormalized table to maintain data traceability"
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added prefix to columns with duplicate names across different tables (e.g., co_escola_educacenso from both desempenho_enem and indicadores_escolares)"
+      },
+      {
+        "decision_id": "A2",
+        "description": "Retained all non-key attributes from original tables without modification to data types or semantics"
+      },
+      {
+        "decision_id": "A3",
+        "description": "Included derived attributes like idade from data_nascimento to support analytical queries without runtime calculations"
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved read performance at the cost of increased storage space due to data duplication"
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified query execution but increased complexity in ETL processes for maintaining data consistency"
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Enhanced analytical query performance while potentially degrading write performance due to larger row sizes"
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "Q1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical queries examining student performance metrics correlated with demographic, educational, and employment data"
+      },
+      {
+        "decision_id": "Q2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting on educational institution performance combining ENEM results, student indicators, and participation statistics"
+      },
+      {
+        "decision_id": "Q3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Cross-domain analysis linking student academic records with employment outcomes and remuneration data"
+      }
+    ]
+  }
+}
+
+CREATE TABLE IF NOT EXISTS public.aluno_ifb_denormalizado
+(
+    -- aluno_ifb attributes
+    id_aluno serial NOT NULL,
+    data_nascimento date,
+    idade integer,
+    sexo character(1) COLLATE pg_catalog."default",
+    nacionalidade character varying(50) COLLATE pg_catalog."default",
+    raca character varying(50) COLLATE pg_catalog."default",
+    portador_deficiencia boolean,
+    
+    -- matricula_ifb attributes
+    id_matricula serial NOT NULL,
+    co_ciclo_matricula character varying(50) COLLATE pg_catalog."default",
+    periodo character varying(30) COLLATE pg_catalog."default",
+    situacao_matricula character varying(50) COLLATE pg_catalog."default",
+    tipo_cota character varying(50) COLLATE pg_catalog."default",
+    atestado_baixarenda character varying(20) COLLATE pg_catalog."default",
+    ano character varying(20) COLLATE pg_catalog."default",
+    unidade_ensino character varying(100) COLLATE pg_catalog."default",
+    
+    -- curso_ifb attributes
+    co_curso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    no_curso character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    co_tipo_curso character varying(10) COLLATE pg_catalog."default",
+    tipo_curso character varying(100) COLLATE pg_catalog."default",
+    co_tipo_nivel character varying(10) COLLATE pg_catalog."default",
+    ds_tipo_nivel character varying(100) COLLATE pg_catalog."default",
+    ds_eixo_tecnologico character varying(200) COLLATE pg_catalog."default",
+    modalidade_ensino character varying(100) COLLATE pg_catalog."default",
+    carga_horaria integer,
+    
+    -- escola attributes
+    co_escola_educacenso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    no_escola_educacenso character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    tp_dependencia_adm_escola smallint,
+    tp_localizacao_escola smallint,
+    inse character varying(10) COLLATE pg_catalog."default",
+    
+    -- localizacao attributes
+    id_loc serial NOT NULL,
+    uf character varying(2) COLLATE pg_catalog."default" NOT NULL,
+    municipio character varying(100) COLLATE pg_catalog."default" NOT NULL,
+    
+    -- desempenho_enem attributes
+    id_desempenho serial NOT NULL,
+    nu_ano_desempenho integer NOT NULL,
+    nu_media_cn numeric(6, 2),
+    nu_media_ch numeric(6, 2),
+    nu_media_lp numeric(6, 2),
+    nu_media_mt numeric(6, 2),
+    nu_media_red numeric(6, 2),
+    co_escola_educacenso_desempenho character varying(20) COLLATE pg_catalog."default",
+    
+    -- indicadores_escolares attributes
+    id_indicadores serial NOT NULL,
+    nu_ano_indicadores integer NOT NULL,
+    nu_taxa_permanencia numeric(6, 2),
+    nu_taxa_aprovacao numeric(5, 2),
+    nu_taxa_reprovacao numeric(5, 2),
+    nu_taxa_abandono numeric(5, 2),
+    co_escola_educacenso_indicadores character varying(20) COLLATE pg_catalog."default",
+    porte_escola character varying(50) COLLATE pg_catalog."default",
+    pc_formacao_docente numeric(5, 2),
+    
+    -- participacao_enem attributes
+    id_participacao serial NOT NULL,
+    nu_ano_participacao integer NOT NULL,
+    nu_matriculas integer,
+    nu_participantes_nec_esp integer,
+    nu_participantes integer,
+    nu_taxa_participacao numeric(5, 2),
+    co_escola_educacenso_participacao character varying(20) COLLATE pg_catalog."default",
+    
+    -- vinculo_empregaticio attributes
+    id_vinculo serial NOT NULL,
+    ano_rais integer,
+    razao_social character varying(200) COLLATE pg_catalog."default",
+    tipo_vinculo_empregaticio character varying(200) COLLATE pg_catalog."default",
+    data_admissao_declarada date,
+    tempo_emprego integer,
+    motivo_desligamento character varying(200) COLLATE pg_catalog."default",
+    mes_desligamento character varying(20) COLLATE pg_catalog."default",
+    indicador_vinculo_ativo boolean,
+    
+    -- remuneracao attributes
+    id_remuneracao serial NOT NULL,
+    vl_remun_media_nom numeric(10, 2),
+    vl_remun_media_sm numeric(10, 2),
+    vl_remun_dezembro_nom numeric(10, 2),
+    vl_remun_dezembro_sm numeric(10, 2),
+    qtd_hora_contr integer,
+    vl_ultima_remuneracao_ano numeric(10, 2),
+    vl_salario_contratual numeric(10, 2),
+    
+    CONSTRAINT aluno_ifb_denormalizado_pkey PRIMARY KEY (id_aluno, id_matricula, co_curso, co_escola_educacenso, id_loc, id_desempenho, id_indicadores, id_participacao, id_vinculo, id_remuneracao)
+);

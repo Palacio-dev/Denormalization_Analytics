@@ -1,0 +1,73 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-42-34
+Model: gemini
+Prompt: RISEN
+Schema: harperdb
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on optimizing read-heavy analytical workloads by eliminating JOIN operations. Given the many-to-many relationship between users and entitlements, and the fact that the 'users' table only contains an identifier, the entire model can be collapsed into a single fact-like table. This materializes the relationship alongside the entitlement attributes, significantly speeding up queries analyzing user feature access, package distribution, and usage limits.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapsing Relations: Merge the 'users', 'user_entitlements', and 'entitlements' tables into a single denormalized table named 'denorm_user_entitlements'."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Migrate all non-key attributes from the 'entitlements' table (activeDate, inactiveDate, useLimit, useCount, featureType, packageType, activeFlag) directly into the new 'denorm_user_entitlements' table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Adding Derived Attributes: Add a 'remaining_uses' column, representing (useLimit - useCount), to avoid repetitive runtime math operations during threshold and exhaustion analytical queries."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy and Storage Overhead: If an entitlement is shared among multiple users, its attributes (e.g., featureType, packageType, dates) will be duplicated for every user linked to it, increasing the overall storage footprint."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: Modifying a shared entitlement's state (such as updating the inactiveDate or activeFlag) now requires a bulk update of multiple rows in the denormalized table rather than a single row update in the original 'entitlements' table."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1",
+        "query": "SELECT featureType, packageType, COUNT(DISTINCT user_id) as active_users FROM denorm_user_entitlements WHERE activeFlag = 1 GROUP BY featureType, packageType;"
+      },
+      {
+        "decision_id": "A2",
+        "query": "SELECT user_id, entitlement_id, remaining_uses FROM denorm_user_entitlements WHERE remaining_uses <= 5 AND activeFlag = 1;"
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Creation Script
+
+```sql
+-- Denormalized Analytical Schema
+-- Collapses users, user_entitlements, and entitlements into a single table.
+
+CREATE TABLE denorm_user_entitlements (
+    user_id INT,
+    entitlement_id INT,
+    activeDate DATE,
+    inactiveDate DATE,
+    useLimit INT,
+    useCount INT,
+    featureType VARCHAR(4),
+    packageType VARCHAR(4),
+    activeFlag INT,
+    remaining_uses INT, -- Derived attribute: useLimit - useCount
+    PRIMARY KEY (user_id, entitlement_id)
+);
+```

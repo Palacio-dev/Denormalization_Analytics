@@ -1,0 +1,103 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-03_22-59-37
+Model: ollama_api
+Prompt: OBT
+Schema: employees
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy adopted follows the ONE-BIG-TABLE MODEL, consolidating all normalized tables into a single table containing all relevant employee data. This approach eliminates the need for JOINs during read operations, significantly improving query performance for analytical workloads. The strategy involves merging employee details with their current department, salary, title, and management information into one comprehensive table.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge employees.employee, employees.department_employee, employees.department, employees.salary, employees.title, and employees.department_manager into a single table named employees_denormalized."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Remove all foreign key constraints and references, as all data will be stored in a single table."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Use employee.id as the primary key for the new denormalized table, ensuring each row represents a unique employee with their latest relevant information."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added department_name from employees.department to avoid JOINs with department table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added salary_amount, salary_from_date, and salary_to_date from employees.salary to include salary information directly."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added title_name, title_from_date, and title_to_date from employees.title to include job title information directly."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added is_manager flag to indicate if the employee is currently a manager of any department."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Added manager_from_date and manager_to_date to indicate the period of management if the employee is or was a manager."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved read performance at the cost of increased storage space due to data duplication."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified query execution at the expense of more complex data maintenance during updates, inserts, and deletes."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of normalization benefits such as data integrity enforcement through foreign keys and reduced redundancy."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Retrieving employee details along with their current department, salary, and title information for reporting purposes."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Identifying all managers and their respective departments for organizational analysis."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyzing employee salary and title history for HR analytics and performance reviews."
+      }
+    ]
+  }
+}
+
+CREATE TABLE IF NOT EXISTS employees.employees_denormalized
+(
+    employee_id bigint NOT NULL,
+    birth_date date NOT NULL,
+    first_name character varying(14) COLLATE pg_catalog."default" NOT NULL,
+    last_name character varying(16) COLLATE pg_catalog."default" NOT NULL,
+    gender employees.employee_gender NOT NULL,
+    hire_date date NOT NULL,
+    department_id character(4) COLLATE pg_catalog."default",
+    department_name character varying(40) COLLATE pg_catalog."default",
+    salary_amount bigint,
+    salary_from_date date,
+    salary_to_date date,
+    title_name character varying(50) COLLATE pg_catalog."default",
+    title_from_date date,
+    title_to_date date,
+    is_manager boolean,
+    manager_from_date date,
+    manager_to_date date,
+    CONSTRAINT idx_employees_denormalized_primary PRIMARY KEY (employee_id)
+);

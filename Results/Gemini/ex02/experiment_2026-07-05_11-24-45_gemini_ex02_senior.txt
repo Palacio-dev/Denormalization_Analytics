@@ -1,0 +1,205 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-24-45
+Model: gemini
+Prompt: senior
+Schema: ex02
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions the highly normalized OLTP schema into a Star Schema optimized for OLAP workloads. The core approach involves collapsing 1:1 relationships into a single fact table to eliminate unnecessary joins, absorbing snowflake lookup tables into wide dimensions to improve read performance, and introducing surrogate keys and a date dimension to support robust time-series analysis and historical tracking (SCDs).",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge 'mutirao_de_limpeza', 'coleta_de_lixo', and 'local_de_coleta' into a single fact table named 'fact_mutirao_coleta'. These tables share a 1:1 relationship based on 'id_mutirao'. Combining them eliminates two joins per query and centralizes all metrics and degenerate dimensions for cleanup events."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Flatten 'unidade_de_conservacao', 'bioma', 'categoria_manejo', and 'esfera_administrativa' into a single wide dimension table named 'dim_unidade_conservacao'. This resolves the snowflake design, absorbing descriptive attributes directly into the UC dimension to optimize group-by operations."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Rename 'regiao' to 'dim_geografia' and 'instituicao_organizadora' to 'dim_instituicao', introducing surrogate keys to decouple the analytical model from source system natural keys."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Introduce a new 'dim_data' (Date Dimension) table to enable standardized time-intelligence queries (YTD, MTD, seasonality) based on the 'data_do_ocorrido' from the cleanup events."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added surrogate keys (e.g., sk_mutirao, sk_geografia) to all fact and dimension tables to support Slowly Changing Dimensions (SCD) and optimize join performance."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Derived a new metric 'total_residuos_coletados' in 'fact_mutirao_coleta' by summing all individual waste categories (plastico, borracha, etc.) at ETL time to save compute resources during query execution."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Converted 'horario_de_inicio' and 'duracao_total' into degenerate dimensions within the fact table, as they are specific to the event grain and rarely used for cross-event grouping."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Storage Redundancy vs. Read Performance: Flattening biomes, management categories, and administrative spheres into 'dim_unidade_conservacao' increases storage footprint due to repeated text values, but drastically reduces CPU overhead by eliminating three joins during analytical queries."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "ETL Complexity vs. Query Simplicity: Generating surrogate keys and calculating derived metrics ('total_residuos_coletados') shifts compute load from query time to ETL time, requiring a more robust data pipeline."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregating total waste collected (by material type) across different municipalities and states. The merged fact table allows direct summation without joining to extension tables."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyzing seasonality of cleanup events (e.g., 'Do we collect more plastic in summer months?'). The new dim_data allows slicing fact metrics by month, quarter, and year."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Comparing total marine vs. continental conservation areas grouped by Biome and Management Category. The flattened dim_unidade_conservacao allows this query to run against a single table without any joins."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Creation Script for the Denormalized Schema
+
+```sql
+-- ==============================================================================
+-- ANALYTICAL PHYSICAL MODEL (OLAP STAR SCHEMA)
+-- ==============================================================================
+
+-- 1. DIMENSION: DATE (dim_data)
+-- Supports time-series analysis, seasonality, and historical tracking.
+CREATE TABLE IF NOT EXISTS public.dim_data
+(
+    sk_data integer NOT NULL, -- Format: YYYYMMDD
+    data_completa date NOT NULL,
+    ano integer NOT NULL,
+    mes integer NOT NULL,
+    nome_mes text NOT NULL,
+    trimestre integer NOT NULL,
+    dia_da_semana integer NOT NULL,
+    nome_dia_semana text NOT NULL,
+    fim_de_semana boolean NOT NULL,
+    CONSTRAINT dim_data_pkey PRIMARY KEY (sk_data)
+);
+
+-- 2. DIMENSION: GEOGRAPHY (dim_geografia)
+-- Converted from 'regiao'.
+CREATE TABLE IF NOT EXISTS public.dim_geografia
+(
+    sk_geografia integer GENERATED ALWAYS AS IDENTITY NOT NULL,
+    id_municipio integer NOT NULL, -- Natural Key
+    nome_municipio text NOT NULL,
+    estado text NOT NULL,
+    CONSTRAINT dim_geografia_pkey PRIMARY KEY (sk_geografia)
+);
+
+-- 3. DIMENSION: INSTITUTION (dim_instituicao)
+-- Converted from 'instituicao_organizadora'.
+CREATE TABLE IF NOT EXISTS public.dim_instituicao
+(
+    sk_instituicao integer GENERATED ALWAYS AS IDENTITY NOT NULL,
+    id_instituicao_organizadora integer NOT NULL, -- Natural Key
+    nome_instituicao text NOT NULL,
+    carater_instituicao text NOT NULL,
+    CONSTRAINT dim_instituicao_pkey PRIMARY KEY (sk_instituicao)
+);
+
+-- 4. DIMENSION: CONSERVATION UNIT (dim_unidade_conservacao)
+-- Flattened dimension absorbing bioma, categoria_manejo, and esfera_administrativa.
+-- Note: Contains area metrics. In some models this could be a fact, but here it acts as a rich entity profile.
+CREATE TABLE IF NOT EXISTS public.dim_unidade_conservacao
+(
+    sk_uc integer GENERATED ALWAYS AS IDENTITY NOT NULL,
+    id_uc integer NOT NULL, -- Natural Key
+    nome_uc text NOT NULL,
+    ano_de_criacao integer,
+    area_soma_biomas double precision,
+    area_soma_biomas_continentais double precision,
+    area_marinha double precision,
+    -- Absorbed from bioma
+    nome_bioma text,
+    -- Absorbed from categoria_manejo
+    categoria_manejo text,
+    categoria_iucn text,
+    plano_manejo text,
+    -- Absorbed from esfera_administrativa
+    esfera_administrativa text,
+    -- Foreign Key to Geography
+    sk_geografia integer,
+    CONSTRAINT dim_unidade_conservacao_pkey PRIMARY KEY (sk_uc),
+    CONSTRAINT fk_dim_uc_geografia FOREIGN KEY (sk_geografia) REFERENCES public.dim_geografia (sk_geografia)
+);
+
+-- 5. FACT: CLEANUP EVENTS & WASTE COLLECTION (fact_mutirao_coleta)
+-- Merges mutirao_de_limpeza, coleta_de_lixo, and local_de_coleta.
+CREATE TABLE IF NOT EXISTS public.fact_mutirao_coleta
+(
+    sk_mutirao integer GENERATED ALWAYS AS IDENTITY NOT NULL,
+    id_mutirao integer NOT NULL, -- Natural Key / Degenerate Dimension
+    
+    -- Surrogate Foreign Keys
+    sk_data integer NOT NULL,
+    sk_geografia integer NOT NULL,
+    sk_instituicao integer NOT NULL,
+    
+    -- Degenerate Dimensions (Event specific details)
+    nome_local_coleta text,
+    horario_de_inicio time without time zone,
+    duracao_total time without time zone,
+    
+    -- Metrics (Facts)
+    numero_aproximado_de_participantes integer,
+    plastico integer DEFAULT 0,
+    borracha integer DEFAULT 0,
+    madeira integer DEFAULT 0,
+    produtos_texteis integer DEFAULT 0,
+    papel integer DEFAULT 0,
+    metal integer DEFAULT 0,
+    vidro integer DEFAULT 0,
+    materiais_de_pesca integer DEFAULT 0,
+    outros_residuos integer DEFAULT 0,
+    
+    -- Derived Metric (Calculated during ETL)
+    total_residuos_coletados integer DEFAULT 0,
+    
+    CONSTRAINT fact_mutirao_coleta_pkey PRIMARY KEY (sk_mutirao),
+    CONSTRAINT fk_fact_data FOREIGN KEY (sk_data) REFERENCES public.dim_data (sk_data),
+    CONSTRAINT fk_fact_geografia FOREIGN KEY (sk_geografia) REFERENCES public.dim_geografia (sk_geografia),
+    CONSTRAINT fk_fact_instituicao FOREIGN KEY (sk_instituicao) REFERENCES public.dim_instituicao (sk_instituicao)
+) PARTITION BY RANGE (sk_data); 
+-- Partitioning recommendation: Partitioning by date (sk_data) improves query performance 
+-- for time-based filtering and makes archiving/dropping old data easier.
+
+-- ==============================================================================
+-- ANALYTICAL INDEXING & CLUSTERING RECOMMENDATIONS
+-- ==============================================================================
+
+-- Indexes on Foreign Keys in the Fact table to speed up Star Schema joins
+CREATE INDEX IF NOT EXISTS idx_fact_sk_data ON public.fact_mutirao_coleta(sk_data);
+CREATE INDEX IF NOT EXISTS idx_fact_sk_geografia ON public.fact_mutirao_coleta(sk_geografia);
+CREATE INDEX IF NOT EXISTS idx_fact_sk_instituicao ON public.fact_mutirao_coleta(sk_instituicao);
+
+-- Indexes on frequently filtered dimension attributes
+CREATE INDEX IF NOT EXISTS idx_dim_geo_estado ON public.dim_geografia(estado);
+CREATE INDEX IF NOT EXISTS idx_dim_uc_bioma ON public.dim_unidade_conservacao(nome_bioma);
+CREATE INDEX IF NOT EXISTS idx_dim_uc_esfera ON public.dim_unidade_conservacao(esfera_administrativa);
+
+-- Optional: Cluster the fact table by Date to physically order data on disk, 
+-- heavily optimizing range queries (e.g., "all waste collected in 2023").
+-- CLUSTER public.fact_mutirao_coleta USING idx_fact_sk_data;
+```

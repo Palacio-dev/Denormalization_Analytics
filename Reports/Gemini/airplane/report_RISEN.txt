@@ -1,0 +1,195 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 8
+  - Total Attributes: 28
+    * aircrafts_data: 3 columns
+    * airports_data: 5 columns
+    * boarding_passes: 4 columns
+    * bookings: 3 columns
+    * flights: 10 columns
+    * seats: 3 columns
+    * ticket_flights: 4 columns
+    * tickets: 5 columns
+
+Denormalized Model:
+  - Tables: 4
+  - Total Attributes: 40
+    * denorm_flights: 24 columns
+    * denorm_ticket_pii: 3 columns
+    * denorm_ticket_flights: 10 columns
+    * denorm_aircraft_seats: 5 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Denormalized model has MORE attributes (28 vs 40)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: airport_name (JSONB) -> aircraft_range (INTEGER)
+  - Type mismatch: total_amount (NUMERIC(10, 2)) -> total_revenue (NUMERIC(12, 2))
+--------------------------------------------------------------------------------
+Completeness Ratio:        1.43
+Data Type Preservation:    0.93
+Avg Levenshtein Distance:  2.11
+BLEU Score:                0.50
+ROUGE-1:                   0.73
+METEOR Score:              0.66
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: denorm_ticket_flights
+Dimension Tables Detected: denorm_flights, denorm_ticket_pii, denorm_aircraft_seats
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected exactly 1 Fact table. Evaluating as a standard STAR SCHEMA.
+  - PAYLOAD WARNING: Fact table 'denorm_ticket_flights' contains more text attributes (5) than numeric measures (3).
+  - DIMENSION NULL WARNING: Attribute 'actual_departure' in 'denorm_flights' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'actual_arrival' in 'denorm_flights' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'departure_delay_mins' in 'denorm_flights' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'arrival_delay_mins' in 'denorm_flights' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'total_revenue' in 'denorm_flights' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'total_passengers' in 'denorm_flights' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'contact_data' in 'denorm_ticket_pii' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * denorm_ticket_flights: 3 Numeric, 5 Text
+  * denorm_flights: 8 Numeric, 16 Text
+  * denorm_ticket_pii: 0 Numeric, 3 Text
+  * denorm_aircraft_seats: 1 Numeric, 4 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  actual_arrival actual_departure aircraft_code airport_code airport_name amount boarding_no book_date book_ref city contact_data coordinates fare_conditions fare_conditions flight_id flight_no model passenger_id passenger_name range scheduled_arrival scheduled_departure seat_no seat_no status ticket_no timezone total_amount
+
+Denormalized Model (Combined Text):
+  actual_arrival actual_departure aircraft_code aircraft_code aircraft_model aircraft_model aircraft_range aircraft_range amount arrival_airport_code arrival_airport_name arrival_city arrival_coordinates arrival_delay_mins arrival_timezone boarding_no book_date book_ref booking_total_amount contact_data departure_airport_code departure_airport_name departure_city departure_coordinates departure_delay_mins departure_timezone fare_conditions fare_conditions flight_id flight_no passenger_id passenger_name scheduled_arrival scheduled_departure seat_no seat_no status ticket_no total_passengers total_revenue
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 28 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    aircraft_code CHARACTER(3)
+  Denormalized:  aircraft_code CHARACTER(3)
+
+Pair 2:
+  Relational:    model JSONB
+  Denormalized:  aircraft_model JSONB
+
+Pair 3:
+  Relational:    range INTEGER
+  Denormalized:  aircraft_range INTEGER
+
+Pair 4:
+  Relational:    airport_code CHARACTER(3)
+  Denormalized:  aircraft_code CHARACTER(3)
+
+Pair 5:
+  Relational:    airport_name JSONB
+  Denormalized:  aircraft_range INTEGER
+
+Pair 6:
+  Relational:    city JSONB
+  Denormalized:  arrival_city JSONB
+
+Pair 7:
+  Relational:    coordinates POINT
+  Denormalized:  arrival_coordinates POINT
+
+Pair 8:
+  Relational:    timezone TEXT
+  Denormalized:  arrival_timezone TEXT
+
+Pair 9:
+  Relational:    boarding_no INTEGER
+  Denormalized:  boarding_no INTEGER
+
+Pair 10:
+  Relational:    seat_no CHARACTER
+  Denormalized:  seat_no CHARACTER
+
+Pair 11:
+  Relational:    book_ref CHARACTER(6)
+  Denormalized:  book_ref CHARACTER(6)
+
+Pair 12:
+  Relational:    book_date TIMESTAMP
+  Denormalized:  book_date TIMESTAMP
+
+Pair 13:
+  Relational:    total_amount NUMERIC(10, 2)
+  Denormalized:  total_revenue NUMERIC(12, 2)
+
+Pair 14:
+  Relational:    flight_id SERIAL
+  Denormalized:  flight_id SERIAL
+
+Pair 15:
+  Relational:    flight_no CHARACTER(6)
+  Denormalized:  flight_no CHARACTER(6)
+
+Pair 16:
+  Relational:    scheduled_departure TIMESTAMP
+  Denormalized:  scheduled_departure TIMESTAMP
+
+Pair 17:
+  Relational:    scheduled_arrival TIMESTAMP
+  Denormalized:  scheduled_arrival TIMESTAMP
+
+Pair 18:
+  Relational:    status CHARACTER
+  Denormalized:  status CHARACTER
+
+Pair 19:
+  Relational:    actual_departure TIMESTAMP
+  Denormalized:  actual_departure TIMESTAMP
+
+Pair 20:
+  Relational:    actual_arrival TIMESTAMP
+  Denormalized:  actual_arrival TIMESTAMP
+
+Pair 21:
+  Relational:    seat_no CHARACTER
+  Denormalized:  seat_no CHARACTER
+
+Pair 22:
+  Relational:    fare_conditions CHARACTER
+  Denormalized:  fare_conditions CHARACTER
+
+Pair 23:
+  Relational:    fare_conditions CHARACTER
+  Denormalized:  fare_conditions CHARACTER
+
+Pair 24:
+  Relational:    amount NUMERIC(10, 2)
+  Denormalized:  amount NUMERIC(10, 2)
+
+Pair 25:
+  Relational:    ticket_no CHARACTER(13)
+  Denormalized:  ticket_no CHARACTER(13)
+
+Pair 26:
+  Relational:    passenger_id CHARACTER
+  Denormalized:  passenger_id CHARACTER
+
+Pair 27:
+  Relational:    passenger_name TEXT
+  Denormalized:  passenger_name TEXT
+
+Pair 28:
+  Relational:    contact_data JSONB
+  Denormalized:  contact_data JSONB
+
+
+================================================================================

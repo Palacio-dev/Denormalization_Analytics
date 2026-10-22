@@ -1,0 +1,257 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_08-56-00
+Model: ollama_api
+Prompt: senior
+Schema: TPC_DS
+==================================================
+
+{
+  "section_1": {
+    "summary": "The normalized schema represents a retail transactional environment with separate entities for store, catalog, and web orders, as well as returns and inventory. To optimize for OLAP workloads, we adopt a hybrid dimensional modeling approach by consolidating the multiple order and lineitem tables into a unified fact structure and flattening dimensions where beneficial. This includes combining purchase, catalog_order, and web_order into a unified Sales Fact table, with associated line items. We also consolidate return data into a unified Returns Fact table. Dimensional tables for Date, Item, Customer, Store, Warehouse, Promotion, etc., are created and flattened to reduce joins. Surrogate keys are introduced for efficient joins and slowly changing dimension handling.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidate s_purchase, s_catalog_order, and s_web_order into a unified fact_sales table to centralize all sales transactions regardless of channel."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge s_purchase_lineitem, s_catalog_order_lineitem, and s_web_order_lineitem into a unified fact_sales_lineitem table to support detailed analysis."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Combine s_store_returns, s_catalog_returns into a unified fact_returns table to centralize all return transactions."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Flatten s_inventory into fact_inventory_snapshot with date dimension integration for easier stock level analysis over time."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Introduce surrogate keys for major dimensions (e.g., dim_date, dim_item, dim_customer) to decouple from source keys and support SCD Type 2 if needed."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Flatten commonly joined dimension tables (e.g., embedding store name, city, state into dim_store) to reduce query-time joins."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added calculated fields like total_sales_amount, net_sale_amount, and return_amount in fact tables to reduce runtime computation."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Converted date strings (char(10)) to date_sk surrogate keys referencing dim_date for efficient date-based aggregations."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Embedded descriptive attributes (e.g., item name, brand, category) directly into fact_sales_lineitem to avoid joins with dim_item for common queries."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Introduced return_flag and sales_channel (store, catalog, web) flags in fact_sales_lineitem to support filtering without joining fact_returns."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Denormalization increases storage footprint due to data duplication, particularly embedding descriptive attributes in fact tables. However, this is offset by reduced I/O and simplified query plans."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Surrogate keys improve join performance and support SCDs, but require ETL logic to maintain key mappings and handle late-arriving dimensions."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Consolidating returns and sales into separate fact tables improves analytical clarity but requires careful handling of return-to-sale linkage for holistic customer behavior analysis."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregate total sales by date, product category, and channel to understand sales trends and performance."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze return rates by item, customer segment, and reason to identify product or service issues."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Monitor inventory levels over time by warehouse and item to optimize stock and reduce overstock or stockouts."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Perform customer cohort analysis based on purchase behavior, including cross-channel activity and return frequency."
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Support drill-through from summary sales reports to line-item details for root-cause analysis."
+      }
+    ]
+  }
+}
+
+-- ============================================================
+--   Denormalized Analytical Schema DDL
+-- ============================================================
+
+-- Dimension Tables
+
+create table dim_date (
+    date_sk                 integer               not null primary key,
+    date_actual             date                  ,
+    day_name                varchar(10)           ,
+    day_of_week             integer               ,
+    day_of_month            integer               ,
+    day_of_year             integer               ,
+    week_of_year            integer               ,
+    month_actual            integer               ,
+    month_name              varchar(10)           ,
+    quarter_actual          integer               ,
+    year_actual             integer               
+);
+
+create table dim_item (
+    item_sk                 integer               not null primary key,
+    item_id                 char(16)              ,
+    item_name               varchar(100)          ,
+    item_brand              varchar(50)           ,
+    item_class              varchar(50)           ,
+    item_category           varchar(50)           ,
+    item_manufacturer       varchar(50)           ,
+    item_color              varchar(20)           ,
+    item_size               varchar(20)           ,
+    item_price              numeric(7,2)          
+);
+
+create table dim_customer (
+    customer_sk             integer               not null primary key,
+    customer_id             char(16)              ,
+    customer_first_name     varchar(50)           ,
+    customer_last_name      varchar(50)           ,
+    customer_gender         char(1)               ,
+    customer_birth_date     date                  ,
+    customer_email          varchar(100)          ,
+    customer_address        varchar(200)          ,
+    customer_city           varchar(50)           ,
+    customer_state          char(2)               ,
+    customer_zip            char(5)               
+);
+
+create table dim_store (
+    store_sk                integer               not null primary key,
+    store_id                char(16)              ,
+    store_name              varchar(100)          ,
+    store_city              varchar(50)           ,
+    store_state             char(2)               ,
+    store_zip               char(5)               ,
+    store_manager           varchar(100)          
+);
+
+create table dim_warehouse (
+    warehouse_sk            integer               not null primary key,
+    warehouse_id            char(16)              ,
+    warehouse_name          varchar(100)          ,
+    warehouse_city          varchar(50)           ,
+    warehouse_state         char(2)               
+);
+
+create table dim_promotion (
+    promotion_sk            integer               not null primary key,
+    promotion_id            char(16)              ,
+    promotion_name          varchar(100)          ,
+    promotion_channel       varchar(20)           ,
+    promotion_start_date    date                  ,
+    promotion_end_date      date                  ,
+    promotion_cost          numeric(10,2)         
+);
+
+create table dim_reason (
+    reason_sk               integer               not null primary key,
+    reason_id               char(16)              ,
+    reason_description      varchar(100)          
+);
+
+-- Fact Tables
+
+create table fact_sales (
+    sales_id                integer               not null primary key,
+    date_sk                 integer               not null,
+    customer_sk             integer               ,
+    store_sk                integer               ,
+    call_center_id          char(16)              ,
+    web_site_id             char(16)              ,
+    sales_channel           varchar(10)           , -- 'store', 'catalog', 'web'
+    register_id             integer               ,
+    clerk_id                integer               ,
+    total_amount            numeric(12,2)         ,
+    total_quantity          integer               ,
+    foreign key (date_sk) references dim_date(date_sk),
+    foreign key (customer_sk) references dim_customer(customer_sk),
+    foreign key (store_sk) references dim_store(store_sk)
+);
+
+create table fact_sales_lineitem (
+    sales_line_id           integer               not null primary key,
+    sales_id                integer               not null,
+    line_number             integer               ,
+    item_sk                 integer               ,
+    promotion_sk            integer               ,
+    warehouse_sk            integer               ,
+    date_sk                 integer               not null,
+    quantity                integer               ,
+    sales_price             numeric(7,2)          ,
+    coupon_amt              numeric(7,2)          ,
+    net_sale_amount         numeric(10,2)         , -- calculated as (sales_price * quantity) - coupon_amt
+    ship_cost               numeric(7,2)          ,
+    return_flag             char(1)               , -- 'Y' if returned
+    foreign key (sales_id) references fact_sales(sales_id),
+    foreign key (item_sk) references dim_item(item_sk),
+    foreign key (promotion_sk) references dim_promotion(promotion_sk),
+    foreign key (warehouse_sk) references dim_warehouse(warehouse_sk),
+    foreign key (date_sk) references dim_date(date_sk)
+);
+
+create table fact_returns (
+    return_id               integer               not null primary key,
+    sales_id                integer               , -- link to original sale
+    line_number             integer               ,
+    date_sk                 integer               not null,
+    customer_sk             integer               ,
+    item_sk                 integer               ,
+    reason_sk               integer               ,
+    return_quantity         integer               ,
+    return_amount           numeric(7,2)          ,
+    return_tax              numeric(7,2)          ,
+    return_fee              numeric(7,2)          ,
+    refunded_cash           numeric(7,2)          ,
+    store_credit            numeric(7,2)          ,
+    foreign key (date_sk) references dim_date(date_sk),
+    foreign key (customer_sk) references dim_customer(customer_sk),
+    foreign key (item_sk) references dim_item(item_sk),
+    foreign key (reason_sk) references dim_reason(reason_sk)
+);
+
+create table fact_inventory_snapshot (
+    warehouse_sk            integer               not null,
+    item_sk                 integer               not null,
+    date_sk                 integer               not null,
+    qty_on_hand             integer               ,
+    primary key (warehouse_sk, item_sk, date_sk),
+    foreign key (warehouse_sk) references dim_warehouse(warehouse_sk),
+    foreign key (item_sk) references dim_item(item_sk),
+    foreign key (date_sk) references dim_date(date_sk)
+);
+
+-- Indexing Recommendations:
+-- Cluster fact_sales and fact_sales_lineitem by date_sk for time-series query performance.
+-- Create bitmap indexes on fact_sales_lineitem.item_sk and fact_sales_lineitem.promotion_sk for fast filtering.
+-- Partition fact_sales_lineitem and fact_inventory_snapshot by date_sk for manageability and performance.
+-- Cluster fact_returns by date_sk and item_sk for return analysis.

@@ -1,0 +1,389 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 14
+  - Total Attributes: 79
+    * categories: 4 columns
+    * customer_customer_demo: 2 columns (junction table - excluded from attribute analysis)
+    * customer_demographics: 2 columns
+    * customers: 11 columns
+    * employee_territories: 2 columns (junction table - excluded from attribute analysis)
+    * employees: 18 columns
+    * order_details: 5 columns
+    * orders: 14 columns
+    * products: 10 columns
+    * region: 2 columns
+    * shippers: 3 columns
+    * suppliers: 12 columns
+    * territories: 3 columns
+    * us_states: 4 columns
+
+  Note: 2 junction table(s) detected and excluded from attribute analysis:
+    - customer_customer_demo
+    - employee_territories
+
+Denormalized Model:
+  - Tables: 1
+  - Total Attributes: 81
+    * sales_obt: 81 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Denormalized model has MORE attributes (79 vs 81)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: title (CHARACTER) -> obt_id (BIGSERIAL)
+  - Type mismatch: phone (CHARACTER) -> reports_to (SMALLINT)
+--------------------------------------------------------------------------------
+Completeness Ratio:        1.03
+Data Type Preservation:    0.97
+Avg Levenshtein Distance:  4.29
+BLEU Score:                0.48
+ROUGE-1:                   0.86
+METEOR Score:              0.45
+
+4. ONE-BIG-TABLE (OBT) ARCHITECTURE AUDIT
+--------------------------------------------------------------------------------
+
+✓ No OBT violations detected! The architecture resembles a true One-Big-Table approach.
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  address address address birth_date category_id category_name city city city company_name company_name company_name contact_name contact_name contact_title contact_title country country country customer_desc customer_id customer_type_id description discontinued discount employee_id extension fax fax first_name freight hire_date home_phone homepage last_name notes order_date order_id phone phone phone photo photo_path picture postal_code postal_code postal_code product_id product_name quantity quantity_per_unit region region region region_description region_id reorder_level required_date ship_address ship_city ship_country ship_name ship_postal_code ship_region shipped_date shipper_id state_abbr state_id state_name state_region supplier_id territory_description territory_id title title_of_courtesy unit_price unit_price units_in_stock units_on_order
+
+Denormalized Model (Combined Text):
+  category_description category_id category_name customer_address customer_city customer_company_name customer_contact_name customer_contact_title customer_country customer_desc customer_fax customer_id customer_phone customer_postal_code customer_region customer_type_id discontinued employee_address employee_birth_date employee_city employee_country employee_extension employee_first_name employee_hire_date employee_home_phone employee_id employee_last_name employee_postal_code employee_region employee_title employee_title_of_courtesy freight homepage notes obt_id order_date order_discount order_id order_quantity order_unit_price photo photo_path picture product_id product_name product_unit_price quantity_per_unit region_description region_id reorder_level reports_to required_date ship_address ship_city ship_country ship_name ship_postal_code ship_region shipped_date shipper_company_name shipper_id shipper_phone state_abbr state_id state_name state_region supplier_address supplier_city supplier_company_name supplier_contact_name supplier_contact_title supplier_country supplier_fax supplier_id supplier_phone supplier_postal_code supplier_region territory_description territory_id units_in_stock units_on_order
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 79 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    category_id SMALLINT
+  Denormalized:  category_id SMALLINT
+
+Pair 2:
+  Relational:    category_name CHARACTER
+  Denormalized:  category_name CHARACTER
+
+Pair 3:
+  Relational:    description TEXT
+  Denormalized:  category_description TEXT
+
+Pair 4:
+  Relational:    picture BYTEA
+  Denormalized:  picture BYTEA
+
+Pair 5:
+  Relational:    customer_type_id CHARACTER
+  Denormalized:  customer_type_id CHARACTER
+
+Pair 6:
+  Relational:    customer_desc TEXT
+  Denormalized:  customer_desc TEXT
+
+Pair 7:
+  Relational:    customer_id CHARACTER
+  Denormalized:  customer_id CHARACTER
+
+Pair 8:
+  Relational:    company_name CHARACTER
+  Denormalized:  shipper_company_name CHARACTER
+
+Pair 9:
+  Relational:    contact_name CHARACTER
+  Denormalized:  customer_contact_name CHARACTER
+
+Pair 10:
+  Relational:    contact_title CHARACTER
+  Denormalized:  employee_title CHARACTER
+
+Pair 11:
+  Relational:    address CHARACTER
+  Denormalized:  employee_address CHARACTER
+
+Pair 12:
+  Relational:    city CHARACTER
+  Denormalized:  customer_city CHARACTER
+
+Pair 13:
+  Relational:    region CHARACTER
+  Denormalized:  customer_region CHARACTER
+
+Pair 14:
+  Relational:    postal_code CHARACTER
+  Denormalized:  supplier_postal_code CHARACTER
+
+Pair 15:
+  Relational:    country CHARACTER
+  Denormalized:  customer_country CHARACTER
+
+Pair 16:
+  Relational:    phone CHARACTER
+  Denormalized:  shipper_phone CHARACTER
+
+Pair 17:
+  Relational:    fax CHARACTER
+  Denormalized:  customer_fax CHARACTER
+
+Pair 18:
+  Relational:    employee_id SMALLINT
+  Denormalized:  employee_id SMALLINT
+
+Pair 19:
+  Relational:    last_name CHARACTER
+  Denormalized:  employee_last_name CHARACTER
+
+Pair 20:
+  Relational:    first_name CHARACTER
+  Denormalized:  employee_first_name CHARACTER
+
+Pair 21:
+  Relational:    title CHARACTER
+  Denormalized:  obt_id BIGSERIAL
+
+Pair 22:
+  Relational:    title_of_courtesy CHARACTER
+  Denormalized:  employee_title_of_courtesy CHARACTER
+
+Pair 23:
+  Relational:    birth_date DATE
+  Denormalized:  employee_birth_date DATE
+
+Pair 24:
+  Relational:    hire_date DATE
+  Denormalized:  employee_hire_date DATE
+
+Pair 25:
+  Relational:    address CHARACTER
+  Denormalized:  customer_address CHARACTER
+
+Pair 26:
+  Relational:    city CHARACTER
+  Denormalized:  supplier_city CHARACTER
+
+Pair 27:
+  Relational:    region CHARACTER
+  Denormalized:  supplier_region CHARACTER
+
+Pair 28:
+  Relational:    postal_code CHARACTER
+  Denormalized:  employee_postal_code CHARACTER
+
+Pair 29:
+  Relational:    country CHARACTER
+  Denormalized:  employee_country CHARACTER
+
+Pair 30:
+  Relational:    home_phone CHARACTER
+  Denormalized:  customer_phone CHARACTER
+
+Pair 31:
+  Relational:    extension CHARACTER
+  Denormalized:  employee_extension CHARACTER
+
+Pair 32:
+  Relational:    photo BYTEA
+  Denormalized:  photo BYTEA
+
+Pair 33:
+  Relational:    notes TEXT
+  Denormalized:  notes TEXT
+
+Pair 34:
+  Relational:    photo_path CHARACTER
+  Denormalized:  photo_path CHARACTER
+
+Pair 35:
+  Relational:    unit_price REAL
+  Denormalized:  order_unit_price REAL
+
+Pair 36:
+  Relational:    quantity SMALLINT
+  Denormalized:  order_quantity SMALLINT
+
+Pair 37:
+  Relational:    discount REAL
+  Denormalized:  order_discount REAL
+
+Pair 38:
+  Relational:    order_id SMALLINT
+  Denormalized:  order_id SMALLINT
+
+Pair 39:
+  Relational:    order_date DATE
+  Denormalized:  order_date DATE
+
+Pair 40:
+  Relational:    required_date DATE
+  Denormalized:  required_date DATE
+
+Pair 41:
+  Relational:    shipped_date DATE
+  Denormalized:  shipped_date DATE
+
+Pair 42:
+  Relational:    freight REAL
+  Denormalized:  freight REAL
+
+Pair 43:
+  Relational:    ship_name CHARACTER
+  Denormalized:  ship_name CHARACTER
+
+Pair 44:
+  Relational:    ship_address CHARACTER
+  Denormalized:  ship_address CHARACTER
+
+Pair 45:
+  Relational:    ship_city CHARACTER
+  Denormalized:  ship_city CHARACTER
+
+Pair 46:
+  Relational:    ship_region CHARACTER
+  Denormalized:  ship_region CHARACTER
+
+Pair 47:
+  Relational:    ship_postal_code CHARACTER
+  Denormalized:  ship_postal_code CHARACTER
+
+Pair 48:
+  Relational:    ship_country CHARACTER
+  Denormalized:  ship_country CHARACTER
+
+Pair 49:
+  Relational:    product_id SMALLINT
+  Denormalized:  product_id SMALLINT
+
+Pair 50:
+  Relational:    product_name CHARACTER
+  Denormalized:  product_name CHARACTER
+
+Pair 51:
+  Relational:    quantity_per_unit CHARACTER
+  Denormalized:  quantity_per_unit CHARACTER
+
+Pair 52:
+  Relational:    unit_price REAL
+  Denormalized:  product_unit_price REAL
+
+Pair 53:
+  Relational:    units_in_stock SMALLINT
+  Denormalized:  units_in_stock SMALLINT
+
+Pair 54:
+  Relational:    units_on_order SMALLINT
+  Denormalized:  units_on_order SMALLINT
+
+Pair 55:
+  Relational:    reorder_level SMALLINT
+  Denormalized:  reorder_level SMALLINT
+
+Pair 56:
+  Relational:    discontinued INTEGER
+  Denormalized:  discontinued INTEGER
+
+Pair 57:
+  Relational:    region_id SMALLINT
+  Denormalized:  region_id SMALLINT
+
+Pair 58:
+  Relational:    region_description CHARACTER
+  Denormalized:  region_description CHARACTER
+
+Pair 59:
+  Relational:    shipper_id SMALLINT
+  Denormalized:  shipper_id SMALLINT
+
+Pair 60:
+  Relational:    company_name CHARACTER
+  Denormalized:  customer_company_name CHARACTER
+
+Pair 61:
+  Relational:    phone CHARACTER
+  Denormalized:  supplier_phone CHARACTER
+
+Pair 62:
+  Relational:    supplier_id SMALLINT
+  Denormalized:  supplier_id SMALLINT
+
+Pair 63:
+  Relational:    company_name CHARACTER
+  Denormalized:  supplier_company_name CHARACTER
+
+Pair 64:
+  Relational:    contact_name CHARACTER
+  Denormalized:  supplier_contact_name CHARACTER
+
+Pair 65:
+  Relational:    contact_title CHARACTER
+  Denormalized:  customer_contact_title CHARACTER
+
+Pair 66:
+  Relational:    address CHARACTER
+  Denormalized:  supplier_address CHARACTER
+
+Pair 67:
+  Relational:    city CHARACTER
+  Denormalized:  employee_city CHARACTER
+
+Pair 68:
+  Relational:    region CHARACTER
+  Denormalized:  employee_region CHARACTER
+
+Pair 69:
+  Relational:    postal_code CHARACTER
+  Denormalized:  customer_postal_code CHARACTER
+
+Pair 70:
+  Relational:    country CHARACTER
+  Denormalized:  supplier_country CHARACTER
+
+Pair 71:
+  Relational:    phone CHARACTER
+  Denormalized:  reports_to SMALLINT
+
+Pair 72:
+  Relational:    fax CHARACTER
+  Denormalized:  supplier_fax CHARACTER
+
+Pair 73:
+  Relational:    homepage TEXT
+  Denormalized:  homepage TEXT
+
+Pair 74:
+  Relational:    territory_id CHARACTER
+  Denormalized:  territory_id CHARACTER
+
+Pair 75:
+  Relational:    territory_description CHARACTER
+  Denormalized:  territory_description CHARACTER
+
+Pair 76:
+  Relational:    state_id SMALLINT
+  Denormalized:  state_id SMALLINT
+
+Pair 77:
+  Relational:    state_name CHARACTER
+  Denormalized:  state_name CHARACTER
+
+Pair 78:
+  Relational:    state_abbr CHARACTER
+  Denormalized:  state_abbr CHARACTER
+
+Pair 79:
+  Relational:    state_region CHARACTER
+  Denormalized:  state_region CHARACTER
+
+
+================================================================================

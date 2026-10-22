@@ -1,0 +1,167 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-03_23-04-35
+Model: ollama_api
+Prompt: OBT
+Schema: northwind
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy follows the ONE-BIG-TABLE MODEL by consolidating all normalized tables into a single wide table. This approach eliminates JOIN operations for read-heavy workloads, significantly improving query performance at the cost of data redundancy and increased storage. All original attributes are preserved with appropriate naming to avoid conflicts.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge all tables into one denormalized table named 'sales_denormalized' to eliminate JOINs in analytical queries."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Eliminate all foreign key constraints and references to simplify the schema for faster reads."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Retain all original columns from source tables with prefixed names where necessary to avoid duplicates."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added prefix 'customer_' to conflicting column names like 'company_name', 'contact_name', etc., from the customers table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added prefix 'employee_' to conflicting column names like 'last_name', 'first_name', etc., from the employees table."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added prefix 'supplier_' to conflicting column names like 'company_name', 'contact_name', etc., from the suppliers table."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added prefix 'category_' to 'category_name' from the categories table."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Added prefix 'shipper_' to 'company_name' from the shippers table."
+      },
+      {
+        "decision_id": "A6",
+        "description": "Added prefix 'territory_' to 'territory_description' from the territories table."
+      },
+      {
+        "decision_id": "A7",
+        "description": "Added prefix 'region_' to 'region_description' from the region table."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved read performance at the expense of increased storage requirements due to data duplication."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified schema reduces maintenance complexity but increases update complexity due to denormalization."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of referential integrity enforcement at the database level requires application-level validation."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical queries joining orders, order_details, products, categories, customers, and employees to analyze sales performance by product category, customer demographics, and employee metrics."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting queries aggregating sales data with customer and supplier information to generate business intelligence dashboards."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Operational analytics requiring frequent access to order details along with product, category, and supplier information without expensive JOIN operations."
+      }
+    ]
+  }
+}
+
+CREATE TABLE IF NOT EXISTS sales_denormalized (
+    order_id smallint NOT NULL,
+    product_id smallint NOT NULL,
+    customer_id character varying(5) COLLATE pg_catalog."default",
+    employee_id smallint,
+    order_date date,
+    required_date date,
+    shipped_date date,
+    ship_via smallint,
+    freight real,
+    ship_name character varying(40) COLLATE pg_catalog."default",
+    ship_address character varying(60) COLLATE pg_catalog."default",
+    ship_city character varying(15) COLLATE pg_catalog."default",
+    ship_region character varying(15) COLLATE pg_catalog."default",
+    ship_postal_code character varying(10) COLLATE pg_catalog."default",
+    ship_country character varying(15) COLLATE pg_catalog."default",
+    unit_price real NOT NULL,
+    quantity smallint NOT NULL,
+    discount real NOT NULL,
+    product_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    supplier_id smallint,
+    category_id smallint,
+    quantity_per_unit character varying(20) COLLATE pg_catalog."default",
+    unit_price_product real,
+    units_in_stock smallint,
+    units_on_order smallint,
+    reorder_level smallint,
+    discontinued integer NOT NULL,
+    category_name character varying(15) COLLATE pg_catalog."default" NOT NULL,
+    description text COLLATE pg_catalog."default",
+    picture bytea,
+    customer_company_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    customer_contact_name character varying(30) COLLATE pg_catalog."default",
+    customer_contact_title character varying(30) COLLATE pg_catalog."default",
+    customer_address character varying(60) COLLATE pg_catalog."default",
+    customer_city character varying(15) COLLATE pg_catalog."default",
+    customer_region character varying(15) COLLATE pg_catalog."default",
+    customer_postal_code character varying(10) COLLATE pg_catalog."default",
+    customer_country character varying(15) COLLATE pg_catalog."default",
+    customer_phone character varying(24) COLLATE pg_catalog."default",
+    customer_fax character varying(24) COLLATE pg_catalog."default",
+    employee_last_name character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    employee_first_name character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    employee_title character varying(30) COLLATE pg_catalog."default",
+    employee_title_of_courtesy character varying(25) COLLATE pg_catalog."default",
+    employee_birth_date date,
+    employee_hire_date date,
+    employee_address character varying(60) COLLATE pg_catalog."default",
+    employee_city character varying(15) COLLATE pg_catalog."default",
+    employee_region character varying(15) COLLATE pg_catalog."default",
+    employee_postal_code character varying(10) COLLATE pg_catalog."default",
+    employee_country character varying(15) COLLATE pg_catalog."default",
+    employee_home_phone character varying(24) COLLATE pg_catalog."default",
+    employee_extension character varying(4) COLLATE pg_catalog."default",
+    employee_photo bytea,
+    employee_notes text COLLATE pg_catalog."default",
+    employee_reports_to smallint,
+    employee_photo_path character varying(255) COLLATE pg_catalog."default",
+    supplier_company_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    supplier_contact_name character varying(30) COLLATE pg_catalog."default",
+    supplier_contact_title character varying(30) COLLATE pg_catalog."default",
+    supplier_address character varying(60) COLLATE pg_catalog."default",
+    supplier_city character varying(15) COLLATE pg_catalog."default",
+    supplier_region character varying(15) COLLATE pg_catalog."default",
+    supplier_postal_code character varying(10) COLLATE pg_catalog."default",
+    supplier_country character varying(15) COLLATE pg_catalog."default",
+    supplier_phone character varying(24) COLLATE pg_catalog."default",
+    supplier_fax character varying(24) COLLATE pg_catalog."default",
+    supplier_homepage text COLLATE pg_catalog."default",
+    shipper_company_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    shipper_phone character varying(24) COLLATE pg_catalog."default",
+    territory_id character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    territory_description character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    region_id smallint NOT NULL,
+    region_description character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT pk_sales_denormalized PRIMARY KEY (order_id, product_id)
+);

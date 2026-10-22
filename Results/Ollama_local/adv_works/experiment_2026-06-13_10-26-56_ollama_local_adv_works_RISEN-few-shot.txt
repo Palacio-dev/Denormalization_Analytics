@@ -1,0 +1,526 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-14_13-26-56
+Model: ollama_local
+Prompt: RISEN-few-shot
+Schema: adv_works
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on the AdventureWorks Cycles schema, which is a classic example of a 
+    relational OLTP system with many small lookup tables (dimensional tables) and many-to-many relationships. The primary bottleneck 
+    in this schema is the frequency of JOIN operations between large fact-like tables (e.g., SalesOrderHeader, Employee, Product) 
+    and small dimension tables (e.g., Department, ProductCategory, ShipMethod). The strategy employs 'Adding Redundant Attributes'
+    to materialize the most common join results into the main fact/transaction tables. This eliminates the need for complex 
+    multi-table joins in analytical queries, significantly improving read performance by allowing single-table scans.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Create a denormalized 'SalesOrder' table that merges data from SalesOrderHeader, SalesOrderDetail, Product,
+         ProductCategory, ProductSubcategory, ProductModel, ProductPhoto, and ShipMethod. This table will contain the full hierarchy
+          of product attributes and shipping details directly.",
+        "source_tables": ["sales.salesorderheader", "sales.salesorderdetail", "production.product", "production.productcategory", "production.productsubcategory", "production.productmodel", "production.productphoto", "purchasing.shipmethod"],
+        "target_tables": ["sales.salesorder_denormalized"]
+      },
+      {
+        "decision_id": "D2",
+        "description": "Create a denormalized 'Employee_HR' table that merges Employee, Department, Shift, and Employeedepartmenthistory. This captures the full employment context for any given employee.",
+        "source_tables": ["humanresources.employee", "humanresources.department", "humanresources.shift", "humanresources.employeedepartmenthistory"],
+        "target_tables": ["humanresources.employee_hr_denormalized"]
+      },
+      {
+        "decision_id": "D3",
+        "description": "Create a denormalized 'Person_Contact' table that merges Person, Address, AddressType, BusinessEntityAddress, and BusinessEntityContact. This consolidates all contact information for individuals.",
+        "source_tables": ["person.person", "person.address", "person.addresstype", "person.businessentityaddress", "person.businessentitycontact"],
+        "target_tables": ["person.person_contact_denormalized"]
+      },
+      {
+        "decision_id": "D4",
+        "description": "Create a denormalized 'Product_Master' table that merges Product, ProductCategory, ProductSubcategory, ProductModel, ProductDescription, and ProductPhoto. This creates a single source of truth for product characteristics.",
+        "source_tables": ["production.product", "production.productcategory", "production.productsubcategory", "production.productmodel", "production.productdescription", "production.productphoto"],
+        "target_tables": ["production.product_master_denormalized"]
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "In 'SalesOrder_denormalized', add columns: product_name, product_number, color, size, standard_cost, list_price, product_category_name, product_subcategory_name, product_model_name, primary_photo_url, ship_method_name, ship_base, ship_rate.",
+        "attributes_added": ["product_name", "product_number", "color", "size", "standard_cost", "list_price", "product_category_name", "product_subcategory_name", "product_model_name", "primary_photo_url", "ship_method_name", "ship_base", "ship_rate"],
+        "attributes_removed": []
+      },
+      {
+        "decision_id": "A2",
+        "description": "In 'Employee_hr_denormalized', add columns: department_name, group_name, shift_name, start_date_in_dept, end_date_in_dept.",
+        "attributes_added": ["department_name", "group_name", "shift_name", "start_date_in_dept", "end_date_in_dept"],
+        "attributes_removed": []
+      },
+      {
+        "decision_id": "A3",
+        "description": "In 'Person_contact_denormalized', add columns: address_line1, address_line2, city, state_province_name, postalcode, address_type_name, person_title, firstname, lastname, suffix, emailaddress, phone_number, phonenumbertype_name.",
+        "attributes_added": ["address_line1", "address_line2", "city", "state_province_name", "postalcode", "address_type_name", "person_title", "firstname", "lastname", "suffix", "emailaddress", "phone_number", "phonenumbertype_name"],
+        "attributes_removed": []
+      },
+      {
+        "decision_id": "A4",
+        "description": "In 'Product_master_denormalized', add columns: product_category_name, product_subcategory_name, product_model_name, catalog_description, instructions, thumbnail_photo_url, large_photo_url.",
+        "attributes_added": ["product_category_name", "product_subcategory_name", "product_model_name", "catalog_description", "instructions", "thumbnail_photo_url", "large_photo_url"],
+        "attributes_removed": []
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy and Integrity: The denormalized schema introduces significant data redundancy (e.g., repeating product names and categories for every order). While this improves read performance, it requires careful application of triggers or constraints to ensure data consistency. If a product name changes, it must be updated in all orders referencing it, which is a complex operation compared to a simple UPDATE on a dimension table.",
+        "impact": "High write complexity, lower consistency enforcement capability without additional logic."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Storage Overhead: The new schema will consume significantly more storage space (potentially 3-5x) due to repeated string data. This is acceptable for analytical workloads where read latency is critical, but not for systems with extremely tight storage budgets.",
+        "impact": "Increased storage cost."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Sales Analysis Query: 'Retrieve a list of all sales orders placed in the last quarter, including the product name, category, subcategory, model, color, list price, and shipping method for each line item, sorted by total line amount descending.' This query typically requires 6-7 JOINs in the normalized schema."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "HR Reporting Query: 'Show the current employment status of all employees, including their name, title, department name, group name, and the name of the shift they work.' This requires joining Employee, Department, Shift, and Employeedepartmenthistory."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Customer Contact Query: 'Provide a complete contact profile for all customers, including their name, email, billing address, shipping address, and phone numbers.' This involves joining Person, Address, AddressType, and BusinessEntityAddress/Contact tables."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Product Catalog Query: 'List all available bicycle models with their full specifications including category, subcategory, model name, description, and images.' This requires joining multiple product-related dimension tables."
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- Denormalized Schema for AdventureWorks Cycles (PostgreSQL)
+-- Strategy: Materialize common JOIN results to improve read performance.
+
+BEGIN;
+
+-- Drop existing denormalized tables if they exist
+DROP TABLE IF EXISTS sales.salesorder_denormalized CASCADE;
+DROP TABLE IF EXISTS humanresources.employee_hr_denormalized CASCADE;
+DROP TABLE IF EXISTS person.person_contact_denormalized CASCADE;
+DROP TABLE IF EXISTS production.product_master_denormalized CASCADE;
+
+-- =========================================
+-- 1. Sales Order Denormalized Table
+-- Merges: SalesOrderHeader, SalesOrderDetail, Product, ProductCategory, 
+-- ProductSubcategory, ProductModel, ProductPhoto, ShipMethod
+-- =========================================
+CREATE TABLE IF NOT EXISTS sales.salesorder_denormalized (
+    salesorderid integer NOT NULL,
+    orderdate timestamp without time zone NOT NULL,
+    duedate timestamp without time zone NOT NULL,
+    shipdate timestamp without time zone,
+    status smallint NOT NULL DEFAULT 1,
+    subtotal numeric NOT NULL DEFAULT 0.00,
+    taxamt numeric NOT NULL DEFAULT 0.00,
+    freight numeric NOT NULL DEFAULT 0.00,
+    totaldue numeric,
+    customerid integer,
+    customer_name text,
+    customer_company text,
+    territoryid integer,
+    territory_name text,
+    salespersonid integer,
+    salesperson_name text,
+    creditcardid integer,
+    creditcard_type text,
+    creditcard_number text,
+    currencyrateid integer,
+    currency_name text,
+    currencyrate numeric,
+    billtoaddressid integer,
+    billto_address_line1 text,
+    billto_address_line2 text,
+    billto_city text,
+    billto_state_province_name text,
+    billto_postalcode text,
+    shiptoaddressid integer,
+    shipto_address_line1 text,
+    shipto_address_line2 text,
+    shipto_city text,
+    shipto_state_province_name text,
+    shipto_postalcode text,
+    shipmethodid integer,
+    ship_method_name text,
+    ship_base numeric,
+    ship_rate numeric,
+    creditcardapprovalcode text,
+    -- Product Hierarchy & Attributes (Repeated per line)
+    salesorderdetailid serial NOT NULL,
+    orderqty smallint NOT NULL,
+    productid integer NOT NULL,
+    product_name text,
+    product_number text,
+    product_color text,
+    product_size text,
+    product_standard_cost numeric,
+    product_listprice numeric,
+    product_categoryid integer,
+    product_category_name text,
+    productsubcategoryid integer,
+    product_subcategory_name text,
+    productmodelid integer,
+    product_model_name text,
+    productdescriptionid integer,
+    product_description text,
+    productphotoid integer,
+    product_thumbnail_photo text,
+    product_large_photo text,
+    specialofferid integer,
+    specialoffer_description text,
+    specialoffer_discountpct numeric,
+    carriertrackingnumber text,
+    unitpricediscount numeric DEFAULT 0.0,
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "PK_SalesOrder_Denormalized_SalesOrderID" PRIMARY KEY (salesorderid),
+    CONSTRAINT "PK_SalesOrder_Denormalized_SalesOrderDetailID" PRIMARY KEY (salesorderid, salesorderdetailid)
+);
+
+-- =========================================
+-- 2. Employee HR Denormalized Table
+-- Merges: Employee, Department, Shift, Employeedepartmenthistory
+-- =========================================
+CREATE TABLE IF NOT EXISTS humanresources.employee_hr_denormalized (
+    businessentityid integer NOT NULL,
+    nationalidnumber text,
+    loginid text,
+    jobtitle text,
+    birthdate date,
+    maritalstatus text,
+    gender text,
+    hiredate date,
+    salariedflag boolean,
+    vacationhours smallint,
+    sickleavehours smallint,
+    currentflag boolean,
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    -- Current Department Info
+    departmentid smallint,
+    department_name text,
+    group_name text,
+    -- Current Shift Info
+    shiftid smallint,
+    shift_name text,
+    shift_starttime time without time zone,
+    shift_endtime time without time zone,
+    -- History (Flattened for current context or max history)
+    -- Storing the most recent history entry for simplicity in denormalization
+    history_departmentid smallint,
+    history_startdate date,
+    history_enddate date,
+    history_shiftid smallint,
+    history_shift_name text,
+    CONSTRAINT "PK_Employee_HR_BusinessEntityID" PRIMARY KEY (businessentityid)
+);
+
+-- =========================================
+-- 3. Person Contact Denormalized Table
+-- Merges: Person, Address, AddressType, BusinessEntityAddress, BusinessEntityContact
+-- =========================================
+CREATE TABLE IF NOT EXISTS person.person_contact_denormalized (
+    businessentityid integer NOT NULL,
+    persontype text,
+    namestyle boolean,
+    title text,
+    firstname text,
+    middlename text,
+    lastname text,
+    suffix text,
+    emailpromotion integer,
+    additionalcontactinfo xml,
+    demographics xml,
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    -- Address Info (Primary Address)
+    addressid integer,
+    address_line1 text,
+    address_line2 text,
+    city text,
+    state_province_name text,
+    postalcode text,
+    spatiallocation bytea,
+    addresstypeid integer,
+    address_type_name text,
+    -- Phone Info (Primary Phone)
+    phonenumber text,
+    phonenumbertype_name text,
+    CONSTRAINT "PK_Person_Contact_BusinessEntityID" PRIMARY KEY (businessentityid)
+);
+
+-- =========================================
+-- 4. Product Master Denormalized Table
+-- Merges: Product, ProductCategory, ProductSubcategory, ProductModel, ProductDescription, ProductPhoto
+-- =========================================
+CREATE TABLE IF NOT EXISTS production.product_master_denormalized (
+    productid serial NOT NULL,
+    name text,
+    productnumber text,
+    makeflag boolean,
+    finishedgoodsflag boolean,
+    color text,
+    safetystocklevel smallint,
+    reorderpoint smallint,
+    standardcost numeric,
+    listprice numeric,
+    size text,
+    sizeunitmeasurecode text,
+    weightunitmeasurecode text,
+    weight numeric,
+    daystomanufacture integer,
+    productline text,
+    class text,
+    style text,
+    sellstartdate timestamp without time zone,
+    sellenddate timestamp without time zone,
+    discontinueddate timestamp without time zone,
+    rowguid uuid NOT NULL DEFAULT uuid_generate_v1(),
+    modifieddate timestamp without time zone NOT NULL DEFAULT now(),
+    -- Category Hierarchy
+    productcategoryid integer,
+    product_category_name text,
+    productsubcategoryid integer,
+    product_subcategory_name text,
+    productmodelid integer,
+    product_model_name text,
+    -- Description
+    productdescriptionid integer,
+    product_description text,
+    -- Photos
+    productphotoid integer,
+    thumbnail_photo text,
+    thumbnail_photo_filename text,
+    large_photo text,
+    large_photo_filename text,
+    CONSTRAINT "PK_Product_Master_ProductID" PRIMARY KEY (productid)
+);
+
+-- =========================================
+-- Foreign Keys (Simplified for Denormalized Tables)
+-- Note: In a true denormalized schema, FKs might be less critical if the 
+-- denormalized tables are treated as "materialized views" or if integrity 
+-- is managed via application logic. However, we keep them for safety.
+-- =========================================
+
+-- FKs for SalesOrder_Denormalized
+ALTER TABLE IF EXISTS sales.salesorder_denormalized
+    ADD CONSTRAINT "FK_SalesOrder_Denormalized_SalesOrderHeader_SalesOrderID" FOREIGN KEY (salesorderid)
+    REFERENCES sales.salesorderheader (salesorderid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesorder_denormalized
+    ADD CONSTRAINT "FK_SalesOrder_Denormalized_SalesOrderDetail_SalesOrderDetailID" FOREIGN KEY (salesorderid, salesorderdetailid)
+    REFERENCES sales.salesorderheader (salesorderid),
+    REFERENCES sales.salesorderdetail (salesorderdetailid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesorder_denormalized
+    ADD CONSTRAINT "FK_SalesOrder_Denormalized_Product_ProductID" FOREIGN KEY (productid)
+    REFERENCES production.product (productid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesorder_denormalized
+    ADD CONSTRAINT "FK_SalesOrder_Denormalized_ProductCategory_ProductCategoryID" FOREIGN KEY (productcategoryid)
+    REFERENCES production.productcategory (productcategoryid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesorder_denormalized
+    ADD CONSTRAINT "FK_SalesOrder_Denormalized_ProductSubcategory_ProductSubcategoryID" FOREIGN KEY (productsubcategoryid)
+    REFERENCES production.productsubcategory (productsubcategoryid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesorder_denormalized
+    ADD CONSTRAINT "FK_SalesOrder_Denormalized_ProductModel_ProductModelID" FOREIGN KEY (productmodelid)
+    REFERENCES production.productmodel (productmodelid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesorder_denormalized
+    ADD CONSTRAINT "FK_SalesOrder_Denormalized_ProductPhoto_ProductPhotoID" FOREIGN KEY (productphotoid)
+    REFERENCES production.productphoto (productphotoid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesorder_denormalized
+    ADD CONSTRAINT "FK_SalesOrder_Denormalized_ShipMethod_ShipMethodID" FOREIGN KEY (shipmethodid)
+    REFERENCES purchasing.shipmethod (shipmethodid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesorder_denormalized
+    ADD CONSTRAINT "FK_SalesOrder_Denormalized_SpecialOfferProduct_SpecialOfferID" FOREIGN KEY (specialofferid)
+    REFERENCES sales.specialofferproduct (specialofferid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesorder_denormalized
+    ADD CONSTRAINT "FK_SalesOrder_Denormalized_Customer_CustomerID" FOREIGN KEY (customerid)
+    REFERENCES sales.customer (customerid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesorder_denormalized
+    ADD CONSTRAINT "FK_SalesOrder_Denormalized_SalesPerson_SalesPersonID" FOREIGN KEY (salespersonid)
+    REFERENCES sales.salesperson (businessentityid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesorder_denormalized
+    ADD CONSTRAINT "FK_SalesOrder_Denormalized_SalesTerritory_TerritoryID" FOREIGN KEY (territoryid)
+    REFERENCES sales.salesterritory (territoryid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesorder_denormalized
+    ADD CONSTRAINT "FK_SalesOrder_Denormalized_CurrencyRate_CurrencyRateID" FOREIGN KEY (currencyrateid)
+    REFERENCES sales.currencyrate (currencyrateid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesorder_denormalized
+    ADD CONSTRAINT "FK_SalesOrder_Denormalized_BillToAddress_AddressID" FOREIGN KEY (billtoaddressid)
+    REFERENCES person.address (addressid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesorder_denormalized
+    ADD CONSTRAINT "FK_SalesOrder_Denormalized_ShipToAddress_AddressID" FOREIGN KEY (shiptoaddressid)
+    REFERENCES person.address (addressid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS sales.salesorder_denormalized
+    ADD CONSTRAINT "FK_SalesOrder_Denormalized_CreditCard_CreditCardID" FOREIGN KEY (creditcardid)
+    REFERENCES sales.creditcard (creditcardid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+-- FKs for Employee_HR_Denormalized
+ALTER TABLE IF EXISTS humanresources.employee_hr_denormalized
+    ADD CONSTRAINT "FK_Employee_HR_Employee_BusinessEntityID" FOREIGN KEY (businessentityid)
+    REFERENCES humanresources.employee (businessentityid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS humanresources.employee_hr_denormalized
+    ADD CONSTRAINT "FK_Employee_HR_Department_DepartmentID" FOREIGN KEY (departmentid)
+    REFERENCES humanresources.department (departmentid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS humanresources.employee_hr_denormalized
+    ADD CONSTRAINT "FK_Employee_HR_Shift_ShiftID" FOREIGN KEY (shiftid)
+    REFERENCES humanresources.shift (shiftid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+-- FKs for Person_Contact_Denormalized
+ALTER TABLE IF EXISTS person.person_contact_denormalized
+    ADD CONSTRAINT "FK_Person_Contact_Person_BusinessEntityID" FOREIGN KEY (businessentityid)
+    REFERENCES person.person (businessentityid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS person.person_contact_denormalized
+    ADD CONSTRAINT "FK_Person_Contact_Address_AddressID" FOREIGN KEY (addressid)
+    REFERENCES person.address (addressid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS person.person_contact_denormalized
+    ADD CONSTRAINT "FK_Person_Contact_AddressType_AddressTypeID" FOREIGN KEY (addresstypeid)
+    REFERENCES person.addresstype (addresstypeid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS person.person_contact_denormalized
+    ADD CONSTRAINT "FK_Person_Contact_PhoneNumberType_PhoneNumberTypeID" FOREIGN KEY (phonenumbertype_name)
+    REFERENCES person.phonenumbertype (phonenumbertypeid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+-- FKs for Product_Master_Denormalized
+ALTER TABLE IF EXISTS production.product_master_denormalized
+    ADD CONSTRAINT "FK_Product_Master_Product_ProductID" FOREIGN KEY (productid)
+    REFERENCES production.product (productid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS production.product_master_denormalized
+    ADD CONSTRAINT "FK_Product_Master_ProductCategory_ProductCategoryID" FOREIGN KEY (productcategoryid)
+    REFERENCES production.productcategory (productcategoryid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS production.product_master_denormalized
+    ADD CONSTRAINT "FK_Product_Master_ProductSubcategory_ProductSubcategoryID" FOREIGN KEY (productsubcategoryid)
+    REFERENCES production.productsubcategory (productsubcategoryid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS production.product_master_denormalized
+    ADD CONSTRAINT "FK_Product_Master_ProductModel_ProductModelID" FOREIGN KEY (productmodelid)
+    REFERENCES production.productmodel (productmodelid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS production.product_master_denormalized
+    ADD CONSTRAINT "FK_Product_Master_ProductDescription_ProductDescriptionID" FOREIGN KEY (productdescriptionid)
+    REFERENCES production.productdescription (productdescriptionid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS production.product_master_denormalized
+    ADD CONSTRAINT "FK_Product_Master_ProductPhoto_ProductPhotoID" FOREIGN KEY (productphotoid)
+    REFERENCES production.productphoto (productphotoid) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+-- =========================================
+-- Indexes for Performance
+-- =========================================
+CREATE INDEX IF NOT EXISTS "IX_SalesOrder_Denormalized_SalesOrderID" ON sales.salesorder_denormalized (salesorderid);
+CREATE INDEX IF NOT EXISTS "IX_SalesOrder_Denormalized_ProductID" ON sales.salesorder_denormalized (productid);
+CREATE INDEX IF NOT EXISTS "IX_SalesOrder_Denormalized_SalesPersonID" ON sales.salesorder_denormalized (salespersonid);
+CREATE INDEX IF NOT EXISTS "IX_SalesOrder_Denormalized_TerritoryID" ON sales.salesorder_denormalized (territoryid);
+
+CREATE INDEX IF NOT EXISTS "IX_Employee_HR_BusinessEntityID" ON humanresources.employee_hr_denormalized (businessentityid);
+CREATE INDEX IF NOT EXISTS "IX_Employee_HR_DepartmentID" ON humanresources.employee_hr_denormalized (departmentid);
+CREATE INDEX IF NOT EXISTS "IX_Employee_HR_ShiftID" ON humanresources.employee_hr_denormalized (shiftid);
+
+CREATE INDEX IF NOT EXISTS "IX_Person_Contact_BusinessEntityID" ON person.person_contact_denormalized (businessentityid);
+CREATE INDEX IF NOT EXISTS "IX_Person_Contact_AddressID" ON person.person_contact_denormalized (addressid);
+
+CREATE INDEX IF NOT EXISTS "IX_Product_Master_ProductID" ON production.product_master_denormalized (productid);
+CREATE INDEX IF NOT EXISTS "IX_Product_Master_ProductCategoryID" ON production.product_master_denormalized (productcategoryid);
+CREATE INDEX IF NOT EXISTS "IX_Product_Master_ProductSubcategoryID" ON production.product_master_denormalized (productsubcategoryid);
+CREATE INDEX IF NOT EXISTS "IX_Product_Master_ProductModelID" ON production.product_master_denormalized (productmodelid);
+
+END;
+```

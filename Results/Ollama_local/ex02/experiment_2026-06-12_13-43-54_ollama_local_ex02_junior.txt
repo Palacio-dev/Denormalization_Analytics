@@ -1,0 +1,264 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_13-43-54
+Model: ollama_local
+Prompt: junior
+Schema: ex02
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on creating a single, wide 'Analytics Fact Table' (unidade_de_conservacao_analytics) that consolidates all dimensions (Bioma, Categoria, Local, Mutirao, Regiao, Instituicao, Esfera) and metrics (Coleta de lixo) into one table. This eliminates the need for complex JOINs between the original normalized tables, which is crucial for high-performance OLAP queries and reporting.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge all dimension tables (bioma, categoria_manejo, esfera_administrativa, instituicao_organizadora, regiao, local_de_coleta) and the transactional fact table (mutirao_de_limpeza) into a single denormalized entity table.",
+        "source_tables": [
+          "bioma",
+          "categoria_manejo",
+          "esfera_administrativa",
+          "instituicao_organizadora",
+          "regiao",
+          "local_de_coleta",
+          "mutirao_de_limpeza"
+        ],
+        "target_table": "unidade_de_conservacao_analytics"
+      },
+      {
+        "decision_id": "D2",
+        "description": "Create a separate denormalized table for waste collection metrics (coleta_de_lixo_analytics) to store the volume of different waste types per event, removing the need to join with the mutirao_de_limpeza table.",
+        "source_tables": [
+          "coleta_de_lixo",
+          "mutirao_de_limpeza"
+        ],
+        "target_table": "coleta_de_lixo_analytics"
+      },
+      {
+        "decision_id": "D3",
+        "description": "Create a unified 'Conservation Event' table that links the UCI details with the collection event details, effectively merging the primary keys of mutirao_de_limpeza and unidade_de_conservacao.",
+        "source_tables": [
+          "unidade_de_conservacao",
+          "mutirao_de_limpeza"
+        ],
+        "target_table": "conservation_event_master"
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived attributes to the 'conservation_event_master' table: 'nome_bioma', 'categoria_texto', 'nome_instituicao', 'nome_regiao', 'tipo_esfera', 'nome_local', and 'data_evento' directly in the row, replacing foreign key lookups.",
+        "added_attributes": [
+          "nome_bioma",
+          "categoria_texto",
+          "nome_instituicao",
+          "nome_regiao",
+          "tipo_esfera",
+          "nome_local",
+          "data_evento"
+        ]
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added 'volume_total' and 'volume_plastico' (and other waste types) columns to 'coleta_de_lixo_analytics' to store the integer counts directly.",
+        "added_attributes": [
+          "volume_total",
+          "volume_plastico",
+          "volume_borracha",
+          "volume_madeira",
+          "volume_produtos_texteis",
+          "volume_papel",
+          "volume_metal",
+          "volume_vidro",
+          "volume_materiais_de_pesca",
+          "volume_outros_residuos"
+        ]
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Trade-off: Storage size increases significantly due to repeated strings (names) and redundant columns. Write performance may decrease slightly due to larger row sizes, but read performance (query speed) will improve drastically by removing JOINs.",
+        "impact": "Increased storage usage and write complexity vs. drastically improved query latency."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Trade-off: Data redundancy means updates to a dimension (e.g., changing a Bioma name) require updating multiple rows in the denormalized tables, increasing the risk of inconsistency unless the data is refreshed periodically (ETL process).",
+        "impact": "Risk of data inconsistency vs. elimination of complex JOIN logic."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Report: 'List all conservation units with their associated bioma name, management category, organizing institution, and region name, along with the total number of waste types collected at the last event.'",
+        "original_complexity": "Requires 5-6 JOINs across bioma, categoria_manejo, esfera_administrativa, instituicao_organizadora, regiao, local_de_coleta, mutirao_de_limpeza, and coleta_de_lixo.",
+        "denormalized_complexity": "Single table scan with potential aggregation."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Report: 'Analyze the distribution of waste types (plastic, paper, metal) across different municipalities and regions for a specific year.'",
+        "original_complexity": "Requires JOINs between mutirao_de_limpeza, regiao, and coleta_de_lixo, followed by GROUP BY.",
+        "denormalized_complexity": "Simple GROUP BY on the pre-aggregated 'coleta_de_lixo_analytics' table."
+      }
+    ]
+  }
+}
+```
+
+### Complete SQL DDL Creation Script for the Denormalized Schema
+
+```sql
+-- Drop existing denormalized tables if they exist (for idempotency)
+DROP TABLE IF EXISTS public.unidade_de_conservacao_analytics;
+DROP TABLE IF EXISTS public.coleta_de_lixo_analytics;
+DROP TABLE IF EXISTS public.conservation_event_master;
+
+-- ============================================================================
+-- Table 1: Conservation Event Master
+-- Purpose: Consolidates UCI details with Event details to avoid JOINs for basic reporting.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.unidade_de_conservacao_analytics
+(
+    id_uc integer NOT NULL,
+    -- Event Details (Denormalized from mutirao_de_limpeza)
+    data_evento date NOT NULL,
+    horario_inicio time without time zone NOT NULL,
+    duracao_total time without time zone NOT NULL,
+    nome_bioma text NOT NULL,
+    categoria_texto text NOT NULL,
+    plano_texto text NOT NULL,
+    nome_instituicao text NOT NULL,
+    carater_instituicao text NOT NULL,
+    nome_regiao text NOT NULL,
+    estado_regiao text NOT NULL,
+    tipo_esfera text NOT NULL,
+    nome_local text NOT NULL,
+    CONSTRAINT unidade_de_conservacao_analytics_pkey PRIMARY KEY (id_uc),
+    CONSTRAINT unidade_de_conservacao_analytics_data_check CHECK (data_evento >= '1900-01-01'::date)
+);
+
+-- ============================================================================
+-- Table 2: Waste Collection Analytics
+-- Purpose: Stores waste volumes per event to avoid JOINs between mutirao and coleta tables.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.coleta_de_lixo_analytics
+(
+    id_evento integer NOT NULL, -- Primary key to link to conservation_event_master
+    volume_total integer DEFAULT 0,
+    volume_plastico integer DEFAULT 0,
+    volume_borracha integer DEFAULT 0,
+    volume_madeira integer DEFAULT 0,
+    volume_produtos_texteis integer DEFAULT 0,
+    volume_papel integer DEFAULT 0,
+    volume_metal integer DEFAULT 0,
+    volume_vidro integer DEFAULT 0,
+    volume_materiais_de_pesca integer DEFAULT 0,
+    volume_outros_residuos integer DEFAULT 0,
+    CONSTRAINT coleta_de_lixo_analytics_pkey PRIMARY KEY (id_evento)
+);
+
+-- ============================================================================
+-- Table 3: Conservation Event Master (Linking Table)
+-- Purpose: Links the UCI Master with the Waste Analytics using the event ID.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.conservation_event_master
+(
+    id_uc integer NOT NULL,
+    id_evento integer NOT NULL,
+    -- Redundant columns for quick filtering without joining
+    nome_bioma text,
+    categoria_texto text,
+    CONSTRAINT conservation_event_master_pkey PRIMARY KEY (id_uc, id_evento),
+    CONSTRAINT conservation_event_master_uc_fkey FOREIGN KEY (id_uc)
+        REFERENCES public.unidade_de_conservacao_analytics (id_uc) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE,
+    CONSTRAINT conservation_event_master_event_fkey FOREIGN KEY (id_evento)
+        REFERENCES public.coleta_de_lixo_analytics (id_evento) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE
+);
+
+-- ============================================================================
+-- Populate Data (Example Logic using INSERT ... SELECT)
+-- Note: In a real environment, this would be run as part of an ETL process
+-- to keep the denormalized tables synchronized with the source.
+-- ============================================================================
+
+-- Populate Conservation Event Master
+INSERT INTO public.unidade_de_conservacao_analytics (
+    id_uc,
+    data_evento,
+    horario_inicio,
+    duracao_total,
+    nome_bioma,
+    categoria_texto,
+    plano_texto,
+    nome_instituicao,
+    carater_instituicao,
+    nome_regiao,
+    estado_regiao,
+    tipo_esfera,
+    nome_local
+)
+SELECT 
+    u.id_uc,
+    m.data_do_ocorrido,
+    m.horario_de_inicio,
+    m.duracao_total,
+    b.nome AS nome_bioma,
+    c.categoria AS categoria_texto,
+    c.plano,
+    i.nome AS nome_instituicao,
+    i.carater,
+    r.nome AS nome_regiao,
+    r.estado,
+    e.tipo,
+    l.nome AS nome_local
+FROM public.unidade_de_conservacao u
+JOIN public.bioma b ON u.id_bioma = b.id_bioma
+JOIN public.categoria_manejo c ON u.id_manejo = c.id_manejo
+JOIN public.esfera_administrativa e ON u.id_esfera = e.id_esfera
+JOIN public.instituicao_organizadora i ON u.id_instituicao_organizadora = i.id_instituicao_organizadora
+JOIN public.regiao r ON u.id_municipio = r.id_municipio
+JOIN public.local_de_coleta l ON u.id_municipio = l.id_mutirao
+JOIN public.mutirao_de_limpeza m ON u.id_municipio = m.id_municipio;
+
+-- Populate Waste Collection Analytics
+INSERT INTO public.coleta_de_lixo_analytics (
+    id_evento,
+    volume_total,
+    volume_plastico,
+    volume_borracha,
+    volume_madeira,
+    volume_produtos_texteis,
+    volume_papel,
+    volume_metal,
+    volume_vidro,
+    volume_materiais_de_pesca,
+    volume_outros_residuos
+)
+SELECT 
+    m.id_mutirao, -- Using mutirao ID as the event ID for simplicity in this schema
+    COALESCE(SUM(c.volume_total), 0) AS volume_total,
+    COALESCE(SUM(c.volume_plastico), 0) AS volume_plastico,
+    COALESCE(SUM(c.volume_borracha), 0) AS volume_borracha,
+    COALESCE(SUM(c.volume_madeira), 0) AS volume_madeira,
+    COALESCE(SUM(c.volume_produtos_texteis), 0) AS volume_produtos_texteis,
+    COALESCE(SUM(c.volume_papel), 0) AS volume_papel,
+    COALESCE(SUM(c.volume_metal), 0) AS volume_metal,
+    COALESCE(SUM(c.volume_vidro), 0) AS volume_vidro,
+    COALESCE(SUM(c.volume_materiais_de_pesca), 0) AS volume_materiais_de_pesca,
+    COALESCE(SUM(c.volume_outros_residuos), 0) AS volume_outros_residuos
+FROM public.mutirao_de_limpeza m
+LEFT JOIN public.coleta_de_lixo c ON m.id_mutirao = c.id_mutirao
+GROUP BY m.id_mutirao;
+
+-- Create indexes for faster analytics queries
+CREATE INDEX IF NOT EXISTS idx_uc_bioma ON public.unidade_de_conservacao_analytics(nome_bioma);
+CREATE INDEX IF NOT EXISTS idx_evento_date ON public.coleta_de_lixo_analytics(data_evento);
+CREATE INDEX IF NOT EXISTS idx_evento_uc ON public.conservation_event_master(id_uc);
+```

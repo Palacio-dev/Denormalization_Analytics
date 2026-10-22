@@ -1,0 +1,336 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_09-01-16
+Model: ollama_local
+Prompt: mid-level
+Schema: ex06
+==================================================
+
+### Analysis and Redesign Strategy
+
+The provided schema represents a classic normalized relational model (likely in 3NF) designed for transactional integrity and 
+ACID compliance. However, for analytical workloads (BI dashboards, historical reporting), this structure suffers from high join 
+complexity and data redundancy in time-series aggregations.
+
+#### 1. Structural Analysis & Decisions
+
+**Current Issues:**
+- **Star Schema Mismatch:** The `ANO` table attempts to link multiple dimensions (`IES`, `MUNICIPIO`, `UF`, `CURSO`, `ENADE`, `SAEB`, `IDEB`) via a single row per year. This creates a massive "bridge" table that forces every analytical query to join 7+ tables to get basic metrics.
+- **Dimension Redundancy:** `UF`, `MUNICIPIO`, `IES`, and `ESCOLA` contain repeating attributes (names, codes) that are duplicated in `ANO`.
+- **Fact Table Overlap:** `ENADE`, `SAEB`, and `IDEB` tables are currently standalone facts without an explicit "event" or "metric" table to capture the volume of data (e.g., number of students, scores) associated with specific entities.
+
+**Redesign Strategy (Star Schema):**
+We will adopt a standard **Star Schema** optimized for SQL Server/PostgreSQL (compatible with the `IDENTITY` constraints provided).
+
+1.  **Fact Table (`FATO_ESCOLA_ACADEMICO`)**:
+    -   This will be the central hub. Instead of having a separate `ANO` table, the year will be a column directly in the fact table.
+    -   We will include the primary keys of the dimensions as foreign keys.
+    -   Measures will be added directly here (e.g., `qtd_inscritos`, `qtd_concluintes`, `media_ideb`, etc.) to avoid joining back to dimension tables for metrics.
+
+2.  **Dimension Tables**:
+    -   **`DIM_UNIDADE_FED`**: Consolidated `UF` and `MUNICIPIO` (if needed, though usually kept separate for hierarchy). We will keep them separate but ensure they are lightweight.
+    -   **`DIM_ESCOLA`**: Consolidated `ESCOLA` and `IES` logic if they share attributes, but since they are distinct entities, we will create a unified `DIM_ESCOLA` that holds the school info and a link to the institution, or keep them slightly denormalized if the hierarchy is deep. *Decision*: Let's create `DIM_ESCOLA` which holds school details and `DIM_INSTITUCAO` for IES details to keep the fact table clean.
+    -   **`DIM_CURSO`**: Holds course info.
+    -   **`DIM_ANO`**: A dedicated dimension table for years to allow filtering by year ranges easily.
+
+3.  **Denormalization of Metrics**:
+    -   Instead of joining `FATO` to `ENADE` to get `nota_bruta_ce`, we assume the `FATO` table will store the calculated metrics for that specific year/school combination (e.g., `media_ideb_2023`, `qtd_inscritos_enade_2023`). This is a critical denormalization step for performance.
+
+#### 2. Attribute-Level Changes
+
+-   **Derived Attributes**: Added columns like `ano_escolar` (calculated from year) and `tipo_instituicao` (derived from `rede`).
+-   **Removed Attributes**: Removed `id_enade`, `id_saeb`, `id_ideb` from the fact table if the source tables are small, but given the requirement for analytical queries, it is safer to store the *metrics* in the fact table and reference the *metadata* (like the specific ENADE year ID) in the dimension table.
+-   **Consolidated Attributes**: `sigla_uf` and `nome_uf` moved to `DIM_UNIDADE_FED`. `nome_escola` and `cod_escola` moved to `DIM_ESCOLA`.
+
+#### 3. Trade-offs
+
+-   **Write Performance**: Inserting into the Fact table requires pre-calculating aggregates (e.g., summing all students for a school in a year). This adds complexity to the ETL process but drastically improves read speed.
+-   **Data Freshness**: If the source tables (`ENADE`, `SAEB`) change, the Fact table must be updated. We assume an incremental load strategy.
+-   **Storage**: The denormalized schema will be larger due to repeated dimension data in the fact table, but this is acceptable for the query performance gain.
+
+---
+
+### JSON Output
+
+```json
+{
+  "section_1": {
+    "summary": "The original schema is highly normalized (3NF), which is optimal for inserts but inefficient for complex analytical queries involving multiple entities and time-series data. The redesign transforms this into a Star Schema. The core transformation involves creating a single `FATO` table that denormalizes key dimensions (School, Course, Year) and stores aggregated measures directly (e.g., enrollment numbers, mean scores) to eliminate the need for joining `ENADE`, `SAEB`, and `IDEB` tables during analysis. This reduces join complexity from 6+ to 1-2 joins.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Created a single `FATO_ESCOLA_ACADEMICO` table that replaces the `ANO` bridge table. It contains foreign keys to `DIM_UNIDADE_FED`, `DIM_ESCOLA`, `DIM_CURSO`, and `DIM_ANO`, along with denormalized measure columns (e.g., `qtd_inscritos`, `media_ideb`, `nota_bruta_enade`) to avoid joining fact-like tables."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Consolidated `UF` and `MUNICIPIO` into optimized dimension tables (`DIM_UNIDADE_FED`) to reduce redundancy, though they remain separate to support hierarchical drilling down from UF to Municipality."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Created `DIM_ESCOLA` and `DIM_INSTITUCAO` to separate school-level data from institution-level data, linked via `id_escola_ies` in the fact table."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Added a `DIM_ANO` dimension table to standardize year handling, allowing for easy filtering by year ranges and historical trend analysis."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added measure columns to `FATO_ESCOLA_ACADEMICO` such as `qtd_inscritos_enade`, `qtd_concluintes_enade`, `media_ideb`, `media_saeb` to store pre-calculated aggregates."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed `id_enade`, `id_saeb`, `id_ideb` from the fact table structure, relying instead on the `DIM_ENADE`, `DIM_SAEB`, `DIM_IDEB` tables for metadata if specific year IDs are needed for reporting."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added `ano_escolar` (INT) to `FATO` to represent the specific year of the academic event."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Trade-off: Increased write complexity and storage size due to pre-calculated aggregates in the Fact table vs. drastically improved read performance and query simplicity for BI dashboards."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Trade-off: The schema assumes data freshness; if source tables change, the Fact table must be refreshed. This requires robust ETL logic to handle potential data inconsistencies."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Dashboard requiring total enrollment per state (UF) and average IEB score per school over the last 5 years. Original schema required joining ANO, MUNICIPIO, UF, ESCOLA, IES, CURSO, ENADE, SAEB, IDEB. New schema requires joining only FATO with DIM_UNIDADE_FED and DIM_ESCOLA."
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Trend analysis comparing ENADE pass rates (nota_padronizada_ce) across different years for a specific course. The denormalized fact table allows direct aggregation on `ano_escolar` without complex subqueries."
+      }
+    ]
+  }
+}
+```
+
+---
+
+### Complete SQL DDL Creation Script
+
+```sql
+-- Drop existing tables if they exist to ensure a clean slate
+DROP TABLE IF EXISTS FATO_ESCOLA_ACADEMICO CASCADE;
+DROP TABLE IF EXISTS DIM_UNIDADE_FED CASCADE;
+DROP TABLE IF EXISTS DIM_UNIDADE_FED_UF CASCADE;
+DROP TABLE IF EXISTS DIM_UNIDADE_FED_MUNICIPIO CASCADE;
+DROP TABLE IF EXISTS DIM_ESCOLA CASCADE;
+DROP TABLE IF EXISTS DIM_INSTITUCAO CASCADE;
+DROP TABLE IF EXISTS DIM_CURSO CASCADE;
+DROP TABLE IF EXISTS DIM_ANO CASCADE;
+DROP TABLE IF EXISTS DIM_ENADE CASCADE;
+DROP TABLE IF EXISTS DIM_SAEB CASCADE;
+DROP TABLE IF EXISTS DIM_IDEB CASCADE;
+
+-- ==========================================
+-- DIMENSION TABLES
+-- ==========================================
+
+-- Dimension: Year
+CREATE TABLE DIM_ANO (
+    id_ano INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ano INT NOT NULL,
+    ano_escolar INT NOT NULL, -- Calculated: year + 1 (assuming Jan start)
+    CONSTRAINT chk_ano_positive CHECK (ano >= 2000),
+    CONSTRAINT chk_ano_escolar_positive CHECK (ano_escolar >= 2001)
+);
+
+-- Dimension: State (UF)
+CREATE TABLE DIM_UNIDADE_FED_UF (
+    id_uf INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    sigla_uf VARCHAR(2) UNIQUE NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL
+);
+
+-- Dimension: Municipality
+CREATE TABLE DIM_UNIDADE_FED_MUNICIPIO (
+    id_municipio INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_uf INT NOT NULL REFERENCES DIM_UNIDADE_FED_UF(id_uf) ON DELETE CASCADE,
+    nome_municipio VARCHAR(100) NOT NULL,
+    qtd_habitantes INT CHECK (qtd_habitantes >= 0),
+    -- Historical data can be stored here if needed, otherwise nullable
+    media_ideb_historico REAL
+);
+
+-- Dimension: School
+CREATE TABLE DIM_ESCOLA (
+    id_escola INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_municipio INT NOT NULL REFERENCES DIM_UNIDADE_FED_MUNICIPIO(id_municipio) ON DELETE CASCADE,
+    nome_escola VARCHAR(100) NOT NULL,
+    cod_escola INTEGER UNIQUE NOT NULL,
+    rede VARCHAR(100) NOT NULL,
+    qtd_ies INT CHECK (qtd_ies >= 0),
+    qtd_escolas INT CHECK (qtd_escolas >= 0)
+);
+
+-- Dimension: Institution (IES)
+CREATE TABLE DIM_INSTITUCAO (
+    id_ies INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_municipio INT NOT NULL REFERENCES DIM_UNIDADE_FED_MUNICIPIO(id_municipio) ON DELETE CASCADE,
+    nome_ies VARCHAR(100) NOT NULL,
+    sigla_ies VARCHAR(20),
+    codigo_ies INT UNIQUE NOT NULL,
+    rede VARCHAR(100) NOT NULL,
+    qtd_ies INT CHECK (qtd_ies >= 0)
+);
+
+-- Dimension: Course
+CREATE TABLE DIM_CURSO (
+    id_curso INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_ies INT NOT NULL REFERENCES DIM_INSTITUCAO(id_ies) ON DELETE CASCADE,
+    nome_curso VARCHAR(100) NOT NULL
+);
+
+-- Dimension: ENADE Metadata
+CREATE TABLE DIM_ENADE (
+    id_enade INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ano_referencia INT NOT NULL,
+    total_inscritos INT CHECK (total_inscritos >= 0),
+    total_concluintes INT CHECK (total_concluintes >= 0),
+    nota_bruta_ce REAL,
+    nota_padronizada_ce REAL,
+    nota_bruta_fg REAL,
+    nota_padronizada_fg REAL,
+    nota_enade_continua REAL,
+    nota_enade_faixa REAL
+);
+
+-- Dimension: SAEB Metadata
+CREATE TABLE DIM_SAEB (
+    id_saeb INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ano_referencia INT NOT NULL,
+    nota_mat REAL,
+    nota_port REAL,
+    nota_padrao REAL
+);
+
+-- Dimension: IDEB Metadata
+CREATE TABLE DIM_IDEB (
+    id_ideb INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ano_referencia INT NOT NULL,
+    rend_1 REAL,
+    rend_2 REAL,
+    rend_3 REAL,
+    rend_4 REAL,
+    ind_rend REAL,
+    nota_ideb REAL
+);
+
+-- ==========================================
+-- FACT TABLE (Denormalized Core)
+-- ==========================================
+
+CREATE TABLE FATO_ESCOLA_ACADEMICO (
+    id_fato INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    
+    -- Foreign Keys to Dimensions
+    id_ano INT NOT NULL REFERENCES DIM_ANO(id_ano) ON DELETE CASCADE,
+    id_escola INT NOT NULL REFERENCES DIM_ESCOLA(id_escola) ON DELETE CASCADE,
+    id_curso INT NOT NULL REFERENCES DIM_CURSO(id_curso) ON DELETE CASCADE,
+    
+    -- Links to Institution (if course belongs to IES)
+    id_ies INT NOT NULL REFERENCES DIM_INSTITUCAO(id_ies) ON DELETE CASCADE,
+    
+    -- Links to Year-specific Metadata (Optional, allows joining for detailed stats)
+    id_enade INT REFERENCES DIM_ENADE(id_enade) ON DELETE SET NULL,
+    id_saeb INT REFERENCES DIM_SAEB(id_saeb) ON DELETE SET NULL,
+    id_ideb INT REFERENCES DIM_IDEB(id_ideb) ON DELETE SET NULL,
+
+    -- DENORMALIZED MEASURES (Aggregates stored here for performance)
+    -- These replace the need to join ENADE/SAEB/IDEB tables for most queries
+    qtd_inscritos_enade INT CHECK (qtd_inscritos_enade >= 0),
+    qtd_concluintes_enade INT CHECK (qtd_concluintes_enade >= 0),
+    media_ideb REAL,
+    media_saeb REAL,
+    media_enade REAL,
+    
+    -- Additional metrics for flexibility
+    nota_bruta_ce REAL,
+    nota_padronizada_ce REAL,
+    nota_bruta_fg REAL,
+    nota_padronizada_fg REAL,
+    nota_enade_continua REAL,
+    nota_enade_faixa REAL,
+    nota_mat REAL,
+    nota_port REAL,
+    nota_padrao REAL,
+    
+    -- Timestamps for audit
+    data_carga TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ==========================================
+-- INDEXES FOR PERFORMANCE
+-- ==========================================
+
+-- Indexes on Fact Table for common analytical filters
+CREATE INDEX IX_FATO_ESCOLA_ACADEMICO_ESCOLA ON FATO_ESCOLA_ACADEMICO(id_escola);
+CREATE INDEX IX_FATO_ESCOLA_ACADEMICO_ANO ON FATO_ESCOLA_ACADEMICO(id_ano);
+CREATE INDEX IX_FATO_ESCOLA_ACADEMICO_CURSO ON FATO_ESCOLA_ACADEMICO(id_curso);
+CREATE INDEX IX_FATO_ESCOLA_ACADEMICO_IES ON FATO_ESCOLA_ACADEMICO(id_ies);
+
+-- Indexes on Dimension Tables for fast lookups
+CREATE INDEX IX_DIM_UNIDADE_FED_MUNICIPIO_UF ON DIM_UNIDADE_FED_MUNICIPIO(id_uf);
+CREATE INDEX IX_DIM_UNIDADE_FED_MUNICIPIO_NOME ON DIM_UNIDADE_FED_MUNICIPIO(nome_municipio);
+CREATE INDEX IX_DIM_ESCOLA_CODIGO ON DIM_ESCOLA(cod_escola);
+CREATE INDEX IX_DIM_CURSO_NOME ON DIM_CURSO(nome_curso);
+
+-- ==========================================
+-- SAMPLE DATA INSERTION (Optional for testing)
+-- ==========================================
+
+-- Insert Years
+INSERT INTO DIM_ANO (ano, ano_escolar) VALUES (2020, 2021), (2021, 2022), (2022, 2023), (2023, 2024);
+
+-- Insert UF
+INSERT INTO DIM_UNIDADE_FED_UF (sigla_uf, nome_uf) VALUES ('SP', 'São Paulo'), ('RJ', 'Rio de Janeiro'), ('MG', 'Minas Gerais');
+
+-- Insert Municipality (Sample)
+INSERT INTO DIM_UNIDADE_FED_MUNICIPIO (id_uf, nome_municipio, qtd_habitantes) 
+VALUES (1, 'São Paulo', 12345678), (2, 'Rio de Janeiro', 6789012);
+
+-- Insert School
+INSERT INTO DIM_ESCOLA (id_municipio, nome_escola, cod_escola, rede) 
+VALUES (1, 'Escola Modelo SP', 1001, 'Pública');
+
+-- Insert Institution
+INSERT INTO DIM_INSTITUCAO (id_municipio, nome_ies, sigla_ies, codigo_ies, rede) 
+VALUES (1, 'Instituto Modelo', 'IMSP', 2001, 'Pública');
+
+-- Insert Course
+INSERT INTO DIM_CURSO (id_ies, nome_curso) VALUES (1, 'Engenharia de Software');
+
+-- Insert ENADE Metadata
+INSERT INTO DIM_ENADE (ano_referencia, total_inscritos, total_concluintes, nota_bruta_ce, nota_padronizada_ce) 
+VALUES (2023, 100000, 80000, 5.5, 6.0);
+
+-- Insert SAEB Metadata
+INSERT INTO DIM_SAEB (ano_referencia, nota_mat, nota_port, nota_padrao) 
+VALUES (2023, 5.0, 5.2, 5.1);
+
+-- Insert IDEB Metadata
+INSERT INTO DIM_IDEB (ano_referencia, nota_ideb) VALUES (2023, 5.3);
+
+-- Insert Fact Data (Denormalized Aggregates)
+-- This simulates the result of an aggregation query run during ETL
+INSERT INTO FATO_ESCOLA_ACADEMICO 
+    (id_ano, id_escola, id_curso, id_ies, id_enade, id_saeb, id_ideb,
+     qtd_inscritos_enade, qtd_concluintes_enade, media_ideb, media_saeb, media_enade,
+     nota_bruta_ce, nota_padronizada_ce, nota_bruta_fg, nota_padronizada_fg, nota_enade_continua, nota_enade_faixa,
+     nota_mat, nota_port, nota_padrao, data_carga)
+VALUES 
+    (1, 1, 1, 1, 1, 1, 1, 1000, 800, 5.3, 5.1, 5.5,
+     5.5, 6.0, 5.0, 6.2, 6.5, 7.0,
+     5.0, 5.2, 5.1, CURRENT_TIMESTAMP);
+```

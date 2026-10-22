@@ -1,0 +1,187 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-59-11
+Model: gemini
+Prompt: OBT
+Schema: ex08
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy adopts the One-Big-Table (OBT) model to eliminate JOIN bottlenecks and optimize heavy analytical read queries. By flattening the highly normalized snowflake schema into a single wide table, we pre-join student demographics, enrollment details, school infrastructure, academic performance, and employment records. This structure enables ultra-fast aggregations and filtering at the cost of data redundancy.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged all 10 tables (aluno_ifb, curso_ifb, desempenho_enem, escola, indicadores_escolares, localizacao, matricula_ifb, participacao_enem, remuneracao, vinculo_empregaticio) into a single table named 'instituicao_aluno_consolidado_obt'."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Removed all Foreign Key constraints to comply with the OBT model requirements and optimize read throughput."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Created a new surrogate Primary Key 'id_registro' to uniquely identify each row in the denormalized table, as the grain now represents a cross-product of student enrollments and employment records."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Prefixed the 'nu_ano' attribute from multiple source tables to avoid ambiguity: 'enem_nu_ano' (from desempenho_enem), 'indicadores_nu_ano' (from indicadores_escolares), and 'participacao_nu_ano' (from participacao_enem)."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Prefixed the 'ano' attribute from matricula_ifb to 'matricula_ano' to differentiate it from 'ano_rais' in vinculo_empregaticio."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Duplicated and prefixed the 'uf' and 'municipio' attributes from the 'localizacao' table to represent both the school's location ('escola_uf', 'escola_municipio') and the employment location ('vinculo_uf', 'vinculo_municipio') since the original model had two separate relationships to the localizacao table."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Retained original Primary Key columns (e.g., id_aluno, co_curso, co_escola_educacenso) as standard data attributes to preserve semantic equivalence and traceability."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage Footprint: School indicators, ENEM performance, and course details will be heavily duplicated for every student enrollment and employment combination."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: Modifying a school's infrastructure data or a course's workload will require updating multiple rows instead of a single record in a dimension table."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Massive Read Performance Gain: Analytical queries grouping student income by school location or course type will no longer require complex 6-to-8 table JOINs, drastically reducing CPU and memory overhead during reads."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "Q1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Socioeconomic impact analysis: Correlating a student's employment status and remuneration (vinculo_empregaticio, remuneracao) with their academic enrollment situation (matricula_ifb) and demographic data (aluno_ifb)."
+      },
+      {
+        "decision_id": "Q2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Institutional performance evaluation: Analyzing how school infrastructure and teacher formation (escola, indicadores_escolares) affect ENEM performance (desempenho_enem) and student retention/dropout rates across different courses."
+      },
+      {
+        "decision_id": "Q3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Geographical mobility analysis: Comparing the municipality of the student's school (escola_municipio) with the municipality of their formal employment (vinculo_municipio)."
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- =====================================================================================
+-- DENORMALIZED SCHEMA: ONE-BIG-TABLE (OBT) MODEL
+-- Target Dialect: PostgreSQL
+-- =====================================================================================
+
+CREATE TABLE IF NOT EXISTS public.instituicao_aluno_consolidado_obt
+(
+    -- Surrogate Primary Key for the OBT
+    id_registro serial NOT NULL,
+
+    -- Attributes from: aluno_ifb
+    id_aluno integer,
+    data_nascimento date,
+    idade integer,
+    sexo character(1) COLLATE pg_catalog."default",
+    nacionalidade character varying(50) COLLATE pg_catalog."default",
+    raca character varying(50) COLLATE pg_catalog."default",
+    portador_deficiencia boolean,
+
+    -- Attributes from: curso_ifb
+    co_curso character varying(50) COLLATE pg_catalog."default",
+    no_curso character varying(200) COLLATE pg_catalog."default",
+    co_tipo_curso character varying(10) COLLATE pg_catalog."default",
+    tipo_curso character varying(100) COLLATE pg_catalog."default",
+    co_tipo_nivel character varying(10) COLLATE pg_catalog."default",
+    ds_tipo_nivel character varying(100) COLLATE pg_catalog."default",
+    ds_eixo_tecnologico character varying(200) COLLATE pg_catalog."default",
+    modalidade_ensino character varying(100) COLLATE pg_catalog."default",
+    carga_horaria integer,
+
+    -- Attributes from: matricula_ifb
+    id_matricula integer,
+    co_ciclo_matricula character varying(50) COLLATE pg_catalog."default",
+    periodo character varying(30) COLLATE pg_catalog."default",
+    situacao_matricula character varying(50) COLLATE pg_catalog."default",
+    tipo_cota character varying(50) COLLATE pg_catalog."default",
+    atestado_baixarenda character varying(20) COLLATE pg_catalog."default",
+    matricula_ano character varying(20) COLLATE pg_catalog."default",
+    unidade_ensino character varying(100) COLLATE pg_catalog."default",
+
+    -- Attributes from: escola
+    co_escola_educacenso character varying(50) COLLATE pg_catalog."default",
+    no_escola_educacenso character varying(200) COLLATE pg_catalog."default",
+    tp_dependencia_adm_escola smallint,
+    tp_localizacao_escola smallint,
+    inse character varying(10) COLLATE pg_catalog."default",
+
+    -- Attributes from: localizacao (Related to escola)
+    escola_uf character varying(2) COLLATE pg_catalog."default",
+    escola_municipio character varying(100) COLLATE pg_catalog."default",
+
+    -- Attributes from: desempenho_enem
+    id_desempenho integer,
+    enem_nu_ano integer,
+    nu_media_cn numeric(6, 2),
+    nu_media_ch numeric(6, 2),
+    nu_media_lp numeric(6, 2),
+    nu_media_mt numeric(6, 2),
+    nu_media_red numeric(6, 2),
+
+    -- Attributes from: indicadores_escolares
+    id_indicadores integer,
+    indicadores_nu_ano integer,
+    nu_taxa_permanencia numeric(6, 2),
+    nu_taxa_aprovacao numeric(5, 2),
+    nu_taxa_reprovacao numeric(5, 2),
+    nu_taxa_abandono numeric(5, 2),
+    porte_escola character varying(50) COLLATE pg_catalog."default",
+    pc_formacao_docente numeric(5, 2),
+
+    -- Attributes from: participacao_enem
+    id_participacao integer,
+    participacao_nu_ano integer,
+    nu_matriculas integer,
+    nu_participantes_nec_esp integer,
+    nu_participantes integer,
+    nu_taxa_participacao numeric(5, 2),
+
+    -- Attributes from: vinculo_empregaticio
+    id_vinculo integer,
+    ano_rais integer,
+    razao_social character varying(200) COLLATE pg_catalog."default",
+    tipo_vinculo_empregaticio character varying(200) COLLATE pg_catalog."default",
+    data_admissao_declarada date,
+    tempo_emprego integer,
+    motivo_desligamento character varying(200) COLLATE pg_catalog."default",
+    mes_desligamento character varying(20) COLLATE pg_catalog."default",
+    indicador_vinculo_ativo boolean,
+
+    -- Attributes from: localizacao (Related to vinculo_empregaticio)
+    vinculo_uf character varying(2) COLLATE pg_catalog."default",
+    vinculo_municipio character varying(100) COLLATE pg_catalog."default",
+
+    -- Attributes from: remuneracao
+    id_remuneracao integer,
+    vl_remun_media_nom numeric(10, 2),
+    vl_remun_media_sm numeric(10, 2),
+    vl_remun_dezembro_nom numeric(10, 2),
+    vl_remun_dezembro_sm numeric(10, 2),
+    qtd_hora_contr integer,
+    vl_ultima_remuneracao_ano numeric(10, 2),
+    vl_salario_contratual numeric(10, 2),
+
+    CONSTRAINT instituicao_aluno_consolidado_obt_pkey PRIMARY KEY (id_registro)
+);
+```

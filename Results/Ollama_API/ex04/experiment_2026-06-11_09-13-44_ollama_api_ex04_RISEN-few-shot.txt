@@ -1,0 +1,212 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-13-44
+Model: ollama_api
+Prompt: RISEN-few-shot
+Schema: ex04
+==================================================
+
+{
+"section_1": {
+"summary": "The denormalization strategy focuses on collapsing related tables and adding redundant attributes to eliminate frequent JOIN operations. The primary goal is to improve read performance for analytical queries that span multiple related entities like country, region, survey, and demographic data. Key decisions include merging country and region information, embedding country details into survey and fact tables, and collapsing related demographic and social indicator tables.",
+"structural_decisions": [
+{
+"decision_id": "D1",
+"description": "Collapse country and region tables into survey table by embedding region_code, region_name, country_name directly into survey table to eliminate JOINs for country-region lookups"
+},
+{
+"decision_id": "D2",
+"description": "Embed country_name, region_code, and region_name into all fact tables (demography, employment, education, economy, health) to eliminate JOINs with country table"
+},
+{
+"decision_id": "D3",
+"description": "Collapse demography-related tables (demography, population, life_expectancy) into a single denormalized table with embedded country information"
+},
+{
+"decision_id": "D4",
+"description": "Retain decile table but embed survey identifiers directly instead of foreign key references to reduce join depth"
+}
+],
+"attribute_level_changes": [
+{
+"decision_id": "A1",
+"description": "Added redundant attributes region_name, country_name to survey table from region and country tables respectively"
+},
+{
+"decision_id": "A2",
+"description": "Added redundant attributes country_name, region_code, region_name to demography, employment, education, economy, and health tables"
+},
+{
+"decision_id": "A3",
+"description": "Added derived attributes pop_total (sum of urban_pop and rural_pop) to demography table"
+},
+{
+"decision_id": "A4",
+"description": "Removed foreign key constraints and replaced with embedded dimensional attributes"
+}
+],
+"tradeoffs": [
+{
+"decision_id": "T1",
+"description": "Storage overhead increases due to redundant country and region information stored across multiple tables, but query performance improves significantly by eliminating JOINs"
+},
+{
+"decision_id": "T2",
+"description": "Data modification complexity increases as updates to country or region information require changes in multiple tables, but read performance for analytical queries is greatly enhanced"
+},
+{
+"decision_id": "T3",
+"description": "Loss of normalization benefits like data consistency enforcement through foreign keys, but gained significant performance improvement for read-heavy analytical workloads"
+}
+]
+},
+"section_2": {
+"query_patterns": [
+{
+"decision_id": "D1",
+"query_pattern_type": "inferred",
+"query_pattern_description": "Analytical queries joining survey data with country and region information to analyze welfare metrics by geographical regions"
+},
+{
+"decision_id": "D2",
+"query_pattern_type": "inferred",
+"query_pattern_description": "Cross-domain analysis queries joining demographic, economic, health, and education indicators for the same country and year"
+},
+{
+"decision_id": "D3",
+"query_pattern_type": "inferred",
+"query_pattern_description": "Time-series analysis queries requiring population demographics along with life expectancy and other health indicators"
+},
+{
+"decision_id": "D4",
+"query_pattern_type": "inferred",
+"query_pattern_description": "Poverty and inequality analysis queries requiring decile information alongside survey metadata"
+}
+]
+}
+}
+
+```sql
+CREATE TABLE IF NOT EXISTS public.survey
+(
+    id_survey serial NOT NULL,
+    country_code character varying NOT NULL,
+    country_name character varying,
+    region_code character varying NOT NULL,
+    region_name character varying NOT NULL,
+    welfare_type character varying,
+    survey_acronym character varying,
+    survey_comparability integer,
+    comparable_spell character varying,
+    poverty_line double precision,
+    headcount double precision,
+    poverty_gap double precision,
+    poverty_severity double precision,
+    gini double precision,
+    reporting_pop integer,
+    reporting_pce double precision,
+    distribution_type character varying,
+    spl double precision,
+    survey_year integer,
+    survey_coverage character varying,
+    reporting_level character varying,
+    PRIMARY KEY (id_survey)
+);
+
+CREATE TABLE IF NOT EXISTS public.decile
+(
+    id_decile serial NOT NULL,
+    value double precision,
+    name character varying,
+    id_survey integer NOT NULL,
+    country_code character varying NOT NULL,
+    survey_year integer,
+    welfare_type character varying,
+    PRIMARY KEY (id_decile)
+);
+
+CREATE TABLE IF NOT EXISTS public.demography
+(
+    id_demography serial NOT NULL,
+    year integer,
+    country_code character varying NOT NULL,
+    country_name character varying,
+    region_code character varying NOT NULL,
+    region_name character varying NOT NULL,
+    pop_density double precision,
+    urban_pop double precision,
+    rural_pop double precision,
+    pop_total double precision,
+    net_migration double precision,
+    death_rate double precision,
+    birth_rate double precision,
+    pop_ages character varying,
+    gender character varying,
+    population_number double precision,
+    life_expectancy double precision,
+    PRIMARY KEY (id_demography)
+);
+
+CREATE TABLE IF NOT EXISTS public.employment
+(
+    id_employment serial NOT NULL,
+    year integer,
+    country_code character varying NOT NULL,
+    country_name character varying,
+    region_code character varying NOT NULL,
+    region_name character varying NOT NULL,
+    child_emp double precision,
+    unemp double precision,
+    vulnerable_emp double precision,
+    part_time double precision,
+    employers double precision,
+    labor_force_total double precision,
+    labor_force_fem double precision,
+    PRIMARY KEY (id_employment)
+);
+
+CREATE TABLE IF NOT EXISTS public.education
+(
+    id_education serial NOT NULL,
+    year integer,
+    country_code character varying NOT NULL,
+    country_name character varying,
+    region_code character varying NOT NULL,
+    region_name character varying NOT NULL,
+    child_out_of_school double precision,
+    progression_to_sec double precision,
+    expenditure double precision,
+    preprim_enroll double precision,
+    prim_enrol double precision,
+    sec_enrol double precision,
+    terti_enrol double precision,
+    PRIMARY KEY (id_education)
+);
+
+CREATE TABLE IF NOT EXISTS public.economy
+(
+    id_economy serial NOT NULL,
+    year integer,
+    country_code character varying NOT NULL,
+    country_name character varying,
+    region_code character varying NOT NULL,
+    region_name character varying NOT NULL,
+    gdp double precision,
+    inflation double precision,
+    tax_revenue double precision,
+    PRIMARY KEY (id_economy)
+);
+
+CREATE TABLE IF NOT EXISTS public.health
+(
+    id_health serial NOT NULL,
+    year integer,
+    country_code character varying NOT NULL,
+    country_name character varying,
+    region_code character varying NOT NULL,
+    region_name character varying NOT NULL,
+    hospital_beds double precision,
+    physicians double precision,
+    expenditure double precision,
+    PRIMARY KEY (id_health)
+);
+```

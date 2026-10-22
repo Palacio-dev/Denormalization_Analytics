@@ -1,0 +1,145 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-04_01-12-20
+Model: ollama_local
+Prompt: OBT
+Schema: ex07
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy adopts the 'One-Big-Table' approach to eliminate join overhead for read-heavy analytical workloads. All entities (Usinas, Proprietarios, Rios, Localizacoes, Municipios, Estados) are merged into a single flat table. Foreign Keys are removed to simplify the schema, and all original attributes are preserved. To maintain semantic integrity without joins, attributes that were previously in different tables are concatenated or prefixed with their source entity name (e.g., 'MunicipioNome', 'RioNome', 'EstadoUf'). The Primary Key is derived from the unique business identifier of the 'Usina' (id).",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged all six original tables (Usina, Proprietarios, Rios, Localizacoes, Municipios, Estados) into a single table named 'Usina_Denormalizada'. Removed all Foreign Key constraints and unique constraints to align with the one-big-table strategy."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Changed the Primary Key from 'id' (Usina) to 'id_usina' to avoid naming conflicts and explicitly denote the root entity within the denormalized structure."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Flattened the hierarchy of Municipios and Localizacoes. The 'id_municipio1' and 'id_municipio2' relationships are now resolved by including 'municipio1_nome', 'municipio1_uf', 'municipio2_nome', and 'municipio2_uf' directly in the row."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Flattened the hierarchy of Rios and Proprietarios by including 'rio_nome' and 'proprietario_nome' directly in the row, removing the need to look up 'Proprietarios' and 'Rios' tables."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Flattened the 'Estados' table by removing the standalone 'uf' column and instead using 'estado_uf' which acts as a lookup for the municipality UFs."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Renamed 'id' to 'id_usina' as the sole Primary Key. Removed all 'id_proprietario', 'id_rio', 'id_localizacao', 'id_municipio', 'id_municipio1', 'id_municipio2', 'uf' (from states), and 'uf' (from municipalities) columns as they are no longer needed for joins."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added 'rio_nome' (VARCHAR) to store the river name directly."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added 'proprietario_nome' (VARCHAR) to store the owner name directly."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added 'municipio1_nome' (VARCHAR), 'municipio1_uf' (CHAR(2)), 'municipio2_nome' (VARCHAR), 'municipio2_uf' (CHAR(2)) to resolve the two-municipality relationship."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Added 'estado_uf' (CHAR(2)) to store the state code associated with the municipalities."
+      },
+      {
+        "decision_id": "A6",
+        "description": "Added 'localizacao_lat' and 'localizacao_long' (DOUBLE PRECISION) to store coordinates directly, removing the need to join 'Localizacoes'."
+      },
+      {
+        "decision_id": "A7",
+        "description": "Added 'estagio' (VARCHAR) to the root row, as it was previously in the 'Usina' table but kept for completeness in the denormalized view."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Increased storage size and potential index bloat on the single large table versus the significant performance gain from eliminating multiple JOIN operations on read-heavy queries."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Loss of referential integrity constraints (Foreign Keys). In a data warehouse or analytical context, this is acceptable, but in a transactional OLTP system, this increases the risk of orphaned records if not managed by application logic."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Tradeoff: Semantic ambiguity is reduced by prefixing attribute names (e.g., 'municipio1_nome'), but the schema becomes harder to maintain and understand for developers unfamiliar with the flattening strategy."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical query: 'Find all hydroelectric plants in State X with a capacity > Y, including their river names and owner names.' Previously required JOINs between Usina, Rios, Proprietarios, and Estados. Now executed with a single filter on 'estado_uf' and 'potkw'."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical query: 'List all plants located in Municipality A and Municipality B.' Previously required a complex JOIN between Usina and Localizacoes, then Localizacoes and Municipios. Now achieved by filtering on 'municipio1_nome' and 'municipio2_nome'."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Geospatial query: 'Find plants within a specific latitude/longitude range.' Previously required joining Usina to Localizacoes to get coordinates. Now filters directly on 'localizacao_lat' and 'localizacao_long'."
+      }
+    ]
+  }
+}
+```
+
+### Complete SQL DDL Creation Script
+
+```sql
+-- Drop existing tables to ensure clean state (if running in a fresh environment)
+DROP TABLE IF EXISTS public."Usina_Denormalizada";
+
+CREATE TABLE IF NOT EXISTS public."Usina_Denormalizada" (
+    id_usina INTEGER PRIMARY KEY,
+    -- Usina Attributes
+    nome VARCHAR NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    iniciop DATE,
+    atualizacao DATE,
+    estagio VARCHAR,
+    lat DOUBLE PRECISION,
+    long DOUBLE PRECISION,
+    
+    -- Proprietario Attributes (Flattened)
+    proprietario_nome VARCHAR,
+    
+    -- Rio Attributes (Flattened)
+    rio_nome VARCHAR,
+    
+    -- Localizacao Attributes (Flattened)
+    localizacao_lat DOUBLE PRECISION,
+    localizacao_long DOUBLE PRECISION,
+    
+    -- Municipio Attributes (Flattened - Handling 1-to-2 relationship)
+    municipio1_nome VARCHAR,
+    municipio1_uf CHAR(2),
+    municipio2_nome VARCHAR,
+    municipio2_uf CHAR(2),
+    
+    -- Estado Attributes (Flattened)
+    estado_uf CHAR(2)
+);
+
+-- Indexes for performance on the denormalized table
+CREATE INDEX IF NOT EXISTS idx_usina_denom_estado ON public."Usina_Denormalizada"(estado_uf);
+CREATE INDEX IF NOT EXISTS idx_usina_denom_capacidade ON public."Usina_Denormalizada"(potkw, potfis);
+CREATE INDEX IF NOT EXISTS idx_usina_denom_municipio1 ON public."Usina_Denormalizada"(municipio1_nome);
+CREATE INDEX IF NOT EXISTS idx_usina_denom_municipio2 ON public."Usina_Denormalizada"(municipio2_nome);
+CREATE INDEX IF NOT EXISTS idx_usina_denom_lat_long ON public."Usina_Denormalizada"(lat, long);
+```

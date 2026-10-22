@@ -1,0 +1,114 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-09-36
+Model: ollama_api
+Prompt: RISEN-few-shot
+Schema: employees
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on collapsing relations and adding redundant attributes to reduce join overhead for common analytical queries. We merge the employee core data with their current department, salary, and title information into a single denormalized table. This approach addresses frequent queries that require employee details along with their current department, salary, and job title, which in the normalized model would require multiple joins.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapse the employee, department_employee, department, salary, and title tables into a single denormalized table to store current employee information."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Retain the department_manager table as a separate entity since it represents a distinct managerial relationship not part of the core employee snapshot."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant attributes dept_name from department table into the new employee_snapshot table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added derived attribute is_current_employee to indicate if the employee record represents the latest known state."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved read performance for employee-centric queries at the cost of increased storage and more complex write operations to maintain data consistency."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified query structure for analytical reporting but lost full historical tracking of concurrent department/salary/title changes within a single row."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Retrieve list of all employees with their current department, salary, and title for HR reporting dashboards."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze salary distributions across departments and job titles, requiring frequent joins between employee, department, salary, and title tables."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Generate organizational charts showing current employees, their departments, and roles without needing complex temporal joins."
+      }
+    ]
+  }
+}
+
+```sql
+CREATE TABLE IF NOT EXISTS employees.employee_snapshot
+(
+    employee_id bigint NOT NULL,
+    birth_date date NOT NULL,
+    first_name character varying(14) COLLATE pg_catalog."default" NOT NULL,
+    last_name character varying(16) COLLATE pg_catalog."default" NOT NULL,
+    gender employees.employee_gender NOT NULL,
+    hire_date date NOT NULL,
+    department_id character(4) COLLATE pg_catalog."default",
+    dept_name character varying(40) COLLATE pg_catalog."default",
+    salary_amount bigint,
+    salary_from_date date,
+    salary_to_date date,
+    title_name character varying(50) COLLATE pg_catalog."default",
+    title_from_date date,
+    title_to_date date,
+    is_current_employee boolean NOT NULL DEFAULT true,
+    CONSTRAINT idx_employee_snapshot_primary PRIMARY KEY (employee_id)
+);
+
+CREATE TABLE IF NOT EXISTS employees.department
+(
+    id character(4) COLLATE pg_catalog."default" NOT NULL,
+    dept_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT idx_department_primary PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS employees.department_manager
+(
+    employee_id bigint NOT NULL,
+    department_id character(4) COLLATE pg_catalog."default" NOT NULL,
+    from_date date NOT NULL,
+    to_date date NOT NULL,
+    CONSTRAINT idx_department_manager_primary PRIMARY KEY (employee_id, department_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_department_manager_dept_no
+    ON employees.department_manager(department_id);
+
+ALTER TABLE IF EXISTS employees.department_manager
+    ADD CONSTRAINT dept_manager_ibfk_1 FOREIGN KEY (employee_id)
+    REFERENCES employees.employee_snapshot (employee_id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE CASCADE;
+
+ALTER TABLE IF EXISTS employees.department_manager
+    ADD CONSTRAINT dept_manager_ibfk_2 FOREIGN KEY (department_id)
+    REFERENCES employees.department (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE CASCADE;
+```

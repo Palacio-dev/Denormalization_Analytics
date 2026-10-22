@@ -1,0 +1,125 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-24-02
+Model: ollama_api
+Prompt: junior
+Schema: ex10
+==================================================
+
+{
+  "section_1": {
+    "summary": "The goal is to denormalize the existing normalized schema to improve query performance for analytics and reporting. The strategy involves merging tables that are frequently joined together, embedding descriptive attributes (like country names, continent names, energy source names), and precomputing derived metrics where applicable. This reduces the number of joins required during querying, which is especially beneficial for OLAP-style workloads.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge `paises`, `continente` into a single dimension table to avoid joining countries with continents."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge `consumo_anual`, `paises`, `continente`, and `fonte_energia` into a single fact table to eliminate multiple joins when analyzing energy consumption by country, continent, and energy type."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge `emissao_g_efeito_estufa`, `paises`, and `continente` into a single fact table to simplify queries related to emissions."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Merge `populacao`, `paises`, and `continente` into a single fact or dimension table to simplify population-based analytics."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added `nome_pais`, `nome_continente`, and `nome_fonte_energia` as descriptive attributes directly in the fact tables to avoid joins."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed surrogate keys (`id_paises`, `id_continente`, `tipo_energia`) from fact tables and replaced them with descriptive names or codes where appropriate for analytical clarity."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Retained `ano` in all fact tables as a key dimension for time-based analysis."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Denormalization increases data redundancy, which may lead to higher storage usage and potential inconsistency if not properly maintained. However, this is acceptable for analytics workloads where read performance is prioritized."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Updates to dimension data (e.g., country name or continent) now require updates in multiple places. This is mitigated by limiting updates or using ETL processes to maintain consistency."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyzing energy consumption (`porcentagem`) by country, continent, and energy source over time. Original schema requires joining `consumo_anual`, `paises`, `continente`, and `fonte_energia`."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting total emissions (`quantidade_emitida`) by country and continent over time. Original schema requires joining `emissao_g_efeito_estufa`, `paises`, and `continente`."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyzing population (`quantidade_hab`) trends by country and continent. Original schema requires joining `populacao`, `paises`, and `continente`."
+      }
+    ]
+  }
+}
+
+---
+
+### Denormalized SQL DDL Creation Script
+
+```sql
+-- Denormalized table for energy consumption
+CREATE TABLE IF NOT EXISTS public.fato_consumo_energia (
+    ano INTEGER NOT NULL,
+    nome_pais VARCHAR(50) NOT NULL,
+    nome_continente VARCHAR(50) NOT NULL,
+    nome_fonte_energia VARCHAR(50) NOT NULL,
+    porcentagem INTEGER NOT NULL
+);
+
+-- Denormalized table for emissions
+CREATE TABLE IF NOT EXISTS public.fato_emissao (
+    ano INTEGER NOT NULL,
+    nome_pais VARCHAR(50) NOT NULL,
+    nome_continente VARCHAR(50) NOT NULL,
+    quantidade_emitida BIGINT NOT NULL
+);
+
+-- Denormalized table for population
+CREATE TABLE IF NOT EXISTS public.fato_populacao (
+    ano INTEGER NOT NULL,
+    nome_pais VARCHAR(50) NOT NULL,
+    nome_continente VARCHAR(50) NOT NULL,
+    quantidade_hab INTEGER NOT NULL
+);
+```
+
+---
+
+### Explanation of the Denormalized Schema
+
+1. **`fato_consumo_energia`**:
+   - Merges data from `consumo_anual`, `paises`, `continente`, and `fonte_energia`.
+   - Includes descriptive names instead of foreign key IDs.
+   - Optimized for queries like: *“What percentage of renewable energy was consumed in Europe in 2020?”*
+
+2. **`fato_emissao`**:
+   - Merges data from `emissao_g_efeito_estufa`, `paises`, and `continente`.
+   - Includes country and continent names directly.
+   - Optimized for queries like: *“Which countries in Asia had the highest emissions in 2021?”*
+
+3. **`fato_populacao`**:
+   - Merges data from `populacao`, `paises`, and `continente`.
+   - Includes country and continent names directly.
+   - Optimized for queries like: *“How has the population of African countries changed over time?”*
+
+This schema is ideal for data warehouses or reporting layers where complex joins are avoided in favor of fast read performance.

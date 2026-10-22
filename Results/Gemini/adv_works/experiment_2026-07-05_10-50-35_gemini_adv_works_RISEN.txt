@@ -1,0 +1,621 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_10-50-35
+Model: gemini
+Prompt: RISEN
+Schema: adv_works
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transforms the highly normalized OLTP AdventureWorks relational model into a Star Schema
+    optimized for OLAP workloads. By collapsing deeply nested hierarchies 
+    (e.g., Product -> Subcategory -> Category, and Address -> State -> Country) into wide dimension tables, and merging order 
+    headers with their respective details into unified fact tables, we eliminate expensive multi-table joins. Derived attributes
+    are added to precompute line totals, and audit/logging columns are removed to reduce storage overhead.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapsed `production.product`, `production.productsubcategory`, `production.productcategory`, and `production.productmodel` into a single wide dimension table `analytical.dim_product`."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapsed `person.address`, `person.stateprovince`, `person.countryregion`, and `sales.salesterritory` into a single wide dimension table `analytical.dim_geography`."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merged `sales.salesorderheader` and `sales.salesorderdetail` into a single fact table `analytical.fact_sales` to avoid joining headers and lines for revenue calculations."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Merged `purchasing.purchaseorderheader` and `purchasing.purchaseorderdetail` into a single fact table `analytical.fact_purchases`."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Collapsed `production.workorder`, `production.workorderrouting`, and `production.scrapreason` into `analytical.fact_workorder`."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Combined `production.transactionhistory` and `production.transactionhistoryarchive` into a single table `analytical.fact_inventory_transactions`."
+      },
+      {
+        "decision_id": "D7",
+        "description": "Collapsed `humanresources.employee` and `sales.salesperson` into `analytical.dim_employee`."
+      },
+      {
+        "decision_id": "D8",
+        "description": "Merged lookup tables into their respective bridge/cross-reference tables (e.g., `person.addresstype` into `dim_businessentity_address`, `person.contacttype` into `dim_businessentity_contact`)."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived attribute `line_total` to `fact_sales`, precomputed as `orderqty * unitprice * (1 - unitpricediscount)`."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added derived attribute `line_total` to `fact_purchases`, precomputed as `orderqty * unitprice`."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added derived boolean attribute `is_archive` to `fact_inventory_transactions` to distinguish records originating from the archive table."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Removed all audit and logging attributes across all tables (`modifieddate`, `rowguid`, `passwordhash`, `passwordsalt`)."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Prefixed overlapping column names to prevent ambiguity (e.g., `name` became `product_name`, `category_name`, `subcategory_name`, `stateprovince_name`)."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage requirements due to data redundancy (e.g., repeating category names for every product in `dim_product`)."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Slower write/update performance (ETL overhead), as updating a single category name now requires updating all associated product rows in the dimension table."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Potential for data anomalies if the denormalized tables are updated directly via OLTP transactions rather than through a controlled ETL pipeline."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1_D2_D3",
+        "query": "SELECT g.countryregion_name, p.category_name, SUM(s.line_total) AS total_revenue FROM analytical.fact_sales s JOIN analytical.dim_product p ON s.productid = p.productid JOIN analytical.dim_geography g ON s.shiptoaddressid = g.addressid GROUP BY g.countryregion_name, p.category_name ORDER BY total_revenue DESC;"
+      },
+      {
+        "decision_id": "D6",
+        "query": "SELECT productid, transactiontype, SUM(quantity) AS total_qty, SUM(actualcost) AS total_cost FROM analytical.fact_inventory_transactions WHERE transactiondate >= '2023-01-01' GROUP BY productid, transactiontype;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+CREATE SCHEMA IF NOT EXISTS analytical;
+
+-- 1. dim_product
+CREATE TABLE analytical.dim_product (
+    productid integer NOT NULL,
+    product_name character varying(50) NOT NULL,
+    productnumber character varying(25) NOT NULL,
+    makeflag boolean NOT NULL DEFAULT true,
+    finishedgoodsflag boolean NOT NULL DEFAULT true,
+    color character varying(15),
+    safetystocklevel smallint NOT NULL,
+    reorderpoint smallint NOT NULL,
+    standardcost numeric NOT NULL,
+    listprice numeric NOT NULL,
+    size character varying(5),
+    sizeunitmeasurecode character(3),
+    weightunitmeasurecode character(3),
+    weight numeric(8, 2),
+    daystomanufacture integer NOT NULL,
+    productline character(2),
+    class character(2),
+    style character(2),
+    sellstartdate timestamp without time zone NOT NULL,
+    sellenddate timestamp without time zone,
+    discontinueddate timestamp without time zone,
+    productsubcategoryid integer,
+    subcategory_name character varying(50),
+    productcategoryid integer,
+    category_name character varying(50),
+    productmodelid integer,
+    model_name character varying(50),
+    catalogdescription xml,
+    instructions xml,
+    CONSTRAINT "PK_dim_product" PRIMARY KEY (productid)
+);
+
+-- 2. dim_geography
+CREATE TABLE analytical.dim_geography (
+    addressid integer NOT NULL,
+    addressline1 character varying(60) NOT NULL,
+    addressline2 character varying(60),
+    city character varying(30) NOT NULL,
+    postalcode character varying(15) NOT NULL,
+    spatiallocation bytea,
+    stateprovinceid integer NOT NULL,
+    stateprovincecode character(3) NOT NULL,
+    isonlystateprovinceflag boolean NOT NULL DEFAULT true,
+    stateprovince_name character varying(50) NOT NULL,
+    countryregioncode character varying(3) NOT NULL,
+    countryregion_name character varying(50) NOT NULL,
+    territoryid integer NOT NULL,
+    territory_name character varying(50) NOT NULL,
+    territory_group character varying(50) NOT NULL,
+    salesytd numeric NOT NULL DEFAULT 0.00,
+    saleslastyear numeric NOT NULL DEFAULT 0.00,
+    costytd numeric NOT NULL DEFAULT 0.00,
+    costlastyear numeric NOT NULL DEFAULT 0.00,
+    CONSTRAINT "PK_dim_geography" PRIMARY KEY (addressid)
+);
+
+-- 3. dim_customer
+CREATE TABLE analytical.dim_customer (
+    customerid integer NOT NULL,
+    personid integer,
+    storeid integer,
+    territoryid integer,
+    store_name character varying(50),
+    salespersonid integer,
+    store_demographics xml,
+    CONSTRAINT "PK_dim_customer" PRIMARY KEY (customerid)
+);
+
+-- 4. dim_person
+CREATE TABLE analytical.dim_person (
+    businessentityid integer NOT NULL,
+    persontype character(2) NOT NULL,
+    namestyle boolean NOT NULL DEFAULT false,
+    title character varying(8),
+    firstname character varying(50) NOT NULL,
+    middlename character varying(50),
+    lastname character varying(50) NOT NULL,
+    suffix character varying(10),
+    emailpromotion integer NOT NULL DEFAULT 0,
+    additionalcontactinfo xml,
+    demographics xml,
+    CONSTRAINT "PK_dim_person" PRIMARY KEY (businessentityid)
+);
+
+-- 5. dim_employee
+CREATE TABLE analytical.dim_employee (
+    businessentityid integer NOT NULL,
+    nationalidnumber character varying(15) NOT NULL,
+    loginid character varying(256) NOT NULL,
+    jobtitle character varying(50) NOT NULL,
+    birthdate date NOT NULL,
+    maritalstatus character(1) NOT NULL,
+    gender character(1) NOT NULL,
+    hiredate date NOT NULL,
+    salariedflag boolean NOT NULL DEFAULT true,
+    vacationhours smallint NOT NULL DEFAULT 0,
+    sickleavehours smallint NOT NULL DEFAULT 0,
+    currentflag boolean NOT NULL DEFAULT true,
+    organizationnode character varying DEFAULT '/',
+    territoryid integer,
+    salesquota numeric,
+    bonus numeric DEFAULT 0.00,
+    commissionpct numeric DEFAULT 0.00,
+    salesytd numeric DEFAULT 0.00,
+    saleslastyear numeric DEFAULT 0.00,
+    CONSTRAINT "PK_dim_employee" PRIMARY KEY (businessentityid)
+);
+
+-- 6. dim_vendor
+CREATE TABLE analytical.dim_vendor (
+    businessentityid integer NOT NULL,
+    accountnumber character varying(15) NOT NULL,
+    vendor_name character varying(50) NOT NULL,
+    creditrating smallint NOT NULL,
+    preferredvendorstatus boolean NOT NULL DEFAULT true,
+    activeflag boolean NOT NULL DEFAULT true,
+    purchasingwebserviceurl character varying(1024),
+    CONSTRAINT "PK_dim_vendor" PRIMARY KEY (businessentityid)
+);
+
+-- 7. fact_sales
+CREATE TABLE analytical.fact_sales (
+    salesorderid integer NOT NULL,
+    salesorderdetailid integer NOT NULL,
+    revisionnumber smallint NOT NULL DEFAULT 0,
+    orderdate timestamp without time zone NOT NULL,
+    duedate timestamp without time zone NOT NULL,
+    shipdate timestamp without time zone,
+    status smallint NOT NULL DEFAULT 1,
+    onlineorderflag boolean NOT NULL DEFAULT true,
+    purchaseordernumber character varying(25),
+    accountnumber character varying(15),
+    customerid integer NOT NULL,
+    salespersonid integer,
+    territoryid integer,
+    billtoaddressid integer NOT NULL,
+    shiptoaddressid integer NOT NULL,
+    shipmethodid integer NOT NULL,
+    creditcardid integer,
+    creditcardapprovalcode character varying(15),
+    currencyrateid integer,
+    subtotal numeric NOT NULL DEFAULT 0.00,
+    taxamt numeric NOT NULL DEFAULT 0.00,
+    freight numeric NOT NULL DEFAULT 0.00,
+    totaldue numeric,
+    comment character varying(128),
+    carriertrackingnumber character varying(25),
+    orderqty smallint NOT NULL,
+    productid integer NOT NULL,
+    specialofferid integer NOT NULL,
+    unitprice numeric NOT NULL,
+    unitpricediscount numeric NOT NULL DEFAULT 0.0,
+    line_total numeric NOT NULL,
+    CONSTRAINT "PK_fact_sales" PRIMARY KEY (salesorderid, salesorderdetailid)
+);
+
+-- 8. fact_purchases
+CREATE TABLE analytical.fact_purchases (
+    purchaseorderid integer NOT NULL,
+    purchaseorderdetailid integer NOT NULL,
+    revisionnumber smallint NOT NULL DEFAULT 0,
+    status smallint NOT NULL DEFAULT 1,
+    employeeid integer NOT NULL,
+    vendorid integer NOT NULL,
+    shipmethodid integer NOT NULL,
+    orderdate timestamp without time zone NOT NULL,
+    shipdate timestamp without time zone,
+    subtotal numeric NOT NULL DEFAULT 0.00,
+    taxamt numeric NOT NULL DEFAULT 0.00,
+    freight numeric NOT NULL DEFAULT 0.00,
+    duedate timestamp without time zone NOT NULL,
+    orderqty smallint NOT NULL,
+    productid integer NOT NULL,
+    unitprice numeric NOT NULL,
+    receivedqty numeric(8, 2) NOT NULL,
+    rejectedqty numeric(8, 2) NOT NULL,
+    line_total numeric NOT NULL,
+    CONSTRAINT "PK_fact_purchases" PRIMARY KEY (purchaseorderid, purchaseorderdetailid)
+);
+
+-- 9. fact_workorder
+CREATE TABLE analytical.fact_workorder (
+    workorderid integer NOT NULL,
+    productid integer NOT NULL,
+    operationsequence smallint NOT NULL DEFAULT 0,
+    orderqty integer NOT NULL,
+    scrappedqty smallint NOT NULL,
+    startdate timestamp without time zone NOT NULL,
+    enddate timestamp without time zone,
+    duedate timestamp without time zone NOT NULL,
+    scrapreasonid smallint,
+    scrapreason_name character varying(50),
+    locationid smallint,
+    scheduledstartdate timestamp without time zone,
+    scheduledenddate timestamp without time zone,
+    actualstartdate timestamp without time zone,
+    actualenddate timestamp without time zone,
+    actualresourcehrs numeric(9, 4),
+    plannedcost numeric,
+    actualcost numeric,
+    CONSTRAINT "PK_fact_workorder" PRIMARY KEY (workorderid, productid, operationsequence)
+);
+
+-- 10. fact_inventory_transactions
+CREATE TABLE analytical.fact_inventory_transactions (
+    transactionid integer NOT NULL,
+    productid integer NOT NULL,
+    referenceorderid integer NOT NULL,
+    referenceorderlineid integer NOT NULL DEFAULT 0,
+    transactiondate timestamp without time zone NOT NULL,
+    transactiontype character(1) NOT NULL,
+    quantity integer NOT NULL,
+    actualcost numeric NOT NULL,
+    is_archive boolean NOT NULL DEFAULT false,
+    CONSTRAINT "PK_fact_inventory_transactions" PRIMARY KEY (transactionid)
+);
+
+-- 11. dim_specialoffer
+CREATE TABLE analytical.dim_specialoffer (
+    specialofferid integer NOT NULL,
+    description character varying(255) NOT NULL,
+    discountpct numeric NOT NULL DEFAULT 0.00,
+    type character varying(50) NOT NULL,
+    category character varying(50) NOT NULL,
+    startdate timestamp without time zone NOT NULL,
+    enddate timestamp without time zone NOT NULL,
+    minqty integer NOT NULL DEFAULT 0,
+    maxqty integer,
+    CONSTRAINT "PK_dim_specialoffer" PRIMARY KEY (specialofferid)
+);
+
+-- 12. bridge_specialoffer_product
+CREATE TABLE analytical.bridge_specialoffer_product (
+    specialofferid integer NOT NULL,
+    productid integer NOT NULL,
+    CONSTRAINT "PK_bridge_specialoffer_product" PRIMARY KEY (specialofferid, productid)
+);
+
+-- 13. dim_currency_rate
+CREATE TABLE analytical.dim_currency_rate (
+    currencyrateid integer NOT NULL,
+    currencyratedate timestamp without time zone NOT NULL,
+    fromcurrencycode character(3) NOT NULL,
+    fromcurrency_name character varying(50) NOT NULL,
+    tocurrencycode character(3) NOT NULL,
+    tocurrency_name character varying(50) NOT NULL,
+    averagerate numeric NOT NULL,
+    endofdayrate numeric NOT NULL,
+    CONSTRAINT "PK_dim_currency_rate" PRIMARY KEY (currencyrateid)
+);
+
+-- 14. dim_creditcard
+CREATE TABLE analytical.dim_creditcard (
+    creditcardid integer NOT NULL,
+    businessentityid integer NOT NULL,
+    cardtype character varying(50) NOT NULL,
+    cardnumber character varying(25) NOT NULL,
+    expmonth smallint NOT NULL,
+    expyear smallint NOT NULL,
+    CONSTRAINT "PK_dim_creditcard" PRIMARY KEY (creditcardid, businessentityid)
+);
+
+-- 15. fact_employee_department_history
+CREATE TABLE analytical.fact_employee_department_history (
+    businessentityid integer NOT NULL,
+    departmentid smallint NOT NULL,
+    shiftid smallint NOT NULL,
+    startdate date NOT NULL,
+    enddate date,
+    department_name character varying(50) NOT NULL,
+    department_groupname character varying(50) NOT NULL,
+    shift_name character varying(50) NOT NULL,
+    starttime time without time zone NOT NULL,
+    endtime time without time zone NOT NULL,
+    CONSTRAINT "PK_fact_employee_department_history" PRIMARY KEY (businessentityid, startdate, departmentid, shiftid)
+);
+
+-- 16. fact_employee_pay_history
+CREATE TABLE analytical.fact_employee_pay_history (
+    businessentityid integer NOT NULL,
+    ratechangedate timestamp without time zone NOT NULL,
+    rate numeric NOT NULL,
+    payfrequency smallint NOT NULL,
+    CONSTRAINT "PK_fact_employee_pay_history" PRIMARY KEY (businessentityid, ratechangedate)
+);
+
+-- 17. dim_jobcandidate
+CREATE TABLE analytical.dim_jobcandidate (
+    jobcandidateid integer NOT NULL,
+    businessentityid integer,
+    resume xml,
+    CONSTRAINT "PK_dim_jobcandidate" PRIMARY KEY (jobcandidateid)
+);
+
+-- 18. dim_document
+CREATE TABLE analytical.dim_document (
+    documentnode character varying NOT NULL,
+    productid integer,
+    title character varying(50) NOT NULL,
+    owner integer NOT NULL,
+    folderflag boolean NOT NULL DEFAULT false,
+    filename character varying(400) NOT NULL,
+    fileextension character varying(8),
+    revision character(5) NOT NULL,
+    changenumber integer NOT NULL DEFAULT 0,
+    status smallint NOT NULL,
+    documentsummary text,
+    document_content bytea,
+    CONSTRAINT "PK_dim_document" PRIMARY KEY (documentnode)
+);
+
+-- 19. dim_illustration
+CREATE TABLE analytical.dim_illustration (
+    illustrationid integer NOT NULL,
+    productmodelid integer NOT NULL,
+    diagram xml,
+    CONSTRAINT "PK_dim_illustration" PRIMARY KEY (illustrationid, productmodelid)
+);
+
+-- 20. dim_product_photo
+CREATE TABLE analytical.dim_product_photo (
+    productphotoid integer NOT NULL,
+    productid integer NOT NULL,
+    thumbnailphoto bytea,
+    thumbnailphotofilename character varying(50),
+    largephoto bytea,
+    largephotofilename character varying(50),
+    is_primary boolean NOT NULL DEFAULT false,
+    CONSTRAINT "PK_dim_product_photo" PRIMARY KEY (productphotoid, productid)
+);
+
+-- 21. fact_product_review
+CREATE TABLE analytical.fact_product_review (
+    productreviewid integer NOT NULL,
+    productid integer NOT NULL,
+    reviewername character varying(50) NOT NULL,
+    reviewdate timestamp without time zone NOT NULL,
+    emailaddress character varying(50) NOT NULL,
+    rating integer NOT NULL,
+    comments character varying(3850),
+    CONSTRAINT "PK_fact_product_review" PRIMARY KEY (productreviewid)
+);
+
+-- 22. dim_location
+CREATE TABLE analytical.dim_location (
+    locationid integer NOT NULL,
+    location_name character varying(50) NOT NULL,
+    costrate numeric NOT NULL DEFAULT 0.00,
+    availability numeric(8, 2) NOT NULL DEFAULT 0.00,
+    CONSTRAINT "PK_dim_location" PRIMARY KEY (locationid)
+);
+
+-- 23. fact_product_inventory
+CREATE TABLE analytical.fact_product_inventory (
+    productid integer NOT NULL,
+    locationid smallint NOT NULL,
+    shelf character varying(10) NOT NULL,
+    bin smallint NOT NULL,
+    quantity smallint NOT NULL DEFAULT 0,
+    CONSTRAINT "PK_fact_product_inventory" PRIMARY KEY (productid, locationid)
+);
+
+-- 24. fact_product_cost_history
+CREATE TABLE analytical.fact_product_cost_history (
+    productid integer NOT NULL,
+    startdate timestamp without time zone NOT NULL,
+    enddate timestamp without time zone,
+    standardcost numeric NOT NULL,
+    CONSTRAINT "PK_fact_product_cost_history" PRIMARY KEY (productid, startdate)
+);
+
+-- 25. fact_product_listprice_history
+CREATE TABLE analytical.fact_product_listprice_history (
+    productid integer NOT NULL,
+    startdate timestamp without time zone NOT NULL,
+    enddate timestamp without time zone,
+    listprice numeric NOT NULL,
+    CONSTRAINT "PK_fact_product_listprice_history" PRIMARY KEY (productid, startdate)
+);
+
+-- 26. dim_product_vendor
+CREATE TABLE analytical.dim_product_vendor (
+    productid integer NOT NULL,
+    businessentityid integer NOT NULL,
+    averageleadtime integer NOT NULL,
+    standardprice numeric NOT NULL,
+    lastreceiptcost numeric,
+    lastreceiptdate timestamp without time zone,
+    minorderqty integer NOT NULL,
+    maxorderqty integer NOT NULL,
+    onorderqty integer,
+    unitmeasurecode character(3) NOT NULL,
+    CONSTRAINT "PK_dim_product_vendor" PRIMARY KEY (productid, businessentityid)
+);
+
+-- 27. dim_shipmethod
+CREATE TABLE analytical.dim_shipmethod (
+    shipmethodid integer NOT NULL,
+    shipmethod_name character varying(50) NOT NULL,
+    shipbase numeric NOT NULL DEFAULT 0.00,
+    shiprate numeric NOT NULL DEFAULT 0.00,
+    CONSTRAINT "PK_dim_shipmethod" PRIMARY KEY (shipmethodid)
+);
+
+-- 28. dim_salestaxrate
+CREATE TABLE analytical.dim_salestaxrate (
+    salestaxrateid integer NOT NULL,
+    stateprovinceid integer NOT NULL,
+    taxtype smallint NOT NULL,
+    taxrate numeric NOT NULL DEFAULT 0.00,
+    salestaxrate_name character varying(50) NOT NULL,
+    CONSTRAINT "PK_dim_salestaxrate" PRIMARY KEY (salestaxrateid)
+);
+
+-- 29. fact_shoppingcart
+CREATE TABLE analytical.fact_shoppingcart (
+    shoppingcartitemid integer NOT NULL,
+    shoppingcartid character varying(50) NOT NULL,
+    quantity integer NOT NULL DEFAULT 1,
+    productid integer NOT NULL,
+    datecreated timestamp without time zone NOT NULL,
+    CONSTRAINT "PK_fact_shoppingcart" PRIMARY KEY (shoppingcartitemid)
+);
+
+-- 30. dim_billofmaterials
+CREATE TABLE analytical.dim_billofmaterials (
+    billofmaterialsid integer NOT NULL,
+    productassemblyid integer,
+    componentid integer NOT NULL,
+    startdate timestamp without time zone NOT NULL,
+    enddate timestamp without time zone,
+    unitmeasurecode character(3) NOT NULL,
+    bomlevel smallint NOT NULL,
+    perassemblyqty numeric(8, 2) NOT NULL DEFAULT 1.00,
+    CONSTRAINT "PK_dim_billofmaterials" PRIMARY KEY (billofmaterialsid)
+);
+
+-- 31. dim_product_description_culture
+CREATE TABLE analytical.dim_product_description_culture (
+    productmodelid integer NOT NULL,
+    productdescriptionid integer NOT NULL,
+    cultureid character(6) NOT NULL,
+    culture_name character varying(50) NOT NULL,
+    description character varying(400) NOT NULL,
+    CONSTRAINT "PK_dim_product_description_culture" PRIMARY KEY (productmodelid, productdescriptionid, cultureid)
+);
+
+-- 32. dim_businessentity_address
+CREATE TABLE analytical.dim_businessentity_address (
+    businessentityid integer NOT NULL,
+    addressid integer NOT NULL,
+    addresstypeid integer NOT NULL,
+    addresstype_name character varying(50) NOT NULL,
+    CONSTRAINT "PK_dim_businessentity_address" PRIMARY KEY (businessentityid, addressid, addresstypeid)
+);
+
+-- 33. dim_businessentity_contact
+CREATE TABLE analytical.dim_businessentity_contact (
+    businessentityid integer NOT NULL,
+    personid integer NOT NULL,
+    contacttypeid integer NOT NULL,
+    contacttype_name character varying(50) NOT NULL,
+    CONSTRAINT "PK_dim_businessentity_contact" PRIMARY KEY (businessentityid, personid, contacttypeid)
+);
+
+-- 34. dim_person_phone
+CREATE TABLE analytical.dim_person_phone (
+    businessentityid integer NOT NULL,
+    phonenumber character varying(25) NOT NULL,
+    phonenumbertypeid integer NOT NULL,
+    phonenumbertype_name character varying(50) NOT NULL,
+    CONSTRAINT "PK_dim_person_phone" PRIMARY KEY (businessentityid, phonenumber, phonenumbertypeid)
+);
+
+-- 35. dim_person_email
+CREATE TABLE analytical.dim_person_email (
+    businessentityid integer NOT NULL,
+    emailaddressid integer NOT NULL,
+    emailaddress character varying(50),
+    CONSTRAINT "PK_dim_person_email" PRIMARY KEY (businessentityid, emailaddressid)
+);
+
+-- 36. fact_salesperson_quota
+CREATE TABLE analytical.fact_salesperson_quota (
+    businessentityid integer NOT NULL,
+    quotadate timestamp without time zone NOT NULL,
+    salesquota numeric NOT NULL,
+    CONSTRAINT "PK_fact_salesperson_quota" PRIMARY KEY (businessentityid, quotadate)
+);
+
+-- 37. fact_salesterritory_history
+CREATE TABLE analytical.fact_salesterritory_history (
+    businessentityid integer NOT NULL,
+    territoryid integer NOT NULL,
+    startdate timestamp without time zone NOT NULL,
+    enddate timestamp without time zone,
+    CONSTRAINT "PK_fact_salesterritory_history" PRIMARY KEY (businessentityid, startdate, territoryid)
+);
+
+-- 38. fact_sales_reason
+CREATE TABLE analytical.fact_sales_reason (
+    salesorderid integer NOT NULL,
+    salesreasonid integer NOT NULL,
+    salesreason_name character varying(50) NOT NULL,
+    salesreason_reasontype character varying(50) NOT NULL,
+    CONSTRAINT "PK_fact_sales_reason" PRIMARY KEY (salesorderid, salesreasonid)
+);
+
+-- 39. dim_countryregioncurrency
+CREATE TABLE analytical.dim_countryregioncurrency (
+    countryregioncode character varying(3) NOT NULL,
+    currencycode character(3) NOT NULL,
+    CONSTRAINT "PK_dim_countryregioncurrency" PRIMARY KEY (countryregioncode, currencycode)
+);
+```

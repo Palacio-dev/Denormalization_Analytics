@@ -1,0 +1,207 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_10-41-49
+Model: ollama_local
+Prompt: RISEN-few-shot
+Schema: ex10
+==================================================
+
+{
+    "section_1": {
+        "summary": "The denormalization strategy focuses on the 'Consumption' and 'Population' domains, which are the primary drivers of analytical read performance in the original schema. The main bottleneck identified is the frequent need to join `consumo_anual` with `paises` (for country names) and `fonte_energia` (for energy type names), as well as joining `populacao` with `paises` and `continente`. To optimize these, we apply 'Adding Redundant Attributes' by materializing foreign keys and descriptive text directly into the transactional tables. We also apply 'Collapsing Relations' to merge the `populacao` table with the `paises` join logic, creating a single wide table that holds country metadata alongside population data, eliminating the need for a join on `id_paises`. The `emissao_g_efeito_estufa` table remains denormalized with the redundant country and energy attributes to support direct reporting.",
+        "structural_decisions": [
+            {
+                "decision_id": "D1",
+                "description": "Merge `populacao` and `paises` tables into a single `populacao_pais` table. This collapses the relationship, moving `nome`, `fundacao`, and `continente` attributes from `paises` directly into `populacao_pais` to eliminate the JOIN on `id_paises`."
+            },
+            {
+                "decision_id": "D2",
+                "description": "Denormalize `consumo_anual` by adding redundant columns for `nome_pais`, `nome_fonte_energia`, and `id_continente`. This allows queries to retrieve consumption data per country and energy type without joining `paises` or `fonte_energia`."
+            },
+            {
+                "decision_id": "D3",
+                "description": "Create a `continente` table that mirrors the original `continente` but includes the redundant `nome` column for direct lookup in reports."
+            }
+        ],
+        "attribute_level_changes": [
+            {
+                "decision_id": "A1",
+                "description": "Added `nome_pais` (varchar) to `consumo_anual`."
+            },
+            {
+                "decision_id": "A2",
+                "description": "Added `nome_fonte_energia` (varchar) to `consumo_anual`."
+            },
+            {
+                "decision_id": "A3",
+                "description": "Added `id_continente` (integer) to `consumo_anual`."
+            },
+            {
+                "decision_id": "A4",
+                "description": "Removed `id_paises` from `populacao` and replaced it with `nome_pais`, `fundacao`, and `continente` in the new `populacao_pais` table."
+            },
+            {
+                "decision_id": "A5",
+                "description": "Removed `id_continente` from `paises` (as it is now redundant within the merged `populacao_pais` table, though the original `continente` table is kept for reference)."
+            }
+        ],
+        "tradeoffs": [
+            {
+                "tradeoff_id": "T1",
+                "description": "Tradeoff: Write Performance vs. Read Performance. Adding redundant attributes increases the size of `consumo_anual` and `populacao_pais`, potentially slowing down INSERT/UPDATE operations and increasing storage costs. However, this is justified by the significant reduction in query latency for analytical reads."
+            },
+            {
+                "tradeoff_id": "T2",
+                "description": "Tradeoff: Data Integrity. While the denormalized schema simplifies queries, it relies on application logic or application-level triggers to ensure that `nome_pais` matches the actual `nome` in the source system if the country name changes. The original foreign key constraint is removed."
+            }
+        ]
+    },
+    "section_2": {
+        "query_patterns": [
+            {
+                "decision_id": "D2",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Report: 'Get total annual energy consumption by country and energy source for the last 5 years.' The original query required JOINs with `paises` and `fonte_energia`. The denormalized version allows a simple GROUP BY on `consumo_anual`."
+            },
+            {
+                "decision_id": "D1",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Report: 'Show population growth trends per continent over time.' The original query required JOINs with `paises` and `continente`. The new `populacao_pais` table allows direct aggregation on `continente`."
+            },
+            {
+                "decision_id": "D2",
+                "query_pattern_type": "inferred",
+                "query_pattern_description": "Report: 'Compare population vs. CO2 emissions for specific countries.' The denormalized `consumo_anual` (which includes CO2 data via `emissao_g_efeito_estufa` denormalization) and `populacao_pais` can be joined on `id_paises` if needed, or queried separately if the focus is purely on the denormalized columns."
+            }
+        ]
+    }
+}
+
+-- ============================================================================
+-- DENORMALIZED SCHEMA SCRIPT (PostgreSQL Dialect)
+-- ============================================================================
+
+BEGIN;
+
+-- Drop existing denormalized tables to ensure clean state
+DROP TABLE IF EXISTS public.consumo_anual;
+DROP TABLE IF EXISTS public.populacao_pais;
+DROP TABLE IF EXISTS public.emissao_g_efeito_estufa;
+DROP TABLE IF EXISTS public.continente;
+
+-- --------------------------------------------------------------------------
+-- 1. CONTINENTE (Reference Table)
+-- --------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.continente (
+    id_continente integer NOT NULL,
+    nome character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT continente_pkey PRIMARY KEY (id_continente)
+);
+
+-- --------------------------------------------------------------------------
+-- 2. POPULACAO_PAIS (Denormalized Population + Country Info)
+-- --------------------------------------------------------------------------
+-- Merges original 'populacao' and 'paises' attributes.
+-- Removes 'id_paises' join, stores country name, foundation year, and continent ID directly.
+CREATE TABLE IF NOT EXISTS public.populacao_pais (
+    id_pop integer NOT NULL,
+    id_paises integer NOT NULL, -- Kept for potential reconstruction or historical tracking, but logically redundant
+    ano integer NOT NULL,
+    quantidade_hab integer NOT NULL,
+    nome_pais character varying(50) COLLATE pg_catalog."default" NOT NULL, -- Redundant attribute
+    fundacao integer NOT NULL, -- Moved from paises
+    id_continente integer NOT NULL, -- Moved from paises
+    CONSTRAINT populacao_pais_pkey PRIMARY KEY (id_pop),
+    CONSTRAINT populacao_pais_fundacao_fkey FOREIGN KEY (fundacao) REFERENCES public.paises (fundacao) MATCH SIMPLE ON UPDATE NO ACTION ON DELETE NO ACTION NOT VALID,
+    CONSTRAINT populacao_pais_id_continente_fkey FOREIGN KEY (id_continente) REFERENCES public.continente (id_continente) MATCH SIMPLE ON UPDATE NO ACTION ON DELETE NO ACTION NOT VALID
+);
+
+-- --------------------------------------------------------------------------
+-- 3. CONSUMO_ANUAL (Denormalized Consumption + Country + Energy Info)
+-- --------------------------------------------------------------------------
+-- Adds redundant columns for country name, energy source name, and continent ID.
+-- This eliminates the need to JOIN with 'paises' and 'fonte_energia' for reporting.
+CREATE TABLE IF NOT EXISTS public.consumo_anual (
+    id_consumo integer NOT NULL,
+    id_paises integer NOT NULL, -- Kept for integrity reference
+    ano integer NOT NULL,
+    porcentagem integer NOT NULL,
+    tipo_energia integer NOT NULL,
+    nome_pais character varying(50) COLLATE pg_catalog."default" NOT NULL, -- Redundant
+    nome_fonte_energia character varying(50) COLLATE pg_catalog."default" NOT NULL, -- Redundant
+    id_continente integer NOT NULL, -- Redundant (derived from paises.continente)
+    CONSTRAINT consumo_anual_pkey PRIMARY KEY (id_consumo),
+    CONSTRAINT consumo_anual_id_paises_fkey FOREIGN KEY (id_paises) REFERENCES public.paises (id_paises) MATCH SIMPLE ON UPDATE NO ACTION ON DELETE NO ACTION NOT VALID,
+    CONSTRAINT consumo_anual_tipo_energia_fkey FOREIGN KEY (tipo_energia) REFERENCES public.fonte_energia (id_fonte_energia) MATCH SIMPLE ON UPDATE NO ACTION ON DELETE NO ACTION NOT VALID
+);
+
+-- --------------------------------------------------------------------------
+-- 4. EMISSAO_G_EFEITO_ESTUFA (Denormalized Emissions)
+-- --------------------------------------------------------------------------
+-- Similar to consumo_anual, adds redundant country and energy attributes.
+CREATE TABLE IF NOT EXISTS public.emissao_g_efeito_estufa (
+    id_emissao integer NOT NULL,
+    id_paises integer NOT NULL,
+    ano integer NOT NULL,
+    quantidade_emitida bigint NOT NULL,
+    nome_pais character varying(50) COLLATE pg_catalog."default" NOT NULL, -- Redundant
+    nome_fonte_energia character varying(50) COLLATE pg_catalog."default" NOT NULL, -- Redundant
+    id_continente integer NOT NULL, -- Redundant
+    CONSTRAINT emissao_g_efeito_estufa_pkey PRIMARY KEY (id_emissao),
+    CONSTRAINT emissao_g_efeito_estufa_id_paises_fkey FOREIGN KEY (id_paises) REFERENCES public.paises (id_paises) MATCH SIMPLE ON UPDATE NO ACTION ON DELETE NO ACTION NOT VALID,
+    CONSTRAINT emissao_g_efeito_estufa_tipo_energia_fkey FOREIGN KEY (tipo_energia) REFERENCES public.fonte_energia (id_fonte_energia) MATCH SIMPLE ON UPDATE NO ACTION ON DELETE NO ACTION NOT VALID
+);
+
+-- --------------------------------------------------------------------------
+-- 5. PISES (Original Reference Table - Preserved for Data Integrity)
+-- --------------------------------------------------------------------------
+-- We keep this table intact. The denormalized tables reference it via id_paises
+-- or use the redundant data for performance.
+CREATE TABLE IF NOT EXISTS public.paises (
+    id_paises integer NOT NULL,
+    nome character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    fundacao integer NOT NULL,
+    continente integer NOT NULL,
+    CONSTRAINT paises_pkey PRIMARY KEY (id_paises)
+);
+
+-- --------------------------------------------------------------------------
+-- 6. FONTE_ENERGIAS (Original Reference Table - Preserved)
+-- --------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.fonte_energia (
+    id_fonte_energia integer NOT NULL,
+    nome character varying(50)[] COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT fonte_energia_pkey PRIMARY KEY (id_fonte_energia)
+);
+
+-- --------------------------------------------------------------------------
+-- FOREIGN KEY CONSTRAINTS (Re-established for Denormalized Tables)
+-- --------------------------------------------------------------------------
+
+-- Ensure referential integrity for the denormalized tables pointing to originals
+ALTER TABLE IF EXISTS public.populacao_pais
+    ADD CONSTRAINT populacao_pais_id_paises_fkey FOREIGN KEY (id_paises)
+    REFERENCES public.paises (id_paises) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+ALTER TABLE IF EXISTS public.consumo_anual
+    ADD CONSTRAINT consumo_anual_id_paises_fkey FOREIGN KEY (id_paises)
+    REFERENCES public.paises (id_paises) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+ALTER TABLE IF EXISTS public.emissao_g_efeito_estufa
+    ADD CONSTRAINT emissao_g_efeito_estufa_id_paises_fkey FOREIGN KEY (id_paises)
+    REFERENCES public.paises (id_paises) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+-- Note: Foreign keys on redundant columns (nome_pais, etc.) are not added.
+-- They are application-managed or handled by the fact that they are simple strings.
+-- If strict integrity is required, one could add CHECK constraints or triggers,
+-- but typically in denormalized analytical schemas, the redundancy is accepted.
+
+COMMIT;

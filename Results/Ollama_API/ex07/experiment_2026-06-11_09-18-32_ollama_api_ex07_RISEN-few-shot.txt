@@ -1,0 +1,88 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-18-32
+Model: ollama_api
+Prompt: RISEN-few-shot
+Schema: ex07
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on collapsing relations and adding redundant attributes to eliminate frequent JOIN operations. The core 'Usina' table is enriched with descriptive fields from related dimension tables like 'Proprietarios', 'Rios', and 'Localizacoes'. Additionally, location details including municipality names and state information are embedded directly into the 'Usina' table by traversing the location-to-municipality-to-state relationships. This approach significantly reduces query complexity for read-heavy analytical workloads that require comprehensive details about power plants along with their geographical and ownership context.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapse the 'Proprietarios' table into 'Usina' by adding the 'proprietario' field to eliminate the need for a JOIN on id_proprietario."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapse the 'Rios' table into 'Usina' by adding the 'rio' field to eliminate the need for a JOIN on id_rio."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Collapse the 'Localizacoes', 'Municipios', and 'Estados' tables into 'Usina' by embedding longitude, latitude, municipality names (for both id_municipio1 and id_municipio2), and state (uf) to avoid multiple JOINs for location-based queries."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant attribute 'proprietario' from 'Proprietarios' table to 'Usina'."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added redundant attribute 'rio' from 'Rios' table to 'Usina'."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added derived attributes 'longitude_loc', 'latitude_loc', 'municipio1', 'municipio2', and 'uf' from 'Localizacoes', 'Municipios', and 'Estados' tables to 'Usina'."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved read performance at the cost of increased storage and potential data redundancy. Updates to proprietor, river, or location details will require propagation to the 'Usina' table."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified query structure and reduced JOIN overhead, but the 'Usina' table becomes wider, which may impact cache efficiency for queries that only need core attributes."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Frequent analytical queries retrieving detailed information about power plants including owner name, river name, and full location context (municipality and state) for reporting and visualization purposes."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries filtering or grouping power plants by owner, river, or geographical attributes (e.g., state, municipality) which previously required multiple JOINs."
+      }
+    ]
+  }
+}
+
+```sql
+CREATE TABLE IF NOT EXISTS public."Usina" (
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    iniciop DATE,
+    atualizacao DATE,
+    lat DOUBLE PRECISION,
+    long DOUBLE PRECISION,
+    estagio VARCHAR,
+    id_proprietario INTEGER NULL,
+    id_rio INTEGER NOT NULL,
+    id_localizacao INTEGER NOT NULL,
+    proprietario VARCHAR,
+    rio VARCHAR NOT NULL,
+    longitude_loc DOUBLE PRECISION,
+    latitude_loc DOUBLE PRECISION,
+    municipio1 VARCHAR NOT NULL,
+    municipio2 VARCHAR,
+    uf CHAR(2) NOT NULL
+);
+```

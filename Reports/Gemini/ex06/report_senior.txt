@@ -1,0 +1,260 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 9
+  - Total Attributes: 45
+    * UF: 4 columns
+    * MUNICIPIO: 9 columns
+    * IDEB: 7 columns
+    * ENADE: 9 columns
+    * SAEB: 4 columns
+    * IES: 6 columns
+    * ESCOLA: 5 columns
+    * CURSO: 3 columns
+    * ANO: 6 columns
+
+Denormalized Model:
+  - Tables: 4
+  - Total Attributes: 44
+    * dim_geography: 13 columns
+    * dim_course: 8 columns
+    * dim_school: 6 columns
+    * fact_education_assessment: 20 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Normalized model has MORE attributes (44 vs 45)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: id_ano (INT) -> ideb_nota (REAL)
+--------------------------------------------------------------------------------
+Completeness Ratio:        0.98
+Data Type Preservation:    0.98
+Avg Levenshtein Distance:  5.14
+BLEU Score:                0.20
+ROUGE-1:                   0.82
+METEOR Score:              0.20
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: fact_education_assessment
+Dimension Tables Detected: dim_geography, dim_course, dim_school
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected exactly 1 Fact table. Evaluating as a standard STAR SCHEMA.
+  - DIMENSION NULL WARNING: Attribute 'qtd_habitantes_uf' in 'dim_geography' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'qtd_ies_municipio' in 'dim_geography' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'qtd_escolas_municipio' in 'dim_geography' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'media_ideb_municipio' in 'dim_geography' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'media_saeb_municipio' in 'dim_geography' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'media_enade_municipio' in 'dim_geography' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'total_participantes_municipio' in 'dim_geography' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'sigla_ies' in 'dim_course' allows NULLs. Consider demanding default values.
+  - SNOWFLAKE VIOLATION: Dimension 'dim_school' contains 1 Foreign Key(s). It is not fully flattened.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * fact_education_assessment: 18 Numeric, 0 Text
+  * dim_geography: 9 Numeric, 3 Text
+  * dim_course: 3 Numeric, 4 Text
+  * dim_school: 3 Numeric, 2 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  ano cod_escola codigo_ies id id_ano id_curso id_enade id_escola id_ideb id_ies id_municipio id_saeb ind_rend media_enade media_ideb media_saeb nome nome_curso nome_escola nome_ies nome_municipio nota_bruta_ce nota_bruta_fg nota_enade_continua nota_enade_faixa nota_ideb nota_mat nota_padrao nota_padronizada_ce nota_padronizada_fg nota_port qtd_ESCOLAS qtd_IES qtd_habitantes rede rede rend_1 rend_2 rend_3 rend_4 sigla_ies sigla_uf total_concluintes total_inscritos total_participantes
+
+Denormalized Model (Combined Text):
+  ano cod_escola codigo_ies enade_nota_bruta_ce enade_nota_bruta_fg enade_nota_continua enade_nota_faixa enade_nota_padronizada_ce enade_nota_padronizada_fg enade_total_concluintes enade_total_inscritos ideb_ind_rend ideb_nota ideb_rend_1 ideb_rend_2 ideb_rend_3 ideb_rend_4 media_enade_municipio media_ideb_municipio media_saeb_municipio nk_id_curso nk_id_escola nk_id_ies nk_id_municipio nk_id_uf nome_curso nome_escola nome_ies nome_municipio nome_uf qtd_escolas_municipio qtd_habitantes_uf qtd_ies_municipio rede_escola rede_ies saeb_nota_mat saeb_nota_padrao saeb_nota_port sigla_ies sigla_uf sk_course sk_geography sk_school total_participantes_municipio
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 44 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id INT
+  Denormalized:  sk_course INT
+
+Pair 2:
+  Relational:    sigla_uf VARCHAR(2)
+  Denormalized:  sigla_uf VARCHAR(2)
+
+Pair 3:
+  Relational:    nome VARCHAR(100)
+  Denormalized:  nome_uf VARCHAR(100)
+
+Pair 4:
+  Relational:    qtd_habitantes INT
+  Denormalized:  qtd_habitantes_uf INT
+
+Pair 5:
+  Relational:    id_municipio INT
+  Denormalized:  nk_id_municipio INT
+
+Pair 6:
+  Relational:    nome_municipio VARCHAR(100)
+  Denormalized:  nome_municipio VARCHAR(100)
+
+Pair 7:
+  Relational:    qtd_IES INT
+  Denormalized:  qtd_ies_municipio INT
+
+Pair 8:
+  Relational:    qtd_ESCOLAS INT
+  Denormalized:  qtd_escolas_municipio INT
+
+Pair 9:
+  Relational:    media_ideb REAL
+  Denormalized:  media_ideb_municipio REAL
+
+Pair 10:
+  Relational:    media_saeb REAL
+  Denormalized:  media_saeb_municipio REAL
+
+Pair 11:
+  Relational:    media_enade REAL
+  Denormalized:  media_enade_municipio REAL
+
+Pair 12:
+  Relational:    total_participantes INT
+  Denormalized:  total_participantes_municipio INT
+
+Pair 13:
+  Relational:    id_ideb INT
+  Denormalized:  nk_id_uf INT
+
+Pair 14:
+  Relational:    rend_1 REAL
+  Denormalized:  ideb_rend_1 REAL
+
+Pair 15:
+  Relational:    rend_2 REAL
+  Denormalized:  ideb_rend_2 REAL
+
+Pair 16:
+  Relational:    rend_3 REAL
+  Denormalized:  ideb_rend_3 REAL
+
+Pair 17:
+  Relational:    rend_4 REAL
+  Denormalized:  ideb_rend_4 REAL
+
+Pair 18:
+  Relational:    ind_rend REAL
+  Denormalized:  ideb_ind_rend REAL
+
+Pair 19:
+  Relational:    id_enade INT
+  Denormalized:  sk_geography INT
+
+Pair 20:
+  Relational:    total_inscritos INT
+  Denormalized:  enade_total_inscritos INT
+
+Pair 21:
+  Relational:    total_concluintes INT
+  Denormalized:  enade_total_concluintes INT
+
+Pair 22:
+  Relational:    nota_bruta_ce REAL
+  Denormalized:  enade_nota_bruta_ce REAL
+
+Pair 23:
+  Relational:    nota_padronizada_ce REAL
+  Denormalized:  enade_nota_padronizada_ce REAL
+
+Pair 24:
+  Relational:    nota_bruta_fg REAL
+  Denormalized:  enade_nota_bruta_fg REAL
+
+Pair 25:
+  Relational:    nota_padronizada_fg REAL
+  Denormalized:  enade_nota_padronizada_fg REAL
+
+Pair 26:
+  Relational:    nota_enade_continua REAL
+  Denormalized:  enade_nota_continua REAL
+
+Pair 27:
+  Relational:    nota_enade_faixa REAL
+  Denormalized:  enade_nota_faixa REAL
+
+Pair 28:
+  Relational:    id_saeb INT
+  Denormalized:  sk_school INT
+
+Pair 29:
+  Relational:    nota_mat REAL
+  Denormalized:  saeb_nota_mat REAL
+
+Pair 30:
+  Relational:    nota_port REAL
+  Denormalized:  saeb_nota_port REAL
+
+Pair 31:
+  Relational:    nota_padrao REAL
+  Denormalized:  saeb_nota_padrao REAL
+
+Pair 32:
+  Relational:    id_ies INT
+  Denormalized:  nk_id_ies INT
+
+Pair 33:
+  Relational:    nome_ies VARCHAR(100)
+  Denormalized:  nome_ies VARCHAR(100)
+
+Pair 34:
+  Relational:    sigla_ies VARCHAR(20)
+  Denormalized:  sigla_ies VARCHAR(20)
+
+Pair 35:
+  Relational:    codigo_ies INT
+  Denormalized:  codigo_ies INT
+
+Pair 36:
+  Relational:    rede VARCHAR(100)
+  Denormalized:  rede_ies VARCHAR(100)
+
+Pair 37:
+  Relational:    id_escola INT
+  Denormalized:  nk_id_escola INT
+
+Pair 38:
+  Relational:    nome_escola VARCHAR(100)
+  Denormalized:  nome_escola VARCHAR(100)
+
+Pair 39:
+  Relational:    cod_escola INTEGER
+  Denormalized:  cod_escola INTEGER
+
+Pair 40:
+  Relational:    rede VARCHAR(100)
+  Denormalized:  rede_escola VARCHAR(100)
+
+Pair 41:
+  Relational:    id_curso INT
+  Denormalized:  nk_id_curso INT
+
+Pair 42:
+  Relational:    nome_curso VARCHAR(100)
+  Denormalized:  nome_curso VARCHAR(100)
+
+Pair 43:
+  Relational:    id_ano INT
+  Denormalized:  ideb_nota REAL
+
+Pair 44:
+  Relational:    ano INT
+  Denormalized:  ano INT
+
+
+================================================================================

@@ -1,0 +1,377 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 11
+  - Total Attributes: 67
+    * country: 3 columns
+    * survey: 18 columns
+    * region: 2 columns
+    * decile: 4 columns
+    * demography: 9 columns
+    * employment: 10 columns
+    * education: 10 columns
+    * economy: 6 columns
+    * population: 5 columns
+    * life_expectancy: 4 columns
+    * health: 6 columns
+
+Denormalized Model:
+  - Tables: 6
+  - Total Attributes: 61
+    * dim_country: 4 columns
+    * fact_country_indicators: 28 columns
+    * fact_population: 6 columns
+    * fact_life_expectancy: 5 columns
+    * fact_survey: 18 columns
+    * fact_survey_decile: 6 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Normalized model has MORE attributes (61 vs 67)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: id_employment (SERIAL) -> life_expectancy_years (DOUBLE)
+  - Type mismatch: id_education (SERIAL) -> population_count (DOUBLE)
+--------------------------------------------------------------------------------
+Completeness Ratio:        0.91
+Data Type Preservation:    0.97
+Avg Levenshtein Distance:  0.97
+BLEU Score:                0.80
+ROUGE-1:                   0.92
+METEOR Score:              0.79
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: fact_survey_decile
+Dimension Tables Detected: dim_country, fact_country_indicators, fact_population, fact_life_expectancy, fact_survey
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected exactly 1 Fact table. Evaluating as a standard STAR SCHEMA.
+  - DIMENSION NULL WARNING: Attribute 'country_name' in 'dim_country' allows NULLs. Consider demanding default values.
+  - SNOWFLAKE VIOLATION: Dimension 'fact_country_indicators' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'pop_density' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'urban_pop' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'rural_pop' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'net_migration' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'death_rate' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'birth_rate' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'child_emp' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'unemp' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'vulnerable_emp' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'part_time' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'employers' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'labor_force_total' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'labor_force_fem' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'child_out_of_school' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'progression_to_sec' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'edu_expenditure' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'preprim_enroll' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'prim_enrol' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'sec_enrol' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'terti_enrol' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'gdp' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'inflation' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'tax_revenue' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'hospital_beds' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'physicians' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'health_expenditure' in 'fact_country_indicators' allows NULLs. Consider demanding default values.
+  - SNOWFLAKE VIOLATION: Dimension 'fact_population' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'pop_ages' in 'fact_population' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'gender' in 'fact_population' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'population_count' in 'fact_population' allows NULLs. Consider demanding default values.
+  - SNOWFLAKE VIOLATION: Dimension 'fact_life_expectancy' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'gender' in 'fact_life_expectancy' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'life_expectancy_years' in 'fact_life_expectancy' allows NULLs. Consider demanding default values.
+  - SNOWFLAKE VIOLATION: Dimension 'fact_survey' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'welfare_type' in 'fact_survey' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'survey_acronym' in 'fact_survey' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'survey_comparability' in 'fact_survey' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'comparable_spell' in 'fact_survey' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'poverty_line' in 'fact_survey' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'headcount' in 'fact_survey' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'poverty_gap' in 'fact_survey' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'poverty_severity' in 'fact_survey' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'gini' in 'fact_survey' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'reporting_pop' in 'fact_survey' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'reporting_pce' in 'fact_survey' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'distribution_type' in 'fact_survey' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'spl' in 'fact_survey' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'survey_coverage' in 'fact_survey' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'reporting_level' in 'fact_survey' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * fact_survey_decile: 3 Numeric, 1 Text
+  * dim_country: 0 Numeric, 4 Text
+  * fact_country_indicators: 27 Numeric, 1 Text
+  * fact_population: 3 Numeric, 3 Text
+  * fact_life_expectancy: 3 Numeric, 2 Text
+  * fact_survey: 11 Numeric, 7 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  "number" birth_rate child_emp child_out_of_school comparable_spell country_code country_name death_rate distribution_type employers expenditure expenditure gdp gender gender gini headcount hospital_beds id_decile id_demography id_economy id_education id_employment id_health id_life_expectancy id_population id_survey inflation labor_force_fem labor_force_total name net_migration part_time physicians pop_ages pop_density poverty_gap poverty_line poverty_severity preprim_enroll prim_enrol progression_to_sec region_code region_name reporting_level reporting_pce reporting_pop rural_pop sec_enrol spl survey_acronym survey_comparability survey_coverage survey_year tax_revenue terti_enrol unemp urban_pop value value vulnerable_emp welfare_type year year year year year
+
+Denormalized Model (Combined Text):
+  birth_rate child_emp child_out_of_school comparable_spell country_code country_name death_rate decile_name decile_value distribution_type edu_expenditure employers gdp gender gender gini headcount health_expenditure hospital_beds id_decile id_life_expectancy id_population id_survey inflation labor_force_fem labor_force_total life_expectancy_years net_migration part_time physicians pop_ages pop_density population_count poverty_gap poverty_line poverty_severity preprim_enroll prim_enrol progression_to_sec region_code region_name reporting_level reporting_pce reporting_pop rural_pop sec_enrol spl survey_acronym survey_comparability survey_coverage survey_year survey_year tax_revenue terti_enrol unemp urban_pop vulnerable_emp welfare_type year year year
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 61 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    country_code CHARACTER
+  Denormalized:  country_code CHARACTER
+
+Pair 2:
+  Relational:    country_name CHARACTER
+  Denormalized:  country_name CHARACTER
+
+Pair 3:
+  Relational:    id_survey SERIAL
+  Denormalized:  id_survey SERIAL
+
+Pair 4:
+  Relational:    welfare_type CHARACTER
+  Denormalized:  welfare_type CHARACTER
+
+Pair 5:
+  Relational:    survey_acronym CHARACTER
+  Denormalized:  survey_acronym CHARACTER
+
+Pair 6:
+  Relational:    survey_comparability INTEGER
+  Denormalized:  survey_comparability INTEGER
+
+Pair 7:
+  Relational:    comparable_spell CHARACTER
+  Denormalized:  comparable_spell CHARACTER
+
+Pair 8:
+  Relational:    poverty_line DOUBLE
+  Denormalized:  poverty_line DOUBLE
+
+Pair 9:
+  Relational:    headcount DOUBLE
+  Denormalized:  headcount DOUBLE
+
+Pair 10:
+  Relational:    poverty_gap DOUBLE
+  Denormalized:  poverty_gap DOUBLE
+
+Pair 11:
+  Relational:    poverty_severity DOUBLE
+  Denormalized:  poverty_severity DOUBLE
+
+Pair 12:
+  Relational:    gini DOUBLE
+  Denormalized:  gini DOUBLE
+
+Pair 13:
+  Relational:    reporting_pop INTEGER
+  Denormalized:  reporting_pop INTEGER
+
+Pair 14:
+  Relational:    reporting_pce DOUBLE
+  Denormalized:  reporting_pce DOUBLE
+
+Pair 15:
+  Relational:    distribution_type CHARACTER
+  Denormalized:  distribution_type CHARACTER
+
+Pair 16:
+  Relational:    spl DOUBLE
+  Denormalized:  spl DOUBLE
+
+Pair 17:
+  Relational:    survey_year INTEGER
+  Denormalized:  survey_year INTEGER
+
+Pair 18:
+  Relational:    survey_coverage CHARACTER
+  Denormalized:  survey_coverage CHARACTER
+
+Pair 19:
+  Relational:    reporting_level CHARACTER
+  Denormalized:  reporting_level CHARACTER
+
+Pair 20:
+  Relational:    region_code CHARACTER
+  Denormalized:  region_code CHARACTER
+
+Pair 21:
+  Relational:    region_name CHARACTER
+  Denormalized:  region_name CHARACTER
+
+Pair 22:
+  Relational:    id_decile SERIAL
+  Denormalized:  id_decile SERIAL
+
+Pair 23:
+  Relational:    value DOUBLE
+  Denormalized:  decile_value DOUBLE
+
+Pair 24:
+  Relational:    name CHARACTER
+  Denormalized:  decile_name CHARACTER
+
+Pair 25:
+  Relational:    year INTEGER
+  Denormalized:  year INTEGER
+
+Pair 26:
+  Relational:    pop_density DOUBLE
+  Denormalized:  pop_density DOUBLE
+
+Pair 27:
+  Relational:    urban_pop DOUBLE
+  Denormalized:  urban_pop DOUBLE
+
+Pair 28:
+  Relational:    rural_pop DOUBLE
+  Denormalized:  rural_pop DOUBLE
+
+Pair 29:
+  Relational:    net_migration DOUBLE
+  Denormalized:  net_migration DOUBLE
+
+Pair 30:
+  Relational:    death_rate DOUBLE
+  Denormalized:  death_rate DOUBLE
+
+Pair 31:
+  Relational:    birth_rate DOUBLE
+  Denormalized:  birth_rate DOUBLE
+
+Pair 32:
+  Relational:    id_employment SERIAL
+  Denormalized:  life_expectancy_years DOUBLE
+
+Pair 33:
+  Relational:    year INTEGER
+  Denormalized:  year INTEGER
+
+Pair 34:
+  Relational:    child_emp DOUBLE
+  Denormalized:  child_emp DOUBLE
+
+Pair 35:
+  Relational:    unemp DOUBLE
+  Denormalized:  unemp DOUBLE
+
+Pair 36:
+  Relational:    vulnerable_emp DOUBLE
+  Denormalized:  vulnerable_emp DOUBLE
+
+Pair 37:
+  Relational:    part_time DOUBLE
+  Denormalized:  part_time DOUBLE
+
+Pair 38:
+  Relational:    employers DOUBLE
+  Denormalized:  employers DOUBLE
+
+Pair 39:
+  Relational:    labor_force_total DOUBLE
+  Denormalized:  labor_force_total DOUBLE
+
+Pair 40:
+  Relational:    labor_force_fem DOUBLE
+  Denormalized:  labor_force_fem DOUBLE
+
+Pair 41:
+  Relational:    id_education SERIAL
+  Denormalized:  population_count DOUBLE
+
+Pair 42:
+  Relational:    year INTEGER
+  Denormalized:  year INTEGER
+
+Pair 43:
+  Relational:    child_out_of_school DOUBLE
+  Denormalized:  child_out_of_school DOUBLE
+
+Pair 44:
+  Relational:    progression_to_sec DOUBLE
+  Denormalized:  progression_to_sec DOUBLE
+
+Pair 45:
+  Relational:    expenditure DOUBLE
+  Denormalized:  edu_expenditure DOUBLE
+
+Pair 46:
+  Relational:    preprim_enroll DOUBLE
+  Denormalized:  preprim_enroll DOUBLE
+
+Pair 47:
+  Relational:    prim_enrol DOUBLE
+  Denormalized:  prim_enrol DOUBLE
+
+Pair 48:
+  Relational:    sec_enrol DOUBLE
+  Denormalized:  sec_enrol DOUBLE
+
+Pair 49:
+  Relational:    terti_enrol DOUBLE
+  Denormalized:  terti_enrol DOUBLE
+
+Pair 50:
+  Relational:    year INTEGER
+  Denormalized:  survey_year INTEGER
+
+Pair 51:
+  Relational:    gdp DOUBLE
+  Denormalized:  gdp DOUBLE
+
+Pair 52:
+  Relational:    inflation DOUBLE
+  Denormalized:  inflation DOUBLE
+
+Pair 53:
+  Relational:    tax_revenue DOUBLE
+  Denormalized:  tax_revenue DOUBLE
+
+Pair 54:
+  Relational:    id_population SERIAL
+  Denormalized:  id_population SERIAL
+
+Pair 55:
+  Relational:    pop_ages CHARACTER
+  Denormalized:  pop_ages CHARACTER
+
+Pair 56:
+  Relational:    gender CHARACTER
+  Denormalized:  gender CHARACTER
+
+Pair 57:
+  Relational:    id_life_expectancy SERIAL
+  Denormalized:  id_life_expectancy SERIAL
+
+Pair 58:
+  Relational:    gender CHARACTER
+  Denormalized:  gender CHARACTER
+
+Pair 59:
+  Relational:    hospital_beds DOUBLE
+  Denormalized:  hospital_beds DOUBLE
+
+Pair 60:
+  Relational:    physicians DOUBLE
+  Denormalized:  physicians DOUBLE
+
+Pair 61:
+  Relational:    expenditure DOUBLE
+  Denormalized:  health_expenditure DOUBLE
+
+
+================================================================================

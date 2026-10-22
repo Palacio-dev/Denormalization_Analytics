@@ -1,0 +1,157 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-38-29
+Model: gemini
+Prompt: RISEN
+Schema: ex06
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions the highly normalized transactional schema into an analytical Star Schema. The original model required up to 6 JOINs to associate educational performance metrics with geographic and institutional data. By applying 'Collapsing Relations' and 'Adding Redundant Attributes', we consolidated the hierarchy into two main dimensions (DIM_LOCALIDADE and DIM_CURSO), one standalone dimension (DIM_ESCOLA), and a single centralized fact table (FATO_AVALIACAO). This dramatically reduces JOIN overhead for heavy read analytical queries while preserving 100% of the original attributes and relationships.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapsing Relations: Merged the 'UF' and 'MUNICIPIO' tables into a single 'DIM_LOCALIDADE' dimension table to eliminate the geographic JOIN."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapsing Relations: Merged the 'IES' and 'CURSO' tables into a single 'DIM_CURSO' dimension table to eliminate the institution-to-course JOIN."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Collapsing Relations: Merged the 'ANO' bridge table with the 'ENADE', 'SAEB', and 'IDEB' metric tables into a single comprehensive fact table named 'FATO_AVALIACAO'."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Adding Redundant Attributes: Added 'nome_municipio' and 'sigla_uf' to 'DIM_CURSO' and 'DIM_ESCOLA' to allow filtering by location directly on these tables without joining 'DIM_LOCALIDADE'."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Attribute Renaming for Disambiguation: Renamed 'nome' from UF to 'nome_uf', 'rede' from IES to 'rede_ies', and 'rede' from ESCOLA to 'rede_escola' to prevent column ambiguity during merges."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Attribute Prefixing: Prefixed all metrics in 'FATO_AVALIACAO' with their source table names (e.g., 'enade_nota_bruta_ce', 'saeb_nota_mat') to maintain semantic clarity."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage Requirements: Storing redundant geographic data (e.g., sigla_uf, nome_municipio) in multiple dimension tables and creating a wide fact table increases the overall disk space footprint."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies Risk: If a municipality changes its name or an IES changes its network (rede), multiple rows across different tables must be updated. This is a standard and acceptable tradeoff in OLAP/analytical environments optimized for reads."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D3",
+        "query": "SELECT c.sigla_uf, c.nome_curso, AVG(f.enade_nota_enade_continua) as media_enade FROM FATO_AVALIACAO f JOIN DIM_CURSO c ON f.id_curso = c.id_curso WHERE f.ano = 2023 GROUP BY c.sigla_uf, c.nome_curso;"
+      },
+      {
+        "decision_id": "D1",
+        "query": "SELECT l.nome_uf, SUM(l.qtd_ESCOLAS) as total_escolas, AVG(l.media_ideb) as media_ideb_estado FROM DIM_LOCALIDADE l GROUP BY l.nome_uf ORDER BY media_ideb_estado DESC;"
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Script
+
+```sql
+-- ==============================================================================
+-- DENORMALIZED ANALYTICAL SCHEMA (STAR SCHEMA)
+-- DIALECT: PostgreSQL
+-- ==============================================================================
+
+DROP TABLE IF EXISTS FATO_AVALIACAO CASCADE;
+DROP TABLE IF EXISTS DIM_CURSO CASCADE;
+DROP TABLE IF EXISTS DIM_ESCOLA CASCADE;
+DROP TABLE IF EXISTS DIM_LOCALIDADE CASCADE;
+
+-- ------------------------------------------------------------------------------
+-- 1. DIM_LOCALIDADE (Collapses UF and MUNICIPIO)
+-- ------------------------------------------------------------------------------
+CREATE TABLE DIM_LOCALIDADE (
+    id_municipio INT PRIMARY KEY,
+    id_uf INT NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    qtd_habitantes INT CHECK(qtd_habitantes >= 0),
+    nome_municipio VARCHAR(100) NOT NULL,
+    qtd_IES INT CHECK (qtd_IES >= 0),
+    qtd_ESCOLAS INT CHECK (qtd_ESCOLAS >= 0),
+    media_ideb REAL,
+    media_saeb REAL,
+    media_enade REAL,
+    total_participantes INT CHECK (total_participantes >= 0)
+);
+
+-- ------------------------------------------------------------------------------
+-- 2. DIM_ESCOLA (Standalone Dimension with Redundant Geographic Attributes)
+-- ------------------------------------------------------------------------------
+CREATE TABLE DIM_ESCOLA (
+    id_escola INT PRIMARY KEY,
+    id_municipio INT NOT NULL REFERENCES DIM_LOCALIDADE(id_municipio) ON DELETE CASCADE,
+    nome_municipio VARCHAR(100) NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_escola VARCHAR(100) NOT NULL,
+    cod_escola INTEGER UNIQUE NOT NULL,
+    rede_escola VARCHAR(100) NOT NULL
+);
+
+-- ------------------------------------------------------------------------------
+-- 3. DIM_CURSO (Collapses IES and CURSO, adds Redundant Geographic Attributes)
+-- ------------------------------------------------------------------------------
+CREATE TABLE DIM_CURSO (
+    id_curso INT PRIMARY KEY,
+    id_ies INT NOT NULL,
+    id_municipio INT NOT NULL REFERENCES DIM_LOCALIDADE(id_municipio) ON DELETE CASCADE,
+    nome_municipio VARCHAR(100) NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_ies VARCHAR(100) NOT NULL,
+    sigla_ies VARCHAR(20),
+    codigo_ies INT NOT NULL,
+    rede_ies VARCHAR(100) NOT NULL,
+    nome_curso VARCHAR(100) NOT NULL
+);
+
+-- ------------------------------------------------------------------------------
+-- 4. FATO_AVALIACAO (Collapses ANO, ENADE, SAEB, and IDEB into a single Fact)
+-- ------------------------------------------------------------------------------
+CREATE TABLE FATO_AVALIACAO (
+    id_avaliacao INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_curso INT NOT NULL REFERENCES DIM_CURSO(id_curso) ON DELETE CASCADE,
+    ano INT NOT NULL,
+    
+    -- ENADE Attributes
+    enade_total_inscritos INT CHECK (enade_total_inscritos >= 0),
+    enade_total_concluintes INT CHECK (enade_total_concluintes >= 0),
+    enade_nota_bruta_ce REAL,
+    enade_nota_padronizada_ce REAL,
+    enade_nota_bruta_fg REAL,
+    enade_nota_padronizada_fg REAL,
+    enade_nota_enade_continua REAL,
+    enade_nota_enade_faixa REAL,
+    
+    -- SAEB Attributes
+    saeb_nota_mat REAL,
+    saeb_nota_port REAL,
+    saeb_nota_padrao REAL,
+    
+    -- IDEB Attributes
+    ideb_rend_1 REAL,
+    ideb_rend_2 REAL,
+    ideb_rend_3 REAL,
+    ideb_rend_4 REAL,
+    ideb_ind_rend REAL,
+    ideb_nota_ideb REAL
+);
+```

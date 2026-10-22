@@ -1,0 +1,265 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-58-13
+Model: gemini
+Prompt: senior
+Schema: ex08
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions the highly normalized OLTP schema into a Kimball-style Star Schema optimized for OLAP workloads. The primary objective is to reduce query complexity by eliminating unnecessary joins, pre-consolidating facts at the same grain, and flattening snowflake dimensions. This architecture minimizes CPU overhead during large-scale aggregations, improves BI tool compatibility, and leverages columnar/analytical database optimizations through wide tables and surrogate keys.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Flattened 'escola' and 'localizacao' into a single dimension 'dim_escola'. The source tables were normalized (snowflake). The target table denormalizes UF and Municipio directly into the school dimension."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merged 'vinculo_empregaticio' and 'remuneracao' into a single wide fact table 'fact_emprego_aluno'. Remuneration metrics are inherently fact measures associated with the employment event and should not be stored in a separate table."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Consolidated 'desempenho_enem', 'indicadores_escolares', and 'participacao_enem' into a single fact table 'fact_desempenho_escolar'. All three source tables share the exact same grain (School + Year), making them prime candidates for a consolidated wide fact table."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Introduced Surrogate Keys (SKs) for all dimensions (dim_aluno, dim_curso, dim_escola, dim_localizacao) to decouple the analytical model from source system Natural Keys (NKs) and support future Slowly Changing Dimensions (SCD Type 2)."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Implemented declarative table partitioning on fact tables based on temporal columns (Year) to support partition pruning during time-series analytical queries."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added 'sk_aluno', 'sk_curso', 'sk_escola', and 'sk_localizacao' as integer surrogate keys across all dimensions and facts."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed 'id_remuneracao' completely, as the measures from the remuneracao table (e.g., vl_remun_media_nom, vl_salario_contratual) were absorbed directly into 'fact_emprego_aluno'."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Retained 'dim_localizacao' as a standalone dimension strictly to serve the 'fact_emprego_aluno' table, as employment location is independent of school location."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy vs. Read Performance: Denormalizing 'localizacao' into 'dim_escola' introduces redundant storage of UF and Municipio strings. However, it eliminates a join for all school-related queries, which heavily outweighs the negligible storage cost."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "ETL Complexity vs. Query Simplicity: Consolidating the three school fact tables requires the ETL pipeline to perform Full Outer Joins on School and Year to handle cases where a school has ENEM data but no indicator data. This shifts the processing burden from query time (BI) to load time (ETL)."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Salary trajectory analysis: 'What is the average contractual salary and December remuneration of students, grouped by their demographics and employment location?' Requires scanning employment and remuneration together."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "School quality correlation: 'Is there a correlation between a school's dropout rate (taxa_abandono) and its average ENEM math score (media_mt) over the last 5 years?' Requires querying indicators and ENEM performance at the same grain."
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Geographic enrollment distribution: 'How many enrollments exist per course type, broken down by the State (UF) and City of the school?' Requires fast aggregation without traversing snowflake geographic tables."
+      }
+    ]
+  }
+}
+```
+
+### Analytical Physical Model DDL (PostgreSQL)
+
+```sql
+/* 
+=============================================================================
+  PRINCIPAL DATA ARCHITECT - ANALYTICAL PHYSICAL MODEL (OLAP)
+  Target: PostgreSQL / Data Warehouse
+  Methodology: Kimball Star Schema
+=============================================================================
+*/
+
+-- ==========================================
+-- 1. DIMENSIONS
+-- ==========================================
+
+CREATE TABLE IF NOT EXISTS public.dim_aluno
+(
+    sk_aluno integer GENERATED ALWAYS AS IDENTITY,
+    id_aluno_nk integer NOT NULL, -- Natural Key
+    data_nascimento date,
+    idade integer,
+    sexo character(1),
+    nacionalidade character varying(50),
+    raca character varying(50),
+    portador_deficiencia boolean,
+    CONSTRAINT dim_aluno_pkey PRIMARY KEY (sk_aluno)
+);
+CREATE UNIQUE INDEX idx_dim_aluno_nk ON public.dim_aluno(id_aluno_nk);
+
+
+CREATE TABLE IF NOT EXISTS public.dim_curso
+(
+    sk_curso integer GENERATED ALWAYS AS IDENTITY,
+    co_curso_nk character varying(50) NOT NULL, -- Natural Key
+    no_curso character varying(200) NOT NULL,
+    co_tipo_curso character varying(10),
+    tipo_curso character varying(100),
+    co_tipo_nivel character varying(10),
+    ds_tipo_nivel character varying(100),
+    ds_eixo_tecnologico character varying(200),
+    modalidade_ensino character varying(100),
+    carga_horaria integer,
+    CONSTRAINT dim_curso_pkey PRIMARY KEY (sk_curso)
+);
+CREATE UNIQUE INDEX idx_dim_curso_nk ON public.dim_curso(co_curso_nk);
+
+
+CREATE TABLE IF NOT EXISTS public.dim_escola
+(
+    sk_escola integer GENERATED ALWAYS AS IDENTITY,
+    co_escola_educacenso_nk character varying(50) NOT NULL, -- Natural Key
+    no_escola_educacenso character varying(200) NOT NULL,
+    tp_dependencia_adm_escola smallint,
+    tp_localizacao_escola smallint,
+    inse character varying(10),
+    -- Denormalized from localizacao
+    uf character varying(2),
+    municipio character varying(100),
+    CONSTRAINT dim_escola_pkey PRIMARY KEY (sk_escola)
+);
+CREATE UNIQUE INDEX idx_dim_escola_nk ON public.dim_escola(co_escola_educacenso_nk);
+
+
+-- Retained for Employment Fact which links directly to location, not via school
+CREATE TABLE IF NOT EXISTS public.dim_localizacao
+(
+    sk_localizacao integer GENERATED ALWAYS AS IDENTITY,
+    id_loc_nk integer NOT NULL, -- Natural Key
+    uf character varying(2) NOT NULL,
+    municipio character varying(100) NOT NULL,
+    CONSTRAINT dim_localizacao_pkey PRIMARY KEY (sk_localizacao)
+);
+CREATE UNIQUE INDEX idx_dim_localizacao_nk ON public.dim_localizacao(id_loc_nk);
+
+
+-- ==========================================
+-- 2. FACT TABLES
+-- ==========================================
+
+-- FACT: MATRICULA (Enrollments)
+-- Partitioned by Year for query pruning
+CREATE TABLE IF NOT EXISTS public.fact_matricula
+(
+    sk_matricula integer GENERATED ALWAYS AS IDENTITY,
+    sk_aluno integer NOT NULL,
+    sk_curso integer NOT NULL,
+    sk_escola integer NOT NULL,
+    ano integer NOT NULL, -- Converted to integer for partitioning and standard analytics
+    periodo character varying(30),
+    co_ciclo_matricula character varying(50),
+    situacao_matricula character varying(50),
+    tipo_cota character varying(50),
+    atestado_baixarenda character varying(20),
+    unidade_ensino character varying(100),
+    CONSTRAINT fact_matricula_pkey PRIMARY KEY (ano, sk_matricula),
+    CONSTRAINT fk_fact_mat_aluno FOREIGN KEY (sk_aluno) REFERENCES public.dim_aluno (sk_aluno),
+    CONSTRAINT fk_fact_mat_curso FOREIGN KEY (sk_curso) REFERENCES public.dim_curso (sk_curso),
+    CONSTRAINT fk_fact_mat_escola FOREIGN KEY (sk_escola) REFERENCES public.dim_escola (sk_escola)
+) PARTITION BY RANGE (ano);
+
+CREATE INDEX idx_fact_mat_aluno ON public.fact_matricula(sk_aluno);
+CREATE INDEX idx_fact_mat_curso ON public.fact_matricula(sk_curso);
+CREATE INDEX idx_fact_mat_escola ON public.fact_matricula(sk_escola);
+
+-- Example Partitions for fact_matricula
+CREATE TABLE fact_matricula_2021 PARTITION OF public.fact_matricula FOR VALUES FROM (2021) TO (2022);
+CREATE TABLE fact_matricula_2022 PARTITION OF public.fact_matricula FOR VALUES FROM (2022) TO (2023);
+CREATE TABLE fact_matricula_2023 PARTITION OF public.fact_matricula FOR VALUES FROM (2023) TO (2024);
+
+
+-- FACT: EMPREGO ALUNO (Employment & Remuneration Consolidated)
+-- Partitioned by ano_rais
+CREATE TABLE IF NOT EXISTS public.fact_emprego_aluno
+(
+    sk_emprego integer GENERATED ALWAYS AS IDENTITY,
+    sk_aluno integer NOT NULL,
+    sk_localizacao integer NOT NULL,
+    ano_rais integer NOT NULL,
+    razao_social character varying(200),
+    tipo_vinculo_empregaticio character varying(200),
+    data_admissao_declarada date,
+    tempo_emprego integer,
+    motivo_desligamento character varying(200),
+    mes_desligamento character varying(20),
+    indicador_vinculo_ativo boolean,
+    -- Denormalized Measures from remuneracao
+    vl_remun_media_nom numeric(10, 2),
+    vl_remun_media_sm numeric(10, 2),
+    vl_remun_dezembro_nom numeric(10, 2),
+    vl_remun_dezembro_sm numeric(10, 2),
+    qtd_hora_contr integer,
+    vl_ultima_remuneracao_ano numeric(10, 2),
+    vl_salario_contratual numeric(10, 2),
+    CONSTRAINT fact_emprego_aluno_pkey PRIMARY KEY (ano_rais, sk_emprego),
+    CONSTRAINT fk_fact_emp_aluno FOREIGN KEY (sk_aluno) REFERENCES public.dim_aluno (sk_aluno),
+    CONSTRAINT fk_fact_emp_loc FOREIGN KEY (sk_localizacao) REFERENCES public.dim_localizacao (sk_localizacao)
+) PARTITION BY RANGE (ano_rais);
+
+CREATE INDEX idx_fact_emp_aluno ON public.fact_emprego_aluno(sk_aluno);
+CREATE INDEX idx_fact_emp_loc ON public.fact_emprego_aluno(sk_localizacao);
+
+-- Example Partitions for fact_emprego_aluno
+CREATE TABLE fact_emprego_aluno_2021 PARTITION OF public.fact_emprego_aluno FOR VALUES FROM (2021) TO (2022);
+CREATE TABLE fact_emprego_aluno_2022 PARTITION OF public.fact_emprego_aluno FOR VALUES FROM (2022) TO (2023);
+
+
+-- FACT: DESEMPENHO ESCOLAR (Consolidated ENEM, Indicators, and Participation)
+-- Partitioned by nu_ano
+CREATE TABLE IF NOT EXISTS public.fact_desempenho_escolar
+(
+    sk_desempenho integer GENERATED ALWAYS AS IDENTITY,
+    sk_escola integer NOT NULL,
+    nu_ano integer NOT NULL,
+    
+    -- Measures from indicadores_escolares
+    porte_escola character varying(50),
+    nu_taxa_permanencia numeric(6, 2),
+    nu_taxa_aprovacao numeric(5, 2),
+    nu_taxa_reprovacao numeric(5, 2),
+    nu_taxa_abandono numeric(5, 2),
+    pc_formacao_docente numeric(5, 2),
+    
+    -- Measures from participacao_enem
+    nu_matriculas integer,
+    nu_participantes_nec_esp integer,
+    nu_participantes integer,
+    nu_taxa_participacao numeric(5, 2),
+    
+    -- Measures from desempenho_enem
+    nu_media_cn numeric(6, 2),
+    nu_media_ch numeric(6, 2),
+    nu_media_lp numeric(6, 2),
+    nu_media_mt numeric(6, 2),
+    nu_media_red numeric(6, 2),
+    
+    CONSTRAINT fact_desempenho_escolar_pkey PRIMARY KEY (nu_ano, sk_desempenho),
+    CONSTRAINT fk_fact_desempenho_escola FOREIGN KEY (sk_escola) REFERENCES public.dim_escola (sk_escola)
+) PARTITION BY RANGE (nu_ano);
+
+CREATE INDEX idx_fact_desempenho_escola ON public.fact_desempenho_escolar(sk_escola);
+
+-- Example Partitions for fact_desempenho_escolar
+CREATE TABLE fact_desempenho_escolar_2021 PARTITION OF public.fact_desempenho_escolar FOR VALUES FROM (2021) TO (2022);
+CREATE TABLE fact_desempenho_escolar_2022 PARTITION OF public.fact_desempenho_escolar FOR VALUES FROM (2022) TO (2023);
+```

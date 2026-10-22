@@ -1,0 +1,285 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_10-22-21
+Model: gemini
+Prompt: RISEN-few-shot
+Schema: HFC
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transforms a highly normalized transactional botanical/herbarium schema into a star/snowflake-like analytical schema. The primary goal is to optimize read-heavy analytical queries by drastically reducing the number of JOINs required to retrieve specimen (tombos) data. We applied the 'Collapsing Relations' technique extensively to merge taxonomic hierarchies, environmental characteristics, and location details directly into a central fact table (`fact_tombos`). We also consolidated related entities like addresses and institutions into dimensions, and merged similar synchronization tables (`reflora` and `specieslink`) into a single unified table. Audit tables were excluded as per the requirements.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapsed taxonomic hierarchy tables (`reinos`, `familias`, `sub_familias`, `generos`, `especies`, `sub_especies`, `variedades`) and their respective `autores` into the central `fact_tombos` table."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merged environmental and collection context tables (`locais_coleta`, `fase_sucessional`, `solos`, `relevos`, `vegetacoes`, `tipos`, `colecoes_anexas`, `coletores`, `coletores_complementares`) directly into `fact_tombos`."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Collapsed `herbarios` and `enderecos` into a single dimension table `dim_herbario` to store institution details and their physical addresses together."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Merged `remessas` and the associative table `retirada_exsiccata_tombos` into a single `fact_remessas` table to track specimen movements efficiently."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Combined `reflora` and `specieslink` into a single `fact_sincronizacao` table, adding a `plataforma` column to distinguish the source, reducing schema complexity."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Collapsed `estados` and `paises` into a single `dim_geografia` table to serve as a unified geographical dimension."
+      },
+      {
+        "decision_id": "D7",
+        "description": "Merged `usuarios` and `tipos_usuarios` into a single `dim_usuarios` table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant taxonomic attributes (e.g., `reino_nome`, `familia_nome`, `especie_nome`, `especie_autor_nome`) directly to `fact_tombos`."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added redundant environmental attributes (e.g., `solo_nome`, `relevo_nome`, `vegetacao_nome`, `fase_sucessional_nome`) directly to `fact_tombos`."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Removed all audit-related attributes and tables (`created_at`, `updated_at`, `alteracoes`, `historico_acessos`, `migrations`, `tombo_alteracoes_antigas`) to focus purely on analytical data preservation."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Prefixed author names based on their taxonomic level (e.g., `sub_familia_autor_nome`, `especie_autor_nome`, `variedade_autor_nome`) to avoid ambiguity in `fact_tombos`."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy and Storage: Storing full taxonomic strings and environmental descriptions in every specimen row significantly increases disk space usage compared to storing integer foreign keys."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If a taxonomic name or author name changes, it will require a bulk update across millions of rows in `fact_tombos` rather than a single row update in a dimension table. This is an acceptable tradeoff for OLAP environments."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1",
+        "query": "SELECT familia_nome, especie_nome, COUNT(hcf) as total_specimens FROM fact_tombos WHERE vegetacao_nome = 'Cerrado' GROUP BY familia_nome, especie_nome ORDER BY total_specimens DESC;"
+      },
+      {
+        "decision_id": "D4",
+        "query": "SELECT dh.herbario_nome, COUNT(fr.tombo_hcf) as total_sent FROM fact_remessas fr JOIN dim_herbario dh ON fr.entidade_destino_id = dh.herbario_id WHERE fr.retirada_devolvido = false GROUP BY dh.herbario_nome;"
+      },
+      {
+        "decision_id": "D5",
+        "query": "SELECT plataforma, ja_comparou, COUNT(sync_id) FROM fact_sincronizacao GROUP BY plataforma, ja_comparou;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+BEGIN;
+
+-- Fact Table: Tombos (Specimens)
+-- Collapses: tombos, coletores, coletores_complementares, locais_coleta, fase_sucessional, solos, relevos, vegetacoes, tipos, colecoes_anexas, reinos, familias, sub_familias, generos, especies, sub_especies, variedades, autores
+CREATE TABLE IF NOT EXISTS public.fact_tombos
+(
+    hcf bigint NOT NULL,
+    data_tombo timestamp with time zone,
+    data_coleta_dia bigint,
+    data_coleta_mes bigint,
+    data_coleta_ano bigint,
+    observacao text COLLATE pg_catalog."default",
+    nomes_populares text COLLATE pg_catalog."default",
+    numero_coleta bigint,
+    latitude double precision,
+    longitude double precision,
+    altitude double precision,
+    data_identificacao_dia smallint,
+    data_identificacao_mes smallint,
+    data_identificacao_ano integer,
+    situacao tombos_situacao,
+    nome_cientifico text COLLATE pg_catalog."default",
+    ativo boolean,
+    taxon character varying(45) COLLATE pg_catalog."default",
+    rascunho boolean,
+    descricao text COLLATE pg_catalog."default",
+    unicata boolean,
+    tombo_cidade_id bigint,
+    
+    -- Coletores
+    coletor_nome character varying(255) COLLATE pg_catalog."default",
+    coletor_email character varying(200) COLLATE pg_catalog."default",
+    coletores_complementares character varying(1000) COLLATE pg_catalog."default",
+    
+    -- Local Coleta & Ambiente
+    local_coleta_descricao text COLLATE pg_catalog."default",
+    local_coleta_cidade_id bigint,
+    local_coleta_fase_numero bigint,
+    fase_sucessional_nome character varying(200) COLLATE pg_catalog."default",
+    solo_nome character varying(300) COLLATE pg_catalog."default",
+    relevo_nome character varying(300) COLLATE pg_catalog."default",
+    vegetacao_nome character varying(300) COLLATE pg_catalog."default",
+    
+    -- Tipos e Coleções
+    tipo_nome character varying(250) COLLATE pg_catalog."default",
+    colecao_anexa_tipo colecoes_anexas_tipo,
+    colecao_anexa_observacoes text COLLATE pg_catalog."default",
+    
+    -- Taxonomia e Autores
+    reino_nome character varying(200) COLLATE pg_catalog."default",
+    familia_nome character varying(200) COLLATE pg_catalog."default",
+    sub_familia_nome character varying(300) COLLATE pg_catalog."default",
+    sub_familia_autor_nome character varying(200) COLLATE pg_catalog."default",
+    sub_familia_autor_observacao character varying(500) COLLATE pg_catalog."default",
+    genero_nome character varying(200) COLLATE pg_catalog."default",
+    especie_nome character varying(200) COLLATE pg_catalog."default",
+    especie_autor_nome character varying(200) COLLATE pg_catalog."default",
+    especie_autor_observacao character varying(500) COLLATE pg_catalog."default",
+    sub_especie_nome character varying(255) COLLATE pg_catalog."default",
+    sub_especie_autor_nome character varying(200) COLLATE pg_catalog."default",
+    sub_especie_autor_observacao character varying(500) COLLATE pg_catalog."default",
+    variedade_nome character varying(200) COLLATE pg_catalog."default",
+    variedade_autor_nome character varying(200) COLLATE pg_catalog."default",
+    variedade_autor_observacao character varying(500) COLLATE pg_catalog."default",
+    
+    -- Relacionamento com Herbario
+    entidade_id bigint,
+    
+    CONSTRAINT fact_tombos_pkey PRIMARY KEY (hcf)
+);
+
+-- Dimension: Herbario
+-- Collapses: herbarios, enderecos
+CREATE TABLE IF NOT EXISTS public.dim_herbario
+(
+    herbario_id bigint NOT NULL,
+    herbario_nome character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    herbario_caminho_logotipo text COLLATE pg_catalog."default",
+    herbario_sigla character varying(80) COLLATE pg_catalog."default" NOT NULL,
+    herbario_email character varying(200) COLLATE pg_catalog."default",
+    endereco_logradouro character varying(200) COLLATE pg_catalog."default",
+    endereco_numero character varying(10) COLLATE pg_catalog."default",
+    endereco_complemento text COLLATE pg_catalog."default",
+    endereco_cidade_id bigint,
+    CONSTRAINT dim_herbario_pkey PRIMARY KEY (herbario_id)
+);
+
+-- Dimension: Herbario Telefones (1:N relationship preserved)
+CREATE TABLE IF NOT EXISTS public.dim_herbario_telefones
+(
+    telefone_id bigserial NOT NULL,
+    herbario_id bigint NOT NULL,
+    telefone_numero character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT dim_herbario_telefones_pkey PRIMARY KEY (telefone_id)
+);
+
+-- Fact Table: Tombos Fotos
+CREATE TABLE IF NOT EXISTS public.fact_tombos_fotos
+(
+    foto_id bigint NOT NULL,
+    tombo_hcf bigint NOT NULL,
+    codigo_barra character varying(45) COLLATE pg_catalog."default",
+    num_barra character varying(45) COLLATE pg_catalog."default",
+    caminho_foto text COLLATE pg_catalog."default",
+    em_vivo boolean NOT NULL,
+    sequencia bigint,
+    CONSTRAINT fact_tombos_fotos_pkey PRIMARY KEY (foto_id)
+);
+
+-- Fact Table: Sincronizacao Externa
+-- Collapses: reflora, specieslink
+CREATE TABLE IF NOT EXISTS public.fact_sincronizacao
+(
+    sync_id bigserial NOT NULL,
+    plataforma character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    cod_barra character varying(12) COLLATE pg_catalog."default",
+    tombo_json text COLLATE pg_catalog."default",
+    ja_comparou boolean,
+    ja_requisitou boolean,
+    nro_requisicoes bigint,
+    CONSTRAINT fact_sincronizacao_pkey PRIMARY KEY (sync_id)
+);
+
+-- Fact Table: Remessas
+-- Collapses: remessas, retirada_exsiccata_tombos
+CREATE TABLE IF NOT EXISTS public.fact_remessas
+(
+    remessa_id bigint NOT NULL,
+    tombo_hcf bigint NOT NULL,
+    observacao text COLLATE pg_catalog."default",
+    data_envio timestamp with time zone,
+    entidade_destino_id bigint NOT NULL,
+    herbario_origem_id bigint NOT NULL,
+    retirada_tipo retirada_exsiccata_tombos_tipo NOT NULL,
+    retirada_data_vencimento timestamp with time zone,
+    retirada_devolvido boolean,
+    CONSTRAINT fact_remessas_pkey PRIMARY KEY (remessa_id, tombo_hcf)
+);
+
+-- Fact Table: Tombos Identificadores
+-- Collapses: tombos_identificadores, identificadores
+CREATE TABLE IF NOT EXISTS public.fact_tombos_identificadores
+(
+    identificador_id bigint NOT NULL,
+    tombo_hcf bigint NOT NULL,
+    identificador_nome character varying(255) COLLATE pg_catalog."default" NOT NULL,
+    ordem smallint,
+    CONSTRAINT fact_tombos_identificadores_pkey PRIMARY KEY (identificador_id, tombo_hcf)
+);
+
+-- Dimension: Usuarios
+-- Collapses: usuarios, tipos_usuarios
+CREATE TABLE IF NOT EXISTS public.dim_usuarios
+(
+    usuario_id bigint NOT NULL,
+    usuario_nome character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    usuario_ra character varying(45) COLLATE pg_catalog."default",
+    usuario_email character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    usuario_senha character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    usuario_telefone character varying(45) COLLATE pg_catalog."default",
+    usuario_token_troca_senha character varying(255) COLLATE pg_catalog."default",
+    usuario_token_troca_senha_expiracao timestamp with time zone,
+    tipo_usuario_nome character varying(100) COLLATE pg_catalog."default",
+    herbario_id bigint NOT NULL,
+    CONSTRAINT dim_usuarios_pkey PRIMARY KEY (usuario_id)
+);
+
+-- Dimension: Geografia
+-- Collapses: estados, paises
+CREATE TABLE IF NOT EXISTS public.dim_geografia
+(
+    estado_id bigint NOT NULL,
+    estado_nome character varying(255) COLLATE pg_catalog."default" NOT NULL,
+    estado_sigla character(4) COLLATE pg_catalog."default",
+    pais_id integer NOT NULL,
+    pais_nome character varying(255) COLLATE pg_catalog."default" NOT NULL,
+    pais_sigla character(4) COLLATE pg_catalog."default",
+    CONSTRAINT dim_geografia_pkey PRIMARY KEY (estado_id)
+);
+
+-- Dimension: Configuracao
+CREATE TABLE IF NOT EXISTS public.dim_configuracao
+(
+    configuracao_id bigint NOT NULL,
+    hora_inicio character varying(19) COLLATE pg_catalog."default" NOT NULL,
+    hora_fim character varying(19) COLLATE pg_catalog."default",
+    periodicidade configuracao_periodicidade,
+    data_proxima_atualizacao character varying(10) COLLATE pg_catalog."default",
+    nome_arquivo character varying(50) COLLATE pg_catalog."default",
+    servico configuracao_servico,
+    CONSTRAINT dim_configuracao_pkey PRIMARY KEY (configuracao_id)
+);
+
+END;
+```

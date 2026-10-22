@@ -1,0 +1,157 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-39-41
+Model: gemini
+Prompt: mid-level
+Schema: ex10
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The redesign transitions the highly normalized transactional schema (3NF) into a Star Schema optimized for OLAP/BI workloads. The strategy focuses on reducing join complexity by denormalizing hierarchical lookups (Continents into Countries) and consolidating metrics that share the exact same granularity. Because the data contains two distinct grains (Country-Year for population/emissions, and Country-Year-EnergyType for consumption), two separate fact tables were created to prevent metric duplication and aggregation errors in BI tools.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Denormalize 'continente' into 'paises' to create a single dimension table 'dim_pais'. This eliminates the need to join two tables to filter or group by continent."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Consolidate 'emissao_g_efeito_estufa' and 'populacao' into a single fact table 'fato_indicadores_pais_ano'. Both original tables share the exact same grain (Country + Year), so combining them reduces the number of fact tables and simplifies cross-metric queries."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Create a separate fact table 'fato_consumo_energia' from 'consumo_anual'. This is kept separate from the other metrics because it has a deeper grain (Country + Year + Energy Type). Merging it with population/emissions would cause a Cartesian product effect, duplicating population and emission measures across energy types."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Create 'dim_fonte_energia' from 'fonte_energia' to act as a conformed dimension for the consumption fact table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Converted 'nome' in 'fonte_energia' from an array of strings (varchar[]) to a standard scalar string (VARCHAR). BI tools struggle with array types for grouping and filtering."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Renamed attributes for better business readability (e.g., 'quantidade_hab' to 'populacao_total', 'quantidade_emitida' to 'emissoes_gee_total')."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Changed 'porcentagem' in 'consumo_anual' from INTEGER to NUMERIC(5,2) in the new fact table to allow for decimal precision, which is standard for analytical percentage reporting."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Removed surrogate keys like 'id_consumo', 'id_emissao', and 'id_pop'. Analytical fact tables are better served by composite primary keys based on their dimensions (e.g., id_pais + ano) to ensure data integrity at the required grain."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy in Dimensions: By moving the continent name into 'dim_pais', the continent string is duplicated for every country in that continent. This increases storage slightly but drastically improves read performance."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Potential Sparsity (NULLs): By combining population and emissions into one fact table, if a country reports population for a specific year but not emissions (or vice versa), the missing metric will have to be stored as NULL."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Calculate total greenhouse gas emissions and population growth grouped by Continent and Year."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Calculate emissions per capita (Emissions / Population) for a specific country in a specific year. Consolidating these into one table makes this a simple row-level calculation rather than a complex join."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze the evolution of the energy matrix (percentage of each energy source) for a given country over the last decade."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Creation Script
+
+```sql
+-- Create a dedicated schema for the analytical model
+CREATE SCHEMA IF NOT EXISTS analytical;
+
+-- ==========================================
+-- DIMENSION TABLES
+-- ==========================================
+
+-- 1. Dimension: Country (Denormalized with Continent)
+CREATE TABLE IF NOT EXISTS analytical.dim_pais
+(
+    id_pais integer NOT NULL,
+    nome_pais character varying(50) NOT NULL,
+    ano_fundacao integer NOT NULL,
+    nome_continente character varying(50) NOT NULL,
+    CONSTRAINT dim_pais_pkey PRIMARY KEY (id_pais)
+);
+
+-- 2. Dimension: Energy Source
+CREATE TABLE IF NOT EXISTS analytical.dim_fonte_energia
+(
+    id_fonte_energia integer NOT NULL,
+    -- Converted from varchar[] to standard varchar for BI compatibility
+    nome_fonte_energia character varying(100) NOT NULL, 
+    CONSTRAINT dim_fonte_energia_pkey PRIMARY KEY (id_fonte_energia)
+);
+
+-- ==========================================
+-- FACT TABLES
+-- ==========================================
+
+-- 3. Fact: Country Annual Indicators (Population & Emissions)
+-- Grain: 1 row per Country per Year
+CREATE TABLE IF NOT EXISTS analytical.fato_indicadores_pais_ano
+(
+    id_pais integer NOT NULL,
+    ano integer NOT NULL,
+    populacao_total bigint,
+    emissoes_gee_total bigint,
+    CONSTRAINT fato_indicadores_pais_ano_pkey PRIMARY KEY (id_pais, ano),
+    CONSTRAINT fk_fato_indicadores_pais FOREIGN KEY (id_pais)
+        REFERENCES analytical.dim_pais (id_pais) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+);
+
+-- 4. Fact: Annual Energy Consumption
+-- Grain: 1 row per Country per Year per Energy Source
+CREATE TABLE IF NOT EXISTS analytical.fato_consumo_energia
+(
+    id_pais integer NOT NULL,
+    id_fonte_energia integer NOT NULL,
+    ano integer NOT NULL,
+    -- Converted to numeric for better BI precision on percentages
+    porcentagem_consumo numeric(5,2) NOT NULL, 
+    CONSTRAINT fato_consumo_energia_pkey PRIMARY KEY (id_pais, id_fonte_energia, ano),
+    CONSTRAINT fk_fato_consumo_pais FOREIGN KEY (id_pais)
+        REFERENCES analytical.dim_pais (id_pais) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION,
+    CONSTRAINT fk_fato_consumo_fonte FOREIGN KEY (id_fonte_energia)
+        REFERENCES analytical.dim_fonte_energia (id_fonte_energia) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+);
+
+-- ==========================================
+-- INDEXES FOR READ-HEAVY WORKLOADS
+-- ==========================================
+
+-- Indexes on foreign keys and commonly filtered/grouped columns
+CREATE INDEX idx_fato_indicadores_ano ON analytical.fato_indicadores_pais_ano(ano);
+CREATE INDEX idx_fato_consumo_ano ON analytical.fato_consumo_energia(ano);
+CREATE INDEX idx_dim_pais_continente ON analytical.dim_pais(nome_continente);
+```

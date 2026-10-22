@@ -1,0 +1,97 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-54-42
+Model: gemini
+Prompt: RISEN
+Schema: solarwinds
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions the highly normalized 3NF transactional schema into an analytical Star Schema with a heavily denormalized fact table. In the original model, answering basic business questions (e.g., 'Total revenue per customer') required a 4-way join across customers, orders, order_details, and products. By collapsing the header and line-item tables into a single fact table, adding redundant descriptive attributes, and precomputing revenue metrics, we eliminate expensive join overhead for the most frequent analytical read queries while preserving full semantic equivalence and reconstructibility through retained dimension tables.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapsing Relations: Merged the 'orders' and 'order_details' tables into a single 'fact_sales' table. This eliminates the 1:N join between order headers and line items, which is a primary bottleneck in analytical workloads."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Adding Redundant Attributes: Injected 'customer_name', 'product_name', and 'product_price' directly into the 'fact_sales' table. This materializes the join results, allowing aggregations and filtering by customer or product directly on the fact table without joining the dimension tables."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Adding Derived Attributes: Added a 'line_total_amount' column (calculated as quantity * product_price) to the 'fact_sales' table. This prevents the database engine from having to perform repetitive row-level mathematical operations during heavy aggregations (SUM, AVG)."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Storage Overhead: Storing redundant textual data (customer_name, product_name) in every row of the fact table significantly increases the storage footprint compared to the normalized schema."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies and Data Staleness: If a customer's name or a product's name changes in the source system, the historical records in the denormalized fact table will retain the old names unless a complex cascading update is executed (though this is often considered a feature in analytical 'point-in-time' reporting)."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1",
+        "query": "SELECT customer_name, SUM(line_total_amount) AS total_revenue FROM fact_sales GROUP BY customer_name ORDER BY total_revenue DESC;"
+      },
+      {
+        "decision_id": "A1",
+        "query": "SELECT product_name, SUM(quantity) AS total_units_sold FROM fact_sales WHERE order_date >= '2023-01-01' GROUP BY product_name;"
+      }
+    ]
+  }
+}
+```
+
+### Denormalized Analytical Schema DDL
+
+```sql
+-- Dimension Table: Customers
+-- Preserves all customer records, including those without any associated orders.
+CREATE TABLE dim_customers (
+  customer_id SERIAL PRIMARY KEY,
+  customer_name VARCHAR(100),
+  customer_email VARCHAR(100),
+  customer_address TEXT
+);
+
+-- Dimension Table: Products
+-- Preserves all product records, including those that have never been sold.
+CREATE TABLE dim_products (
+  product_id SERIAL PRIMARY KEY,
+  product_name VARCHAR(100),
+  price DECIMAL(10,2)
+);
+
+-- Fact Table: Sales
+-- Collapses 'orders' and 'order_details', adds redundant attributes for zero-join querying, 
+-- and includes derived metrics for fast aggregations.
+CREATE TABLE fact_sales (
+  order_detail_id SERIAL PRIMARY KEY,
+  order_id INT NOT NULL,
+  order_date DATE,
+  
+  -- Foreign keys maintained for reconstructibility and optional dimension joins
+  customer_id INT REFERENCES dim_customers(customer_id),
+  product_id INT REFERENCES dim_products(product_id),
+  
+  -- Redundant Attributes (Technique 1)
+  customer_name VARCHAR(100),
+  product_name VARCHAR(100),
+  product_price DECIMAL(10,2),
+  
+  -- Original Attributes
+  quantity INT,
+  
+  -- Derived Attributes (Technique 2)
+  line_total_amount DECIMAL(12,2)
+);
+```

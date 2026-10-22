@@ -1,0 +1,112 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-19-39
+Model: ollama_api
+Prompt: mid-level
+Schema: ex07
+==================================================
+
+{
+  "section_1": {
+    "summary": "The original schema represents a normalized structure for hydroelectric plants (Usina) with related entities such as owners, rivers, locations, municipalities, and states. The denormalization strategy consolidates these into a single wide analytical table to optimize read-heavy analytical queries by reducing joins, flattening hierarchies, and precomputing useful attributes like full location names and geographic coordinates.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidate all dimension tables into a single denormalized 'Usina_Analytics' table to reduce join complexity for analytical queries."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Flatten location hierarchy by embedding municipality and state names directly into the main table using joins from Localizacoes -> Municipios -> Estados."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Integrate river name directly into the main table by joining Usina -> Rios."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Integrate owner name directly into the main table by joining Usina -> Proprietarios."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Embed both primary and secondary municipalities associated with a location for richer geographic context."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived fields: proprietario_nome, rio_nome, municipio1_nome, municipio2_nome, uf1, uf2, latitude, longitude."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Renamed id_localizacao to id_localizacao_original and dropped foreign key constraints in favor of flattened values."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Removed surrogate keys for dimensions (e.g., id_proprietario, id_rio) and replaced them with descriptive names."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data redundancy increases due to denormalization; updates to dimension values require propagation across multiple rows."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Storage footprint increases due to repeated text fields (e.g., municipio names, uf codes), but this is acceptable for analytical workloads."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of referential integrity at the database level since foreign key constraints are removed for performance; must be handled at ETL/application layer."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Users frequently analyze power plant capacity (potkw, potfis) grouped by owner, state, or river. Denormalization avoids costly joins during aggregation."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Geospatial dashboards require latitude/longitude and full location names (municipio, uf) without needing to join multiple tables."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Filtering or grouping by operational stage (estagio), owner, or river name is common in reporting tools; embedding these avoids lookup overhead."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical queries often need both primary and secondary municipalities for a location to support regional analysis."
+      }
+    ]
+  }
+}
+
+```sql
+-- Denormalized Analytical Schema for Usina
+DROP TABLE IF EXISTS public."Usina_Analytics";
+
+CREATE TABLE public."Usina_Analytics" (
+    id_usina INTEGER PRIMARY KEY,
+    nome_usina VARCHAR NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    iniciop DATE,
+    atualizacao DATE,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    estagio VARCHAR,
+    proprietario_nome VARCHAR,
+    rio_nome VARCHAR,
+    municipio1_nome VARCHAR,
+    municipio2_nome VARCHAR,
+    uf1 CHAR(2),
+    uf2 CHAR(2),
+    id_localizacao_original INTEGER
+);
+
+COMMENT ON TABLE public."Usina_Analytics" IS 'Denormalized analytical table for hydroelectric power plants with embedded dimension values for optimized querying.';
+```

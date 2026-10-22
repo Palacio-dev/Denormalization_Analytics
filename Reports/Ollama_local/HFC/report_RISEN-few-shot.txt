@@ -1,0 +1,427 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 37
+  - Total Attributes: 139
+    * alteracoes: 10 columns
+    * autores: 5 columns
+    * colecoes_anexas: 5 columns
+    * coletores: 5 columns
+    * coletores_complementares: 4 columns
+    * configuracao: 7 columns
+    * enderecos: 7 columns
+    * especies: 7 columns
+    * estados: 6 columns
+    * familias: 5 columns
+    * fase_sucessional: 4 columns
+    * generos: 5 columns
+    * herbarios: 8 columns
+    * historico_acessos: 3 columns
+    * identificadores: 4 columns
+    * locais_coleta: 7 columns
+    * migrations: 2 columns
+    * paises: 5 columns
+    * reflora: 6 columns
+    * reinos: 4 columns
+    * relevos: 4 columns
+    * remessas: 7 columns
+    * retirada_exsiccata_tombos: 7 columns
+    * solos: 4 columns
+    * specieslink: 6 columns
+    * sub_especies: 8 columns
+    * sub_familias: 6 columns
+    * telefones: 3 columns
+    * tipos: 4 columns
+    * tipos_usuarios: 4 columns
+    * tombo_alteracoes_antigas: 4 columns
+    * tombos: 39 columns
+    * tombos_fotos: 9 columns
+    * tombos_identificadores: 3 columns (junction table - excluded from attribute analysis)
+    * usuarios: 12 columns
+    * variedades: 8 columns
+    * vegetacoes: 4 columns
+
+  Note: 1 junction table(s) detected and excluded from attribute analysis:
+    - tombos_identificadores
+
+Denormalized Model:
+  - Tables: 3
+  - Total Attributes: 70
+    * tombos_denormalizado: 73 columns
+    * herbarios_denormalizados: 15 columns
+    * autores_denormalizados: 5 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Normalized model has MORE attributes (70 vs 139)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: tombo_json (TEXT) -> nome_colecao_anexa (CHARACTER)
+  - Type mismatch: identificacao (BOOLEAN) -> nome_tombo_identificador (CHARACTER)
+  - Type mismatch: tipo (COLECOES_ANEXAS_TIPO) -> nome_tipo (CHARACTER)
+  - Type mismatch: complementares (CHARACTER) -> complemento (TEXT)
+  - Type mismatch: periodicidade (CONFIGURACAO_PERIODICIDADE) -> nome_cidade (CHARACTER)
+  - Type mismatch: cidade_id (BIGINT) -> nome_cidade_herbario (CHARACTER)
+  - Type mismatch: sigla (CHARACTER(4)) -> sigla (CHARACTER)
+  - Type mismatch: numero (BIGINT) -> numero (CHARACTER)
+  - Type mismatch: data_criacao (TIMESTAMP) -> nome_estado_herbario (CHARACTER)
+  - Type mismatch: usuario_id (BIGINT) -> ra_usuario (CHARACTER)
+  - Type mismatch: observacao (TEXT) -> nome_pais_herbario (CHARACTER)
+  - Type mismatch: data_envio (TIMESTAMP) -> data_tombo_antiga (DATE)
+  - Type mismatch: sequencia (BIGINT) -> nome_sub_especie (CHARACTER)
+  - Type mismatch: observacao (TEXT) -> observacao (CHARACTER)
+  - Type mismatch: fase_sucessional_id (BIGINT) -> nome_fase_sucessional (CHARACTER)
+--------------------------------------------------------------------------------
+Completeness Ratio:        0.50
+Data Type Preservation:    0.79
+Avg Levenshtein Distance:  4.51
+BLEU Score:                0.18
+ROUGE-1:                   0.52
+METEOR Score:              0.21
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: tombos_denormalizado
+Dimension Tables Detected: herbarios_denormalizados, autores_denormalizados
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected exactly 1 Fact table. Evaluating as a standard STAR SCHEMA.
+  - FACT FK VIOLATION: Foreign Key 'entidade_id' in Fact 'tombos_denormalizado' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'local_coleta_id' in Fact 'tombos_denormalizado' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'tipo_id' in Fact 'tombos_denormalizado' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'especie_id' in Fact 'tombos_denormalizado' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'genero_id' in Fact 'tombos_denormalizado' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'familia_id' in Fact 'tombos_denormalizado' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'sub_familia_id' in Fact 'tombos_denormalizado' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'sub_especie_id' in Fact 'tombos_denormalizado' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'colecao_anexa_id' in Fact 'tombos_denormalizado' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'solo_id' in Fact 'tombos_denormalizado' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'relevo_id' in Fact 'tombos_denormalizado' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'vegetacao_id' in Fact 'tombos_denormalizado' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'coletor_id' in Fact 'tombos_denormalizado' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'cidade_id' in Fact 'tombos_denormalizado' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'fase_sucessional_id' in Fact 'tombos_denormalizado' allows NULL values.
+  - PAYLOAD WARNING: Fact table 'tombos_denormalizado' contains more text attributes (45) than numeric measures (13).
+  - SNOWFLAKE VIOLATION: Dimension 'herbarios_denormalizados' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'caminho_logotipo' in 'herbarios_denormalizados' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'email' in 'herbarios_denormalizados' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'endereco_id' in 'herbarios_denormalizados' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nome_endereco' in 'herbarios_denormalizados' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'logradouro' in 'herbarios_denormalizados' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'numero' in 'herbarios_denormalizados' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'complemento' in 'herbarios_denormalizados' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nome_cidade' in 'herbarios_denormalizados' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nome_estado' in 'herbarios_denormalizados' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nome_pais' in 'herbarios_denormalizados' allows NULLs. Consider demanding default values.
+  - SNOWFLAKE VIOLATION: Dimension 'autores_denormalizados' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'observacao' in 'autores_denormalizados' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * tombos_denormalizado: 13 Numeric, 45 Text
+  * herbarios_denormalizados: 2 Numeric, 13 Text
+  * autores_denormalizados: 1 Numeric, 4 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  altitude applied_at ativo ativo caminho_foto caminho_logotipo cidade_id cidade_id cidade_id cod_barra cod_barra codigo_barra coletor_id complementares complemento data data_coleta_ano data_coleta_dia data_coleta_mes data_criacao data_envio data_identificacao_ano data_identificacao_dia data_identificacao_mes data_proxima_atualizacao data_tombo data_vencimento descricao descricao descricao devolvido em_vivo email email email entidade_destino_id fase_sucessional_id hcf hora_fim hora_inicio id id id id id id id id id id id id id id id id id id id id id id id id id id id id id id identificacao ja_comparou ja_comparou ja_requisitou ja_requisitou latitude logradouro longitude name nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome_arquivo nome_cientifico nomes_populares nro_requisicoes nro_requisicoes num_barra numero numero numero numero_coleta observacao observacao observacao observacao observacoes periodicidade ra rascunho reino_id senha sequencia sequencia servico sigla sigla sigla situacao status taxon telefone tipo tipo tipo token_troca_senha token_troca_senha_expiracao tombo_json tombo_json tombo_json unicata usuario_id variedade_id
+
+Denormalized Model (Combined Text):
+  altitude ativo caminho_logotipo complemento complemento data_coleta_ano data_coleta_dia data_coleta_mes data_identificacao_ano data_identificacao_dia data_identificacao_mes data_tombo data_tombo_antiga descricao descricao_local_coleta email email_herbario hcf id latitude logradouro logradouro longitude nome nome nome_autor nome_cidade nome_cidade nome_cidade_herbario nome_cientifico nome_colecao_anexa nome_endereco nome_endereco nome_especie nome_estado nome_estado nome_estado_herbario nome_familia nome_fase_sucessional nome_genero nome_herbario nome_local_coleta nome_pais nome_pais nome_pais_herbario nome_relevo nome_solo nome_sub_especie nome_sub_familia nome_tipo nome_tipo_usuario nome_tombo_identificador nome_usuario nome_vegetacao nomes_populares numero numero numero_coleta observacao observacao observacao_tombo_antiga ra_usuario rascunho sequencia_antiga sigla situacao taxon telefone_usuario unicata variedade_id
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 70 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 2:
+  Relational:    observacao TEXT
+  Denormalized:  observacao TEXT
+
+Pair 3:
+  Relational:    tombo_json TEXT
+  Denormalized:  nome_colecao_anexa CHARACTER
+
+Pair 4:
+  Relational:    ativo BOOLEAN
+  Denormalized:  ativo BOOLEAN
+
+Pair 5:
+  Relational:    identificacao BOOLEAN
+  Denormalized:  nome_tombo_identificador CHARACTER
+
+Pair 6:
+  Relational:    nome CHARACTER
+  Denormalized:  nome_especie CHARACTER
+
+Pair 7:
+  Relational:    observacao CHARACTER
+  Denormalized:  nome_vegetacao CHARACTER
+
+Pair 8:
+  Relational:    tipo COLECOES_ANEXAS_TIPO
+  Denormalized:  nome_tipo CHARACTER
+
+Pair 9:
+  Relational:    observacoes TEXT
+  Denormalized:  observacao_tombo_antiga TEXT
+
+Pair 10:
+  Relational:    nome CHARACTER
+  Denormalized:  nome_autor CHARACTER
+
+Pair 11:
+  Relational:    email CHARACTER
+  Denormalized:  nome_familia CHARACTER
+
+Pair 12:
+  Relational:    complementares CHARACTER
+  Denormalized:  complemento TEXT
+
+Pair 13:
+  Relational:    hora_inicio CHARACTER
+  Denormalized:  nome_endereco CHARACTER
+
+Pair 14:
+  Relational:    hora_fim CHARACTER
+  Denormalized:  logradouro CHARACTER
+
+Pair 15:
+  Relational:    periodicidade CONFIGURACAO_PERIODICIDADE
+  Denormalized:  nome_cidade CHARACTER
+
+Pair 16:
+  Relational:    nome_arquivo CHARACTER
+  Denormalized:  nome_relevo CHARACTER
+
+Pair 17:
+  Relational:    logradouro CHARACTER
+  Denormalized:  logradouro CHARACTER
+
+Pair 18:
+  Relational:    numero CHARACTER
+  Denormalized:  nome_genero CHARACTER
+
+Pair 19:
+  Relational:    complemento TEXT
+  Denormalized:  complemento TEXT
+
+Pair 20:
+  Relational:    cidade_id BIGINT
+  Denormalized:  nome_cidade_herbario CHARACTER
+
+Pair 21:
+  Relational:    nome CHARACTER
+  Denormalized:  nome_pais CHARACTER
+
+Pair 22:
+  Relational:    nome CHARACTER
+  Denormalized:  nome_solo CHARACTER
+
+Pair 23:
+  Relational:    sigla CHARACTER(4)
+  Denormalized:  sigla CHARACTER
+
+Pair 24:
+  Relational:    nome CHARACTER
+  Denormalized:  nome_estado CHARACTER
+
+Pair 25:
+  Relational:    numero BIGINT
+  Denormalized:  numero CHARACTER
+
+Pair 26:
+  Relational:    nome CHARACTER
+  Denormalized:  nome CHARACTER
+
+Pair 27:
+  Relational:    nome CHARACTER
+  Denormalized:  nome_endereco CHARACTER
+
+Pair 28:
+  Relational:    nome CHARACTER
+  Denormalized:  nome_usuario CHARACTER
+
+Pair 29:
+  Relational:    caminho_logotipo TEXT
+  Denormalized:  caminho_logotipo TEXT
+
+Pair 30:
+  Relational:    email CHARACTER
+  Denormalized:  email_herbario CHARACTER
+
+Pair 31:
+  Relational:    data_criacao TIMESTAMP
+  Denormalized:  nome_estado_herbario CHARACTER
+
+Pair 32:
+  Relational:    usuario_id BIGINT
+  Denormalized:  ra_usuario CHARACTER
+
+Pair 33:
+  Relational:    nome CHARACTER
+  Denormalized:  nome_cidade CHARACTER
+
+Pair 34:
+  Relational:    descricao TEXT
+  Denormalized:  descricao TEXT
+
+Pair 35:
+  Relational:    nome CHARACTER
+  Denormalized:  nome_estado CHARACTER
+
+Pair 36:
+  Relational:    cod_barra CHARACTER
+  Denormalized:  nome_herbario CHARACTER
+
+Pair 37:
+  Relational:    nome CHARACTER
+  Denormalized:  nome_pais CHARACTER
+
+Pair 38:
+  Relational:    nome CHARACTER
+  Denormalized:  nome CHARACTER
+
+Pair 39:
+  Relational:    observacao TEXT
+  Denormalized:  nome_pais_herbario CHARACTER
+
+Pair 40:
+  Relational:    data_envio TIMESTAMP
+  Denormalized:  data_tombo_antiga DATE
+
+Pair 41:
+  Relational:    numero CHARACTER
+  Denormalized:  numero CHARACTER
+
+Pair 42:
+  Relational:    sequencia BIGINT
+  Denormalized:  nome_sub_especie CHARACTER
+
+Pair 43:
+  Relational:    descricao TEXT
+  Denormalized:  descricao_local_coleta TEXT
+
+Pair 44:
+  Relational:    hcf BIGSERIAL
+  Denormalized:  hcf BIGSERIAL
+
+Pair 45:
+  Relational:    data_tombo TIMESTAMP
+  Denormalized:  data_tombo TIMESTAMP
+
+Pair 46:
+  Relational:    data_coleta_dia BIGINT
+  Denormalized:  data_coleta_dia BIGINT
+
+Pair 47:
+  Relational:    observacao TEXT
+  Denormalized:  observacao CHARACTER
+
+Pair 48:
+  Relational:    nomes_populares TEXT
+  Denormalized:  nomes_populares TEXT
+
+Pair 49:
+  Relational:    numero_coleta BIGINT
+  Denormalized:  numero_coleta BIGINT
+
+Pair 50:
+  Relational:    latitude DOUBLE
+  Denormalized:  latitude DOUBLE
+
+Pair 51:
+  Relational:    longitude DOUBLE
+  Denormalized:  longitude DOUBLE
+
+Pair 52:
+  Relational:    altitude DOUBLE
+  Denormalized:  altitude DOUBLE
+
+Pair 53:
+  Relational:    variedade_id BIGINT
+  Denormalized:  variedade_id BIGINT
+
+Pair 54:
+  Relational:    data_identificacao_dia SMALLINT
+  Denormalized:  data_identificacao_dia SMALLINT
+
+Pair 55:
+  Relational:    data_identificacao_mes SMALLINT
+  Denormalized:  data_identificacao_mes SMALLINT
+
+Pair 56:
+  Relational:    data_identificacao_ano INTEGER
+  Denormalized:  data_identificacao_ano INTEGER
+
+Pair 57:
+  Relational:    situacao TOMBOS_SITUACAO
+  Denormalized:  situacao TOMBOS_SITUACAO
+
+Pair 58:
+  Relational:    nome_cientifico TEXT
+  Denormalized:  nome_cientifico TEXT
+
+Pair 59:
+  Relational:    data_coleta_mes BIGINT
+  Denormalized:  data_coleta_mes BIGINT
+
+Pair 60:
+  Relational:    data_coleta_ano BIGINT
+  Denormalized:  data_coleta_ano BIGINT
+
+Pair 61:
+  Relational:    taxon CHARACTER
+  Denormalized:  taxon CHARACTER
+
+Pair 62:
+  Relational:    rascunho BOOLEAN
+  Denormalized:  rascunho BOOLEAN
+
+Pair 63:
+  Relational:    unicata BOOLEAN
+  Denormalized:  unicata BOOLEAN
+
+Pair 64:
+  Relational:    fase_sucessional_id BIGINT
+  Denormalized:  nome_fase_sucessional CHARACTER
+
+Pair 65:
+  Relational:    codigo_barra CHARACTER
+  Denormalized:  nome_tipo_usuario CHARACTER
+
+Pair 66:
+  Relational:    num_barra CHARACTER
+  Denormalized:  nome_sub_familia CHARACTER
+
+Pair 67:
+  Relational:    sequencia BIGINT
+  Denormalized:  sequencia_antiga BIGINT
+
+Pair 68:
+  Relational:    email CHARACTER
+  Denormalized:  email CHARACTER
+
+Pair 69:
+  Relational:    telefone CHARACTER
+  Denormalized:  telefone_usuario CHARACTER
+
+Pair 70:
+  Relational:    token_troca_senha CHARACTER
+  Denormalized:  nome_local_coleta CHARACTER
+
+
+================================================================================

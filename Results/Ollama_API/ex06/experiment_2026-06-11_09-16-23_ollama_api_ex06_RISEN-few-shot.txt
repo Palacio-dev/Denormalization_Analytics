@@ -1,0 +1,114 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-16-23
+Model: ollama_api
+Prompt: RISEN-few-shot
+Schema: ex06
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on collapsing relations and adding redundant attributes to eliminate costly 
+    joins in analytical queries. The main structural change is to merge most tables into a single fact-like table 'MUNICIPIO_ANO' 
+    that contains all educational indicators at the municipality-year level. This eliminates the need for multiple joins between 
+    MUNICIPIO, ANO, and the indicator tables (IDEB, ENADE, SAEB). Additionally, we add redundant attributes from UF to avoid joining 
+    with the state table, and include derived attributes for totals and averages where appropriate.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapse Relations: Merge MUNICIPIO with ANO and all indicator tables (IDEB, ENADE, SAEB) into a single table MUNICIPIO_ANO to eliminate complex joins for time-series analysis by municipality."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapse Relations: Merge IES and ESCOLA into MUNICIPIO_ANO by adding their counts as derived attributes (qtd_IES, qtd_ESCOLAS) which already exist in MUNICIPIO."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Adding Redundant Attributes: Include UF information (sigla_uf, nome, qtd_habitantes) directly in MUNICIPIO_ANO to avoid joining with UF table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant attributes from UF table (sigla_uf, nome, qtd_habitantes) to MUNICIPIO_ANO table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Moved all indicator attributes (from IDEB, ENADE, SAEB) to MUNICIPIO_ANO table as direct columns."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Removed foreign key relationships and associated ID columns (id_uf, id_municipio, etc.) that are no longer needed due to denormalization."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Storage vs Performance: Increased storage requirements due to data duplication, but significantly improved read performance for analytical queries."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Data Consistency: Updates become more complex as changes need to be propagated across denormalized tables, but reads are much faster."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Schema Flexibility: Schema is less flexible to changes as denormalized structure requires more effort to modify compared to normalized structure."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Frequent analytical queries analyzing educational indicators (IDEB, ENADE, SAEB) over time for specific municipalities or regions, requiring joins across multiple tables."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries comparing municipality-level education metrics with demographic data (population), necessitating joins between MUNICIPIO and UF tables."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregation queries calculating averages or totals of educational indicators across municipalities or states, previously requiring complex joins and grouping."
+      }
+    ]
+  }
+}
+
+```sql
+DROP TABLE IF EXISTS MUNICIPIO_ANO CASCADE;
+
+CREATE TABLE MUNICIPIO_ANO(
+    id_municipio INT NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    qtd_habitantes INT CHECK(qtd_habitantes >= 0),
+    ano INT NOT NULL,
+    qtd_IES INT CHECK (qtd_IES >= 0),
+    qtd_ESCOLAS INT CHECK (qtd_ESCOLAS >= 0),
+    media_ideb REAL,
+    media_saeb REAL,
+    media_enade REAL,
+    total_participantes INT CHECK (total_participantes >= 0),
+    rend_1 REAL,
+    rend_2 REAL,
+    rend_3 REAL,
+    rend_4 REAL,
+    ind_rend REAL,
+    nota_ideb REAL,
+    total_inscritos INT CHECK (total_inscritos >= 0),
+    total_concluintes INT CHECK (total_concluintes >= 0),
+    nota_bruta_ce REAL,
+    nota_padronizada_ce REAL,
+    nota_bruta_fg REAL,
+    nota_padronizada_fg REAL,
+    nota_enade_continua REAL,
+    nota_enade_faixa REAL,
+    nota_mat REAL,
+    nota_port REAL,
+    nota_padrao REAL,
+    PRIMARY KEY (id_municipio, ano)
+);
+```

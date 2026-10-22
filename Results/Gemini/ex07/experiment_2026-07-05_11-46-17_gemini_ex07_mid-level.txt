@@ -1,0 +1,139 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-46-17
+Model: gemini
+Prompt: mid-level
+Schema: ex07
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions the highly normalized 3NF transactional schema into a simplified Star Schema optimized for OLAP/BI workloads. Simple lookup tables ('Proprietarios', 'Rios') are flattened directly into the central fact table ('fact_usina') to eliminate unnecessary joins, as they only contain a single descriptive attribute. The complex geographical hierarchy ('Localizacoes', 'Municipios', 'Estados') is consolidated into a single dimension table ('dim_localizacao'). This reduces the query join path from up to 5 joins down to a maximum of 1 join, significantly improving read performance for analytical queries and dashboards.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge 'Proprietarios' directly into the central 'Usina' fact table. The 'Proprietarios' table is a simple lookup; flattening it removes a join."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge 'Rios' directly into the central 'Usina' fact table. Similar to D1, this removes an unnecessary join for a single descriptive attribute."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Consolidate 'Localizacoes', 'Municipios', and 'Estados' into a single denormalized dimension table named 'dim_localizacao'."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Removed 'id_proprietario' and 'id_rio' from the fact table, replacing them with derived descriptive attributes 'proprietario_nome' and 'rio_nome'."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added 'municipio_principal', 'uf_principal', 'municipio_secundario', and 'uf_secundario' to 'dim_localizacao' to resolve the dual-municipality relationship (id_municipio1, id_municipio2) without requiring bridge tables or multiple joins to a municipality table."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Renamed 'nome' in the Usina table to 'usina_nome' to provide better context in flattened BI dashboard views."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy: Storing 'proprietario_nome' and 'rio_nome' directly in the fact table increases storage footprint. This is a standard OLAP tradeoff where storage is sacrificed for read speed."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If a river or owner changes its name, multiple rows in the fact table must be updated. In a read-heavy analytical environment where historical data is mostly immutable, this is acceptable."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Dual Municipality Querying: Storing two municipalities in separate columns ('municipio_principal', 'municipio_secundario') makes it slightly more complex to aggregate total power strictly by a single municipality if plants frequently span borders. However, it avoids the extreme complexity of a Many-to-Many bridge table."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregate total power capacity (potkw, potfis) grouped by owner (Proprietario) to analyze market share."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze power plant distribution, count, and capacity along specific rivers for environmental or hydrological reporting."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Geospatial and regional analysis of power plants by State (UF) and Municipality, requiring fast filtering and grouping without traversing 3 levels of normalized tables."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Script for Denormalized Schema
+
+```sql
+-- ==============================================================================
+-- Analytical Schema (OLAP) - Optimized for Read-Heavy Workloads
+-- ==============================================================================
+
+-- 1. Create the denormalized Location Dimension
+-- This table consolidates Localizacoes, Municipios, and Estados.
+-- It flattens the relationship to two municipalities into single row attributes.
+CREATE TABLE IF NOT EXISTS public.dim_localizacao (
+    id_localizacao INTEGER PRIMARY KEY,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    municipio_principal VARCHAR,
+    uf_principal CHAR(2),
+    municipio_secundario VARCHAR,
+    uf_secundario CHAR(2)
+);
+
+-- 2. Create the central Fact Table
+-- This table acts as a Factless Fact / Profile Fact. 
+-- It contains measures (potkw, potfis) and has absorbed simple dimensions (Rios, Proprietarios).
+CREATE TABLE IF NOT EXISTS public.fact_usina (
+    id_usina INTEGER PRIMARY KEY,
+    usina_nome VARCHAR NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    iniciop DATE,
+    atualizacao DATE,
+    lat DOUBLE PRECISION,
+    long DOUBLE PRECISION,
+    estagio VARCHAR,
+    
+    -- Denormalized attributes (previously required joins)
+    proprietario_nome VARCHAR,
+    rio_nome VARCHAR,
+    
+    -- Foreign key to the consolidated location dimension
+    id_localizacao INTEGER NOT NULL,
+    
+    CONSTRAINT fk_fact_usina_localizacao 
+        FOREIGN KEY (id_localizacao) 
+        REFERENCES public.dim_localizacao(id_localizacao)
+);
+
+-- ==============================================================================
+-- Analytical Indexes for BI Performance
+-- ==============================================================================
+
+-- Index for geographic filtering (very common in BI dashboards)
+CREATE INDEX IF NOT EXISTS idx_dim_loc_uf ON public.dim_localizacao(uf_principal);
+CREATE INDEX IF NOT EXISTS idx_dim_loc_mun ON public.dim_localizacao(municipio_principal);
+
+-- Index for filtering/grouping by owner and river
+CREATE INDEX IF NOT EXISTS idx_fact_usina_proprietario ON public.fact_usina(proprietario_nome);
+CREATE INDEX IF NOT EXISTS idx_fact_usina_rio ON public.fact_usina(rio_nome);
+
+-- Index for timeline/date range queries
+CREATE INDEX IF NOT EXISTS idx_fact_usina_iniciop ON public.fact_usina(iniciop);
+
+COMMIT;
+```

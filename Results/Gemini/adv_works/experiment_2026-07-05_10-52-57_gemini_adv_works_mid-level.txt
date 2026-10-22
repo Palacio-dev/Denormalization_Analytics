@@ -1,0 +1,307 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_10-52-57
+Model: gemini
+Prompt: mid-level
+Schema: adv_works
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The original schema is a highly normalized OLTP database (AdventureWorks) designed to minimize data redundancy and ensure transactional integrity. To optimize for read-heavy analytical workloads, the schema has been redesigned into a dimensional Star Schema. This involves consolidating snowflake dimensions (e.g., merging Product, Category, Subcategory, and Model) into flat dimension tables, and combining header/detail transactional tables into granular fact tables. This strategy eliminates complex multi-table joins, improves query performance for aggregations, and provides a highly intuitive structure for BI tools.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Denormalize the product hierarchy by consolidating `production.product`, `production.productcategory`, `production.productsubcategory`, and `production.productmodel` into a single `dim_product` table."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Denormalize customer details by consolidating `sales.customer`, `person.person`, `sales.store`, `person.address`, `person.stateprovince`, and `person.countryregion` into a single `dim_customer` table."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Denormalize employee information by consolidating `humanresources.employee`, `person.person`, `humanresources.department`, and `humanresources.shift` into a single `dim_employee` table."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Denormalize vendor information by consolidating `purchasing.vendor`, `person.address`, `person.stateprovince`, and `person.countryregion` into a single `dim_vendor` table."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Consolidate sales transactions by joining `sales.salesorderheader` and `sales.salesorderdetail` into a single granular `fact_sales` table at the line-item level."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Consolidate purchase transactions by joining `purchasing.purchaseorderheader` and `purchasing.purchaseorderdetail` into a single granular `fact_purchases` table."
+      },
+      {
+        "decision_id": "D7",
+        "description": "Combine active and archived inventory transactions (`production.transactionhistory` and `production.transactionhistoryarchive`) into a single `fact_inventory` table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added surrogate keys (e.g., `product_key`, `customer_key`) to all dimension tables to support Slowly Changing Dimensions (SCD) and decouple the analytical model from source system business keys."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Derived a new metric `line_total` in `fact_sales` calculated as `orderqty * unitprice * (1 - unitpricediscount)` to pre-compute revenue and save query time."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Flattened `customer_name` in `dim_customer` by conditionally concatenating `firstname` and `lastname` for individual customers, or using the `name` attribute from the `store` table for reseller customers."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Replaced raw timestamp columns with integer `date_key` fields (e.g., YYYYMMDD) in fact tables to link to a newly introduced central `dim_date` dimension for consistent time-based aggregations."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy: Storing descriptive attributes like category names in `dim_product` and state names in `dim_customer` increases storage footprint, but drastically reduces join complexity and improves read performance."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Header Duplication: Storing header-level attributes (like order dates, customer keys, and territory keys) on every line item in `fact_sales` and `fact_purchases` increases fact table width, but completely avoids header-to-detail joins during analysis."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Update Anomalies: Denormalized tables are optimized for reads. Updates to a source entity (e.g., renaming a Product Category) will require updating multiple rows in `dim_product` instead of a single row in a normalized table, requiring robust ETL pipelines."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze sales revenue and volume by product category and subcategory over time without needing to join 5 different product-related tables."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Evaluate customer lifetime value and geographic distribution of sales by slicing `fact_sales` directly with `dim_customer`."
+      },
+      {
+        "decision_id": "D6",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Assess vendor performance by analyzing purchase order received vs. rejected quantities and total spend over specific time periods."
+      },
+      {
+        "decision_id": "D7",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Track historical inventory movements and costs across different transaction types (Sales, Purchases, Work Orders) using a single unified inventory fact table."
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- ==============================================================================
+-- DDL Script for Denormalized Analytical Schema (Star Schema)
+-- Optimized for BI dashboards, reporting, and read-heavy workloads.
+-- ==============================================================================
+
+CREATE SCHEMA IF NOT EXISTS analytics;
+
+-- ==============================================================================
+-- DIMENSIONS
+-- ==============================================================================
+
+CREATE TABLE analytics.dim_date (
+    date_key integer NOT NULL,
+    full_date date NOT NULL,
+    year integer NOT NULL,
+    quarter integer NOT NULL,
+    month integer NOT NULL,
+    month_name varchar(20) NOT NULL,
+    day_of_month integer NOT NULL,
+    day_of_week integer NOT NULL,
+    day_name varchar(20) NOT NULL,
+    is_weekend boolean NOT NULL,
+    CONSTRAINT pk_dim_date PRIMARY KEY (date_key)
+);
+COMMENT ON TABLE analytics.dim_date IS 'Central date dimension for time-based aggregations.';
+
+CREATE TABLE analytics.dim_product (
+    product_key serial NOT NULL,
+    product_id integer NOT NULL,
+    product_name varchar(50) NOT NULL,
+    product_number varchar(25) NOT NULL,
+    color varchar(15),
+    standard_cost numeric NOT NULL,
+    list_price numeric NOT NULL,
+    size varchar(5),
+    weight numeric(8,2),
+    product_line varchar(2),
+    class varchar(2),
+    style varchar(2),
+    subcategory_name varchar(50),
+    category_name varchar(50),
+    model_name varchar(50),
+    sell_start_date timestamp,
+    sell_end_date timestamp,
+    is_current boolean DEFAULT true,
+    CONSTRAINT pk_dim_product PRIMARY KEY (product_key)
+);
+COMMENT ON TABLE analytics.dim_product IS 'Denormalized product hierarchy combining Product, Subcategory, Category, and Model.';
+
+CREATE TABLE analytics.dim_customer (
+    customer_key serial NOT NULL,
+    customer_id integer NOT NULL,
+    customer_type varchar(15) NOT NULL, -- 'Store' or 'Individual'
+    customer_name varchar(150) NOT NULL,
+    email_address varchar(50),
+    phone_number varchar(25),
+    address_line1 varchar(60),
+    address_line2 varchar(60),
+    city varchar(30),
+    state_province_name varchar(50),
+    country_region_name varchar(50),
+    postal_code varchar(15),
+    territory_name varchar(50),
+    territory_group varchar(50),
+    CONSTRAINT pk_dim_customer PRIMARY KEY (customer_key)
+);
+COMMENT ON TABLE analytics.dim_customer IS 'Denormalized customer details combining Person, Store, Address, and Geography.';
+
+CREATE TABLE analytics.dim_employee (
+    employee_key serial NOT NULL,
+    business_entity_id integer NOT NULL,
+    national_id_number varchar(15),
+    job_title varchar(50),
+    birth_date date,
+    marital_status char(1),
+    gender char(1),
+    hire_date date,
+    salaried_flag boolean,
+    first_name varchar(50),
+    last_name varchar(50),
+    department_name varchar(50),
+    department_group varchar(50),
+    shift_name varchar(50),
+    CONSTRAINT pk_dim_employee PRIMARY KEY (employee_key)
+);
+COMMENT ON TABLE analytics.dim_employee IS 'Denormalized employee details combining Employee, Person, Department, and Shift.';
+
+CREATE TABLE analytics.dim_vendor (
+    vendor_key serial NOT NULL,
+    business_entity_id integer NOT NULL,
+    account_number varchar(15),
+    vendor_name varchar(50),
+    credit_rating smallint,
+    preferred_vendor_status boolean,
+    active_flag boolean,
+    address_line1 varchar(60),
+    city varchar(30),
+    state_province_name varchar(50),
+    country_region_name varchar(50),
+    postal_code varchar(15),
+    CONSTRAINT pk_dim_vendor PRIMARY KEY (vendor_key)
+);
+COMMENT ON TABLE analytics.dim_vendor IS 'Denormalized vendor details combining Vendor, Address, and Geography.';
+
+CREATE TABLE analytics.dim_sales_territory (
+    territory_key serial NOT NULL,
+    territory_id integer NOT NULL,
+    territory_name varchar(50) NOT NULL,
+    country_region_code varchar(3) NOT NULL,
+    territory_group varchar(50) NOT NULL,
+    CONSTRAINT pk_dim_sales_territory PRIMARY KEY (territory_key)
+);
+COMMENT ON TABLE analytics.dim_sales_territory IS 'Sales territory dimension.';
+
+CREATE TABLE analytics.dim_promotion (
+    promotion_key serial NOT NULL,
+    special_offer_id integer NOT NULL,
+    description varchar(255) NOT NULL,
+    discount_pct numeric NOT NULL,
+    type varchar(50) NOT NULL,
+    category varchar(50) NOT NULL,
+    start_date timestamp NOT NULL,
+    end_date timestamp NOT NULL,
+    min_qty integer NOT NULL,
+    max_qty integer,
+    CONSTRAINT pk_dim_promotion PRIMARY KEY (promotion_key)
+);
+COMMENT ON TABLE analytics.dim_promotion IS 'Special offers and promotions dimension.';
+
+-- ==============================================================================
+-- FACTS
+-- ==============================================================================
+
+CREATE TABLE analytics.fact_sales (
+    sales_order_id integer NOT NULL,
+    sales_order_detail_id integer NOT NULL,
+    order_date_key integer NOT NULL,
+    due_date_key integer NOT NULL,
+    ship_date_key integer,
+    customer_key integer NOT NULL,
+    salesperson_key integer,
+    territory_key integer NOT NULL,
+    product_key integer NOT NULL,
+    promotion_key integer NOT NULL,
+    order_qty smallint NOT NULL,
+    unit_price numeric NOT NULL,
+    unit_price_discount numeric NOT NULL,
+    line_total numeric NOT NULL,
+    allocated_tax_amt numeric,
+    allocated_freight numeric,
+    CONSTRAINT pk_fact_sales PRIMARY KEY (sales_order_id, sales_order_detail_id)
+);
+COMMENT ON TABLE analytics.fact_sales IS 'Granular sales fact table combining SalesOrderHeader and SalesOrderDetail.';
+
+CREATE TABLE analytics.fact_purchases (
+    purchase_order_id integer NOT NULL,
+    purchase_order_detail_id integer NOT NULL,
+    order_date_key integer NOT NULL,
+    ship_date_key integer,
+    vendor_key integer NOT NULL,
+    employee_key integer NOT NULL,
+    product_key integer NOT NULL,
+    order_qty smallint NOT NULL,
+    unit_price numeric NOT NULL,
+    received_qty numeric(8,2) NOT NULL,
+    rejected_qty numeric(8,2) NOT NULL,
+    line_total numeric NOT NULL,
+    CONSTRAINT pk_fact_purchases PRIMARY KEY (purchase_order_id, purchase_order_detail_id)
+);
+COMMENT ON TABLE analytics.fact_purchases IS 'Granular purchase fact table combining PurchaseOrderHeader and PurchaseOrderDetail.';
+
+CREATE TABLE analytics.fact_inventory (
+    transaction_id integer NOT NULL,
+    transaction_date_key integer NOT NULL,
+    product_key integer NOT NULL,
+    reference_order_id integer NOT NULL,
+    reference_order_line_id integer NOT NULL,
+    transaction_type char(1) NOT NULL,
+    quantity integer NOT NULL,
+    actual_cost numeric NOT NULL,
+    CONSTRAINT pk_fact_inventory PRIMARY KEY (transaction_id)
+);
+COMMENT ON TABLE analytics.fact_inventory IS 'Unified inventory fact table combining active and archived transaction history.';
+
+-- ==============================================================================
+-- FOREIGN KEYS
+-- ==============================================================================
+
+ALTER TABLE analytics.fact_sales ADD CONSTRAINT fk_fact_sales_date FOREIGN KEY (order_date_key) REFERENCES analytics.dim_date (date_key);
+ALTER TABLE analytics.fact_sales ADD CONSTRAINT fk_fact_sales_due_date FOREIGN KEY (due_date_key) REFERENCES analytics.dim_date (date_key);
+ALTER TABLE analytics.fact_sales ADD CONSTRAINT fk_fact_sales_ship_date FOREIGN KEY (ship_date_key) REFERENCES analytics.dim_date (date_key);
+ALTER TABLE analytics.fact_sales ADD CONSTRAINT fk_fact_sales_customer FOREIGN KEY (customer_key) REFERENCES analytics.dim_customer (customer_key);
+ALTER TABLE analytics.fact_sales ADD CONSTRAINT fk_fact_sales_product FOREIGN KEY (product_key) REFERENCES analytics.dim_product (product_key);
+ALTER TABLE analytics.fact_sales ADD CONSTRAINT fk_fact_sales_territory FOREIGN KEY (territory_key) REFERENCES analytics.dim_sales_territory (territory_key);
+ALTER TABLE analytics.fact_sales ADD CONSTRAINT fk_fact_sales_promotion FOREIGN KEY (promotion_key) REFERENCES analytics.dim_promotion (promotion_key);
+
+ALTER TABLE analytics.fact_purchases ADD CONSTRAINT fk_fact_purchases_date FOREIGN KEY (order_date_key) REFERENCES analytics.dim_date (date_key);
+ALTER TABLE analytics.fact_purchases ADD CONSTRAINT fk_fact_purchases_ship_date FOREIGN KEY (ship_date_key) REFERENCES analytics.dim_date (date_key);
+ALTER TABLE analytics.fact_purchases ADD CONSTRAINT fk_fact_purchases_vendor FOREIGN KEY (vendor_key) REFERENCES analytics.dim_vendor (vendor_key);
+ALTER TABLE analytics.fact_purchases ADD CONSTRAINT fk_fact_purchases_employee FOREIGN KEY (employee_key) REFERENCES analytics.dim_employee (employee_key);
+ALTER TABLE analytics.fact_purchases ADD CONSTRAINT fk_fact_purchases_product FOREIGN KEY (product_key) REFERENCES analytics.dim_product (product_key);
+
+ALTER TABLE analytics.fact_inventory ADD CONSTRAINT fk_fact_inventory_date FOREIGN KEY (transaction_date_key) REFERENCES analytics.dim_date (date_key);
+ALTER TABLE analytics.fact_inventory ADD CONSTRAINT fk_fact_inventory_product FOREIGN KEY (product_key) REFERENCES analytics.dim_product (product_key);
+```

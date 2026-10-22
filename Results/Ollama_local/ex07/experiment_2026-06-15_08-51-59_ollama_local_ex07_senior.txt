@@ -1,0 +1,207 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-15_08-51-59
+Model: ollama_local
+Prompt: senior
+Schema: ex07
+==================================================
+
+# Phase 1 – Schema Assessment
+
+### Entity Relationships & Cardinalities
+The source schema represents a classic **1-to-Many-to-Many** and **Many-to-Many** relationship structure typical of operational systems:
+1.  **Usina (Fact-like Core)**: Acts as the central entity.
+    *   `1 Usina` — `1 Proprietario` (One-to-One/One-to-Many depending on business logic, but normalized here).
+    *   `1 Usina` — `1 Rio` (One-to-One).
+    *   `1 Usina` — `1 Localizacao` (One-to-One).
+    *   `1 Usina` — `1 Municipio` (via `Localizacao` -> `Municipio1`).
+    *   `1 Usina` — `1 Municipio` (via `Localizacao` -> `Municipio2`).
+    *   `1 Usina` — `1 Estado` (via `Municipio`).
+2.  **Lookup Tables**: `Proprietarios`, `Rios`, `Localizacoes`, `Municipios`, `Estados`.
+3.  **Hierarchies**:
+    *   `Estado` -> `Municipio` -> `Localizacao` -> `Usina`.
+    *   `Usina` is the leaf fact; `Estado` is the root dimension.
+
+### Query Access Patterns
+In an OLAP context, analysts will likely execute:
+*   **Geospatial Aggregations**: "Total power (MW) by State, grouped by year."
+*   **Multi-Dimensional Filtering**: "Show all hydroelectric plants (`estagio`='hidro') in State 'SP' owned by 'Empresa X', sorted by initiation date."
+*   **Complex Joins**: Queries often require joining `Usina` -> `Localizacoes` -> `Municipios` -> `Estados` to get a complete geographical context, while joining `Proprietarios` and `Rios` for entity details.
+*   **Drill-down/Up**: Drilling from `Usina` up to `Estado` or down to specific `Municipio`s.
+
+### Identified Bottlenecks
+*   **Join Explosion**: A single query requires joining 5 distinct tables (`Usina`, `Proprietarios`, `Rios`, `Localizacoes`, `Municipios`, `Estados`).
+*   **Redundant Data**: `Municipios` stores `uf`, but `Estados` also stores `uf`. `Localizacoes` stores coordinates, but `Municipios` stores `uf` (implied location).
+*   **Cardinality Mismatch**: `Municipios` allows multiple rows per `uf` (one-to-many), while `Estados` is strictly one-to-one. `Localizacoes` supports two municipalities (`id_municipio1`, `id_municipio2`), complicating aggregation logic.
+
+---
+
+# Phase 2 - Analytical Modeling Strategy
+
+### Chosen Architecture: **Star Schema with Reference Data Absorption**
+
+**Justification:**
+1.  **Query Performance**: The primary goal is to minimize the number of `JOIN` operations. By absorbing lookup tables into the main fact table or flattening dimensions, we reduce the execution plan complexity from 5+ joins to 0-1 joins.
+2.  **BI Platform Compatibility**: Tools like Tableau, PowerBI, and Looker struggle with complex star schemas involving multiple intermediate tables (e.g., joining `Municipios` to `Estados`). A single wide table containing all dimensions allows for immediate visualization.
+3.  **Aggregation Efficiency**: Aggregating by `uf` (State) across `Municipios` and `Estados` requires a join. If `uf` is present directly in the `Usina` table, this aggregation is instantaneous.
+4.  **Data Consistency**: While redundancy is introduced, it ensures that the "State" associated with a plant is always consistent with the plant's location, avoiding the risk of a plant being in State A but its municipality being in State B (a data integrity issue in the source).
+
+**Denormalization Decisions:**
+
+| Decision | Description | Performance Objective | Join Reduction | Redundancy Introduced | Update Implication |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **D1: Absorb Lookup Tables** | Move `nome`, `potkw`, `potfis`, `iniciop`, `atualizacao`, `lat`, `long`, `estagio`, `id_proprietario`, `id_rio`, `id_localizacao` into a single `Usina` table. | Eliminates joins for core attributes. | 0 (Core data) | High (Stores `uf`, `rio_name`, `prop_name` if fully absorbed, otherwise keeps IDs). | Requires updating the source to keep IDs; if IDs are kept, no redundancy. If names are kept, update is costly but rare for static data. |
+| **D2: Flatten Hierarchy** | Add `uf` directly to `Usina` (derived from `Municipios` or `Localizacoes`). | Enables `GROUP BY uf` without joins. | 1 (Saves `Municipios` -> `Estados` join) | `uf` is repeated for every plant. | Low impact; `uf` changes rarely. |
+| **D3: Flatten Location** | Add `municipio_nome` and `uf` directly to `Usina`. | Enables filtering by municipality name/state without joining `Municipios`. | 1 (Saves `Usina` -> `Localizacoes` -> `Municipios`) | `municipio_nome` and `uf` are duplicated per plant. | Low impact. |
+| **D4: Reference Absorption** | Store `proprietario_nome`, `rio_nome`, `localizacao_descricao` in `Usina`. | Simplifies filtering and grouping. | 1 (Saves `Usina` -> `Proprietarios` etc.) | Textual redundancy. | Low impact (names are stable). |
+
+**Note on `Municipio2`**: The source schema has `id_municipio2`. In a Star Schema, we typically normalize this to avoid duplicate rows (1-to-Many relationship). We will keep `id_municipio2` as a nullable foreign key in the analytical table or simply ignore it if business logic dictates it's rarely used, but for completeness, we will store it if needed, or better yet, absorb the `uf` of the second municipality as well.
+
+---
+
+# Phase 3 – Analytical Physical Model Design
+
+### Optimized Schema Design
+
+The new schema consolidates all dimensions into the `Usina` fact table (or a closely coupled dimension table) to create a **Single-Table Star Schema** (often called a "Wide Fact" or "Denormalized Fact" pattern suitable for OLAP).
+
+**Key Design Choices:**
+*   **Surrogate Keys**: The `id` is retained as the primary key.
+*   **Partitioning**: Recommended by `iniciop` (Year) for time-series aggregations.
+*   **Clustering**: Recommended by `uf` and `estagio` for geographic and status-based filtering.
+*   **Data Types**: Optimized for storage (e.g., `VARCHAR` instead of `TEXT` where possible, `DATE` instead of `TIMESTAMP` if time is not critical).
+
+### Table Definition: `public.usina_analytics`
+
+```sql
+CREATE TABLE IF NOT EXISTS public.usina_analytics (
+    id SERIAL PRIMARY KEY,
+    
+    -- Core Metrics (Fact Attributes)
+    nome VARCHAR(255) NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    estagio VARCHAR(50),
+    
+    -- Temporal Attributes
+    iniciop DATE,
+    atualizacao DATE,
+    
+    -- Geographic Attributes (Flattened from Municipios/Localizacoes/Estados)
+    -- Derived from id_municipio1 and id_municipio2
+    uf VARCHAR(2) NOT NULL,
+    municipio_nome VARCHAR(255),
+    municipio2_nome VARCHAR(255), -- Nullable
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    
+    -- Entity Attributes (Flattened from Proprietarios, Rios, Localizacoes)
+    proprietario_nome VARCHAR(255),
+    rio_nome VARCHAR(255),
+    
+    -- Foreign Keys (Retained for traceability and potential future joins)
+    id_proprietario INTEGER,
+    id_rio INTEGER,
+    id_localizacao INTEGER,
+    id_municipio1 INTEGER,
+    id_municipio2 INTEGER
+);
+
+-- Partitioning Recommendation: Partition by Year of Initiation
+-- This optimizes time-window queries (e.g., "Plants started in 2020")
+CREATE TABLE IF NOT EXISTS public.usina_analytics_2020 PARTITION OF public.usina_analytics 
+    FOR VALUES IN ('2020-01-01', '2020-12-31');
+
+-- Clustering Recommendation: Cluster by 'uf' and 'estagio'
+-- This improves scan performance for geographic and status-based reports
+-- Note: Partitioned tables cannot be clustered in standard PostgreSQL, 
+-- but in a column-store (e.g., Snowflake, BigQuery, Redshift), 
+-- clustering keys would be 'uf' and 'estagio'.
+-- For standard Postgres, we rely on B-Tree indexes on these columns.
+CREATE INDEX IF NOT EXISTS idx_usina_analytics_uf ON public.usina_analytics (uf);
+CREATE INDEX IF NOT EXISTS idx_usina_analytics_estagio ON public.usina_analytics (estagio);
+CREATE INDEX IF NOT EXISTS idx_usina_analytics_iniciop ON public.usina_analytics (iniciop);
+```
+
+### Rationale for Physical Design
+
+1.  **Minimized Joins**: Queries like `SELECT COUNT(*) FROM usina_analytics WHERE uf = 'SP'` now require zero joins.
+2.  **Traceability**: The `id_*` columns are preserved. If a downstream system needs to re-join to the original `Municipios` table for historical data or if the denormalized value is missing, the link exists.
+3.  **Storage Trade-off**: We accept the storage cost of repeating `uf` and `municipio_nome` (approx. 1-2x increase for large datasets) to gain query speed improvements of 10x to 100x depending on query complexity.
+4.  **BI Compatibility**: BI tools can now map the `uf` column directly to a "State" visual without needing to join a dimension table, reducing the risk of "broken" visualizations where the state doesn't match the municipality.
+
+---
+
+# SQL DDL Creation Script
+
+```sql
+-- Drop existing tables if they exist to ensure a clean state
+DROP TABLE IF EXISTS public.usina_analytics;
+DROP TABLE IF EXISTS public.usina_analytics_2020;
+
+-- Create the main analytical fact table
+CREATE TABLE IF NOT EXISTS public.usina_analytics (
+    id SERIAL PRIMARY KEY,
+    
+    -- Core Metrics
+    nome VARCHAR(255) NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    estagio VARCHAR(50),
+    
+    -- Temporal Attributes
+    iniciop DATE,
+    atualizacao DATE,
+    
+    -- Geographic Attributes (Flattened)
+    uf VARCHAR(2) NOT NULL,
+    municipio_nome VARCHAR(255),
+    municipio2_nome VARCHAR(255),
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    
+    -- Entity Attributes (Flattened)
+    proprietario_nome VARCHAR(255),
+    rio_nome VARCHAR(255),
+    
+    -- Foreign Keys (Preserved for audit/traceability)
+    id_proprietario INTEGER,
+    id_rio INTEGER,
+    id_localizacao INTEGER,
+    id_municipio1 INTEGER,
+    id_municipio2 INTEGER
+);
+
+-- Create Partition for 2020 (Example partitioning strategy)
+CREATE TABLE IF NOT EXISTS public.usina_analytics_2020 PARTITION OF public.usina_analytics 
+    FOR VALUES IN ('2020-01-01', '2020-12-31');
+
+-- Create indexes for common analytical access patterns
+CREATE INDEX IF NOT EXISTS idx_usina_analytics_uf ON public.usina_analytics (uf);
+CREATE INDEX IF NOT EXISTS idx_usina_analytics_estagio ON public.usina_analytics (estagio);
+CREATE INDEX IF NOT EXISTS idx_usina_analytics_iniciop ON public.usina_analytics (iniciop);
+CREATE INDEX IF NOT EXISTS idx_usina_analytics_potkw ON public.usina_analytics (potkw);
+
+-- Optional: Add a view to map the flattened data back to original structure if needed
+CREATE OR REPLACE VIEW public.usina_analytics_view AS
+SELECT 
+    a.id,
+    a.nome,
+    a.potkw,
+    a.potfis,
+    a.estagio,
+    a.iniciop,
+    a.atualizacao,
+    a.uf,
+    a.municipio_nome,
+    a.municipio2_nome,
+    a.latitude,
+    a.longitude,
+    a.proprietario_nome,
+    a.rio_nome,
+    a.id_proprietario,
+    a.id_rio,
+    a.id_localizacao,
+    a.id_municipio1,
+    a.id_municipio2
+FROM public.usina_analytics a;
+```

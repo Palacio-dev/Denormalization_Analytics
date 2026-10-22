@@ -1,0 +1,199 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-11-49
+Model: ollama_api
+Prompt: RISEN
+Schema: ex02
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on collapsing relations and adding redundant attributes to improve read 
+    performance for analytical queries. The main goal is to reduce JOIN operations by embedding frequently accessed related data 
+    directly into core tables like `mutirao_de_limpeza` and `unidade_de_conservacao`. Vertical partitioning was not applied due 
+    to the absence of clear access pattern disparities within individual tables. Derived attributes were not introduced since no 
+    explicit aggregation-heavy workload was provided.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapse the relationship between `mutirao_de_limpeza` and `regiao` by embedding municipality name and state into `mutirao_de_limpeza`."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapse the relationship between `mutirao_de_limpeza` and `instituicao_organizadora` by embedding organizer name and character into `mutirao_de_limpeza`."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Collapse the relationship between `unidade_de_conservacao` and `bioma`, `categoria_manejo`, `esfera_administrativa`, and `regiao` by embedding bioma name, management category details, administrative sphere type, and municipality name/state into `unidade_de_conservacao`."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Merge `coleta_de_lixo` and `local_de_coleta` into `mutirao_de_limpeza` to eliminate joins when querying cleanup event details along with collected waste and location."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant attributes: `municipio_nome`, `estado` in `mutirao_de_limpeza` from `regiao`."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added redundant attributes: `instituicao_nome`, `carater` in `mutirao_de_limpeza` from `instituicao_organizadora`."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added redundant attributes: `bioma_nome` in `unidade_de_conservacao` from `bioma`."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added redundant attributes: `categoria_manejo`, `categoria_iucn`, `plano` in `unidade_de_conservacao` from `categoria_manejo`."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Added redundant attribute: `esfera_tipo` in `unidade_de_conservacao` from `esfera_administrativa`."
+      },
+      {
+        "decision_id": "A6",
+        "description": "Added redundant attributes: `municipio_nome`, `estado` in `unidade_de_conservacao` from `regiao`."
+      },
+      {
+        "decision_id": "A7",
+        "description": "Added all columns from `coleta_de_lixo` and `local_de_coleta` into `mutirao_de_limpeza`."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved read performance at the cost of increased storage and potential write complexity. Updates to related entities (e.g., renaming a municipality) now require updating multiple tables."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Data redundancy increases the risk of inconsistency if update propagation is not handled carefully. Application logic or triggers must ensure synchronized updates across denormalized fields."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Simplified query execution paths but reduced normalization level. This may complicate schema evolution and maintenance compared to a fully normalized design."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Frequent analytical queries reporting on cleanup events by region (municipality/estado) would previously require a join with the `regiao` table. Embedding this data avoids that join."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries filtering or grouping cleanup events by organizing institution name or character type would require joining with `instituicao_organizadora`. Denormalization removes this need."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting on conservation units often involves bioma, management category, administrative sphere, and location. Previously, four joins were needed; now these values are directly available in `unidade_de_conservacao`."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyzing cleanup events typically includes data from `coleta_de_lixo` and `local_de_coleta`. Merging these tables into `mutirao_de_limpeza` streamlines such queries by eliminating two joins."
+      }
+    ]
+  }
+}
+
+```sql
+CREATE TABLE IF NOT EXISTS public.bioma
+(
+    id_bioma integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT bioma_pkey PRIMARY KEY (id_bioma)
+);
+
+CREATE TABLE IF NOT EXISTS public.categoria_manejo
+(
+    id_manejo integer NOT NULL,
+    categoria text COLLATE pg_catalog."default" NOT NULL,
+    categoria_iucn text COLLATE pg_catalog."default" NOT NULL,
+    plano text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT categoria_manejo_pkey PRIMARY KEY (id_manejo)
+);
+
+CREATE TABLE IF NOT EXISTS public.esfera_administrativa
+(
+    id_esfera integer NOT NULL,
+    tipo text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT esfera_administrativa_pkey PRIMARY KEY (id_esfera)
+);
+
+CREATE TABLE IF NOT EXISTS public.instituicao_organizadora
+(
+    id_instituicao_organizadora integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    carater text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT instituicao_organizadora_pkey PRIMARY KEY (id_instituicao_organizadora)
+);
+
+CREATE TABLE IF NOT EXISTS public.regiao
+(
+    id_municipio integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    estado text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT regiao_pkey PRIMARY KEY (id_municipio)
+);
+
+CREATE TABLE IF NOT EXISTS public.unidade_de_conservacao
+(
+    id_uc integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    ano_de_criacao integer,
+    area_soma_biomas double precision,
+    area_soma_biomas_continentais double precision,
+    area_marinha double precision,
+    id_bioma integer,
+    id_municipio integer,
+    id_manejo integer,
+    id_esfera integer,
+    -- Redundant attributes from bioma
+    bioma_nome text COLLATE pg_catalog."default",
+    -- Redundant attributes from categoria_manejo
+    categoria_manejo text COLLATE pg_catalog."default",
+    categoria_iucn text COLLATE pg_catalog."default",
+    plano text COLLATE pg_catalog."default",
+    -- Redundant attribute from esfera_administrativa
+    esfera_tipo text COLLATE pg_catalog."default",
+    -- Redundant attributes from regiao
+    municipio_nome text COLLATE pg_catalog."default",
+    estado text COLLATE pg_catalog."default",
+    CONSTRAINT unidade_de_conservacao_pkey PRIMARY KEY (id_uc)
+);
+
+CREATE TABLE IF NOT EXISTS public.mutirao_de_limpeza
+(
+    id_mutirao integer NOT NULL,
+    data_do_ocorrido date NOT NULL,
+    horario_de_inicio time without time zone NOT NULL,
+    numero_aproximado_de_participantes integer,
+    duracao_total time without time zone NOT NULL,
+    id_municipio integer,
+    id_instituicao_organizadora integer,
+    -- Redundant attributes from regiao
+    municipio_nome text COLLATE pg_catalog."default",
+    estado text COLLATE pg_catalog."default",
+    -- Redundant attributes from instituicao_organizadora
+    instituicao_nome text COLLATE pg_catalog."default",
+    carater text COLLATE pg_catalog."default",
+    -- Columns from local_de_coleta
+    local_nome text COLLATE pg_catalog."default",
+    -- Columns from coleta_de_lixo
+    plastico integer,
+    borracha integer,
+    madeira integer,
+    produtos_texteis integer,
+    papel integer,
+    metal integer,
+    vidro integer,
+    materiais_de_pesca integer,
+    outros_residuos integer,
+    CONSTRAINT mutirao_de_limpeza_pkey PRIMARY KEY (id_mutirao)
+);
+```

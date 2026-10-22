@@ -1,0 +1,793 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 68
+  - Total Attributes: 279
+    * department: 4 columns
+    * employee: 15 columns
+    * employeedepartmenthistory: 6 columns
+    * employeepayhistory: 5 columns
+    * jobcandidate: 4 columns
+    * shift: 5 columns
+    * address: 9 columns
+    * addresstype: 4 columns
+    * businessentity: 3 columns
+    * businessentityaddress: 5 columns
+    * businessentitycontact: 5 columns
+    * contacttype: 3 columns
+    * countryregion: 3 columns
+    * emailaddress: 5 columns
+    * password: 5 columns
+    * person: 13 columns
+    * personphone: 4 columns
+    * phonenumbertype: 3 columns
+    * stateprovince: 8 columns
+    * billofmaterials: 9 columns
+    * culture: 3 columns
+    * document: 13 columns
+    * illustration: 3 columns
+    * location: 5 columns
+    * product: 25 columns
+    * productcategory: 4 columns
+    * productcosthistory: 5 columns
+    * productdescription: 4 columns
+    * productdocument: 3 columns
+    * productinventory: 7 columns
+    * productlistpricehistory: 5 columns
+    * productmodel: 6 columns
+    * productmodelillustration: 3 columns
+    * productmodelproductdescriptionculture: 4 columns
+    * productphoto: 6 columns
+    * productproductphoto: 4 columns
+    * productreview: 8 columns
+    * productsubcategory: 5 columns
+    * scrapreason: 3 columns
+    * transactionhistory: 9 columns
+    * transactionhistoryarchive: 9 columns
+    * unitmeasure: 3 columns
+    * workorder: 9 columns
+    * workorderrouting: 12 columns
+    * productvendor: 11 columns
+    * purchaseorderdetail: 9 columns
+    * purchaseorderheader: 12 columns
+    * shipmethod: 6 columns
+    * vendor: 8 columns
+    * countryregioncurrency: 3 columns (junction table - excluded from attribute analysis)
+    * creditcard: 6 columns
+    * currency: 3 columns
+    * currencyrate: 7 columns
+    * customer: 6 columns
+    * personcreditcard: 3 columns
+    * salesorderdetail: 10 columns
+    * salesorderheader: 25 columns
+    * salesorderheadersalesreason: 3 columns (junction table - excluded from attribute analysis)
+    * salesperson: 9 columns
+    * salespersonquotahistory: 5 columns
+    * salesreason: 4 columns
+    * salestaxrate: 7 columns
+    * salesterritory: 10 columns
+    * salesterritoryhistory: 6 columns
+    * shoppingcartitem: 6 columns
+    * specialoffer: 11 columns
+    * specialofferproduct: 4 columns
+    * store: 6 columns
+
+  Note: 2 junction table(s) detected and excluded from attribute analysis:
+    - countryregioncurrency
+    - salesorderheadersalesreason
+
+Denormalized Model:
+  - Tables: 8
+  - Total Attributes: 149
+    * employee_current_assignment: 24 columns
+    * employeepayhistory: 5 columns
+    * party: 29 columns
+    * address_enriched: 15 columns
+    * product_master: 28 columns
+    * sales_order_enriched: 44 columns
+    * salesorderdetail: 10 columns
+    * vendor_enriched: 8 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Normalized model has MORE attributes (149 vs 279)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: departmentid (SERIAL) -> current_departmentid (SMALLINT)
+  - Type mismatch: name ("NAME") -> gender (CHARACTER(1))
+  - Type mismatch: groupname ("NAME") -> current_department_groupname (CHARACTER)
+  - Type mismatch: salariedflag ("FLAG") -> salariedflag (BOOLEAN)
+  - Type mismatch: currentflag ("FLAG") -> currentflag (BOOLEAN)
+  - Type mismatch: enddate (DATE) -> vendor_name (CHARACTER)
+  - Type mismatch: shiftid (SERIAL) -> current_shiftid (SMALLINT)
+  - Type mismatch: addresstypeid (SERIAL) -> billto_addressline1 (CHARACTER)
+  - Type mismatch: businessentityid (SERIAL) -> businessentityid (INTEGER)
+  - Type mismatch: contacttypeid (SERIAL) -> customer_storeid (INTEGER)
+  - Type mismatch: emailaddressid (SERIAL) -> billtoaddressid (INTEGER)
+  - Type mismatch: emailaddress (CHARACTER) -> shiptoaddressid (INTEGER)
+  - Type mismatch: namestyle ("NAMESTYLE") -> namestyle (BOOLEAN)
+  - Type mismatch: firstname ("NAME") -> firstname (CHARACTER)
+  - Type mismatch: middlename ("NAME") -> middlename (CHARACTER)
+  - Type mismatch: lastname ("NAME") -> lastname (CHARACTER)
+  - Type mismatch: phonenumber ("PHONE") -> nationalidnumber (CHARACTER)
+  - Type mismatch: stateprovinceid (SERIAL) -> stateprovinceid (INTEGER)
+  - Type mismatch: isonlystateprovinceflag ("FLAG") -> isonlystateprovinceflag (BOOLEAN)
+  - Type mismatch: billofmaterialsid (SERIAL) -> billto_stateprovinceid (INTEGER)
+  - Type mismatch: cultureid (CHARACTER(6)) -> customerid (INTEGER)
+  - Type mismatch: folderflag ("FLAG") -> salariedflag (BOOLEAN)
+  - Type mismatch: status (SMALLINT) -> maritalstatus (CHARACTER(1))
+  - Type mismatch: illustrationid (SERIAL) -> billto_countryregion_name (CHARACTER)
+  - Type mismatch: locationid (SERIAL) -> vacationhours (SMALLINT)
+  - Type mismatch: costrate (NUMERIC) -> countryregionname (CHARACTER)
+  - Type mismatch: makeflag ("FLAG") -> makeflag (BOOLEAN)
+  - Type mismatch: finishedgoodsflag ("FLAG") -> finishedgoodsflag (BOOLEAN)
+  - Type mismatch: productcategoryid (SERIAL) -> productcategoryid (INTEGER)
+  - Type mismatch: productdescriptionid (SERIAL) -> productsubcategory_name (CHARACTER)
+  - Type mismatch: bin (SMALLINT) -> loginid (CHARACTER)
+  - Type mismatch: quantity (SMALLINT) -> billto_city (CHARACTER)
+  - Type mismatch: listprice (NUMERIC) -> billto_postalcode (CHARACTER)
+  - Type mismatch: productmodelid (SERIAL) -> productcategory_name (CHARACTER)
+  - Type mismatch: illustrationid (INTEGER) -> billto_countryregioncode (CHARACTER)
+  - Type mismatch: "primary" ("FLAG") -> territoryid (INTEGER)
+  - Type mismatch: productreviewid (SERIAL) -> shipto_stateprovinceid (INTEGER)
+  - Type mismatch: reviewername ("NAME") -> stateprovincename (CHARACTER)
+  - Type mismatch: comments (CHARACTER) -> currentflag (BOOLEAN)
+  - Type mismatch: productsubcategoryid (SERIAL) -> productsubcategoryid (INTEGER)
+  - Type mismatch: scrapreasonid (SERIAL) -> customer_personid (INTEGER)
+  - Type mismatch: transactionid (SERIAL) -> organizationnode (CHARACTER)
+  - Type mismatch: productid (INTEGER) -> product_name (CHARACTER)
+  - Type mismatch: workorderid (SERIAL) -> salesorderid (INTEGER)
+  - Type mismatch: orderqty (INTEGER) -> orderqty (SMALLINT)
+  - Type mismatch: duedate (TIMESTAMP) -> hiredate (DATE)
+  - Type mismatch: actualstartdate (TIMESTAMP) -> department_startdate (DATE)
+  - Type mismatch: actualenddate (TIMESTAMP) -> department_enddate (DATE)
+  - Type mismatch: standardprice (NUMERIC) -> shipto_addressline2 (CHARACTER)
+  - Type mismatch: unitprice (NUMERIC) -> weightunitmeasurecode (CHARACTER(3))
+  - Type mismatch: shipmethodid (SERIAL) -> shipmethodid (INTEGER)
+  - Type mismatch: shipbase (NUMERIC) -> shipto_addressline1 (CHARACTER)
+  - Type mismatch: shiprate (NUMERIC) -> shipto_city (CHARACTER)
+  - Type mismatch: accountnumber ("ACCOUNTNUMBER") -> accountnumber (CHARACTER)
+  - Type mismatch: preferredvendorstatus ("FLAG") -> preferredvendorstatus (BOOLEAN)
+  - Type mismatch: activeflag ("FLAG") -> activeflag (BOOLEAN)
+  - Type mismatch: creditcardid (SERIAL) -> creditcardid (INTEGER)
+  - Type mismatch: currencycode (CHARACTER(3)) -> current_shift_name (CHARACTER)
+  - Type mismatch: currencyrateid (SERIAL) -> currencyrateid (INTEGER)
+  - Type mismatch: currencyratedate (TIMESTAMP) -> current_department_name (CHARACTER)
+  - Type mismatch: customerid (SERIAL) -> customerid (INTEGER)
+  - Type mismatch: shipdate (TIMESTAMP) -> shipto_postalcode (CHARACTER)
+  - Type mismatch: onlineorderflag ("FLAG") -> onlineorderflag (BOOLEAN)
+  - Type mismatch: purchaseordernumber ("ORDERNUMBER") -> purchaseordernumber (CHARACTER)
+  - Type mismatch: accountnumber ("ACCOUNTNUMBER") -> accountnumber (CHARACTER)
+  - Type mismatch: salesreasonid (SERIAL) -> salespersonid (INTEGER)
+  - Type mismatch: salestaxrateid (SERIAL) -> customer_territoryid (INTEGER)
+  - Type mismatch: territoryid (SERIAL) -> territoryid (INTEGER)
+  - Type mismatch: specialofferid (SERIAL) -> specialofferid (INTEGER)
+  - Type mismatch: category (CHARACTER) -> sickleavehours (SMALLINT)
+--------------------------------------------------------------------------------
+Completeness Ratio:        0.53
+Data Type Preservation:    0.53
+Avg Levenshtein Distance:  3.56
+BLEU Score:                0.26
+ROUGE-1:                   0.48
+METEOR Score:              0.30
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  "group" "primary" accountnumber accountnumber activeflag actualcost actualcost actualcost actualenddate actualresourcehrs actualstartdate additionalcontactinfo addressid addressline1 addressline2 addresstypeid availability averageleadtime averagerate billofmaterialsid bin birthdate bomlevel bonus businessentityid businessentityid businessentityid businessentityid cardnumber cardtype carriertrackingnumber catalogdescription category changenumber city class color comment comments commissionpct contacttypeid costlastyear costrate costytd countryregioncode creditcardapprovalcode creditcardid creditrating cultureid currencycode currencyratedate currencyrateid currentflag customerid daystomanufacture demographics demographics departmentid description description diagram discontinueddate discountpct document documentnode documentnode documentsummary duedate duedate duedate emailaddress emailaddress emailaddressid emailpromotion enddate enddate enddate enddate enddate enddate enddate endofdayrate endtime expmonth expyear fileextension filename finishedgoodsflag firstname folderflag freight freight gender groupname hiredate illustrationid illustrationid instructions isonlystateprovinceflag jobcandidateid jobtitle largephoto largephotofilename lastname lastreceiptcost lastreceiptdate listprice listprice locationid loginid makeflag maritalstatus maxorderqty maxqty middlename minorderqty minqty name name name name name name name name name name name name name name name name name name name name name name namestyle nationalidnumber onlineorderflag onorderqty operationsequence orderdate orderdate orderqty orderqty orderqty organizationnode passwordhash passwordsalt payfrequency perassemblyqty personid persontype phonenumber phonenumbertypeid plannedcost postalcode preferredvendorstatus productcategoryid productdescriptionid productdescriptionid productid productid productid productline productmodelid productmodelid productmodelid productmodelid productnumber productphotoid productphotoid productreviewid productsubcategoryid purchaseorderdetailid purchaseorderid purchaseordernumber purchasingwebserviceurl quantity quantity quantity quantity quotadate rate ratechangedate rating reasontype receivedqty referenceorderid referenceorderid referenceorderlineid referenceorderlineid rejectedqty reorderpoint resume reviewdate reviewername revision revisionnumber revisionnumber safetystocklevel salariedflag saleslastyear saleslastyear salesorderdetailid salesorderid salesquota salesquota salesreasonid salestaxrateid salesytd salesytd scheduledenddate scheduledstartdate scrappedqty scrapreasonid sellenddate sellstartdate shelf shiftid shipbase shipdate shipdate shipmethodid shiprate shoppingcartid shoppingcartitemid sickleavehours size spatiallocation specialofferid standardcost standardcost standardprice startdate startdate startdate startdate startdate startdate startdate starttime stateprovincecode stateprovinceid status status status storeid style subtotal subtotal suffix taxamt taxamt taxrate taxtype territoryid thumbnailphoto thumbnailphotofilename title title totaldue transactiondate transactiondate transactionid transactionid transactiontype transactiontype type unitmeasurecode unitprice unitprice unitpricediscount vacationhours weight workorderid
+
+Denormalized Model (Combined Text):
+  accountnumber accountnumber activeflag additionalcontactinfo addressid addressline1 addressline2 billto_addressline1 billto_addressline2 billto_city billto_countryregion_name billto_countryregioncode billto_postalcode billto_stateprovince_name billto_stateprovinceid billtoaddressid birthdate birthdate businessentityid businessentityid businessentityid businessentityid carriertrackingnumber city class color comment countryregioncode countryregionname creditcardapprovalcode creditcardid creditrating currencyrateid current_department_groupname current_department_name current_departmentid current_shift_endtime current_shift_name current_shift_starttime current_shiftid currentflag currentflag customer_personid customer_storeid customer_territoryid customerid customerid daystomanufacture demographics department_enddate department_startdate discontinueddate duedate emailpromotion finishedgoodsflag firstname freight full_name gender gender hiredate hiredate isonlystateprovinceflag jobtitle jobtitle lastname listprice loginid loginid makeflag maritalstatus maritalstatus middlename namestyle nationalidnumber nationalidnumber onlineorderflag orderdate orderqty organizationnode organizationnode payfrequency persontype postalcode preferredvendorstatus product_name productcategory_name productcategoryid productid productid productline productmodelid productnumber productsubcategory_name productsubcategoryid purchaseordernumber purchasingwebserviceurl rate ratechangedate reorderpoint revisionnumber safetystocklevel salariedflag salariedflag salesorderdetailid salesorderid salesorderid salespersonid sellenddate sellstartdate shipdate shipmethodid shipto_addressline1 shipto_addressline2 shipto_city shipto_countryregion_name shipto_countryregioncode shipto_postalcode shipto_stateprovince_name shipto_stateprovinceid shiptoaddressid sickleavehours sickleavehours size sizeunitmeasurecode spatiallocation specialofferid standardcost stateprovincecode stateprovinceid stateprovincename status storeid style subtotal suffix taxamt territoryid territoryid territoryid title totaldue unitprice unitpricediscount vacationhours vacationhours vendor_name weight weightunitmeasurecode
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 149 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    departmentid SERIAL
+  Denormalized:  current_departmentid SMALLINT
+
+Pair 2:
+  Relational:    name "NAME"
+  Denormalized:  gender CHARACTER(1)
+
+Pair 3:
+  Relational:    groupname "NAME"
+  Denormalized:  current_department_groupname CHARACTER
+
+Pair 4:
+  Relational:    businessentityid INTEGER
+  Denormalized:  businessentityid INTEGER
+
+Pair 5:
+  Relational:    nationalidnumber CHARACTER
+  Denormalized:  nationalidnumber CHARACTER
+
+Pair 6:
+  Relational:    loginid CHARACTER
+  Denormalized:  loginid CHARACTER
+
+Pair 7:
+  Relational:    jobtitle CHARACTER
+  Denormalized:  jobtitle CHARACTER
+
+Pair 8:
+  Relational:    birthdate DATE
+  Denormalized:  birthdate DATE
+
+Pair 9:
+  Relational:    maritalstatus CHARACTER(1)
+  Denormalized:  maritalstatus CHARACTER(1)
+
+Pair 10:
+  Relational:    gender CHARACTER(1)
+  Denormalized:  gender CHARACTER(1)
+
+Pair 11:
+  Relational:    hiredate DATE
+  Denormalized:  hiredate DATE
+
+Pair 12:
+  Relational:    salariedflag "FLAG"
+  Denormalized:  salariedflag BOOLEAN
+
+Pair 13:
+  Relational:    vacationhours SMALLINT
+  Denormalized:  vacationhours SMALLINT
+
+Pair 14:
+  Relational:    sickleavehours SMALLINT
+  Denormalized:  sickleavehours SMALLINT
+
+Pair 15:
+  Relational:    currentflag "FLAG"
+  Denormalized:  currentflag BOOLEAN
+
+Pair 16:
+  Relational:    organizationnode CHARACTER
+  Denormalized:  organizationnode CHARACTER
+
+Pair 17:
+  Relational:    startdate DATE
+  Denormalized:  birthdate DATE
+
+Pair 18:
+  Relational:    enddate DATE
+  Denormalized:  vendor_name CHARACTER
+
+Pair 19:
+  Relational:    ratechangedate TIMESTAMP
+  Denormalized:  ratechangedate TIMESTAMP
+
+Pair 20:
+  Relational:    rate NUMERIC
+  Denormalized:  rate NUMERIC
+
+Pair 21:
+  Relational:    payfrequency SMALLINT
+  Denormalized:  payfrequency SMALLINT
+
+Pair 22:
+  Relational:    shiftid SERIAL
+  Denormalized:  current_shiftid SMALLINT
+
+Pair 23:
+  Relational:    starttime TIME
+  Denormalized:  current_shift_starttime TIME
+
+Pair 24:
+  Relational:    endtime TIME
+  Denormalized:  current_shift_endtime TIME
+
+Pair 25:
+  Relational:    addressid SERIAL
+  Denormalized:  addressid SERIAL
+
+Pair 26:
+  Relational:    addressline1 CHARACTER
+  Denormalized:  addressline1 CHARACTER
+
+Pair 27:
+  Relational:    addressline2 CHARACTER
+  Denormalized:  addressline2 CHARACTER
+
+Pair 28:
+  Relational:    city CHARACTER
+  Denormalized:  city CHARACTER
+
+Pair 29:
+  Relational:    postalcode CHARACTER
+  Denormalized:  postalcode CHARACTER
+
+Pair 30:
+  Relational:    spatiallocation BYTEA
+  Denormalized:  spatiallocation BYTEA
+
+Pair 31:
+  Relational:    addresstypeid SERIAL
+  Denormalized:  billto_addressline1 CHARACTER
+
+Pair 32:
+  Relational:    businessentityid SERIAL
+  Denormalized:  businessentityid INTEGER
+
+Pair 33:
+  Relational:    contacttypeid SERIAL
+  Denormalized:  customer_storeid INTEGER
+
+Pair 34:
+  Relational:    countryregioncode CHARACTER
+  Denormalized:  countryregioncode CHARACTER
+
+Pair 35:
+  Relational:    emailaddressid SERIAL
+  Denormalized:  billtoaddressid INTEGER
+
+Pair 36:
+  Relational:    emailaddress CHARACTER
+  Denormalized:  shiptoaddressid INTEGER
+
+Pair 37:
+  Relational:    persontype CHARACTER(2)
+  Denormalized:  persontype CHARACTER(2)
+
+Pair 38:
+  Relational:    namestyle "NAMESTYLE"
+  Denormalized:  namestyle BOOLEAN
+
+Pair 39:
+  Relational:    title CHARACTER
+  Denormalized:  title CHARACTER
+
+Pair 40:
+  Relational:    firstname "NAME"
+  Denormalized:  firstname CHARACTER
+
+Pair 41:
+  Relational:    middlename "NAME"
+  Denormalized:  middlename CHARACTER
+
+Pair 42:
+  Relational:    lastname "NAME"
+  Denormalized:  lastname CHARACTER
+
+Pair 43:
+  Relational:    suffix CHARACTER
+  Denormalized:  suffix CHARACTER
+
+Pair 44:
+  Relational:    emailpromotion INTEGER
+  Denormalized:  emailpromotion INTEGER
+
+Pair 45:
+  Relational:    additionalcontactinfo XML
+  Denormalized:  additionalcontactinfo XML
+
+Pair 46:
+  Relational:    demographics XML
+  Denormalized:  demographics XML
+
+Pair 47:
+  Relational:    phonenumber "PHONE"
+  Denormalized:  nationalidnumber CHARACTER
+
+Pair 48:
+  Relational:    stateprovinceid SERIAL
+  Denormalized:  stateprovinceid INTEGER
+
+Pair 49:
+  Relational:    stateprovincecode CHARACTER(3)
+  Denormalized:  stateprovincecode CHARACTER(3)
+
+Pair 50:
+  Relational:    isonlystateprovinceflag "FLAG"
+  Denormalized:  isonlystateprovinceflag BOOLEAN
+
+Pair 51:
+  Relational:    billofmaterialsid SERIAL
+  Denormalized:  billto_stateprovinceid INTEGER
+
+Pair 52:
+  Relational:    cultureid CHARACTER(6)
+  Denormalized:  customerid INTEGER
+
+Pair 53:
+  Relational:    title CHARACTER
+  Denormalized:  jobtitle CHARACTER
+
+Pair 54:
+  Relational:    folderflag "FLAG"
+  Denormalized:  salariedflag BOOLEAN
+
+Pair 55:
+  Relational:    filename CHARACTER
+  Denormalized:  full_name CHARACTER
+
+Pair 56:
+  Relational:    status SMALLINT
+  Denormalized:  maritalstatus CHARACTER(1)
+
+Pair 57:
+  Relational:    documentnode CHARACTER
+  Denormalized:  shipto_countryregioncode CHARACTER
+
+Pair 58:
+  Relational:    illustrationid SERIAL
+  Denormalized:  billto_countryregion_name CHARACTER
+
+Pair 59:
+  Relational:    locationid SERIAL
+  Denormalized:  vacationhours SMALLINT
+
+Pair 60:
+  Relational:    costrate NUMERIC
+  Denormalized:  countryregionname CHARACTER
+
+Pair 61:
+  Relational:    productid SERIAL
+  Denormalized:  productid SERIAL
+
+Pair 62:
+  Relational:    productnumber CHARACTER
+  Denormalized:  productnumber CHARACTER
+
+Pair 63:
+  Relational:    makeflag "FLAG"
+  Denormalized:  makeflag BOOLEAN
+
+Pair 64:
+  Relational:    finishedgoodsflag "FLAG"
+  Denormalized:  finishedgoodsflag BOOLEAN
+
+Pair 65:
+  Relational:    color CHARACTER
+  Denormalized:  color CHARACTER
+
+Pair 66:
+  Relational:    safetystocklevel SMALLINT
+  Denormalized:  safetystocklevel SMALLINT
+
+Pair 67:
+  Relational:    reorderpoint SMALLINT
+  Denormalized:  reorderpoint SMALLINT
+
+Pair 68:
+  Relational:    standardcost NUMERIC
+  Denormalized:  standardcost NUMERIC
+
+Pair 69:
+  Relational:    listprice NUMERIC
+  Denormalized:  listprice NUMERIC
+
+Pair 70:
+  Relational:    size CHARACTER
+  Denormalized:  size CHARACTER
+
+Pair 71:
+  Relational:    weight NUMERIC(8, 2)
+  Denormalized:  weight NUMERIC(8, 2)
+
+Pair 72:
+  Relational:    daystomanufacture INTEGER
+  Denormalized:  daystomanufacture INTEGER
+
+Pair 73:
+  Relational:    productline CHARACTER(2)
+  Denormalized:  productline CHARACTER(2)
+
+Pair 74:
+  Relational:    class CHARACTER(2)
+  Denormalized:  class CHARACTER(2)
+
+Pair 75:
+  Relational:    style CHARACTER(2)
+  Denormalized:  style CHARACTER(2)
+
+Pair 76:
+  Relational:    productmodelid INTEGER
+  Denormalized:  productmodelid INTEGER
+
+Pair 77:
+  Relational:    sellstartdate TIMESTAMP
+  Denormalized:  sellstartdate TIMESTAMP
+
+Pair 78:
+  Relational:    sellenddate TIMESTAMP
+  Denormalized:  sellenddate TIMESTAMP
+
+Pair 79:
+  Relational:    discontinueddate TIMESTAMP
+  Denormalized:  discontinueddate TIMESTAMP
+
+Pair 80:
+  Relational:    productcategoryid SERIAL
+  Denormalized:  productcategoryid INTEGER
+
+Pair 81:
+  Relational:    productdescriptionid SERIAL
+  Denormalized:  productsubcategory_name CHARACTER
+
+Pair 82:
+  Relational:    documentnode CHARACTER
+  Denormalized:  shipto_countryregion_name CHARACTER
+
+Pair 83:
+  Relational:    bin SMALLINT
+  Denormalized:  loginid CHARACTER
+
+Pair 84:
+  Relational:    quantity SMALLINT
+  Denormalized:  billto_city CHARACTER
+
+Pair 85:
+  Relational:    listprice NUMERIC
+  Denormalized:  billto_postalcode CHARACTER
+
+Pair 86:
+  Relational:    productmodelid SERIAL
+  Denormalized:  productcategory_name CHARACTER
+
+Pair 87:
+  Relational:    illustrationid INTEGER
+  Denormalized:  billto_countryregioncode CHARACTER
+
+Pair 88:
+  Relational:    thumbnailphotofilename CHARACTER
+  Denormalized:  shipto_stateprovince_name CHARACTER
+
+Pair 89:
+  Relational:    largephotofilename CHARACTER
+  Denormalized:  billto_stateprovince_name CHARACTER
+
+Pair 90:
+  Relational:    "primary" "FLAG"
+  Denormalized:  territoryid INTEGER
+
+Pair 91:
+  Relational:    productreviewid SERIAL
+  Denormalized:  shipto_stateprovinceid INTEGER
+
+Pair 92:
+  Relational:    reviewername "NAME"
+  Denormalized:  stateprovincename CHARACTER
+
+Pair 93:
+  Relational:    emailaddress CHARACTER
+  Denormalized:  billto_addressline2 CHARACTER
+
+Pair 94:
+  Relational:    comments CHARACTER
+  Denormalized:  currentflag BOOLEAN
+
+Pair 95:
+  Relational:    productsubcategoryid SERIAL
+  Denormalized:  productsubcategoryid INTEGER
+
+Pair 96:
+  Relational:    scrapreasonid SERIAL
+  Denormalized:  customer_personid INTEGER
+
+Pair 97:
+  Relational:    transactionid SERIAL
+  Denormalized:  organizationnode CHARACTER
+
+Pair 98:
+  Relational:    productid INTEGER
+  Denormalized:  product_name CHARACTER
+
+Pair 99:
+  Relational:    unitmeasurecode CHARACTER(3)
+  Denormalized:  sizeunitmeasurecode CHARACTER(3)
+
+Pair 100:
+  Relational:    workorderid SERIAL
+  Denormalized:  salesorderid INTEGER
+
+Pair 101:
+  Relational:    orderqty INTEGER
+  Denormalized:  orderqty SMALLINT
+
+Pair 102:
+  Relational:    duedate TIMESTAMP
+  Denormalized:  hiredate DATE
+
+Pair 103:
+  Relational:    productid INTEGER
+  Denormalized:  productid INTEGER
+
+Pair 104:
+  Relational:    actualstartdate TIMESTAMP
+  Denormalized:  department_startdate DATE
+
+Pair 105:
+  Relational:    actualenddate TIMESTAMP
+  Denormalized:  department_enddate DATE
+
+Pair 106:
+  Relational:    standardprice NUMERIC
+  Denormalized:  shipto_addressline2 CHARACTER
+
+Pair 107:
+  Relational:    duedate TIMESTAMP
+  Denormalized:  duedate TIMESTAMP
+
+Pair 108:
+  Relational:    unitprice NUMERIC
+  Denormalized:  weightunitmeasurecode CHARACTER(3)
+
+Pair 109:
+  Relational:    revisionnumber SMALLINT
+  Denormalized:  revisionnumber SMALLINT
+
+Pair 110:
+  Relational:    status SMALLINT
+  Denormalized:  status SMALLINT
+
+Pair 111:
+  Relational:    orderdate TIMESTAMP
+  Denormalized:  orderdate TIMESTAMP
+
+Pair 112:
+  Relational:    shipdate TIMESTAMP
+  Denormalized:  shipdate TIMESTAMP
+
+Pair 113:
+  Relational:    subtotal NUMERIC
+  Denormalized:  subtotal NUMERIC
+
+Pair 114:
+  Relational:    taxamt NUMERIC
+  Denormalized:  taxamt NUMERIC
+
+Pair 115:
+  Relational:    freight NUMERIC
+  Denormalized:  freight NUMERIC
+
+Pair 116:
+  Relational:    shipmethodid SERIAL
+  Denormalized:  shipmethodid INTEGER
+
+Pair 117:
+  Relational:    shipbase NUMERIC
+  Denormalized:  shipto_addressline1 CHARACTER
+
+Pair 118:
+  Relational:    shiprate NUMERIC
+  Denormalized:  shipto_city CHARACTER
+
+Pair 119:
+  Relational:    businessentityid INTEGER
+  Denormalized:  businessentityid INTEGER
+
+Pair 120:
+  Relational:    accountnumber "ACCOUNTNUMBER"
+  Denormalized:  accountnumber CHARACTER
+
+Pair 121:
+  Relational:    creditrating SMALLINT
+  Denormalized:  creditrating SMALLINT
+
+Pair 122:
+  Relational:    preferredvendorstatus "FLAG"
+  Denormalized:  preferredvendorstatus BOOLEAN
+
+Pair 123:
+  Relational:    activeflag "FLAG"
+  Denormalized:  activeflag BOOLEAN
+
+Pair 124:
+  Relational:    purchasingwebserviceurl CHARACTER
+  Denormalized:  purchasingwebserviceurl CHARACTER
+
+Pair 125:
+  Relational:    creditcardid SERIAL
+  Denormalized:  creditcardid INTEGER
+
+Pair 126:
+  Relational:    currencycode CHARACTER(3)
+  Denormalized:  current_shift_name CHARACTER
+
+Pair 127:
+  Relational:    currencyrateid SERIAL
+  Denormalized:  currencyrateid INTEGER
+
+Pair 128:
+  Relational:    currencyratedate TIMESTAMP
+  Denormalized:  current_department_name CHARACTER
+
+Pair 129:
+  Relational:    customerid SERIAL
+  Denormalized:  customerid INTEGER
+
+Pair 130:
+  Relational:    personid INTEGER
+  Denormalized:  territoryid INTEGER
+
+Pair 131:
+  Relational:    storeid INTEGER
+  Denormalized:  storeid INTEGER
+
+Pair 132:
+  Relational:    businessentityid INTEGER
+  Denormalized:  businessentityid INTEGER
+
+Pair 133:
+  Relational:    salesorderdetailid SERIAL
+  Denormalized:  salesorderdetailid SERIAL
+
+Pair 134:
+  Relational:    carriertrackingnumber CHARACTER
+  Denormalized:  carriertrackingnumber CHARACTER
+
+Pair 135:
+  Relational:    unitprice NUMERIC
+  Denormalized:  unitprice NUMERIC
+
+Pair 136:
+  Relational:    unitpricediscount NUMERIC
+  Denormalized:  unitpricediscount NUMERIC
+
+Pair 137:
+  Relational:    salesorderid SERIAL
+  Denormalized:  salesorderid SERIAL
+
+Pair 138:
+  Relational:    shipdate TIMESTAMP
+  Denormalized:  shipto_postalcode CHARACTER
+
+Pair 139:
+  Relational:    onlineorderflag "FLAG"
+  Denormalized:  onlineorderflag BOOLEAN
+
+Pair 140:
+  Relational:    purchaseordernumber "ORDERNUMBER"
+  Denormalized:  purchaseordernumber CHARACTER
+
+Pair 141:
+  Relational:    accountnumber "ACCOUNTNUMBER"
+  Denormalized:  accountnumber CHARACTER
+
+Pair 142:
+  Relational:    creditcardapprovalcode CHARACTER
+  Denormalized:  creditcardapprovalcode CHARACTER
+
+Pair 143:
+  Relational:    totaldue NUMERIC
+  Denormalized:  totaldue NUMERIC
+
+Pair 144:
+  Relational:    comment CHARACTER
+  Denormalized:  comment CHARACTER
+
+Pair 145:
+  Relational:    salesreasonid SERIAL
+  Denormalized:  salespersonid INTEGER
+
+Pair 146:
+  Relational:    salestaxrateid SERIAL
+  Denormalized:  customer_territoryid INTEGER
+
+Pair 147:
+  Relational:    territoryid SERIAL
+  Denormalized:  territoryid INTEGER
+
+Pair 148:
+  Relational:    specialofferid SERIAL
+  Denormalized:  specialofferid INTEGER
+
+Pair 149:
+  Relational:    category CHARACTER
+  Denormalized:  sickleavehours SMALLINT
+
+
+================================================================================

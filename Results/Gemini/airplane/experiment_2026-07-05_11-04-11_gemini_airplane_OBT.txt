@@ -1,0 +1,142 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-04-11
+Model: gemini
+Prompt: OBT
+Schema: airplane
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy adopts a One-Big-Table (OBT) model centered around the lowest granularity of the data: the passenger's flight segment (ticket_flights/boarding_passes). By flattening the 8 normalized tables (bookings, tickets, ticket_flights, boarding_passes, flights, airports_data, aircrafts_data, seats) into a single wide table, we eliminate the need for expensive multi-way JOINs. This structure provides a complete, pre-joined view of a passenger's journey, including booking financials, flight schedules, aircraft details, and geographical airport data for both departure and arrival.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged 'bookings', 'tickets', 'ticket_flights', and 'boarding_passes' to form the core passenger journey grain, capturing the financial and assignment details of each trip."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Denormalized 'flights', 'aircrafts_data', and 'seats' into the core table to attach execution details (schedules, actual times, aircraft model/range, and seat class) directly to the passenger's segment."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Denormalized 'airports_data' twice to represent both the departure and arrival airports, flattening the geographical context (city, coordinates, timezone) for each flight segment."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Introduced a surrogate primary key ('journey_id') to satisfy the single Primary Key constraint of the OBT model, while dropping all Foreign Key constraints to optimize read performance."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Prefixed 'fare_conditions' from 'ticket_flights' as 'ticket_fare_conditions' and from 'seats' as 'seat_fare_conditions' to prevent column name collisions."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Prefixed attributes from 'airports_data' with 'departure_' and 'arrival_' (e.g., 'departure_airport_name', 'arrival_city') to distinguish between origin and destination details."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Renamed 'amount' from 'ticket_flights' to 'ticket_amount' and 'total_amount' from 'bookings' to 'booking_total_amount' to clarify the financial metrics."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Renamed 'model' and 'range' from 'aircrafts_data' to 'aircraft_model' and 'aircraft_range' respectively to provide clear entity context."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Renamed 'status' from 'flights' to 'flight_status' to avoid ambiguity with other potential status fields."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "High data redundancy: Booking details, flight schedules, aircraft specs, and airport coordinates are repeated for every single passenger on a flight, significantly increasing storage costs."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update anomalies: Modifying a flight's schedule or an aircraft's model now requires updating thousands of rows instead of a single row in a normalized table."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of database-level integrity: Without Foreign Keys, referential integrity (e.g., ensuring an aircraft code exists) must be strictly managed by the ETL/application layer."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "Q1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Passenger Journey and Revenue Analysis: Aggregating 'ticket_amount' by 'departure_city' and 'arrival_city' or analyzing flight delays ('actual_departure' vs 'scheduled_departure') by 'aircraft_model' without executing 8-table JOINs."
+      },
+      {
+        "decision_id": "Q2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Seat Occupancy and Class Upgrades: Comparing 'ticket_fare_conditions' against 'seat_fare_conditions' to identify passengers who were upgraded or downgraded, filtered by 'flight_status'."
+      }
+    ]
+  }
+}
+```
+
+```sql
+CREATE TABLE IF NOT EXISTS bookings.obt_flight_journeys
+(
+    journey_id serial NOT NULL,
+    
+    -- Bookings Data
+    book_ref character(6) COLLATE pg_catalog."default" NOT NULL,
+    book_date timestamp with time zone NOT NULL,
+    booking_total_amount numeric(10, 2) NOT NULL,
+    
+    -- Tickets Data
+    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL,
+    passenger_id character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    passenger_name text COLLATE pg_catalog."default" NOT NULL,
+    contact_data jsonb,
+    
+    -- Ticket Flights Data
+    ticket_fare_conditions character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    ticket_amount numeric(10, 2) NOT NULL,
+    
+    -- Boarding Passes & Seats Data
+    boarding_no integer,
+    seat_no character varying(4) COLLATE pg_catalog."default",
+    seat_fare_conditions character varying(10) COLLATE pg_catalog."default",
+    
+    -- Flights Data
+    flight_id integer NOT NULL,
+    flight_no character(6) COLLATE pg_catalog."default" NOT NULL,
+    scheduled_departure timestamp with time zone NOT NULL,
+    scheduled_arrival timestamp with time zone NOT NULL,
+    actual_departure timestamp with time zone,
+    actual_arrival timestamp with time zone,
+    flight_status character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Aircrafts Data
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    aircraft_model jsonb NOT NULL,
+    aircraft_range integer NOT NULL,
+    
+    -- Departure Airport Data
+    departure_airport_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    departure_airport_name jsonb NOT NULL,
+    departure_city jsonb NOT NULL,
+    departure_coordinates point NOT NULL,
+    departure_timezone text COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Arrival Airport Data
+    arrival_airport_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    arrival_airport_name jsonb NOT NULL,
+    arrival_city jsonb NOT NULL,
+    arrival_coordinates point NOT NULL,
+    arrival_timezone text COLLATE pg_catalog."default" NOT NULL,
+    
+    CONSTRAINT obt_flight_journeys_pkey PRIMARY KEY (journey_id)
+);
+
+COMMENT ON TABLE bookings.obt_flight_journeys
+    IS 'One-Big-Table (OBT) denormalized view of passenger flight journeys';
+```

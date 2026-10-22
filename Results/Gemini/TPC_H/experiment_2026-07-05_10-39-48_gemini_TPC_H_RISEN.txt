@@ -1,0 +1,165 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_10-39-48
+Model: gemini
+Prompt: RISEN
+Schema: TPC_H
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transforms the highly normalized TPC-H relational model into a Star Schema optimized for OLAP (analytical) workloads. The primary bottlenecks in these analytical queries are the deep snowflake joins (Customer/Supplier -> Nation -> Region) and the massive joins between the Orders and Lineitem tables. By collapsing these relations, we eliminate significant join overhead. We also apply vertical partitioning to the Part table to isolate pricing data, improving cache efficiency for price-focused aggregations, and we add derived attributes to precompute revenue, drastically reducing CPU cycles during aggregation.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapse the REGION and NATION tables into the CUSTOMER table to create a unified DIM_CUSTOMER dimension table."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapse the REGION and NATION tables into the SUPPLIER table to create a unified DIM_SUPPLIER dimension table."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Collapse the ORDERS and LINEITEM tables into a single FACT_SALES_LINEITEM fact table to avoid the most expensive join in the schema."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Vertically partition the PART table into DIM_PART_PHYSICAL (attributes) and DIM_PART_PRICING (financials) to optimize cache usage for queries scanning only pricing data."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant attributes from NATION and REGION into DIM_CUSTOMER. Prefixed them as C_NATION_NAME, C_REGIONKEY, C_REGION_NAME, C_NATION_COMMENT, and C_REGION_COMMENT to avoid ambiguity."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added redundant attributes from NATION and REGION into DIM_SUPPLIER. Prefixed them as S_NATION_NAME, S_REGIONKEY, S_REGION_NAME, S_NATION_COMMENT, and S_REGION_COMMENT."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added a derived attribute L_NET_REVENUE to FACT_SALES_LINEITEM to precompute the commonly used aggregation logic: (L_EXTENDEDPRICE * (1 - L_DISCOUNT))."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Collapsing NATION and REGION into the Customer and Supplier dimensions increases storage footprint and introduces update anomalies for location data. This is an acceptable tradeoff since geographical reference data is highly static."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Collapsing ORDERS into LINEITEM duplicates order-level attributes (e.g., O_ORDERDATE, O_TOTALPRICE) across all associated line items, increasing storage size but vastly improving read speed for time-series sales analysis."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Vertically partitioning PART requires a join if a query needs both physical attributes and retail price, slightly penalizing such specific queries to benefit the majority of narrow analytical scans."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1",
+        "query": "SELECT C_REGION_NAME, SUM(L_NET_REVENUE) FROM FACT_SALES_LINEITEM JOIN DIM_CUSTOMER ON O_CUSTKEY = C_CUSTKEY GROUP BY C_REGION_NAME;"
+      },
+      {
+        "decision_id": "D3",
+        "query": "SELECT O_ORDERDATE, SUM(L_NET_REVENUE) FROM FACT_SALES_LINEITEM GROUP BY O_ORDERDATE;"
+      },
+      {
+        "decision_id": "D4",
+        "query": "SELECT P_PARTKEY, P_RETAILPRICE FROM DIM_PART_PRICING WHERE P_RETAILPRICE > 1000.00;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- ==============================================================================
+-- DENORMALIZED ANALYTICAL SCHEMA (STAR SCHEMA)
+-- ==============================================================================
+
+CREATE TABLE DIM_CUSTOMER ( 
+    C_CUSTKEY         INTEGER NOT NULL,
+    C_NAME            VARCHAR(25) NOT NULL,
+    C_ADDRESS         VARCHAR(40) NOT NULL,
+    C_PHONE           CHAR(15) NOT NULL,
+    C_ACCTBAL         DECIMAL(15,2) NOT NULL,
+    C_MKTSEGMENT      CHAR(10) NOT NULL,
+    C_COMMENT         VARCHAR(117) NOT NULL,
+    C_NATIONKEY       INTEGER NOT NULL,
+    C_NATION_NAME     CHAR(25) NOT NULL,
+    C_NATION_COMMENT  VARCHAR(152),
+    C_REGIONKEY       INTEGER NOT NULL,
+    C_REGION_NAME     CHAR(25) NOT NULL,
+    C_REGION_COMMENT  VARCHAR(152)
+);
+
+CREATE TABLE DIM_SUPPLIER ( 
+    S_SUPPKEY         INTEGER NOT NULL,
+    S_NAME            CHAR(25) NOT NULL,
+    S_ADDRESS         VARCHAR(40) NOT NULL,
+    S_PHONE           CHAR(15) NOT NULL,
+    S_ACCTBAL         DECIMAL(15,2) NOT NULL,
+    S_COMMENT         VARCHAR(101) NOT NULL,
+    S_NATIONKEY       INTEGER NOT NULL,
+    S_NATION_NAME     CHAR(25) NOT NULL,
+    S_NATION_COMMENT  VARCHAR(152),
+    S_REGIONKEY       INTEGER NOT NULL,
+    S_REGION_NAME     CHAR(25) NOT NULL,
+    S_REGION_COMMENT  VARCHAR(152)
+);
+
+CREATE TABLE DIM_PART_PHYSICAL ( 
+    P_PARTKEY         INTEGER NOT NULL,
+    P_NAME            VARCHAR(55) NOT NULL,
+    P_MFGR            CHAR(25) NOT NULL,
+    P_BRAND           CHAR(10) NOT NULL,
+    P_TYPE            VARCHAR(25) NOT NULL,
+    P_SIZE            INTEGER NOT NULL,
+    P_CONTAINER       CHAR(10) NOT NULL,
+    P_COMMENT         VARCHAR(23) NOT NULL 
+);
+
+CREATE TABLE DIM_PART_PRICING ( 
+    P_PARTKEY         INTEGER NOT NULL,
+    P_RETAILPRICE     DECIMAL(15,2) NOT NULL
+);
+
+CREATE TABLE FACT_PARTSUPP ( 
+    PS_PARTKEY        INTEGER NOT NULL,
+    PS_SUPPKEY        INTEGER NOT NULL,
+    PS_AVAILQTY       INTEGER NOT NULL,
+    PS_SUPPLYCOST     DECIMAL(15,2) NOT NULL,
+    PS_COMMENT        VARCHAR(199) NOT NULL 
+);
+
+CREATE TABLE FACT_SALES_LINEITEM ( 
+    L_ORDERKEY        INTEGER NOT NULL,
+    L_LINENUMBER      INTEGER NOT NULL,
+    O_CUSTKEY         INTEGER NOT NULL,
+    L_PARTKEY         INTEGER NOT NULL,
+    L_SUPPKEY         INTEGER NOT NULL,
+    O_ORDERSTATUS     CHAR(1) NOT NULL,
+    O_TOTALPRICE      DECIMAL(15,2) NOT NULL,
+    O_ORDERDATE       DATE NOT NULL,
+    O_ORDERPRIORITY   CHAR(15) NOT NULL,  
+    O_CLERK           CHAR(15) NOT NULL, 
+    O_SHIPPRIORITY    INTEGER NOT NULL,
+    O_COMMENT         VARCHAR(79) NOT NULL,
+    L_QUANTITY        DECIMAL(15,2) NOT NULL,
+    L_EXTENDEDPRICE   DECIMAL(15,2) NOT NULL,
+    L_DISCOUNT        DECIMAL(15,2) NOT NULL,
+    L_TAX             DECIMAL(15,2) NOT NULL,
+    L_RETURNFLAG      CHAR(1) NOT NULL,
+    L_LINESTATUS      CHAR(1) NOT NULL,
+    L_SHIPDATE        DATE NOT NULL,
+    L_COMMITDATE      DATE NOT NULL,
+    L_RECEIPTDATE     DATE NOT NULL,
+    L_SHIPINSTRUCT    CHAR(25) NOT NULL,
+    L_SHIPMODE        CHAR(10) NOT NULL,
+    L_COMMENT         VARCHAR(44) NOT NULL,
+    L_NET_REVENUE     DECIMAL(15,2) NOT NULL
+);
+```

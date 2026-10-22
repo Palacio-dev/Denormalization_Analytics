@@ -1,0 +1,359 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 11
+  - Total Attributes: 67
+    * country: 3 columns
+    * survey: 18 columns
+    * region: 2 columns
+    * decile: 4 columns
+    * demography: 9 columns
+    * employment: 10 columns
+    * education: 10 columns
+    * economy: 6 columns
+    * population: 5 columns
+    * life_expectancy: 4 columns
+    * health: 6 columns
+
+Denormalized Model:
+  - Tables: 7
+  - Total Attributes: 62
+    * master_country_survey: 20 columns
+    * master_demographics: 13 columns
+    * master_health: 6 columns
+    * master_decile: 4 columns
+    * employment: 10 columns
+    * education: 10 columns
+    * economy: 6 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Normalized model has MORE attributes (62 vs 67)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: id_decile (SERIAL) -> id_decile (INTEGER)
+  - Type mismatch: id_employment (SERIAL) -> id_employment (INTEGER)
+  - Type mismatch: id_education (SERIAL) -> id_education (INTEGER)
+  - Type mismatch: id_economy (SERIAL) -> id_economy (INTEGER)
+  - Type mismatch: id_health (SERIAL) -> id_health (INTEGER)
+--------------------------------------------------------------------------------
+Completeness Ratio:        0.93
+Data Type Preservation:    0.92
+Avg Levenshtein Distance:  0.27
+BLEU Score:                0.89
+ROUGE-1:                   0.93
+METEOR Score:              0.90
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: master_country_survey, master_demographics
+Dimension Tables Detected: master_health, master_decile, employment, education, economy
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected 2 Fact tables. Evaluating as a GALAXY SCHEMA.
+  - SNOWFLAKE VIOLATION: Dimension 'master_health' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'hospital_beds' in 'master_health' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'physicians' in 'master_health' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'expenditure' in 'master_health' allows NULLs. Consider demanding default values.
+  - SNOWFLAKE VIOLATION: Dimension 'master_decile' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'value' in 'master_decile' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'name' in 'master_decile' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'child_emp' in 'employment' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'unemp' in 'employment' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'vulnerable_emp' in 'employment' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'part_time' in 'employment' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'employers' in 'employment' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'labor_force_total' in 'employment' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'labor_force_fem' in 'employment' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'child_out_of_school' in 'education' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'progression_to_sec' in 'education' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'expenditure' in 'education' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'preprim_enroll' in 'education' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'prim_enrol' in 'education' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'sec_enrol' in 'education' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'terti_enrol' in 'education' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'gdp' in 'economy' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'inflation' in 'economy' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'tax_revenue' in 'economy' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * master_country_survey: 10 Numeric, 7 Text
+  * master_demographics: 9 Numeric, 2 Text
+  * master_health: 5 Numeric, 1 Text
+  * master_decile: 3 Numeric, 1 Text
+  * employment: 9 Numeric, 1 Text
+  * education: 9 Numeric, 1 Text
+  * economy: 5 Numeric, 1 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  "number" birth_rate child_emp child_out_of_school comparable_spell country_code country_name death_rate distribution_type employers expenditure expenditure gdp gender gender gini headcount hospital_beds id_decile id_demography id_economy id_education id_employment id_health id_life_expectancy id_population id_survey inflation labor_force_fem labor_force_total name net_migration part_time physicians pop_ages pop_density poverty_gap poverty_line poverty_severity preprim_enroll prim_enrol progression_to_sec region_code region_name reporting_level reporting_pce reporting_pop rural_pop sec_enrol spl survey_acronym survey_comparability survey_coverage survey_year tax_revenue terti_enrol unemp urban_pop value value vulnerable_emp welfare_type year year year year year
+
+Denormalized Model (Combined Text):
+  "number" birth_rate child_emp child_out_of_school comparable_spell country_code country_code country_code country_name death_rate distribution_type employers expenditure expenditure gdp gender gini headcount hospital_beds id_decile id_economy id_education id_employment id_health inflation labor_force_fem labor_force_total name net_migration part_time physicians pop_ages pop_density poverty_gap poverty_line poverty_severity preprim_enroll prim_enrol progression_to_sec reporting_level reporting_pce reporting_pop rural_pop sec_enrol spl survey_acronym survey_comparability survey_coverage survey_year tax_revenue terti_enrol unemp urban_pop value value vulnerable_emp welfare_type year year year year year
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 62 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    country_code CHARACTER
+  Denormalized:  country_code CHARACTER
+
+Pair 2:
+  Relational:    country_name CHARACTER
+  Denormalized:  country_name CHARACTER
+
+Pair 3:
+  Relational:    welfare_type CHARACTER
+  Denormalized:  welfare_type CHARACTER
+
+Pair 4:
+  Relational:    survey_acronym CHARACTER
+  Denormalized:  survey_acronym CHARACTER
+
+Pair 5:
+  Relational:    survey_comparability INTEGER
+  Denormalized:  survey_comparability INTEGER
+
+Pair 6:
+  Relational:    comparable_spell CHARACTER
+  Denormalized:  comparable_spell CHARACTER
+
+Pair 7:
+  Relational:    poverty_line DOUBLE
+  Denormalized:  poverty_line DOUBLE
+
+Pair 8:
+  Relational:    headcount DOUBLE
+  Denormalized:  headcount DOUBLE
+
+Pair 9:
+  Relational:    poverty_gap DOUBLE
+  Denormalized:  poverty_gap DOUBLE
+
+Pair 10:
+  Relational:    poverty_severity DOUBLE
+  Denormalized:  poverty_severity DOUBLE
+
+Pair 11:
+  Relational:    gini DOUBLE
+  Denormalized:  gini DOUBLE
+
+Pair 12:
+  Relational:    reporting_pop INTEGER
+  Denormalized:  reporting_pop INTEGER
+
+Pair 13:
+  Relational:    reporting_pce DOUBLE
+  Denormalized:  reporting_pce DOUBLE
+
+Pair 14:
+  Relational:    distribution_type CHARACTER
+  Denormalized:  distribution_type CHARACTER
+
+Pair 15:
+  Relational:    spl DOUBLE
+  Denormalized:  spl DOUBLE
+
+Pair 16:
+  Relational:    survey_year INTEGER
+  Denormalized:  survey_year INTEGER
+
+Pair 17:
+  Relational:    survey_coverage CHARACTER
+  Denormalized:  survey_coverage CHARACTER
+
+Pair 18:
+  Relational:    reporting_level CHARACTER
+  Denormalized:  reporting_level CHARACTER
+
+Pair 19:
+  Relational:    region_code CHARACTER
+  Denormalized:  country_code CHARACTER
+
+Pair 20:
+  Relational:    region_name CHARACTER
+  Denormalized:  country_code CHARACTER
+
+Pair 21:
+  Relational:    id_decile SERIAL
+  Denormalized:  id_decile INTEGER
+
+Pair 22:
+  Relational:    value DOUBLE
+  Denormalized:  value DOUBLE
+
+Pair 23:
+  Relational:    name CHARACTER
+  Denormalized:  name CHARACTER
+
+Pair 24:
+  Relational:    year INTEGER
+  Denormalized:  year INTEGER
+
+Pair 25:
+  Relational:    pop_density DOUBLE
+  Denormalized:  pop_density DOUBLE
+
+Pair 26:
+  Relational:    urban_pop DOUBLE
+  Denormalized:  urban_pop DOUBLE
+
+Pair 27:
+  Relational:    rural_pop DOUBLE
+  Denormalized:  rural_pop DOUBLE
+
+Pair 28:
+  Relational:    net_migration DOUBLE
+  Denormalized:  net_migration DOUBLE
+
+Pair 29:
+  Relational:    death_rate DOUBLE
+  Denormalized:  death_rate DOUBLE
+
+Pair 30:
+  Relational:    birth_rate DOUBLE
+  Denormalized:  birth_rate DOUBLE
+
+Pair 31:
+  Relational:    id_employment SERIAL
+  Denormalized:  id_employment INTEGER
+
+Pair 32:
+  Relational:    year INTEGER
+  Denormalized:  year INTEGER
+
+Pair 33:
+  Relational:    child_emp DOUBLE
+  Denormalized:  child_emp DOUBLE
+
+Pair 34:
+  Relational:    unemp DOUBLE
+  Denormalized:  unemp DOUBLE
+
+Pair 35:
+  Relational:    vulnerable_emp DOUBLE
+  Denormalized:  vulnerable_emp DOUBLE
+
+Pair 36:
+  Relational:    part_time DOUBLE
+  Denormalized:  part_time DOUBLE
+
+Pair 37:
+  Relational:    employers DOUBLE
+  Denormalized:  employers DOUBLE
+
+Pair 38:
+  Relational:    labor_force_total DOUBLE
+  Denormalized:  labor_force_total DOUBLE
+
+Pair 39:
+  Relational:    labor_force_fem DOUBLE
+  Denormalized:  labor_force_fem DOUBLE
+
+Pair 40:
+  Relational:    id_education SERIAL
+  Denormalized:  id_education INTEGER
+
+Pair 41:
+  Relational:    year INTEGER
+  Denormalized:  year INTEGER
+
+Pair 42:
+  Relational:    child_out_of_school DOUBLE
+  Denormalized:  child_out_of_school DOUBLE
+
+Pair 43:
+  Relational:    progression_to_sec DOUBLE
+  Denormalized:  progression_to_sec DOUBLE
+
+Pair 44:
+  Relational:    expenditure DOUBLE
+  Denormalized:  expenditure DOUBLE
+
+Pair 45:
+  Relational:    preprim_enroll DOUBLE
+  Denormalized:  preprim_enroll DOUBLE
+
+Pair 46:
+  Relational:    prim_enrol DOUBLE
+  Denormalized:  prim_enrol DOUBLE
+
+Pair 47:
+  Relational:    sec_enrol DOUBLE
+  Denormalized:  sec_enrol DOUBLE
+
+Pair 48:
+  Relational:    terti_enrol DOUBLE
+  Denormalized:  terti_enrol DOUBLE
+
+Pair 49:
+  Relational:    id_economy SERIAL
+  Denormalized:  id_economy INTEGER
+
+Pair 50:
+  Relational:    year INTEGER
+  Denormalized:  year INTEGER
+
+Pair 51:
+  Relational:    gdp DOUBLE
+  Denormalized:  gdp DOUBLE
+
+Pair 52:
+  Relational:    inflation DOUBLE
+  Denormalized:  inflation DOUBLE
+
+Pair 53:
+  Relational:    tax_revenue DOUBLE
+  Denormalized:  tax_revenue DOUBLE
+
+Pair 54:
+  Relational:    pop_ages CHARACTER
+  Denormalized:  pop_ages CHARACTER
+
+Pair 55:
+  Relational:    gender CHARACTER
+  Denormalized:  gender CHARACTER
+
+Pair 56:
+  Relational:    "number" DOUBLE
+  Denormalized:  "number" DOUBLE
+
+Pair 57:
+  Relational:    value DOUBLE
+  Denormalized:  value DOUBLE
+
+Pair 58:
+  Relational:    id_health SERIAL
+  Denormalized:  id_health INTEGER
+
+Pair 59:
+  Relational:    year INTEGER
+  Denormalized:  year INTEGER
+
+Pair 60:
+  Relational:    hospital_beds DOUBLE
+  Denormalized:  hospital_beds DOUBLE
+
+Pair 61:
+  Relational:    physicians DOUBLE
+  Denormalized:  physicians DOUBLE
+
+Pair 62:
+  Relational:    expenditure DOUBLE
+  Denormalized:  expenditure DOUBLE
+
+
+================================================================================

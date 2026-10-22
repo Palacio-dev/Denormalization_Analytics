@@ -1,0 +1,139 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_10-57-38
+Model: gemini
+Prompt: RISEN-few-shot
+Schema: airplane
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on creating a single wide table (One Big Table) named `flight_tickets_denormalized`. This approach collapses 8 highly normalized tables into a single structure, eliminating the need for complex multi-way joins during analytical queries. The grain of the table is at the seat-flight level, allowing for analysis of both booked tickets and available capacity. Derived attributes for flight delays were added to precompute common analytical metrics, and airport attributes were duplicated to represent both departure and arrival locations within the same record.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapsing Relations: Merged `bookings`, `tickets`, `ticket_flights`, `boarding_passes`, `flights`, `aircrafts_data`, and `seats` into a central fact table to analyze revenue, passenger behavior, and flight capacity without requiring joins."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Adding Redundant Attributes: Duplicated `airports_data` attributes into `departure_*` and `arrival_*` columns to resolve the dual foreign key relationship from the `flights` table, allowing direct filtering and grouping by origin and destination."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived attribute `departure_delay_seconds` to precompute the time difference between `actual_departure` and `scheduled_departure`."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added derived attribute `arrival_delay_seconds` to precompute the time difference between `actual_arrival` and `scheduled_arrival`."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Renamed `model` to `aircraft_model` and `range` to `aircraft_range` to prevent ambiguity when merged into the single table."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Renamed `fare_conditions` from the `seats` table to `seat_fare_conditions` and from the `ticket_flights` table to `ticket_fare_conditions` to distinguish between the physical seat class and the purchased ticket class."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Renamed `total_amount` from `bookings` to `booking_total_amount` and `amount` from `ticket_flights` to `ticket_amount` to clarify the financial metrics."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage Space: Storing redundant airport, aircraft, and booking data for every ticket/seat significantly increases the storage footprint compared to the normalized model."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If an airport's timezone or an aircraft's model changes, multiple rows in the denormalized table must be updated. This is acceptable for an analytical read-heavy workload but would be detrimental in an OLTP environment."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1",
+        "query": "SELECT flight_no, aircraft_model, SUM(ticket_amount) AS total_flight_revenue, COUNT(DISTINCT ticket_no) AS total_passengers FROM bookings.flight_tickets_denormalized GROUP BY flight_no, aircraft_model;"
+      },
+      {
+        "decision_id": "D2",
+        "query": "SELECT departure_city, arrival_city, AVG(arrival_delay_seconds) AS avg_arrival_delay FROM bookings.flight_tickets_denormalized WHERE flight_status = 'Arrived' GROUP BY departure_city, arrival_city;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+BEGIN;
+
+CREATE SCHEMA IF NOT EXISTS bookings;
+
+DROP TABLE IF EXISTS bookings.flight_tickets_denormalized CASCADE;
+
+CREATE TABLE IF NOT EXISTS bookings.flight_tickets_denormalized
+(
+    -- IDs and Keys
+    ticket_no character(13) COLLATE pg_catalog."default",
+    flight_id integer,
+    book_ref character(6) COLLATE pg_catalog."default",
+    aircraft_code character(3) COLLATE pg_catalog."default",
+    departure_airport_code character(3) COLLATE pg_catalog."default",
+    arrival_airport_code character(3) COLLATE pg_catalog."default",
+
+    -- Bookings Data
+    book_date timestamp with time zone,
+    booking_total_amount numeric(10, 2),
+
+    -- Tickets Data
+    passenger_id character varying(20) COLLATE pg_catalog."default",
+    passenger_name text COLLATE pg_catalog."default",
+    contact_data jsonb,
+
+    -- Ticket Flights Data
+    ticket_fare_conditions character varying(10) COLLATE pg_catalog."default",
+    ticket_amount numeric(10, 2),
+
+    -- Boarding Passes Data
+    boarding_no integer,
+    seat_no character varying(4) COLLATE pg_catalog."default",
+
+    -- Flights Data
+    flight_no character(6) COLLATE pg_catalog."default",
+    scheduled_departure timestamp with time zone,
+    scheduled_arrival timestamp with time zone,
+    actual_departure timestamp with time zone,
+    actual_arrival timestamp with time zone,
+    flight_status character varying(20) COLLATE pg_catalog."default",
+    
+    -- Derived Attributes for Flights
+    departure_delay_seconds integer,
+    arrival_delay_seconds integer,
+
+    -- Aircrafts Data
+    aircraft_model jsonb,
+    aircraft_range integer,
+
+    -- Seats Data
+    seat_fare_conditions character varying(10) COLLATE pg_catalog."default",
+
+    -- Departure Airports Data
+    departure_airport_name jsonb,
+    departure_city jsonb,
+    departure_coordinates point,
+    departure_timezone text COLLATE pg_catalog."default",
+
+    -- Arrival Airports Data
+    arrival_airport_name jsonb,
+    arrival_city jsonb,
+    arrival_coordinates point,
+    arrival_timezone text COLLATE pg_catalog."default"
+);
+
+COMMENT ON TABLE bookings.flight_tickets_denormalized IS 'Denormalized analytical table for flight bookings, tickets, and boarding data';
+
+END;
+```

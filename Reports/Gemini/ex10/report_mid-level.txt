@@ -1,0 +1,123 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 6
+  - Total Attributes: 16
+    * consumo_anual: 5 columns
+    * continente: 2 columns
+    * emissao_g_efeito_estufa: 4 columns
+    * fonte_energia: 2 columns
+    * paises: 4 columns
+    * populacao: 4 columns
+
+Denormalized Model:
+  - Tables: 4
+  - Total Attributes: 11
+    * dim_pais: 4 columns
+    * dim_fonte_energia: 2 columns
+    * fato_indicadores_pais_ano: 4 columns
+    * fato_consumo_energia: 4 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Normalized model has MORE attributes (11 vs 16)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: id_consumo (INTEGER) -> populacao_total (BIGINT)
+  - Type mismatch: porcentagem (INTEGER) -> porcentagem_consumo (NUMERIC(5, 2))
+  - Type mismatch: id_continente (INTEGER) -> nome_continente (CHARACTER)
+  - Type mismatch: id_emissao (INTEGER) -> emissoes_gee_total (BIGINT)
+  - Type mismatch: quantidade_emitida (BIGINT) -> nome_fonte_energia (CHARACTER)
+--------------------------------------------------------------------------------
+Completeness Ratio:        0.69
+Data Type Preservation:    0.55
+Avg Levenshtein Distance:  5.82
+BLEU Score:                0.17
+ROUGE-1:                   0.58
+METEOR Score:              0.16
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: fato_consumo_energia
+Dimension Tables Detected: dim_pais, dim_fonte_energia, fato_indicadores_pais_ano
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected exactly 1 Fact table. Evaluating as a standard STAR SCHEMA.
+  - SNOWFLAKE VIOLATION: Dimension 'fato_indicadores_pais_ano' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'populacao_total' in 'fato_indicadores_pais_ano' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'emissoes_gee_total' in 'fato_indicadores_pais_ano' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * fato_consumo_energia: 2 Numeric, 0 Text
+  * dim_pais: 2 Numeric, 2 Text
+  * dim_fonte_energia: 1 Numeric, 1 Text
+  * fato_indicadores_pais_ano: 4 Numeric, 0 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  ano ano ano fundacao id_consumo id_continente id_emissao id_fonte_energia id_paises id_pop nome nome nome porcentagem quantidade_emitida quantidade_hab
+
+Denormalized Model (Combined Text):
+  ano ano ano_fundacao emissoes_gee_total id_fonte_energia id_pais nome_continente nome_fonte_energia nome_pais populacao_total porcentagem_consumo
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 11 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id_consumo INTEGER
+  Denormalized:  populacao_total BIGINT
+
+Pair 2:
+  Relational:    ano INTEGER
+  Denormalized:  ano INTEGER
+
+Pair 3:
+  Relational:    porcentagem INTEGER
+  Denormalized:  porcentagem_consumo NUMERIC(5, 2)
+
+Pair 4:
+  Relational:    id_continente INTEGER
+  Denormalized:  nome_continente CHARACTER
+
+Pair 5:
+  Relational:    nome CHARACTER
+  Denormalized:  nome_pais CHARACTER
+
+Pair 6:
+  Relational:    id_emissao INTEGER
+  Denormalized:  emissoes_gee_total BIGINT
+
+Pair 7:
+  Relational:    ano INTEGER
+  Denormalized:  ano INTEGER
+
+Pair 8:
+  Relational:    quantidade_emitida BIGINT
+  Denormalized:  nome_fonte_energia CHARACTER
+
+Pair 9:
+  Relational:    id_fonte_energia INTEGER
+  Denormalized:  id_fonte_energia INTEGER
+
+Pair 10:
+  Relational:    id_paises INTEGER
+  Denormalized:  id_pais INTEGER
+
+Pair 11:
+  Relational:    fundacao INTEGER
+  Denormalized:  ano_fundacao INTEGER
+
+
+================================================================================

@@ -1,0 +1,94 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-49-24
+Model: gemini
+Prompt: OBT
+Schema: ex07
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions the highly normalized snowflake schema into a One-Big-Table (OBT) model. The original schema required up to five levels of JOINs (Usina -> Localizacoes -> Municipios -> Estados) to retrieve complete geographical and ownership data for a single power plant. By flattening these relationships into a single table, we drastically reduce read latency for analytical queries, prioritizing read performance over storage efficiency.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged dimension tables 'Proprietarios', 'Rios', and 'Localizacoes' directly into the central 'Usina' table to form the OBT."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Flattened the dual relationship between 'Localizacoes' and 'Municipios' (representing two potential municipalities) into distinct column sets (municipio1_* and municipio2_*) within the OBT."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Absorbed the 'Estados' table into the municipality columns, as it only contained the 'uf' attribute which is now represented as 'municipio1_uf' and 'municipio2_uf'."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Removed all Foreign Key columns (id_proprietario, id_rio, id_localizacao, id_municipio1, id_municipio2) as relationships are now resolved via inline attributes."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Prefixed ambiguous columns to preserve semantics: 'nome' became 'usina_nome', 'lat'/'long' became 'usina_lat'/'usina_long', and 'latitude'/'longitude' became 'localizacao_latitude'/'localizacao_longitude'."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Duplicated 'municipio' and 'uf' attributes to account for the two municipality references in the original 'Localizacoes' table, naming them 'municipio1_nome', 'municipio1_uf', 'municipio2_nome', and 'municipio2_uf'."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage Costs: String values for owners, rivers, municipalities, and states will be heavily duplicated across rows instead of being stored once in dimension tables."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If a municipality changes its name or a river is renamed, the update must be applied to every single row in the OBT that references it, rather than a single row in a dimension table."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "Q1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Geospatial aggregations: Calculating total power capacity (potkw / potfis) grouped by state (uf) or municipality. The OBT avoids 4-way joins for this common analytical workload."
+      },
+      {
+        "decision_id": "Q2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Environmental and regulatory reporting: Filtering power plants by river basin (rio) and owner (proprietario) alongside their operational stage (estagio)."
+      }
+    ]
+  }
+}
+```
+
+```sql
+BEGIN;
+
+DROP TABLE IF EXISTS public."Usina_OBT" CASCADE;
+
+CREATE TABLE IF NOT EXISTS public."Usina_OBT" (
+    id SERIAL PRIMARY KEY,
+    usina_nome VARCHAR NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    iniciop DATE,
+    atualizacao DATE,
+    usina_lat DOUBLE PRECISION,
+    usina_long DOUBLE PRECISION,
+    estagio VARCHAR,
+    proprietario VARCHAR,
+    rio VARCHAR NOT NULL,
+    localizacao_longitude DOUBLE PRECISION,
+    localizacao_latitude DOUBLE PRECISION,
+    municipio1_nome VARCHAR NOT NULL,
+    municipio1_uf CHAR(2) NOT NULL,
+    municipio2_nome VARCHAR,
+    municipio2_uf CHAR(2)
+);
+
+COMMIT;
+```

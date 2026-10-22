@@ -1,0 +1,81 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-45-38
+Model: gemini
+Prompt: OBT
+Schema: harperdb
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy follows the ONE-BIG-TABLE model, consolidating the many-to-many relationship between 'users' and 'entitlements' (resolved by 'user_entitlements') into a single flat table. This eliminates the need for expensive JOIN operations during read-heavy workloads, optimizing data retrieval for user-entitlement queries at the cost of potential data redundancy.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged the 'users', 'entitlements', and 'user_entitlements' tables into a single denormalized table named 'user_entitlements_denorm'."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Removed all Foreign Key constraints to comply with the ONE-BIG-TABLE strategy and optimize for read-heavy operations without referential checks."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Established a single composite Primary Key using the combination of user and entitlement identifiers to maintain row uniqueness."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Renamed 'id' from the 'users' table to 'user_id' to prevent ambiguity and column name duplication."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Renamed 'id' from the 'entitlements' table to 'entitlement_id' to prevent ambiguity and column name duplication."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Retained all non-key attributes from the 'entitlements' table (activeDate, inactiveDate, useLimit, useCount, featureType, packageType, activeFlag) without changes to their data types."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy: Entitlement details (like activeDate, featureType, etc.) will be duplicated for every user that shares the same entitlement_id, increasing storage requirements."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: Modifying an entitlement's properties (e.g., updating the inactiveDate or useLimit) now requires updating multiple rows instead of a single row in a normalized entitlements table."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "Q1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Retrieve all active entitlements, their feature types, and usage limits for a specific user. The denormalized schema serves this with a simple point query instead of a 3-table JOIN."
+      },
+      {
+        "decision_id": "Q2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical aggregations, such as counting the number of users per packageType or featureType, which can now be performed via a single table scan."
+      }
+    ]
+  }
+}
+```
+
+```sql
+CREATE TABLE user_entitlements_denorm (
+    user_id INT,
+    entitlement_id INT,
+    activeDate DATE,
+    inactiveDate DATE,
+    useLimit INT,
+    useCount INT,
+    featureType VARCHAR(4),
+    packageType VARCHAR(4),
+    activeFlag INT,
+    PRIMARY KEY (user_id, entitlement_id)
+);
+```

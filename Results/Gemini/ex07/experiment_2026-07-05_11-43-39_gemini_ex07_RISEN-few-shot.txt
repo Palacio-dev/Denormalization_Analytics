@@ -1,0 +1,88 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-43-39
+Model: gemini
+Prompt: RISEN-few-shot
+Schema: ex07
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on Collapsing Relations to create a single, wide analytical table (One Big Table). By merging the dimensions (Proprietarios, Rios, Localizacoes, Municipios, and Estados) directly into the central fact/entity table (Usina), we eliminate the need for 5-6 costly JOIN operations. This significantly accelerates heavy read queries that aggregate power plant metrics (potkw, potfis) by geographical dimensions or ownership.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapse 'Proprietarios', 'Rios', 'Localizacoes', 'Municipios', and 'Estados' into a single denormalized table based on 'Usina'."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added 'proprietario' from the Proprietarios table directly to the denormalized table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added 'rio' from the Rios table directly to the denormalized table."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added 'latitude' and 'longitude' from the Localizacoes table. Prefixed as 'localizacao_latitude' and 'localizacao_longitude' to avoid ambiguity with Usina's native 'lat' and 'long' attributes, which were prefixed as 'usina_lat' and 'usina_long'."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added 'municipio' and 'uf' from the Municipios table twice to represent the two possible municipalities linked to a location. Prefixed as 'municipio1_nome', 'municipio1_uf', 'municipio2_nome', and 'municipio2_uf'."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage footprint (Data Redundancy): Textual data such as owner names, river names, and municipality names will be repeated across multiple rows instead of being stored once in dimension tables."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If a municipality changes its name or a river is renamed, the update must be applied to all corresponding rows in the denormalized table rather than a single row in a dimension table."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1",
+        "query": "SELECT municipio1_uf, estagio, SUM(potkw) AS total_potencia_kw, COUNT(*) AS qtd_usinas FROM Usina_Analitica GROUP BY municipio1_uf, estagio ORDER BY total_potencia_kw DESC;"
+      },
+      {
+        "decision_id": "D1",
+        "query": "SELECT proprietario, rio, AVG(potfis) AS media_potfis FROM Usina_Analitica WHERE municipio1_nome = 'SAO PAULO' OR municipio2_nome = 'SAO PAULO' GROUP BY proprietario, rio;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+BEGIN;
+
+DROP TABLE IF EXISTS public."Usina_Analitica";
+
+CREATE TABLE IF NOT EXISTS public."Usina_Analitica" (
+    id INTEGER,
+    usina_nome VARCHAR NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    iniciop DATE,
+    atualizacao DATE,
+    usina_lat DOUBLE PRECISION,
+    usina_long DOUBLE PRECISION,
+    estagio VARCHAR,
+    proprietario VARCHAR,
+    rio VARCHAR NOT NULL,
+    localizacao_latitude DOUBLE PRECISION,
+    localizacao_longitude DOUBLE PRECISION,
+    municipio1_nome VARCHAR NOT NULL,
+    municipio1_uf CHAR(2) NOT NULL,
+    municipio2_nome VARCHAR,
+    municipio2_uf CHAR(2)
+);
+
+COMMIT;
+```

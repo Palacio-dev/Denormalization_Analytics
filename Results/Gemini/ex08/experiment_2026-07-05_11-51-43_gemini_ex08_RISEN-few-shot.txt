@@ -1,0 +1,170 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-51-43
+Model: gemini
+Prompt: RISEN-few-shot
+Schema: ex08
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on reducing the number of joins required for analytical queries by collapsing the highly normalized 10-table schema into three subject-oriented wide tables: one for school performance indicators, one for student enrollments, and one for student employment records. This approach avoids Cartesian products that would occur if enrollments and employments were merged into a single table, while fully materializing all relevant dimensions (student, course, school, location) into their respective fact contexts.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapsed 'escola', 'localizacao', 'desempenho_enem', 'indicadores_escolares', and 'participacao_enem' into a single wide table 'denorm_escola_indicadores' with a grain of school per year."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapsed 'matricula_ifb', 'aluno_ifb', 'curso_ifb', 'escola', and 'localizacao' into a single wide table 'denorm_matricula' representing the full context of a student's enrollment."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Collapsed 'vinculo_empregaticio', 'aluno_ifb', 'remuneracao', and 'localizacao' into a single wide table 'denorm_empregabilidade' representing the full context of a student's employment history."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived attribute 'nu_media_geral_enem' in 'denorm_escola_indicadores' to precompute the average of the 5 ENEM scores (CN, CH, LP, MT, RED)."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added derived attribute 'remuneracao_anual_estimada' in 'denorm_empregabilidade' to precompute the estimated annual remuneration (vl_remun_media_nom * 12)."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Prefixed attributes from 'aluno_ifb', 'curso_ifb', 'escola', and 'localizacao' with their entity names (e.g., 'aluno_idade', 'curso_no_curso', 'escola_uf') to prevent ambiguity and maintain clear lineage."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy vs. Read Performance: Duplicating student demographic data across both 'denorm_matricula' and 'denorm_empregabilidade' eliminates the need to join an 'aluno' table, significantly speeding up queries, but increases storage footprint."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Grain Separation vs. Single Wide Table: Keeping school indicators, enrollments, and employment in three separate tables rather than one massive table avoids Cartesian products between multiple enrollments and multiple jobs for a single student, ensuring accurate aggregations at the cost of requiring a join if cross-domain analysis is needed."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1",
+        "query": "SELECT escola_uf, ano, AVG(nu_media_geral_enem) AS avg_enem_score, AVG(nu_taxa_aprovacao) AS avg_approval_rate FROM denorm_escola_indicadores GROUP BY escola_uf, ano ORDER BY ano DESC;"
+      },
+      {
+        "decision_id": "D2",
+        "query": "SELECT curso_ds_eixo_tecnologico, situacao_matricula, COUNT(id_matricula) AS total_enrollments FROM denorm_matricula WHERE aluno_raca = 'Parda' GROUP BY curso_ds_eixo_tecnologico, situacao_matricula;"
+      },
+      {
+        "decision_id": "D3",
+        "query": "SELECT aluno_sexo, AVG(vl_remun_media_nom) AS avg_monthly_remuneration, AVG(remuneracao_anual_estimada) AS avg_annual_remuneration FROM denorm_empregabilidade WHERE indicador_vinculo_ativo = true GROUP BY aluno_sexo;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS public.denorm_escola_indicadores
+(
+    co_escola_educacenso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    ano integer NOT NULL,
+    no_escola_educacenso character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    tp_dependencia_adm_escola smallint,
+    tp_localizacao_escola smallint,
+    inse character varying(10) COLLATE pg_catalog."default",
+    escola_uf character varying(2) COLLATE pg_catalog."default",
+    escola_municipio character varying(100) COLLATE pg_catalog."default",
+    nu_media_cn numeric(6, 2),
+    nu_media_ch numeric(6, 2),
+    nu_media_lp numeric(6, 2),
+    nu_media_mt numeric(6, 2),
+    nu_media_red numeric(6, 2),
+    nu_media_geral_enem numeric(6, 2),
+    nu_taxa_permanencia numeric(6, 2),
+    nu_taxa_aprovacao numeric(5, 2),
+    nu_taxa_reprovacao numeric(5, 2),
+    nu_taxa_abandono numeric(5, 2),
+    porte_escola character varying(50) COLLATE pg_catalog."default",
+    pc_formacao_docente numeric(5, 2),
+    nu_matriculas integer,
+    nu_participantes_nec_esp integer,
+    nu_participantes integer,
+    nu_taxa_participacao numeric(5, 2),
+    CONSTRAINT denorm_escola_indicadores_pkey PRIMARY KEY (co_escola_educacenso, ano)
+);
+
+CREATE TABLE IF NOT EXISTS public.denorm_matricula
+(
+    id_matricula integer NOT NULL,
+    co_ciclo_matricula character varying(50) COLLATE pg_catalog."default",
+    periodo character varying(30) COLLATE pg_catalog."default",
+    situacao_matricula character varying(50) COLLATE pg_catalog."default",
+    tipo_cota character varying(50) COLLATE pg_catalog."default",
+    atestado_baixarenda character varying(20) COLLATE pg_catalog."default",
+    ano_matricula character varying(20) COLLATE pg_catalog."default",
+    unidade_ensino character varying(100) COLLATE pg_catalog."default",
+    id_aluno integer,
+    aluno_data_nascimento date,
+    aluno_idade integer,
+    aluno_sexo character(1) COLLATE pg_catalog."default",
+    aluno_nacionalidade character varying(50) COLLATE pg_catalog."default",
+    aluno_raca character varying(50) COLLATE pg_catalog."default",
+    aluno_portador_deficiencia boolean,
+    co_curso character varying(50) COLLATE pg_catalog."default",
+    curso_no_curso character varying(200) COLLATE pg_catalog."default",
+    curso_co_tipo_curso character varying(10) COLLATE pg_catalog."default",
+    curso_tipo_curso character varying(100) COLLATE pg_catalog."default",
+    curso_co_tipo_nivel character varying(10) COLLATE pg_catalog."default",
+    curso_ds_tipo_nivel character varying(100) COLLATE pg_catalog."default",
+    curso_ds_eixo_tecnologico character varying(200) COLLATE pg_catalog."default",
+    curso_modalidade_ensino character varying(100) COLLATE pg_catalog."default",
+    curso_carga_horaria integer,
+    co_escola_educacenso character varying(50) COLLATE pg_catalog."default",
+    escola_no_escola_educacenso character varying(200) COLLATE pg_catalog."default",
+    escola_tp_dependencia_adm_escola smallint,
+    escola_tp_localizacao_escola smallint,
+    escola_inse character varying(10) COLLATE pg_catalog."default",
+    escola_uf character varying(2) COLLATE pg_catalog."default",
+    escola_municipio character varying(100) COLLATE pg_catalog."default",
+    CONSTRAINT denorm_matricula_pkey PRIMARY KEY (id_matricula)
+);
+
+CREATE TABLE IF NOT EXISTS public.denorm_empregabilidade
+(
+    id_vinculo integer NOT NULL,
+    ano_rais integer,
+    razao_social character varying(200) COLLATE pg_catalog."default",
+    tipo_vinculo_empregaticio character varying(200) COLLATE pg_catalog."default",
+    data_admissao_declarada date,
+    tempo_emprego integer,
+    motivo_desligamento character varying(200) COLLATE pg_catalog."default",
+    mes_desligamento character varying(20) COLLATE pg_catalog."default",
+    indicador_vinculo_ativo boolean,
+    id_aluno integer,
+    aluno_data_nascimento date,
+    aluno_idade integer,
+    aluno_sexo character(1) COLLATE pg_catalog."default",
+    aluno_nacionalidade character varying(50) COLLATE pg_catalog."default",
+    aluno_raca character varying(50) COLLATE pg_catalog."default",
+    aluno_portador_deficiencia boolean,
+    vl_remun_media_nom numeric(10, 2),
+    vl_remun_media_sm numeric(10, 2),
+    vl_remun_dezembro_nom numeric(10, 2),
+    vl_remun_dezembro_sm numeric(10, 2),
+    qtd_hora_contr integer,
+    vl_ultima_remuneracao_ano numeric(10, 2),
+    vl_salario_contratual numeric(10, 2),
+    remuneracao_anual_estimada numeric(12, 2),
+    vinculo_uf character varying(2) COLLATE pg_catalog."default",
+    vinculo_municipio character varying(100) COLLATE pg_catalog."default",
+    CONSTRAINT denorm_empregabilidade_pkey PRIMARY KEY (id_vinculo)
+);
+
+COMMIT;
+```

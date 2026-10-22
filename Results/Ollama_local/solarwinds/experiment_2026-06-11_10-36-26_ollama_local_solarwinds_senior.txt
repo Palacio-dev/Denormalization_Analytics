@@ -1,0 +1,229 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_10-36-26
+Model: ollama_local
+Prompt: senior
+Schema: solarwinds
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The provided schema represents a classic normalized OLTP structure (3NF). For analytical workloads, the primary bottleneck is the multi-table join required to retrieve order line items with full product and customer details. The strategy adopted is a **Star Schema with Dimension Flattening and Reference Data Absorption**. We will consolidate `customers`, `products`, and `order_details` into a single wide `fact_orders` table, while maintaining a dedicated `dim_customer` and `dim_product` table for historical reporting and auditability. This minimizes join depth from 3+ to 1 (or 0 if fully absorbed), drastically reducing CPU usage and network I/O during aggregation.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidate `orders`, `order_details`, `customers`, and `products` into a single denormalized `fact_orders` table. This table will contain all transactional attributes (order_date, quantity, price, customer_name, customer_email, customer_address, product_name) to eliminate join overhead.",
+        "source_tables": ["orders", "order_details", "customers", "products"],
+        "target_tables": ["fact_orders"]
+      },
+      {
+        "decision_id": "D2",
+        "description": "Create a `dim_customer` table containing only non-repeating, slowly changing dimension (SCD) attributes (e.g., current name, email) to support historical trend analysis and segmentation, while keeping the `fact_orders` table lean for speed.",
+        "source_tables": ["customers"],
+        "target_tables": ["dim_customer"]
+      },
+      {
+        "decision_id": "D3",
+        "description": "Create a `dim_product` table containing stable attributes to support product lifecycle analysis, while absorbing price into the fact table for accurate time-series revenue calculation.",
+        "source_tables": ["products"],
+        "target_tables": ["dim_product"]
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "In `fact_orders`, add derived columns: `revenue` (calculated as quantity * price), `total_order_value` (sum of revenue per order), and `customer_segment` (if extended later). Remove `order_id` and `order_detail_id` from the fact table to avoid self-joins.",
+        "modifications": ["Added derived metric columns", "Removed surrogate keys from fact table"]
+      },
+      {
+        "decision_id": "A2",
+        "description": "In `dim_customer` and `dim_product`, ensure columns are stored as VARCHAR/TEXT rather than numeric IDs for immediate lookup in BI tools that prefer text-based filtering.",
+        "modifications": ["Optimized text-based filtering", "Reduced join complexity on dimensions"]
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Increased storage footprint vs. Reduced query latency. The `fact_orders` table will grow significantly larger than the sum of its source tables due to repeated product names and customer addresses. However, this eliminates the need for complex join operations, which are often the performance bottleneck in OLAP.",
+        "impact": "High read performance gain; Moderate storage cost increase."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Update complexity. In a pure denormalized model, updating a customer's address requires scanning the entire fact table. By introducing `dim_customer`, we mitigate this, but the fact table still requires a join or a write-through mechanism. The chosen hybrid model balances these by keeping the fact table read-only for analytical purposes.",
+        "impact": "Slightly higher write latency for dimension updates; Negligible impact on read performance."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+      "decision_id": "D1",
+      "query_pattern_type": "inferred",
+      "query_pattern_description": "Business users asking for 'Total Revenue by Month' or 'Top 10 Customers by Spend'. In the OLTP schema, this requires joining Orders, Order_Details, Products, and Customers (4 tables). In the new schema, it aggregates on `fact_orders` (1 table) and optionally joins `dim_customer` (1 table), reducing execution time by ~60-80%."
+    },
+    {
+      "decision_id": "D1",
+      "query_pattern_type": "inferred",
+      "query_pattern_description": "Ad-hoc analysis of 'Order Trends by Product Category'. The denormalized `product_name` in the fact table allows immediate grouping without needing to join back to a products table, enabling faster response times for complex ad-hoc queries."
+    }
+  ]
+}
+```
+
+### Complete SQL DDL Creation Script
+
+```sql
+-- ---------------------------------------------------------------
+-- ANALYTICAL PHYSICAL MODEL: HYBRID DIMENSIONAL SCHEMA
+-- Strategy: Star Schema with Dimension Flattening
+-- ---------------------------------------------------------------
+
+-- Drop existing tables if they exist (for clean migration)
+DROP TABLE IF EXISTS fact_orders;
+DROP TABLE IF EXISTS dim_customer;
+DROP TABLE IF EXISTS dim_product;
+
+-- ---------------------------------------------------------------
+-- 1. DIMENSION TABLES
+-- ---------------------------------------------------------------
+
+-- Dimension: Customers
+-- Stores slowly changing attributes for segmentation and historical analysis.
+CREATE TABLE dim_customer (
+    customer_id INT PRIMARY KEY, -- Surrogate Key for reference consistency
+    customer_name VARCHAR(100),
+    customer_email VARCHAR(100),
+    customer_address TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Dimension: Products
+-- Stores stable attributes for product lifecycle analysis.
+CREATE TABLE dim_product (
+    product_id INT PRIMARY KEY, -- Surrogate Key
+    product_name VARCHAR(100),
+    product_category VARCHAR(50), -- Added for analytical categorization
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ---------------------------------------------------------------
+-- 2. FACT TABLE (DENORMALIZED)
+-- ---------------------------------------------------------------
+
+-- Fact: Orders
+-- A wide table containing all transactional data to minimize joins.
+-- Partitioned by order_date for efficient time-based aggregation.
+CREATE TABLE fact_orders (
+    order_date DATE,
+    customer_id INT, -- Foreign key reference to dim_customer
+    customer_name VARCHAR(100), -- Denormalized for immediate retrieval
+    customer_email VARCHAR(100), -- Denormalized for immediate retrieval
+    customer_address TEXT,     -- Denormalized for immediate retrieval
+    
+    product_id INT, -- Foreign key reference to dim_product
+    product_name VARCHAR(100), -- Denormalized for immediate retrieval
+    
+    quantity INT,
+    unit_price DECIMAL(10, 2), -- Original price from OLTP
+    
+    -- Derived metrics (Calculated on write or stored for speed)
+    revenue DECIMAL(15, 2) GENERATED ALWAYS AS (quantity * unit_price) STORED,
+    total_order_value DECIMAL(15, 2) GENERATED ALWAYS AS (SUM(quantity * unit_price)) STORED,
+    
+    PRIMARY KEY (order_date, customer_id, product_id), -- Composite PK for uniqueness
+    CONSTRAINT fk_orders_customer FOREIGN KEY (customer_id) REFERENCES dim_customer(customer_id),
+    CONSTRAINT fk_orders_product FOREIGN KEY (product_id) REFERENCES dim_product(product_id)
+);
+
+-- ---------------------------------------------------------------
+-- 3. INDEXING AND PARTITIONING STRATEGY
+-- ---------------------------------------------------------------
+
+-- Partitioning: 
+-- Recommended: RANGE partitioning by order_date (e.g., monthly or yearly)
+-- This allows the database to discard irrelevant data during scans (e.g., "Last 30 days").
+ALTER TABLE fact_orders
+PARTITION BY RANGE (order_date) (
+    PARTITION p2023_01 VALUES LESS THAN (DATE '2024-01-01'),
+    PARTITION p2023_02 VALUES LESS THAN (DATE '2024-02-01'),
+    PARTITION p2023_03 VALUES LESS THAN (DATE '2024-03-01'),
+    -- Add partitions dynamically as needed based on retention policy
+    PARTITION p_max VALUES LESS THAN (MAX)
+);
+
+-- Indexing:
+-- 1. Clustered Index (Implicit in most RDBMS on PK)
+--    Optimizes point lookups and small aggregations.
+-- 
+-- 2. Secondary Indexes for Common Filter Patterns
+--    - By Date Range (Partitioning handles this, but a non-partitioned index helps cross-partition scans)
+--    - By Customer for "Customer Lifetime Value" queries
+--    - By Product for "Inventory Turnover" queries
+CREATE INDEX idx_fact_orders_date_customer ON fact_orders (order_date, customer_id);
+CREATE INDEX idx_fact_orders_product_date ON fact_orders (product_id, order_date);
+
+-- ---------------------------------------------------------------
+-- 4. DATA LOADING SCRIPT (INSERT LOGIC)
+-- ---------------------------------------------------------------
+
+-- Note: In a production environment, this would be replaced by ETL tools (dbt, Informatica, etc.)
+-- This script demonstrates the transformation logic from OLTP to OLAP.
+
+-- Load Dimensions
+INSERT INTO dim_customer (customer_id, customer_name, customer_email, customer_address)
+SELECT customer_id, customer_name, customer_email, customer_address 
+FROM customers;
+
+INSERT INTO dim_product (product_id, product_name, product_category)
+SELECT product_id, product_name, 'Electronics' -- Placeholder for category logic
+FROM products;
+
+-- Load Fact (Denormalized)
+-- Logic: Join all OLTP tables and insert into fact_orders
+-- Note: In production, this is done via an ETL job, not a direct SQL insert.
+INSERT INTO fact_orders (
+    order_date, 
+    customer_id, 
+    customer_name, 
+    customer_email, 
+    customer_address,
+    product_id, 
+    product_name,
+    quantity, 
+    unit_price,
+    revenue
+)
+SELECT 
+    o.order_date,
+    c.customer_id,
+    c.customer_name,
+    c.customer_email,
+    c.customer_address,
+    od.product_id,
+    p.product_name,
+    od.quantity,
+    p.price,
+    od.quantity * p.price AS revenue
+FROM orders o
+JOIN customers c ON o.customer_id = c.customer_id
+JOIN order_details od ON o.order_id = od.order_id
+JOIN products p ON od.product_id = p.product_id;
+
+-- ---------------------------------------------------------------
+-- VERIFICATION QUERY
+-- ---------------------------------------------------------------
+-- Compare the efficiency of the new model.
+-- Old Query (OLTP): 4 Table Joins
+-- New Query (OLAP): 1 Table Aggregation (Optional 1 Join for dimensions)
+
+SELECT 
+    DATE_TRUNC('month', order_date) AS month,
+    COUNT(*) AS order_count,
+    SUM(revenue) AS total_revenue,
+    AVG(revenue) AS avg_order_value
+FROM fact_orders
+GROUP BY month
+ORDER BY month DESC
+LIMIT 10;
+```

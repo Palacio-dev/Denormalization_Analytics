@@ -1,0 +1,155 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 6
+  - Total Attributes: 18
+    * department: 2 columns
+    * department_employee: 4 columns
+    * department_manager: 4 columns
+    * employee: 6 columns
+    * salary: 4 columns
+    * title: 4 columns
+
+Denormalized Model:
+  - Tables: 4
+  - Total Attributes: 22
+    * dim_employee: 8 columns
+    * dim_department: 3 columns
+    * fact_employee_history: 9 columns
+    * fact_department_manager: 6 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Denormalized model has MORE attributes (18 vs 22)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: id (CHARACTER(4)) -> department_id (CHAR(4))
+  - Type mismatch: dept_name (CHARACTER) -> department_name (VARCHAR(40))
+  - Type mismatch: from_date (DATE) -> full_name (VARCHAR(31))
+  - Type mismatch: to_date (DATE) -> is_current (BOOLEAN)
+  - Type mismatch: first_name (CHARACTER) -> first_name (VARCHAR(14))
+  - Type mismatch: last_name (CHARACTER) -> last_name (VARCHAR(16))
+  - Type mismatch: gender (EMPLOYEES) -> gender (VARCHAR(10))
+  - Type mismatch: from_date (DATE) -> employee_sk (BIGSERIAL)
+  - Type mismatch: to_date (DATE) -> is_current (BOOLEAN)
+  - Type mismatch: title (CHARACTER) -> job_title (VARCHAR(50))
+--------------------------------------------------------------------------------
+Completeness Ratio:        1.22
+Data Type Preservation:    0.44
+Avg Levenshtein Distance:  6.00
+BLEU Score:                0.23
+ROUGE-1:                   0.54
+METEOR Score:              0.20
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: fact_employee_history, fact_department_manager
+Dimension Tables Detected: dim_employee, dim_department
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected 2 Fact tables. Evaluating as a GALAXY SCHEMA.
+  - PAYLOAD WARNING: Fact table 'fact_employee_history' contains more text attributes (4) than numeric measures (3).
+  - PAYLOAD WARNING: Fact table 'fact_department_manager' contains more text attributes (3) than numeric measures (1).
+
+Payload Analysis (Text vs Numeric Metrics):
+  * fact_employee_history: 3 Numeric, 4 Text
+  * fact_department_manager: 1 Numeric, 3 Text
+  * dim_employee: 2 Numeric, 6 Text
+  * dim_department: 1 Numeric, 2 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  amount birth_date dept_name first_name from_date from_date from_date from_date gender hire_date id id last_name title to_date to_date to_date to_date
+
+Denormalized Model (Combined Text):
+  birth_date department_id department_manager_sk department_name department_sk effective_from_date effective_from_date effective_to_date effective_to_date employee_history_sk employee_id employee_sk first_name full_name gender hire_date is_current is_current job_title last_name record_duration_days salary_amount
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 18 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id CHARACTER(4)
+  Denormalized:  department_id CHAR(4)
+
+Pair 2:
+  Relational:    dept_name CHARACTER
+  Denormalized:  department_name VARCHAR(40)
+
+Pair 3:
+  Relational:    from_date DATE
+  Denormalized:  full_name VARCHAR(31)
+
+Pair 4:
+  Relational:    to_date DATE
+  Denormalized:  is_current BOOLEAN
+
+Pair 5:
+  Relational:    from_date DATE
+  Denormalized:  effective_from_date DATE
+
+Pair 6:
+  Relational:    to_date DATE
+  Denormalized:  effective_to_date DATE
+
+Pair 7:
+  Relational:    id BIGINT
+  Denormalized:  employee_id BIGINT
+
+Pair 8:
+  Relational:    birth_date DATE
+  Denormalized:  birth_date DATE
+
+Pair 9:
+  Relational:    first_name CHARACTER
+  Denormalized:  first_name VARCHAR(14)
+
+Pair 10:
+  Relational:    last_name CHARACTER
+  Denormalized:  last_name VARCHAR(16)
+
+Pair 11:
+  Relational:    gender EMPLOYEES
+  Denormalized:  gender VARCHAR(10)
+
+Pair 12:
+  Relational:    hire_date DATE
+  Denormalized:  hire_date DATE
+
+Pair 13:
+  Relational:    amount BIGINT
+  Denormalized:  salary_amount BIGINT
+
+Pair 14:
+  Relational:    from_date DATE
+  Denormalized:  employee_sk BIGSERIAL
+
+Pair 15:
+  Relational:    to_date DATE
+  Denormalized:  is_current BOOLEAN
+
+Pair 16:
+  Relational:    title CHARACTER
+  Denormalized:  job_title VARCHAR(50)
+
+Pair 17:
+  Relational:    from_date DATE
+  Denormalized:  effective_from_date DATE
+
+Pair 18:
+  Relational:    to_date DATE
+  Denormalized:  effective_to_date DATE
+
+
+================================================================================

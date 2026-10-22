@@ -1,0 +1,279 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_09-59-30
+Model: gemini
+Prompt: mid-level
+Schema: HFC
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions the highly normalized, transactional (3NF) herbarium database into a Star Schema optimized for OLAP/BI workloads. The core focus is the 'tombos' (specimen records) table, which acts as the primary Fact table. Deep snowflake hierarchies for Taxonomy (Kingdom to Variety) and Geography/Environment (Country to Soil/Vegetation) have been flattened into wide dimensions. Many-to-many relationships (like identifiers) and child records (like photos) are aggregated into arrays or pre-calculated measures within the fact table to eliminate expensive runtime joins.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Create 'fact_tombos' as the central fact table, grain at the individual specimen (tombo) level. Source: tombos."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Flatten the taxonomic snowflake hierarchy (reinos, familias, sub_familias, generos, especies, sub_especies, variedades, autores) into a single wide dimension table 'dim_taxonomia'."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Flatten geographical and environmental data (paises, estados, cidades, locais_coleta, solos, relevos, vegetacoes, fase_sucessional) into a single wide dimension 'dim_geografia_local'."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Consolidate herbarium data (herbarios, enderecos, telefones) into 'dim_herbario'."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Create 'fact_remessas' to track specimen movements/loans by joining 'remessas' and 'retirada_exsiccata_tombos'."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Create 'fact_alteracoes' to track the audit trail of specimens by combining 'alteracoes' and 'tombo_alteracoes_antigas'."
+      },
+      {
+        "decision_id": "D7",
+        "description": "Introduce a central 'dim_tempo' (Date dimension) to handle all date-based slicing and dicing."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Consolidated fragmented date fields (data_coleta_dia, data_coleta_mes, data_coleta_ano) into a single DATE attribute 'data_coleta' and linked to dim_tempo."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Aggregated 'coletores_complementares' into a single text array/string within 'dim_coletor' to avoid a 1:N join."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Aggregated the M:N relationship of 'tombos_identificadores' into a comma-separated string 'identificadores_nomes' directly in 'fact_tombos'."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Derived a new measure 'qtd_fotos' in 'fact_tombos' by pre-aggregating counts from the 'tombos_fotos' table."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage footprint and data redundancy in dimension tables (e.g., repeating 'Plantae' for every plant species in dim_taxonomia) in exchange for massive read performance gains."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Loss of strict referential integrity for dimensional attributes. An update to a family name in the source system requires updating multiple rows in the analytical dim_taxonomia table (Type 1 or Type 2 SCD logic required in ETL)."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Aggregating identifiers and complementary collectors into text strings/arrays makes it slightly harder to join directly on those specific individuals, but vastly simplifies the 95% use case of simply displaying or text-searching them in dashboards."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Taxonomic distribution: 'Show me the count of specimens grouped by Family, Genus, and Species'. Flattening prevents a 5-table join."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Geospatial and ecological analysis: 'How many specimens were collected in a specific State, within a specific vegetation type and soil?'. Flattening prevents a 6-table join."
+      },
+      {
+        "decision_id": "A1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Time-series analysis: 'Show specimen collection trends by year and month'. Standardizing dates and using dim_tempo allows seamless time intelligence functions."
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Loan/Exchange tracking: 'Which herbariums have the most overdue borrowed specimens?'. fact_remessas provides immediate answers without traversing headers and line items."
+      }
+    ]
+  }
+}
+```
+
+### Analytical Schema DDL (PostgreSQL)
+
+```sql
+-- ==============================================================================
+-- ANALYTICAL SCHEMA (STAR SCHEMA) FOR HERBARIUM BI & REPORTING
+-- ==============================================================================
+
+CREATE SCHEMA IF NOT EXISTS analytical;
+
+-- ------------------------------------------------------------------------------
+-- 1. DIMENSION TABLES
+-- ------------------------------------------------------------------------------
+
+-- Date Dimension for time-series analysis
+CREATE TABLE IF NOT EXISTS analytical.dim_tempo (
+    date_key INT PRIMARY KEY, -- Format YYYYMMDD
+    data_completa DATE NOT NULL,
+    ano INT NOT NULL,
+    mes INT NOT NULL,
+    dia INT NOT NULL,
+    trimestre INT NOT NULL,
+    semestre INT NOT NULL,
+    nome_mes VARCHAR(20) NOT NULL,
+    dia_semana VARCHAR(20) NOT NULL,
+    is_fim_semana BOOLEAN NOT NULL
+);
+
+-- Flattened Taxonomy Dimension
+CREATE TABLE IF NOT EXISTS analytical.dim_taxonomia (
+    taxonomia_key BIGSERIAL PRIMARY KEY,
+    reino_nome VARCHAR(200),
+    familia_nome VARCHAR(200),
+    sub_familia_nome VARCHAR(300),
+    sub_familia_autor VARCHAR(200),
+    genero_nome VARCHAR(200),
+    especie_nome VARCHAR(200),
+    especie_autor VARCHAR(200),
+    sub_especie_nome VARCHAR(255),
+    sub_especie_autor VARCHAR(200),
+    variedade_nome VARCHAR(200),
+    variedade_autor VARCHAR(200),
+    nome_cientifico_completo TEXT, -- Pre-concatenated full scientific name
+    tipo_taxon VARCHAR(250) -- From public.tipos
+);
+
+-- Flattened Geography and Environment Dimension
+CREATE TABLE IF NOT EXISTS analytical.dim_geografia_local (
+    geografia_key BIGSERIAL PRIMARY KEY,
+    pais_nome VARCHAR(255),
+    pais_sigla CHAR(4),
+    estado_nome VARCHAR(255),
+    estado_sigla CHAR(4),
+    cidade_nome VARCHAR(255), -- Denormalized from implied cities table
+    local_descricao TEXT,
+    fase_sucessional_nome VARCHAR(200),
+    solo_nome VARCHAR(300),
+    relevo_nome VARCHAR(300),
+    vegetacao_nome VARCHAR(300)
+);
+
+-- Flattened Collector Dimension
+CREATE TABLE IF NOT EXISTS analytical.dim_coletor (
+    coletor_key BIGSERIAL PRIMARY KEY,
+    coletor_principal_nome VARCHAR(255),
+    coletor_principal_email VARCHAR(200),
+    coletores_complementares TEXT -- Aggregated from public.coletores_complementares
+);
+
+-- Flattened Herbarium/Institution Dimension
+CREATE TABLE IF NOT EXISTS analytical.dim_herbario (
+    herbario_key BIGSERIAL PRIMARY KEY,
+    herbario_nome VARCHAR(200),
+    herbario_sigla VARCHAR(80),
+    herbario_email VARCHAR(200),
+    logradouro VARCHAR(200),
+    numero VARCHAR(10),
+    cidade_nome VARCHAR(255),
+    telefone_principal VARCHAR(200) -- Aggregated/Selected from public.telefones
+);
+
+-- Flattened User Dimension (for audit and system usage)
+CREATE TABLE IF NOT EXISTS analytical.dim_usuario (
+    usuario_key BIGSERIAL PRIMARY KEY,
+    usuario_nome VARCHAR(200),
+    usuario_email VARCHAR(200),
+    tipo_usuario VARCHAR(100),
+    herbario_vinculo_nome VARCHAR(200)
+);
+
+-- ------------------------------------------------------------------------------
+-- 2. FACT TABLES
+-- ------------------------------------------------------------------------------
+
+-- Core Fact Table: Specimens (Tombos)
+CREATE TABLE IF NOT EXISTS analytical.fact_tombos (
+    tombo_hcf BIGINT PRIMARY KEY, -- Degenerate dimension, natural key
+    
+    -- Foreign Keys to Dimensions
+    data_tombo_key INT REFERENCES analytical.dim_tempo(date_key),
+    data_coleta_key INT REFERENCES analytical.dim_tempo(date_key),
+    data_identificacao_key INT REFERENCES analytical.dim_tempo(date_key),
+    taxonomia_key BIGINT REFERENCES analytical.dim_taxonomia(taxonomia_key),
+    geografia_key BIGINT REFERENCES analytical.dim_geografia_local(geografia_key),
+    coletor_key BIGINT REFERENCES analytical.dim_coletor(coletor_key),
+    herbario_key BIGINT REFERENCES analytical.dim_herbario(herbario_key),
+    
+    -- Degenerate Dimensions / Attributes
+    numero_coleta BIGINT,
+    situacao VARCHAR(50), -- Cast from ENUM tombos_situacao
+    ativo BOOLEAN,
+    rascunho BOOLEAN,
+    unicata BOOLEAN,
+    nomes_populares TEXT,
+    identificadores_nomes TEXT, -- Aggregated array/comma-separated string of identifiers
+    
+    -- Measures (Facts)
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    altitude DOUBLE PRECISION,
+    qtd_fotos INT DEFAULT 0, -- Pre-calculated count from public.tombos_fotos
+    qtd_alteracoes INT DEFAULT 0 -- Pre-calculated count of edits
+);
+
+-- Fact Table: Specimen Loans and Transfers (Remessas)
+CREATE TABLE IF NOT EXISTS analytical.fact_remessas (
+    remessa_tombo_key BIGSERIAL PRIMARY KEY,
+    
+    -- Foreign Keys
+    tombo_hcf BIGINT REFERENCES analytical.fact_tombos(tombo_hcf),
+    herbario_origem_key BIGINT REFERENCES analytical.dim_herbario(herbario_key),
+    herbario_destino_key BIGINT REFERENCES analytical.dim_herbario(herbario_key),
+    data_envio_key INT REFERENCES analytical.dim_tempo(date_key),
+    data_vencimento_key INT REFERENCES analytical.dim_tempo(date_key),
+    
+    -- Attributes
+    tipo_retirada VARCHAR(50), -- Cast from ENUM retirada_exsiccata_tombos_tipo
+    devolvido BOOLEAN,
+    observacao_remessa TEXT,
+    
+    -- Measures
+    dias_em_emprestimo INT, -- Calculated field: current_date - data_envio (or data_devolucao)
+    dias_atraso INT -- Calculated field: current_date - data_vencimento (if devolvido = false)
+);
+
+-- Fact Table: Specimen Audit/Alterations
+CREATE TABLE IF NOT EXISTS analytical.fact_alteracoes (
+    alteracao_key BIGSERIAL PRIMARY KEY,
+    
+    -- Foreign Keys
+    tombo_hcf BIGINT REFERENCES analytical.fact_tombos(tombo_hcf),
+    usuario_key BIGINT REFERENCES analytical.dim_usuario(usuario_key),
+    data_alteracao_key INT REFERENCES analytical.dim_tempo(date_key),
+    
+    -- Attributes
+    status_alteracao VARCHAR(50), -- Cast from ENUM alteracoes_status
+    observacao TEXT,
+    is_alteracao_legado BOOLEAN DEFAULT FALSE -- Flag to identify records from tombo_alteracoes_antigas
+);
+
+-- ------------------------------------------------------------------------------
+-- 3. INDEXES FOR PERFORMANCE
+-- ------------------------------------------------------------------------------
+
+-- Indexes on Fact Tombos
+CREATE INDEX idx_fact_tombos_taxonomia ON analytical.fact_tombos(taxonomia_key);
+CREATE INDEX idx_fact_tombos_geografia ON analytical.fact_tombos(geografia_key);
+CREATE INDEX idx_fact_tombos_data_coleta ON analytical.fact_tombos(data_coleta_key);
+CREATE INDEX idx_fact_tombos_herbario ON analytical.fact_tombos(herbario_key);
+
+-- Indexes on Fact Remessas
+CREATE INDEX idx_fact_remessas_tombo ON analytical.fact_remessas(tombo_hcf);
+CREATE INDEX idx_fact_remessas_destino ON analytical.fact_remessas(herbario_destino_key);
+CREATE INDEX idx_fact_remessas_vencimento ON analytical.fact_remessas(data_vencimento_key);
+
+-- Indexes on Fact Alteracoes
+CREATE INDEX idx_fact_alteracoes_tombo ON analytical.fact_alteracoes(tombo_hcf);
+CREATE INDEX idx_fact_alteracoes_usuario ON analytical.fact_alteracoes(usuario_key);
+```

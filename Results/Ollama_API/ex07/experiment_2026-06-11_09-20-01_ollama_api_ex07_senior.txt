@@ -1,0 +1,124 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-20-01
+Model: ollama_api
+Prompt: senior
+Schema: ex07
+==================================================
+
+{
+  "section_1": {
+    "summary": "The normalized OLTP schema is being transformed into an analytics-optimized star schema model. The primary fact table will be 'Usina' (hydroelectric plant), which contains numeric and date-based measures. All lookup/reference tables are flattened into a single wide dimension table, 'DimUsina', to reduce joins and simplify reporting queries. This approach significantly improves query performance for OLAP workloads while maintaining traceability back to source entities.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge all dimension tables (Proprietarios, Rios, Localizacoes, Municipios, Estados) into a single denormalized dimension table called DimUsina to eliminate multiple joins during querying."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Retain the Usina table as the central fact-like entity but enrich it with descriptive attributes from related dimensions to form a wide, analytics-friendly structure."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Introduce surrogate keys in the new dimension table to decouple from source system keys and support slowly changing dimensions in future enhancements."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Add descriptive columns such as proprietario_nome, rio_nome, municipio_nome, uf, latitude, longitude directly into the new DimUsina table by joining source tables."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Derive a composite location field or geospatial identifier if needed for advanced BI mapping visualizations."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Remove foreign key constraints and references to external tables to flatten the schema."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved read performance at the cost of increased storage due to denormalization and data duplication across rows."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified query logic and faster aggregations versus loss of normalization benefits like update efficiency and consistency enforcement."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Reduced ETL complexity for downstream tools, but higher initial ETL transformation effort required to denormalize and populate the wide table."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting on total installed capacity (potkw) and physical capacity (potfis) grouped by state (uf) or river (rio). Requires joining Usina with Rios, Localizacoes, Municipios, and Estados."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analysis of plants by owner (proprietario) including count of plants, average capacity, grouped by region/state."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Geospatial analysis using latitude/longitude coordinates joined through Localizacoes to map plant locations and associate with municipalities/states."
+      }
+    ]
+  }
+}
+
+```sql
+-- Denormalized Analytical Physical Model DDL Script
+
+-- Drop existing table if exists
+DROP TABLE IF EXISTS public."DimUsina";
+
+-- Create the denormalized dimension/fact-like table for analytics
+CREATE TABLE public."DimUsina" (
+    usina_sk BIGSERIAL PRIMARY KEY, -- Surrogate key for analytics use
+    usina_id INTEGER NOT NULL, -- Original primary key from Usina table
+    nome VARCHAR NOT NULL,
+    potkw FLOAT,
+    potfis FLOAT,
+    iniciop DATE,
+    atualizacao DATE,
+    lat DOUBLE PRECISION,
+    long DOUBLE PRECISION,
+    estagio VARCHAR,
+    
+    -- Flattened Proprietario
+    id_proprietario INTEGER,
+    proprietario_nome VARCHAR,
+    
+    -- Flattened Rio
+    id_rio INTEGER,
+    rio_nome VARCHAR,
+    
+    -- Flattened Localizacao + Municipio + Estado
+    id_localizacao INTEGER,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    id_municipio1 INTEGER,
+    municipio_nome VARCHAR,
+    uf CHAR(2),
+    id_municipio2 INTEGER -- Optional secondary municipality
+);
+
+-- Index Recommendations
+CREATE INDEX idx_dimusina_uf ON public."DimUsina"(uf);
+CREATE INDEX idx_dimusina_rio ON public."DimUsina"(rio_nome);
+CREATE INDEX idx_dimusina_proprietario ON public."DimUsina"(proprietario_nome);
+CREATE INDEX idx_dimusina_municipio ON public."DimUsina"(municipio_nome);
+CREATE INDEX idx_dimusina_geolocation ON public."DimUsina"(latitude, longitude);
+
+-- Optional: Partitioning recommendation by estado (uf) or estagio if data volume is large
+-- Example (PostgreSQL 10+ syntax):
+-- CREATE TABLE public."DimUsina" (...) PARTITION BY LIST (uf);
+
+COMMENT ON TABLE public."DimUsina" IS 'Denormalized analytical model of hydroelectric plants with flattened dimensions for optimized querying.';
+```

@@ -1,0 +1,239 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_08-54-47
+Model: ollama_api
+Prompt: junior
+Schema: TPC_DS
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on reducing the number of joins required for common analytical queries by merging transactional line items with their parent order headers. This approach consolidates store, catalog, and web orders into unified fact tables that include both header and line item information. The inventory and returns data are kept separate due to their specialized analytical use cases, but are denormalized internally to reduce joins.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge s_purchase and s_purchase_lineitem into a single denormalized fact table purchase_fact to eliminate join between header and lineitem"
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge s_catalog_order and s_catalog_order_lineitem into catalog_order_fact to consolidate catalog transactions"
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge s_web_order and s_web_order_lineitem into web_order_fact to consolidate web transactions"
+      },
+      {
+        "decision_id": "D4",
+        "description": "Denormalize s_inventory by keeping all columns in single table as it's already flat"
+      },
+      {
+        "decision_id": "D5",
+        "description": "Denormalize s_store_returns by keeping all columns in single table as it's already flat"
+      },
+      {
+        "decision_id": "D6",
+        "description": "Denormalize s_catalog_returns by keeping all columns in single table as it's already flat"
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added order/purchase date and time to line item fact tables to enable time-based analysis without joins"
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added customer_id fields to line item fact tables to enable customer-based analysis without joins"
+      },
+      {
+        "decision_id": "A3",
+        "description": "Standardized column names across fact tables for consistency (e.g., quantity, sales_price, item_id)"
+      },
+      {
+        "decision_id": "A4",
+        "description": "Retained all original attributes to preserve information granularity"
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage space due to data duplication in denormalized tables vs. normalized schema"
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Improved query performance for analytics at the cost of more complex data loading and maintenance processes"
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Simplified query structure for reporting but reduced flexibility for ad-hoc queries requiring different granularities"
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analysis of sales by item, customer, date, store, and promotion requires joining purchase header and lineitem tables"
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting on catalog orders by item, customer, date, and promotion requires joining catalog order header and lineitem tables"
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Web order analysis by item, customer, date, and promotion requires joining web order header and lineitem tables"
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Inventory analysis by warehouse, item, and date is already flat but kept separate for specialized reporting"
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Store returns analysis by customer, item, date, and reason is already flat but kept separate for specialized reporting"
+      },
+      {
+        "decision_id": "D6",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Catalog returns analysis by customer, item, date, and reason is already flat but kept separate for specialized reporting"
+      }
+    ]
+  }
+}
+
+-- ============================================================
+--   Table: purchase_fact                                     
+-- ============================================================
+create table purchase_fact
+(
+    purc_purchase_id            integer               not null,
+    plin_line_number            integer               not null,
+    purc_store_id               char(16)                      ,
+    purc_customer_id            char(16)                      ,
+    purc_purchase_date          char(10)                      ,
+    purc_purchase_time          integer                       ,
+    purc_register_id            integer                       ,
+    purc_clerk_id               integer                       ,
+    purc_comment                char(100)                     ,
+    plin_item_id                char(16)                      ,
+    plin_promotion_id           char(16)                      ,
+    plin_quantity               integer                       ,
+    plin_sale_price             numeric(7,2)                  ,
+    plin_coupon_amt             numeric(7,2)                  ,
+    plin_comment                varchar(100)                  
+);
+
+-- ============================================================
+--   Table: catalog_order_fact                                
+-- ============================================================
+create table catalog_order_fact
+(
+    cord_order_id               integer               not null,
+    clin_line_number            integer               not null,
+    cord_bill_customer_id       char(16)                      ,
+    cord_ship_customer_id       char(16)                      ,
+    cord_order_date             char(10)                      ,
+    cord_order_time             integer                       ,
+    cord_ship_mode_id           char(16)                      ,
+    cord_call_center_id         char(16)                      ,
+    cord_order_comments         varchar(100)                  ,
+    clin_item_id                char(16)                      ,
+    clin_promotion_id           char(16)                      ,
+    clin_quantity               integer                       ,
+    clin_sales_price            numeric(7,2)                  ,
+    clin_coupon_amt             numeric(7,2)                  ,
+    clin_warehouse_id           char(16)                      ,
+    clin_ship_date              char(10)                      ,
+    clin_catalog_number         integer                       ,
+    clin_catalog_page_number    integer                       ,
+    clin_ship_cost              numeric(7,2)                  
+);
+
+-- ============================================================
+--   Table: web_order_fact                                    
+-- ============================================================
+create table web_order_fact
+(
+    word_order_id               integer               not null,
+    wlin_line_number            integer               not null,
+    word_bill_customer_id       char(16)                      ,
+    word_ship_customer_id       char(16)                      ,
+    word_order_date             char(10)                      ,
+    word_order_time             integer                       ,
+    word_ship_mode_id           char(16)                      ,
+    word_web_site_id            char(16)                      ,
+    word_order_comments         char(100)                     ,
+    wlin_item_id                char(16)                      ,
+    wlin_promotion_id           char(16)                      ,
+    wlin_quantity               integer                       ,
+    wlin_sales_price            numeric(7,2)                  ,
+    wlin_coupon_amt             numeric(7,2)                  ,
+    wlin_warehouse_id           char(16)                      ,
+    wlin_ship_date              char(10)                      ,
+    wlin_ship_cost              numeric(7,2)                  ,
+    wlin_web_page_id            char(16)                      
+);
+
+-- ============================================================
+--   Table: inventory_fact                                    
+-- ============================================================
+create table inventory_fact
+(
+    invn_warehouse_id           char(16)              not null,
+    invn_item_id                char(16)              not null,
+    invn_date                   char(10)              not null,
+    invn_qty_on_hand            integer                       
+);
+
+-- ============================================================
+--   Table: store_returns_fact                                
+-- ============================================================
+create table store_returns_fact
+(
+    sret_store_id               char(16)                      ,
+    sret_purchase_id            char(16)              not null,
+    sret_line_number            integer               not null,
+    sret_item_id                char(16)              not null,
+    sret_customer_id            char(16)                      ,
+    sret_return_date            char(10)                      ,
+    sret_return_time            char(10)                      ,
+    sret_ticket_number          char(20)                      ,
+    sret_return_qty             integer                       ,
+    sret_return_amt             numeric(7,2)                  ,
+    sret_return_tax             numeric(7,2)                  ,
+    sret_return_fee             numeric(7,2)                  ,
+    sret_return_ship_cost       numeric(7,2)                  ,
+    sret_refunded_cash          numeric(7,2)                  ,
+    sret_reversed_charge        numeric(7,2)                  ,
+    sret_store_credit           numeric(7,2)                  ,
+    sret_reason_id              char(16)                      
+);
+
+-- ============================================================
+--   Table: catalog_returns_fact                              
+-- ============================================================
+create table catalog_returns_fact
+(
+    cret_call_center_id         char(16)                      ,
+    cret_order_id               integer               not null,
+    cret_line_number            integer               not null,
+    cret_item_id                char(16)              not null,
+    cret_return_customer_id     char(16)                      ,
+    cret_refund_customer_id     char(16)                      ,
+    cret_return_date            char(10)                      ,
+    cret_return_time            char(10)                      ,
+    cret_return_qty             integer                       ,
+    cret_return_amt             numeric(7,2)                  ,
+    cret_return_tax             numeric(7,2)                  ,
+    cret_return_fee             numeric(7,2)                  ,
+    cret_return_ship_cost       numeric(7,2)                  ,
+    cret_refunded_cash          numeric(7,2)                  ,
+    cret_reversed_charge        numeric(7,2)                  ,
+    cret_merchant_credit        numeric(7,2)                  ,
+    cret_reason_id              char(16)                      ,
+    cret_shipmode_id            char(16)                      ,
+    cret_catalog_page_id        char(16)                      ,
+    cret_warehouse_id           char(16)                      
+);

@@ -1,0 +1,155 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-04_01-34-49
+Model: ollama_local
+Prompt: OBT
+Schema: solarwinds
+==================================================
+
+Based on the **RISEN FRAMEWORK**, here is the analysis and execution plan to denormalize the provided relational schema.
+
+### 1. Analysis of the Provided SQL Creation Script
+The input schema represents a standard **Order Management System** with a star-like topology:
+*   **Customers**: Stores entity data for clients.
+*   **Orders**: Links customers to specific dates (many-to-one relationship with Customers).
+*   **Products**: Stores product catalog data.
+*   **Order Details**: The junction table linking Orders and Products, containing quantity.
+
+The relationships are:
+1.  `customers` $\to$ `orders` (1:N)
+2.  `orders` $\to$ `order_details` (1:N)
+3.  `products` $\to$ `order_details` (1:N)
+
+### 2. Analysis of 'Frequent Queries / Workload Context'
+Since no specific queries were provided, I will infer the most common analytical workloads for an e-commerce or order processing system:
+*   **Order Line Item Retrieval**: Queries typically need to join `orders`, `order_details`, and `products` to get a complete view of what was bought by whom.
+    *   *Pattern*: `SELECT p.product_name, p.price, o.order_date, od.quantity FROM orders o JOIN order_details od ON ... JOIN products p ON ...`
+*   **Customer Order History**: Getting all orders for a customer, including the items purchased.
+    *   *Pattern*: `SELECT c.name, o.order_date, p.product_name ... FROM customers c JOIN orders o ON ... JOIN order_details od ON ...`
+*   **Total Spend Analysis**: Calculating total revenue per customer or per product.
+    *   *Pattern*: Aggregations requiring joins across all four tables.
+
+**Bottleneck**: In the normalized model, every such query requires at least **2 to 3 JOINs**. As the dataset grows, these JOINs become the primary performance bottleneck due to index lookups and sort operations.
+
+### 3. Design of the New Denormalized Schema (ONE-BIG-TABLE MODEL)
+To optimize read performance, we will flatten the entire structure into a single table named `big_order_data`.
+*   **Primary Key**: A composite key `(customer_id, order_id, order_detail_id)` is chosen as the natural surrogate for the transaction line item.
+*   **Foreign Keys**: All foreign key references are removed to satisfy the strict "One Big Table" constraint.
+*   **Attributes**:
+    *   Attributes from `customers` are prefixed with `customer_`.
+    *   Attributes from `orders` are prefixed with `order_`.
+    *   Attributes from `products` are prefixed with `product_`.
+    *   Attributes from `order_details` are prefixed with `order_detail_`.
+*   **Data Types**: Preserved exactly as in the original schema (e.g., `DECIMAL(10,2)` for price, `DATE` for order_date).
+
+---
+
+### Execution Output
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy collapses the four relational tables (customers, orders, products, order_details) into a single 'big_order_data' table. This eliminates JOIN overhead for read-heavy analytical queries by embedding customer context, order metadata, product details, and line-item quantities directly into one row per transaction line.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged all four source tables (customers, orders, products, order_details) into a single physical table named 'big_order_data'. Removed all FOREIGN KEY constraints and REFERENCES clauses."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Replaced the composite primary key logic of the original schema with a single unified Primary Key: (customer_id, order_id, order_detail_id). This ensures every unique line item has a unique identifier without needing foreign key lookups."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Renamed all non-key attributes to avoid ambiguity by prefixing them with their source entity name (e.g., 'customer_name', 'product_price'). This ensures semantic clarity while maintaining the exact column set from the original normalized model."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Moved 'customer_id' from being a Foreign Key in 'orders' to being part of the Primary Key in the new table. Removed the dependency on the 'customers' table for existence validation."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Moved 'product_id' from being a Foreign Key in 'order_details' to being part of the Primary Key. Removed the dependency on the 'products' table."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Moved 'order_id' from being a Foreign Key in 'order_details' to being part of the Primary Key. Removed the dependency on the 'orders' table."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Retained all original data types (VARCHAR, TEXT, DATE, DECIMAL, INT, SERIAL) to ensure full semantic equivalence and data integrity."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Increased Write Performance vs. Storage Bloat. The new table allows for faster INSERT/UPDATE operations (no JOINs required), but it consumes significantly more storage space and requires careful indexing strategy (covering indexes) compared to the sparse normalized tables."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Loss of Referential Integrity. The original schema enforced data consistency via Foreign Keys (e.g., preventing an order for a non-existent customer). The new schema relies on application-level validation or triggers, as the database will not automatically reject invalid data based on table relationships."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Get full order details with customer and product info in one pass. (Original: 3 JOINs required)"
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Calculate total revenue per customer. (Original: Requires aggregation across 3 tables)"
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "List all products purchased by a specific customer. (Original: Requires JOIN on orders and order_details)"
+      }
+    ]
+  }
+}
+```
+
+---
+
+### Complete SQL DDL Creation Script
+
+```sql
+-- Denormalized Schema: ONE-BIG-TABLE MODEL
+-- Strategy: Flatten customers, orders, products, and order_details into a single table
+-- to optimize read performance by eliminating JOINs.
+
+CREATE TABLE IF NOT EXISTS big_order_data (
+    customer_id INT NOT NULL,
+    order_id INT NOT NULL,
+    order_detail_id INT NOT NULL,
+    
+    -- Customer Attributes
+    customer_name VARCHAR(100),
+    customer_email VARCHAR(100),
+    customer_address TEXT,
+    
+    -- Order Attributes
+    order_date DATE,
+    
+    -- Product Attributes
+    product_name VARCHAR(100),
+    product_price DECIMAL(10,2),
+    
+    -- Order Detail Attributes
+    quantity INT,
+    
+    -- Primary Key: Composite of all three entities to ensure uniqueness per line item
+    PRIMARY KEY (customer_id, order_id, order_detail_id)
+);
+
+-- Optional: Create an index on customer_id for faster customer-level aggregations
+CREATE INDEX idx_big_order_data_customer_id ON big_order_data(customer_id);
+
+-- Optional: Create an index on order_id for faster order-level aggregations
+CREATE INDEX idx_big_order_data_order_id ON big_order_data(order_id);
+```

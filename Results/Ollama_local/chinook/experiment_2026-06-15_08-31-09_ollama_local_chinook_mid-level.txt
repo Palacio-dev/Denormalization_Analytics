@@ -1,0 +1,221 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-15_08-31-09
+Model: ollama_local
+Prompt: mid-level
+Schema: chinook
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The original schema is a standard 3rd Normal Form (3NF) design suitable for transactional OLTP workloads. It suffers from high join complexity for analytical queries (e.g., joining Customer, Invoice, InvoiceLine, Track, Album, Artist, Genre, and MediaType to get a complete report). The strategy involves adopting a Star Schema (Dimensional Modeling) approach. Dimensions (Customer, Employee, Artist, Genre, etc.) are denormalized by including all descriptive attributes (like addresses, phone numbers, names) directly into the fact tables or dedicated dimension tables to eliminate joins. Measures (Total, UnitPrice, Quantity) remain in the fact tables. A consolidated 'Sales' fact table is created to link Customers, Invoices, and Tracks, while a 'Media' fact table handles Track-level details like Album and Genre. Employee details are flattened into the Customer fact table via SupportRepId.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidated 'Invoice' and 'InvoiceLine' into a single 'Sales_Fact' table. This table now contains CustomerId, InvoiceDate, BillingAddress (flattened), Total, UnitPrice, Quantity, and TrackId. This eliminates the need to join two tables to get invoice line items."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Flattened 'Track' details into the 'Sales_Fact' table. Added AlbumId, GenreId, MediaTypeId, Composer, Milliseconds, Bytes, and UnitPrice directly to the Sales_Fact table. This removes the need to join the 'Track' dimension table."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Flattened 'Album' and 'Artist' details into the 'Sales_Fact' table. Added Title, ArtistId, and Artist Name (Name) directly to the Sales_Fact table. This removes the need to join 'Album' and 'Artist' tables."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Flattened 'Genre' and 'MediaType' details into the 'Sales_Fact' table. Added Genre Name and Media Type Name directly to the Sales_Fact table. This removes the need to join 'Genre' and 'MediaType' tables."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Created a dedicated 'Employee_Dim' table for the organizational hierarchy (EmployeeId, LastName, FirstName, Title, ReportsTo, BirthDate, HireDate) instead of storing these in Customer. Customer table now only holds SupportRepId (FK) and Customer specific address/contact info."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Created 'Customer_Dim' table with only CustomerId, FirstName, LastName, Company, Email, and SupportRepId. All address and phone fields were moved to the Sales_Fact table (BillingAddress) or kept in Customer_Dim if specific customer attributes are queried frequently. *Correction based on typical BI patterns: Customer address is usually in the fact table for billing reports, but Customer identity is in the dimension. Let's assume BillingAddress is in Fact, and Customer Identity is in Dim.*"
+      },
+      {
+        "decision_id": "D7",
+        "description": "Created 'Playlist_Fact' table with PlaylistId, Name, and a list of TrackIds (or a denormalized list of Track details if playing tracks directly). This allows analysis of playlist popularity without joining 'PlaylistTrack'."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added 'ArtistName' to Sales_Fact. Derived from Artist.Name. Stored as VARCHAR(120) to avoid join latency."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added 'AlbumTitle', 'GenreName', 'MediaTypeName', 'Composer', 'Milliseconds', 'Bytes' to Sales_Fact. These were previously in separate dimension tables."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Moved 'BillingAddress', 'BillingCity', 'BillingState', 'BillingCountry', 'BillingPostalCode' from Invoice table to Sales_Fact. This allows direct aggregation of revenue by location without joining."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Removed 'BillingAddress' columns from the 'Invoice' table (now obsolete) and 'Track' columns from 'InvoiceLine' (now obsolete)."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Write Performance Impact: Inserting a row into Sales_Fact now requires updating 10+ columns (Customer, Invoice, Track, Album, Artist, Genre, Media info). In a high-volume OLTP environment, this could slow down write throughput compared to the original normalized design."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Data Redundancy: Attributes like 'Name' and 'Address' are repeated in multiple fact tables. If an artist's name changes, it must be updated in every Sales_Fact row where they appear, which is operationally difficult (requires application logic or triggers)."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Storage Overhead: The denormalized schema will likely use more storage than the normalized schema due to repeated string data, though this is usually negligible compared to the gain in query speed."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Top 10 Customers by Total Sales Revenue. Previously required: SELECT ... FROM Invoice JOIN InvoiceLine ... JOIN Track ... JOIN Album ... JOIN Artist ... GROUP BY CustomerId."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Revenue breakdown by Genre and Media Type. Previously required: SELECT ... FROM InvoiceLine ... JOIN Track ... JOIN Genre ... JOIN MediaType ... GROUP BY ..."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Sales by Employee (Support Rep). Previously required: SELECT ... FROM Customer ... JOIN Employee ... GROUP BY EmployeeId."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Top Tracks by Sales Volume. Previously required: SELECT ... FROM InvoiceLine ... JOIN Track ... GROUP BY TrackId."
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- ==========================================
+-- Denormalized Analytical Schema (Star Schema)
+-- Optimized for Read-Heavy BI Workloads
+-- ==========================================
+
+-- 1. DIMENSION TABLES (Simplified)
+-- Stores reference keys and minimal attributes for easy filtering.
+
+CREATE TABLE IF NOT EXISTS public."Employee_Dim" (
+    "EmployeeId" integer NOT NULL,
+    "LastName" character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    "FirstName" character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    "Title" character varying(30) COLLATE pg_catalog."default",
+    "ReportsTo" integer,
+    "BirthDate" timestamp without time zone,
+    "HireDate" timestamp without time zone,
+    CONSTRAINT "PK_Employee_Dim" PRIMARY KEY ("EmployeeId")
+);
+
+CREATE TABLE IF NOT EXISTS public."Customer_Dim" (
+    "CustomerId" integer NOT NULL,
+    "FirstName" character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    "LastName" character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    "Company" character varying(80) COLLATE pg_catalog."default",
+    "Email" character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    "SupportRepId" integer,
+    CONSTRAINT "PK_Customer_Dim" PRIMARY KEY ("CustomerId")
+);
+
+-- Note: Billing Address is moved to Fact table for faster aggregation.
+
+-- 2. FACT TABLES (Denormalized)
+-- Contains all transactional and descriptive data to eliminate joins.
+
+-- Sales Fact Table
+-- Combines Invoice, InvoiceLine, and Track details.
+-- Also includes Album, Artist, Genre, and Media Type details.
+CREATE TABLE IF NOT EXISTS public."Sales_Fact" (
+    "InvoiceId" integer NOT NULL,
+    "CustomerId" integer NOT NULL,
+    "InvoiceDate" timestamp without time zone NOT NULL,
+    "BillingAddress" character varying(70) COLLATE pg_catalog."default",
+    "BillingCity" character varying(40) COLLATE pg_catalog."default",
+    "BillingState" character varying(40) COLLATE pg_catalog."default",
+    "BillingCountry" character varying(40) COLLATE pg_catalog."default",
+    "BillingPostalCode" character varying(10) COLLATE pg_catalog."default",
+    "Total" numeric(10, 2) NOT NULL,
+    
+    -- Track Details (Flattened from Track table)
+    "TrackId" integer NOT NULL,
+    "TrackName" character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    "AlbumId" integer,
+    "AlbumTitle" character varying(160) COLLATE pg_catalog."default",
+    "ArtistId" integer,
+    "ArtistName" character varying(120) COLLATE pg_catalog."default",
+    "GenreId" integer,
+    "GenreName" character varying(120) COLLATE pg_catalog."default",
+    "MediaTypeId" integer NOT NULL,
+    "MediaTypeName" character varying(120) COLLATE pg_catalog."default",
+    "Composer" character varying(220) COLLATE pg_catalog."default",
+    "Milliseconds" integer NOT NULL,
+    "Bytes" integer,
+    "UnitPrice" numeric(10, 2) NOT NULL,
+    "Quantity" integer NOT NULL,
+    
+    -- Support Rep Details (Flattened from Customer/Employee link)
+    "SupportRepLastName" character varying(20) COLLATE pg_catalog."default",
+    "SupportRepFirstName" character varying(20) COLLATE pg_catalog."default",
+    
+    CONSTRAINT "PK_Sales_Fact" PRIMARY KEY ("InvoiceId", "TrackId")
+);
+
+-- Playlist Fact Table
+-- Simplified to store playlist name and its tracks directly if possible, 
+-- or just the relationship if we keep PlaylistTrack. 
+-- For max denormalization: Store Track details in Playlist_Fact too? 
+-- Let's keep it slightly normalized on the playlist side to avoid massive bloat, 
+-- but denormalized on the track side.
+CREATE TABLE IF NOT EXISTS public."Playlist_Fact" (
+    "PlaylistId" integer NOT NULL,
+    "Name" character varying(120) COLLATE pg_catalog."default",
+    "TrackId" integer NOT NULL,
+    "TrackName" character varying(200) COLLATE pg_catalog."default",
+    "AlbumTitle" character varying(160) COLLATE pg_catalog."default",
+    "ArtistName" character varying(120) COLLATE pg_catalog."default",
+    "GenreName" character varying(120) COLLATE pg_catalog."default",
+    "MediaTypeName" character varying(120) COLLATE pg_catalog."default",
+    CONSTRAINT "PK_Playlist_Fact" PRIMARY KEY ("PlaylistId", "TrackId")
+);
+
+-- 3. DATA LOADING LOGIC (Optional Triggers or Scripts)
+-- In a real scenario, an ETL process would populate these. 
+-- Below are example INSERT statements demonstrating the denormalization logic.
+
+-- Example: Inserting a Sales record with full context
+INSERT INTO public."Sales_Fact" (
+    "InvoiceId", "CustomerId", "InvoiceDate", "BillingAddress", "BillingCity", 
+    "BillingState", "BillingCountry", "BillingPostalCode", "Total",
+    "TrackId", "TrackName", "AlbumTitle", "ArtistName", "GenreName", "MediaTypeName",
+    "Composer", "Milliseconds", "Bytes", "UnitPrice", "Quantity",
+    "SupportRepLastName", "SupportRepFirstName"
+) VALUES (
+    1, 1, NOW(), '123 Main St', 'New York', 'NY', 'USA', '10001', 50.00,
+    101, 'Song Title', 'Album One', 'Artist One', 'Rock', 'Audio',
+    'John Doe', 300000, 1000000, 5.00, 10,
+    'Jane Smith', 'John Doe'
+);
+
+-- 4. INDEXES FOR ANALYTICAL QUERIES
+CREATE INDEX IF NOT EXISTS "IX_Sales_Customer" ON public."Sales_Fact"("CustomerId");
+CREATE INDEX IF NOT EXISTS "IX_Sales_Date" ON public."Sales_Fact"("InvoiceDate");
+CREATE INDEX IF NOT EXISTS "IX_Sales_Genre" ON public."Sales_Fact"("GenreName");
+CREATE INDEX IF NOT EXISTS "IX_Sales_Media" ON public."Sales_Fact"("MediaTypeName");
+CREATE INDEX IF NOT EXISTS "IX_Sales_Employee" ON public."Sales_Fact"("SupportRepLastName");
+
+-- Note: Primary keys on Dimension tables are also critical for lookups.
+CREATE INDEX IF NOT EXISTS "IX_Employee_Dim_EmployeeId" ON public."Employee_Dim"("EmployeeId");
+CREATE INDEX IF NOT EXISTS "IX_Customer_Dim_CustomerId" ON public."Customer_Dim"("CustomerId");
+```

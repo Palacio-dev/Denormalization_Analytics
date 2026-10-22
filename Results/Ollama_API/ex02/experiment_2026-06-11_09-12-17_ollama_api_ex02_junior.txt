@@ -1,0 +1,141 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-12-17
+Model: ollama_api
+Prompt: junior
+Schema: ex02
+==================================================
+
+{
+  "section_1": {
+    "summary": "The original schema consists of 9 normalized tables with foreign key relationships. The denormalization strategy involves merging related tables to reduce the number of joins required for analytical queries. Key merges include combining mutirao_de_limpeza with coleta_de_lixo and local_de_coleta, and merging unidade_de_conservacao with its related dimension tables (bioma, categoria_manejo, esfera_administrativa, and regiao). This approach significantly reduces query complexity for reporting and analytics while maintaining data integrity.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge mutirao_de_limpeza, coleta_de_lixo, and local_de_coleta into a single fact table 'mutirao_fato' to eliminate joins for waste collection analytics"
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge unidade_de_conservacao with bioma, categoria_manejo, esfera_administrativa, and regiao into a single dimension table 'unidade_conservacao_dim' to simplify conservation unit reporting"
+      },
+      {
+        "decision_id": "D3",
+        "description": "Retain instituicao_organizadora as a separate dimension table since it's referenced by mutirao_de_limpeza"
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added descriptive columns (nome_instituicao, nome_municipio, estado, nome_bioma, etc.) to denormalized tables to avoid joins"
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed redundant primary key columns from merged tables (id_mutirao from coleta_de_lixo and local_de_coleta)"
+      },
+      {
+        "decision_id": "A3",
+        "description": "Preserved all foreign key relationships through inclusion of descriptive data rather than IDs"
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Storage overhead increases due to data duplication, but query performance improves significantly for analytical workloads"
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Data modification complexity increases as changes in dimension data require updates in multiple places, but read operations are optimized"
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of normalization benefits like data consistency enforcement, but gain in simplified query structure for business intelligence"
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries analyzing waste collection quantities by location, date, and organizer institution"
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries reporting on conservation unit characteristics including biome, management category, and administrative sphere"
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries aggregating participant counts and event durations by geographic region and organizing institution"
+      }
+    ]
+  }
+}
+
+```sql
+-- Denormalized schema for analytics and reporting
+
+-- Fact table for cleanup events with all collection data
+CREATE TABLE IF NOT EXISTS public.mutirao_fato (
+    id_mutirao integer NOT NULL,
+    data_do_ocorrido date NOT NULL,
+    horario_de_inicio time without time zone NOT NULL,
+    numero_aproximado_de_participantes integer,
+    duracao_total time without time zone NOT NULL,
+    -- Local de coleta
+    local_nome text COLLATE pg_catalog."default" NOT NULL,
+    -- Coleta de lixo quantities
+    plastico integer,
+    borracha integer,
+    madeira integer,
+    produtos_texteis integer,
+    papel integer,
+    metal integer,
+    vidro integer,
+    materiais_de_pesca integer,
+    outros_residuos integer,
+    -- Instituicao organizadora (denormalized)
+    id_instituicao_organizadora integer,
+    nome_instituicao text COLLATE pg_catalog."default" NOT NULL,
+    carater_instituicao text COLLATE pg_catalog."default" NOT NULL,
+    -- Municipio/Regiao (denormalized)
+    id_municipio integer,
+    nome_municipio text COLLATE pg_catalog."default" NOT NULL,
+    estado text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT mutirao_fato_pkey PRIMARY KEY (id_mutirao)
+);
+
+-- Dimension table for conservation units with all related information
+CREATE TABLE IF NOT EXISTS public.unidade_conservacao_dim (
+    id_uc integer NOT NULL,
+    nome_uc text COLLATE pg_catalog."default" NOT NULL,
+    ano_de_criacao integer,
+    area_soma_biomas double precision,
+    area_soma_biomas_continentais double precision,
+    area_marinha double precision,
+    -- Bioma information (denormalized)
+    id_bioma integer,
+    nome_bioma text COLLATE pg_catalog."default" NOT NULL,
+    -- Categoria manejo information (denormalized)
+    id_manejo integer,
+    categoria_manejo text COLLATE pg_catalog."default" NOT NULL,
+    categoria_iucn text COLLATE pg_catalog."default" NOT NULL,
+    plano_manejo text COLLATE pg_catalog."default" NOT NULL,
+    -- Esfera administrativa information (denormalized)
+    id_esfera integer,
+    tipo_esfera text COLLATE pg_catalog."default" NOT NULL,
+    -- Municipio/Regiao information (denormalized)
+    id_municipio_uc integer,
+    nome_municipio_uc text COLLATE pg_catalog."default" NOT NULL,
+    estado_uc text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT unidade_conservacao_dim_pkey PRIMARY KEY (id_uc)
+);
+
+-- Dimension table for organizing institutions (kept separate for potential reuse)
+CREATE TABLE IF NOT EXISTS public.instituicao_organizadora_dim (
+    id_instituicao_organizadora integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    carater text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT instituicao_organizadora_dim_pkey PRIMARY KEY (id_instituicao_organizadora)
+);
+```

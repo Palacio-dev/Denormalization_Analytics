@@ -1,0 +1,192 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_10-32-45
+Model: ollama_local
+Prompt: mid-level
+Schema: solarwinds
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The original schema follows a standard Third Normal Form (3NF) design suitable for transactional OLTP systems. To optimize for read-heavy analytical workloads (OLAP), the model is being transformed into a Star Schema. This involves creating a dedicated Fact table (`fact_orders`) to store transactional data and separate Dimension tables (`dim_customers`, `dim_products`, `dim_orders`) for descriptive attributes. Highly correlated attributes like `customer_id` and `order_id` are duplicated in the fact table to eliminate joins during aggregation.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Split the original `orders` table into a Dimension table (`dim_orders`) containing only non-transactional attributes (order_date) and a Fact table (`fact_orders`) containing the transactional core (order_id, customer_id)."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Split the original `products` table into a Dimension table (`dim_products`) containing product metadata (product_id, product_name, price) and remove it from the `order_details` relationship."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Split the original `order_details` table into a Fact table (`fact_order_items`) containing measures (quantity, calculated line_total) and a Dimension table (`dim_order_items`) containing product references."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Move `customer_name`, `customer_email`, and `customer_address` from the `customers` table to the new `dim_customers` dimension table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived attribute `line_total` to `fact_order_items` by multiplying `quantity` and `price` (from dim_products) at ingestion time to avoid runtime calculations."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed foreign key constraints from the Fact tables to ensure write performance, relying on application-level validation."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added surrogate keys (e.g., `customer_sk`, `product_sk`) to Dimension tables to ensure stable foreign key references in the Fact tables, decoupling from changing physical IDs."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy: Customer and Product details are now repeated for every order line, increasing storage requirements compared to the normalized schema."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Write Complexity: Inserting new data requires populating multiple tables (Fact + Dimensions) and calculating derived attributes, increasing the complexity of the ETL/CDP pipeline."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Data Freshness Lag: The analytical model relies on the ETL process; there is an inherent delay between a transaction occurring in the source system and its availability in the analytical model."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregating total sales by customer over a date range. In the normalized schema, this requires a JOIN between orders, order_details, and products. In the denormalized schema, the fact table contains the necessary links, allowing simple GROUP BY operations."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Calculating the average order value per product category. The denormalized structure allows joining the fact table with dimension tables to access product metadata without joining back through the original product table."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Identifying top 10 customers by revenue. The denormalized schema eliminates the need to join customer details with orders and order details, significantly reducing query execution time."
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- ==========================================
+-- DENORMALIZED ANALYTICAL SCHEMA (STAR SCHEMA)
+-- Optimized for BI Dashboards and Reporting
+-- ==========================================
+
+-- --------------------------------------------------------
+-- DIMENSION TABLES
+-- --------------------------------------------------------
+
+-- Customers Dimension
+CREATE TABLE dim_customers (
+    customer_sk INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    customer_name VARCHAR(100),
+    customer_email VARCHAR(100),
+    customer_address TEXT,
+    -- Historical snapshot tracking (optional for advanced analytics)
+    -- customer_snapshot_date DATE
+);
+
+-- Orders Dimension
+CREATE TABLE dim_orders (
+    order_sk INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    order_id INT NOT NULL UNIQUE, -- Physical ID for reference
+    order_date DATE,
+    -- Order status could be added here if tracked
+    -- order_status VARCHAR(20)
+);
+
+-- Products Dimension
+CREATE TABLE dim_products (
+    product_sk INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    product_id INT NOT NULL UNIQUE, -- Physical ID for reference
+    product_name VARCHAR(100),
+    price DECIMAL(10,2),
+    -- Product category could be added here
+    -- product_category VARCHAR(50)
+);
+
+-- Order Items Dimension (Intermediate dimension to link Order and Product)
+CREATE TABLE dim_order_items (
+    item_sk INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    order_item_id INT NOT NULL UNIQUE, -- Unique ID for the specific line item
+    product_sk INT NOT NULL REFERENCES dim_products(product_sk),
+    -- Reference back to order for context if needed
+    -- order_sk INT NOT NULL REFERENCES dim_orders(order_sk)
+);
+
+-- --------------------------------------------------------
+-- FACT TABLES
+-- --------------------------------------------------------
+
+-- Fact Orders (Transactional Core)
+-- Contains the primary key of the order and the foreign keys to dimensions
+CREATE TABLE fact_orders (
+    order_fact_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    -- Surrogate Keys to Dimensions
+    customer_sk INT NOT NULL REFERENCES dim_customers(customer_sk),
+    order_sk INT NOT NULL REFERENCES dim_orders(order_sk),
+    
+    -- Measures
+    order_quantity INT, -- If quantity is per order (e.g., 1 box of 10)
+    order_total DECIMAL(10,2), -- Sum of all line items for this order
+    
+    -- Timestamps for time intelligence
+    event_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Fact Order Items (Detailed Transactions)
+-- This is the core transactional fact
+CREATE TABLE fact_order_items (
+    item_fact_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    -- Surrogate Keys to Dimensions
+    order_sk INT NOT NULL REFERENCES dim_orders(order_sk),
+    item_sk INT NOT NULL REFERENCES dim_order_items(item_sk),
+    
+    -- Measures
+    quantity INT NOT NULL,
+    unit_price DECIMAL(10,2),
+    -- Pre-calculated measure to avoid runtime multiplication
+    line_total DECIMAL(10,2) GENERATED ALWAYS AS (quantity * unit_price)
+);
+
+-- --------------------------------------------------------
+-- SAMPLE DATA INSERTION (FOR ILLUSTRATION)
+-- --------------------------------------------------------
+
+-- Insert Sample Dimensions
+INSERT INTO dim_customers (customer_name, customer_email, customer_address) VALUES 
+('Alice Smith', 'alice@example.com', '123 Main St'),
+('Bob Jones', 'bob@example.com', '456 Oak Ave');
+
+INSERT INTO dim_orders (order_id, order_date) VALUES 
+(1001, '2023-10-01'),
+(1002, '2023-10-05');
+
+INSERT INTO dim_products (product_id, product_name, price) VALUES 
+(1, 'Widget A', 10.00),
+(2, 'Widget B', 25.50);
+
+-- Insert Sample Facts
+-- Fact Orders
+INSERT INTO fact_orders (customer_sk, order_sk, order_quantity, order_total) VALUES 
+(1, 1001, 1, 45.50),
+(2, 1002, 1, 10.00);
+
+-- Fact Order Items
+INSERT INTO fact_order_items (order_sk, item_sk, product_sk, quantity, unit_price, line_total) VALUES 
+(1001, 1, 1, 1, 10.00, 10.00),
+(1001, 2, 2, 1, 25.50, 25.50),
+(1002, 1, 1, 1, 10.00, 10.00);
+```

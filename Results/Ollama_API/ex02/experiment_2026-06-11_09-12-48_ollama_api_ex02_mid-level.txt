@@ -1,0 +1,114 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-12-48
+Model: ollama_api
+Prompt: mid-level
+Schema: ex02
+==================================================
+
+{
+  "section_1": {
+    "summary": "The current normalized schema consists of multiple transactional and reference tables. The goal is to create a denormalized analytical schema optimized for read-heavy workloads. We will consolidate related entities into fewer, wider tables that support efficient aggregations and reporting. The strategy includes: 1) Merging lookup/reference tables into descriptive fields within main entities, 2) Combining related facts (e.g., cleanup events with their waste collection data), 3) Flattening geographical and organizational hierarchies, and 4) Using a star schema where applicable with consolidated dimensions and facts.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge mutirao_de_limpeza, coleta_de_lixo, and local_de_coleta into a single fact table named fact_mutirao_coleta to reduce joins and simplify reporting on cleanup events and collected waste."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge unidade_de_conservacao with bioma, categoria_manejo, esfera_administrativa, and regiao into a single dimension table named dim_unidade_conservacao to reduce join complexity for conservation unit analysis."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge instituicao_organizadora and regiao (municipality) into the fact_mutirao_coleta table to include descriptive fields directly, avoiding joins for common filters and groupings."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added descriptive fields (e.g., nome_instituicao, nome_municipio, nome_bioma) directly into fact and dimension tables to avoid joins."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed surrogate keys from lookup tables now embedded in main tables (e.g., id_manejo, id_bioma)."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Renamed several attributes for clarity and consistency (e.g., nome to nome_municipio, categoria to categoria_manejo)."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage usage due to denormalization and duplication of descriptive fields. This is acceptable for read-optimized analytical workloads."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Loss of update efficiency: changes in reference data (e.g., municipality name) require updates in multiple rows, but this is rare in analytical workloads."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Schema is less flexible to structural changes, but more performant for standard BI queries."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting on cleanup events, participant counts, and waste collected by date, municipality, and organizer. Requires joining multiple tables in the normalized schema."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyzing conservation units by biome, management category, administrative level, and region. Requires multiple joins to get descriptive fields."
+      }
+    ]
+  }
+}
+
+-- Denormalized Schema DDL
+
+-- Dimension Table: dim_unidade_conservacao
+CREATE TABLE IF NOT EXISTS public.dim_unidade_conservacao
+(
+    id_uc integer NOT NULL,
+    nome_uc text NOT NULL,
+    ano_de_criacao integer,
+    area_soma_biomas double precision,
+    area_soma_biomas_continentais double precision,
+    area_marinha double precision,
+    nome_bioma text,
+    nome_municipio text,
+    estado text,
+    categoria_manejo text,
+    categoria_iucn text,
+    plano_manejo text,
+    esfera_administrativa text,
+    CONSTRAINT dim_unidade_conservacao_pkey PRIMARY KEY (id_uc)
+);
+
+-- Fact Table: fact_mutirao_coleta
+CREATE TABLE IF NOT EXISTS public.fact_mutirao_coleta
+(
+    id_mutirao integer NOT NULL,
+    data_do_ocorrido date NOT NULL,
+    horario_de_inicio time without time zone NOT NULL,
+    duracao_total time without time zone NOT NULL,
+    numero_aproximado_de_participantes integer,
+    nome_local_coleta text NOT NULL,
+    nome_instituicao_organizadora text NOT NULL,
+    carater_instituicao text NOT NULL,
+    nome_municipio text NOT NULL,
+    estado text NOT NULL,
+    plastico integer,
+    borracha integer,
+    madeira integer,
+    produtos_texteis integer,
+    papel integer,
+    metal integer,
+    vidro integer,
+    materiais_de_pesca integer,
+    outros_residuos integer,
+    CONSTRAINT fact_mutirao_coleta_pkey PRIMARY KEY (id_mutirao)
+);

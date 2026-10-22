@@ -1,0 +1,83 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-23-09
+Model: ollama_api
+Prompt: RISEN-few-shot
+Schema: ex10
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on collapsing relations and adding redundant attributes to improve read performance for analytical queries that frequently join country-related data across multiple dimensions such as energy consumption, emissions, population, and continent information. By merging the most commonly joined tables into fewer wide tables, we reduce the need for expensive JOIN operations during query execution.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapse the 'paises', 'continente', 'consumo_anual', and 'fonte_energia' tables into a single denormalized table to eliminate joins when querying energy consumption by country and continent."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapse the 'paises', 'emissao_g_efeito_estufa', and 'populacao' tables into a single fact-like table to support emission and demographic analysis without requiring multiple joins."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant attributes 'nome_pais', 'fundacao', 'nome_continente', and 'nome_fonte_energia' to avoid joins with referenced tables."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Retained all original non-key attributes across both new tables to ensure full semantic equivalence with the normalized schema."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage overhead due to redundant data (e.g., repeated country names and continent names) in exchange for faster read performance."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified query execution at the cost of more complex write operations and potential data inconsistency if updates are not managed carefully."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical queries aggregating energy consumption by continent or country over time, requiring joins between 'consumo_anual', 'paises', 'continente', and 'fonte_energia'."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries correlating greenhouse gas emissions with population growth per country and year, involving joins between 'emissao_g_efeito_estufa', 'populacao', and 'paises'."
+      }
+    ]
+  }
+}
+
+```sql
+CREATE TABLE IF NOT EXISTS public.consumo_energia_pais (
+    id_consumo integer NOT NULL,
+    ano integer NOT NULL,
+    porcentagem integer NOT NULL,
+    id_paises integer NOT NULL,
+    nome_pais character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    fundacao integer NOT NULL,
+    id_continente integer NOT NULL,
+    nome_continente character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    tipo_energia integer NOT NULL,
+    nome_fonte_energia character varying(50)[] COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT consumo_energia_pais_pkey PRIMARY KEY (id_consumo)
+);
+
+CREATE TABLE IF NOT EXISTS public.demografia_emissao_pais (
+    id_emissao integer NOT NULL,
+    id_paises integer NOT NULL,
+    nome_pais character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    ano integer NOT NULL,
+    quantidade_emitida bigint NOT NULL,
+    id_pop integer NOT NULL,
+    quantidade_hab integer NOT NULL,
+    CONSTRAINT demografia_emissao_pais_pkey PRIMARY KEY (id_emissao)
+);
+```

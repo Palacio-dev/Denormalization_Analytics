@@ -1,0 +1,167 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-39-23
+Model: gemini
+Prompt: junior
+Schema: ex06
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transforms the highly normalized transactional schema (3NF/Snowflake) into a Star Schema optimized for OLAP (Online Analytical Processing) workloads. By flattening the geographical and institutional hierarchies into wide dimension tables and consolidating the fragmented assessment scores into a single fact table, we drastically reduce the number of joins required for analytical queries, improving read performance.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged UF, MUNICIPIO, IES, and CURSO tables into a single wide dimension table named DIM_CURSO_LOCALIDADE. This flattens the hierarchy (State -> City -> Institution -> Course) into one table."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merged UF, MUNICIPIO, and ESCOLA tables into a single dimension table named DIM_ESCOLA_LOCALIDADE. Since ESCOLA does not connect to the ANO fact table in the original schema, it is kept as a standalone dimension for basic education analytics."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merged ANO, IDEB, ENADE, and SAEB tables into a single fact table named FACT_AVALIACAO. The original ANO table acted as a bridge; by embedding the metrics directly into this table, we eliminate three 1:1 joins."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Removed surrogate keys id_ideb, id_enade, and id_saeb from the fact table, as their respective attributes are now embedded directly into FACT_AVALIACAO."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Renamed ambiguous columns during the merge to prevent collisions and improve clarity (e.g., 'nome' in UF became 'nome_uf', 'rede' in IES became 'rede_ies')."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Replaced id_ano with id_avaliacao in the new fact table to better represent the grain of the table (an evaluation event for a course in a specific year)."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage/Redundancy: Geographical data (UF and MUNICIPIO) is repeated across every course and school, which increases the storage footprint."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If a city's population (qtd_habitantes) or averages change, multiple rows in the dimension tables must be updated. This is generally acceptable in data warehouses where data is mostly read-only or updated in bulk."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze the correlation between ENADE, SAEB, and IDEB scores for specific courses over multiple years without requiring 4 separate joins."
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Compare the average performance of courses grouped by State (UF), City (Municipio), and Institution Network (Rede) to identify regional educational trends."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Creation Script
+
+```sql
+-- Drop existing denormalized tables if they exist
+DROP TABLE IF EXISTS FACT_AVALIACAO CASCADE;
+DROP TABLE IF EXISTS DIM_CURSO_LOCALIDADE CASCADE;
+DROP TABLE IF EXISTS DIM_ESCOLA_LOCALIDADE CASCADE;
+
+-- ==============================================================================
+-- DIMENSION: DIM_CURSO_LOCALIDADE
+-- Merges: CURSO, IES, MUNICIPIO, UF
+-- ==============================================================================
+CREATE TABLE DIM_CURSO_LOCALIDADE (
+    id_curso INT PRIMARY KEY,
+    nome_curso VARCHAR(100) NOT NULL,
+    
+    -- IES Attributes
+    id_ies INT NOT NULL,
+    nome_ies VARCHAR(100) NOT NULL,
+    sigla_ies VARCHAR(20),
+    codigo_ies INT NOT NULL,
+    rede_ies VARCHAR(100) NOT NULL,
+    
+    -- MUNICIPIO Attributes
+    id_municipio INT NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    qtd_ies INT CHECK (qtd_ies >= 0),
+    qtd_escolas INT CHECK (qtd_escolas >= 0),
+    media_ideb REAL,
+    media_saeb REAL,
+    media_enade REAL,
+    total_participantes INT CHECK (total_participantes >= 0),
+    
+    -- UF Attributes
+    id_uf INT NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    qtd_habitantes INT CHECK (qtd_habitantes >= 0)
+);
+
+-- ==============================================================================
+-- DIMENSION: DIM_ESCOLA_LOCALIDADE
+-- Merges: ESCOLA, MUNICIPIO, UF
+-- ==============================================================================
+CREATE TABLE DIM_ESCOLA_LOCALIDADE (
+    id_escola INT PRIMARY KEY,
+    nome_escola VARCHAR(100) NOT NULL,
+    cod_escola INTEGER NOT NULL,
+    rede_escola VARCHAR(100) NOT NULL,
+    
+    -- MUNICIPIO Attributes
+    id_municipio INT NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    qtd_ies INT CHECK (qtd_ies >= 0),
+    qtd_escolas INT CHECK (qtd_escolas >= 0),
+    media_ideb REAL,
+    media_saeb REAL,
+    media_enade REAL,
+    total_participantes INT CHECK (total_participantes >= 0),
+    
+    -- UF Attributes
+    id_uf INT NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    qtd_habitantes INT CHECK (qtd_habitantes >= 0)
+);
+
+-- ==============================================================================
+-- FACT: FACT_AVALIACAO
+-- Merges: ANO, ENADE, SAEB, IDEB
+-- ==============================================================================
+CREATE TABLE FACT_AVALIACAO (
+    id_avaliacao INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_curso INT NOT NULL REFERENCES DIM_CURSO_LOCALIDADE(id_curso) ON DELETE CASCADE,
+    ano INT NOT NULL,
+    
+    -- IDEB Metrics
+    rend_1 REAL,
+    rend_2 REAL,
+    rend_3 REAL,
+    rend_4 REAL,
+    ind_rend REAL,
+    nota_ideb REAL,
+    
+    -- ENADE Metrics
+    total_inscritos INT CHECK (total_inscritos >= 0),
+    total_concluintes INT CHECK (total_concluintes >= 0),
+    nota_bruta_ce REAL,
+    nota_padronizada_ce REAL,
+    nota_bruta_fg REAL,
+    nota_padronizada_fg REAL,
+    nota_enade_continua REAL,
+    nota_enade_faixa REAL,
+    
+    -- SAEB Metrics
+    nota_mat REAL,
+    nota_port REAL,
+    nota_padrao REAL
+);
+```

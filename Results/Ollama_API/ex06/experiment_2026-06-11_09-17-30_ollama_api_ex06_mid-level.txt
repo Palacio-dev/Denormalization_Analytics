@@ -1,0 +1,143 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-17-30
+Model: ollama_api
+Prompt: mid-level
+Schema: ex06
+==================================================
+
+{
+  "section_1": {
+    "summary": "The original schema is highly normalized, with separate tables for states (UF), municipalities, schools, institutions (IES), courses, and several assessment metrics (IDEB, ENADE, SAEB). The denormalization strategy consolidates related entities into fewer, wider tables optimized for analytical queries. We introduce a star schema with a central fact table representing assessments by year and educational unit, surrounded by denormalized dimension tables for geographic and institutional data. This reduces join complexity and improves performance for aggregations and BI reporting.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidated the MUNICIPIO, UF tables into a single MUNICIPIO_DIM dimension table to reduce joins when querying municipality-level data along with state-level attributes."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merged ESCOLA and IES into a single EDUCATIONAL_ENTITY_DIM dimension table to simplify querying of all educational institutions regardless of type."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Created a central fact table ASSESSMENT_FACT that combines metrics from IDEB, ENADE, SAEB, and links them to years, educational entities, and municipalities."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Removed the ANO table and embedded the year directly into the fact table to reduce unnecessary normalization."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Removed the CURSO table since it does not contribute to the analytical scope of the assessment metrics and adds unnecessary joins."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added descriptive attributes like nome_uf, sigla_uf directly into MUNICIPIO_DIM to avoid joins with UF table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added derived attribute tipo_entidade ('Escola' or 'IES') in EDUCATIONAL_ENTITY_DIM to distinguish institution types in a unified table."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Moved metrics from IDEB, ENADE, and SAEB tables into the ASSESSMENT_FACT table as fact columns."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage due to denormalization and duplication of descriptive attributes (e.g., nome_uf, nome_municipio) in dimension tables."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Loss of referential integrity enforcement at the database level due to reduced use of foreign keys."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Insert and update operations become more complex due to data duplication, but this is acceptable for read-heavy analytical workloads."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Queries aggregating educational metrics (IDEB, ENADE, SAEB) by state or municipality require joining MUNICIPIO and UF tables. Denormalization into MUNICIPIO_DIM avoids this join."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Comparing performance of schools and higher education institutions (IES) implies a need to query both in unified reports. EDUCATIONAL_ENTITY_DIM supports this."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Analytical dashboards showing trends over time require linking metrics to years. Embedding year in ASSESSMENT_FACT improves performance."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "BI tools often filter or group by institution type (e.g., public/private, school/IES). Embedding such attributes in dimension tables improves usability."
+      }
+    ]
+  }
+}
+
+-- Denormalized Schema DDL
+
+DROP TABLE IF EXISTS MUNICIPIO_DIM CASCADE;
+CREATE TABLE MUNICIPIO_DIM (
+    id_municipio INT PRIMARY KEY,
+    nome_municipio VARCHAR(100) NOT NULL,
+    id_uf INT NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    qtd_habitantes INT CHECK(qtd_habitantes >= 0),
+    qtd_IES INT CHECK (qtd_IES >= 0),
+    qtd_ESCOLAS INT CHECK (qtd_ESCOLAS >= 0),
+    media_ideb REAL,
+    media_saeb REAL,
+    media_enade REAL,
+    total_participantes INT CHECK (total_participantes >= 0)
+);
+
+DROP TABLE IF EXISTS EDUCATIONAL_ENTITY_DIM CASCADE;
+CREATE TABLE EDUCATIONAL_ENTITY_DIM (
+    id_entidade INT PRIMARY KEY,
+    nome_entidade VARCHAR(100) NOT NULL,
+    tipo_entidade VARCHAR(10) CHECK (tipo_entidade IN ('Escola', 'IES')) NOT NULL,
+    cod_entidade INT UNIQUE,
+    rede VARCHAR(100),
+    sigla_ies VARCHAR(20),
+    id_municipio INT NOT NULL REFERENCES MUNICIPIO_DIM(id_municipio)
+);
+
+DROP TABLE IF EXISTS ASSESSMENT_FACT CASCADE;
+CREATE TABLE ASSESSMENT_FACT (
+    id_avaliacao INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ano INT NOT NULL,
+    id_municipio INT NOT NULL REFERENCES MUNICIPIO_DIM(id_municipio),
+    id_entidade INT REFERENCES EDUCATIONAL_ENTITY_DIM(id_entidade),
+    -- IDEB metrics
+    rend_1 REAL,
+    rend_2 REAL,
+    rend_3 REAL,
+    rend_4 REAL,
+    ind_rend REAL,
+    nota_ideb REAL,
+    -- ENADE metrics
+    total_inscritos INT CHECK (total_inscritos >= 0),
+    total_concluintes INT CHECK (total_concluintes >= 0),
+    nota_bruta_ce REAL,
+    nota_padronizada_ce REAL,
+    nota_bruta_fg REAL,
+    nota_padronizada_fg REAL,
+    nota_enade_continua REAL,
+    nota_enade_faixa REAL,
+    -- SAEB metrics
+    nota_mat REAL,
+    nota_port REAL,
+    nota_padrao REAL
+);

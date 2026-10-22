@@ -1,0 +1,95 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-03_23-03-37
+Model: ollama_api
+Prompt: OBT
+Schema: ex10
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy follows the ONE-BIG-TABLE MODEL approach, consolidating all normalized tables into a single denormalized table. This eliminates JOIN operations and foreign key constraints, significantly improving read performance for analytical queries. The strategy involves merging data from all related tables based on their relationships, preserving all original attributes while removing redundant foreign keys.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge all tables (consumo_anual, continente, emissao_g_efeito_estufa, fonte_energia, paises, populacao) into a single table using paises as the central entity, joining all related data by country and year where applicable."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Removed all foreign key constraints and references to create a standalone denormalized table with no relational dependencies."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Preserved all original attributes from source tables, adding table prefixes where column names conflict (e.g., ano from different tables becomes consumo_ano, emissao_ano, populacao_ano)."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added descriptive names for tipo_energia by joining with fonte_energia.nome to preserve semantic meaning."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added continent name (nome_continente) by joining with continente table to preserve geographic context."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Separated ano attribute into consumo_ano, emissao_ano, and populacao_ano to preserve temporal context from different fact tables."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Renamed id_paises to id_country and nome (from paises) to country_name for clearer semantics in the denormalized model."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved read performance at the cost of increased storage space due to data duplication across merged records."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified data model for analytics but increased complexity in ETL process to maintain data consistency."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of update efficiency since changes in reference data (e.g., country names) require updates across multiple rows."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "Q1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical queries aggregating energy consumption by country/continent with emission and population context (e.g., 'Show energy consumption patterns by continent with population and emission data')."
+      },
+      {
+        "decision_id": "Q2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Time-series analysis of energy consumption, emissions, and population growth for specific countries or regions."
+      },
+      {
+        "decision_id": "Q3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Comparative analysis of energy source adoption rates across countries and years."
+      }
+    ]
+  }
+}
+
+CREATE TABLE IF NOT EXISTS public.consumo_energia_denormalized (
+    id_consumo integer NOT NULL,
+    id_country integer NOT NULL,
+    country_name character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    foundation_year integer NOT NULL,
+    id_continente integer NOT NULL,
+    nome_continente character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    consumo_ano integer NOT NULL,
+    porcentagem integer NOT NULL,
+    tipo_energia_id integer NOT NULL,
+    tipo_energia_nome character varying(50)[] COLLATE pg_catalog."default" NOT NULL,
+    emissao_ano integer NOT NULL,
+    quantidade_emitida bigint NOT NULL,
+    populacao_ano integer NOT NULL,
+    quantidade_hab integer NOT NULL,
+    CONSTRAINT consumo_energia_denormalized_pkey PRIMARY KEY (id_consumo)
+);

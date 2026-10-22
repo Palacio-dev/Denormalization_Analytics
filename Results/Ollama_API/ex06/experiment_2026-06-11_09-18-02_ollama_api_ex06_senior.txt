@@ -1,0 +1,184 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-18-02
+Model: ollama_api
+Prompt: senior
+Schema: ex06
+==================================================
+
+{
+  "section_1": {
+    "summary": "The normalized OLTP schema is transformed into a star schema model optimized for analytical workloads. The fact table captures metrics related to education performance across years, institutions, schools, and locations. Dimension tables are created for geography (UF and MUNICIPIO), educational entities (IES, ESCOLA, CURSO), and assessments (IDEB, ENADE, SAEB). To optimize query performance and reduce joins, we flatten the MUNICIPIO hierarchy into a single dimension, absorb reference data from ANO, and create surrogate keys for traceability. We also merge assessment tables into the fact to reduce the number of joins during aggregation queries.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged MUNICIPIO and UF into a single GEOGRAFIA_DIM dimension to eliminate a join in location-based analysis."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Created a central FATO_AVALIACAO_EDUCACIONAL fact table that consolidates metrics from IDEB, ENADE, SAEB, and links to IES, ESCOLA, CURSO, and GEOGRAFIA_DIM."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Absorbed the ANO table into the fact table to avoid a central linking table and improve query performance by denormalizing year and assessment IDs directly into facts."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Converted IDEB, ENADE, and SAEB into attributes within the fact table to reduce join complexity during aggregations."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Created separate dimension tables for IES, ESCOLA, and CURSO to maintain descriptive attributes while enabling filtering and grouping."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added descriptive fields like nome_uf, nome_municipio, nome_ies, nome_escola, nome_curso directly into the fact or dimensions to support self-contained reporting."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added surrogate keys to all dimension tables to support slowly changing dimensions and improve join performance."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Moved all metrics from IDEB, ENADE, and SAEB into the fact table to support fast aggregations without joins."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data redundancy is introduced by duplicating descriptive fields (e.g., nome_uf, nome_municipio) in multiple tables to reduce joins, increasing storage usage slightly."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Fact table grows in width due to inclusion of multiple assessment metrics, which increases memory usage during large aggregations but significantly improves query performance."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Updates and maintenance become more complex due to denormalization; changes in dimension descriptions require updates in multiple places unless managed via ETL."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries comparing average IDEB scores by state and year, requiring fast grouping and aggregation with minimal joins."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting on ENADE performance by course and institution over time, requiring efficient access to course, IES, and ENADE metrics."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyzing school-level SAEB performance in correlation with municipality demographics, requiring a unified geographic dimension."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Drill-down reports from national to state to municipality levels, requiring a flattened geographic hierarchy."
+      }
+    ]
+  }
+}
+
+---
+
+```sql
+-- Denormalized Analytical Schema DDL
+
+-- Dimension: GEOGRAFIA_DIM
+DROP TABLE IF EXISTS GEOGRAFIA_DIM CASCADE;
+CREATE TABLE GEOGRAFIA_DIM (
+    sk_geografia INT PRIMARY KEY,
+    id_municipio INT NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    id_uf INT NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    qtd_habitantes INT CHECK(qtd_habitantes >= 0),
+    qtd_IES INT CHECK (qtd_IES >= 0),
+    qtd_ESCOLAS INT CHECK (qtd_ESCOLAS >= 0),
+    media_ideb REAL,
+    media_saeb REAL,
+    media_enade REAL,
+    total_participantes INT CHECK (total_participantes >= 0)
+);
+
+-- Dimension: IES_DIM
+DROP TABLE IF EXISTS IES_DIM CASCADE;
+CREATE TABLE IES_DIM (
+    sk_ies INT PRIMARY KEY,
+    id_ies INT NOT NULL,
+    nome_ies VARCHAR(100) NOT NULL,
+    sigla_ies VARCHAR(20),
+    codigo_ies INT NOT NULL,
+    rede VARCHAR(100) NOT NULL
+);
+
+-- Dimension: ESCOLA_DIM
+DROP TABLE IF EXISTS ESCOLA_DIM CASCADE;
+CREATE TABLE ESCOLA_DIM (
+    sk_escola INT PRIMARY KEY,
+    id_escola INT NOT NULL,
+    nome_escola VARCHAR(100) NOT NULL,
+    cod_escola INT NOT NULL,
+    rede VARCHAR(100) NOT NULL
+);
+
+-- Dimension: CURSO_DIM
+DROP TABLE IF EXISTS CURSO_DIM CASCADE;
+CREATE TABLE CURSO_DIM (
+    sk_curso INT PRIMARY KEY,
+    id_curso INT NOT NULL,
+    nome_curso VARCHAR(100) NOT NULL
+);
+
+-- Fact Table: FATO_AVALIACAO_EDUCACIONAL
+DROP TABLE IF EXISTS FATO_AVALIACAO_EDUCACIONAL CASCADE;
+CREATE TABLE FATO_AVALIACAO_EDUCACIONAL (
+    sk_geografia INT NOT NULL REFERENCES GEOGRAFIA_DIM(sk_geografia),
+    sk_ies INT REFERENCES IES_DIM(sk_ies),
+    sk_escola INT REFERENCES ESCOLA_DIM(sk_escola),
+    sk_curso INT REFERENCES CURSO_DIM(sk_curso),
+    ano INT NOT NULL,
+
+    -- IDEB Metrics
+    rend_1 REAL,
+    rend_2 REAL,
+    rend_3 REAL,
+    rend_4 REAL,
+    ind_rend REAL,
+    nota_ideb REAL,
+
+    -- ENADE Metrics
+    total_inscritos INT CHECK (total_inscritos >= 0),
+    total_concluintes INT CHECK (total_concluintes >= 0),
+    nota_bruta_ce REAL,
+    nota_padronizada_ce REAL,
+    nota_bruta_fg REAL,
+    nota_padronizada_fg REAL,
+    nota_enade_continua REAL,
+    nota_enade_faixa REAL,
+
+    -- SAEB Metrics
+    nota_mat REAL,
+    nota_port REAL,
+    nota_padrao REAL,
+
+    PRIMARY KEY (sk_geografia, ano, sk_ies, sk_escola, sk_curso)
+);
+
+-- Index Recommendations
+CREATE INDEX idx_fato_ano ON FATO_AVALIACAO_EDUCACIONAL(ano);
+CREATE INDEX idx_fato_geografia ON FATO_AVALIACAO_EDUCACIONAL(sk_geografia);
+CREATE INDEX idx_fato_ies ON FATO_AVALIACAO_EDUCACIONAL(sk_ies);
+CREATE INDEX idx_fato_escola ON FATO_AVALIACAO_EDUCACIONAL(sk_escola);
+CREATE INDEX idx_fato_curso ON FATO_AVALIACAO_EDUCACIONAL(sk_curso);
+
+-- Partitioning Recommendation (by year)
+-- ALTER TABLE FATO_AVALIACAO_EDUCACIONAL PARTITION BY RANGE (ano);
+```

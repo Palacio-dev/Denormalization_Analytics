@@ -1,0 +1,181 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-14-35
+Model: ollama_api
+Prompt: junior
+Schema: ex04
+==================================================
+
+{
+  "section_1": {
+    "summary": "The original schema is highly normalized with 11 tables and multiple foreign key relationships. The goal of denormalization is to reduce the number of joins required for analytical queries by merging related tables and including derived or repeated data. We identified opportunities to merge dimensionally related tables such as country and region, and fact tables like survey with decile data. Additionally, we can combine time-series demographic, economic, and social indicator tables (e.g., demography, employment, education, economy, health) by country and year. This will significantly improve performance for reporting and analytics at the cost of some data redundancy.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge 'country' and 'region' into a single dimension table to eliminate a join when filtering or grouping by region."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge 'survey' and 'decile' into one table since deciles are dependent on survey data and always queried together."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Combine 'demography', 'employment', 'education', 'economy', 'health', and 'population' (aggregated) into a single fact table grouped by country and year for comprehensive time-series analysis."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Denormalize 'life_expectancy' into the main demographic fact table by gender and year, removing the need for a separate table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added 'region_name' directly into the country dimension table from the region table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added decile-related fields (decile_value, decile_name) as arrays or repeated columns in the survey table."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Aggregated population counts by age/gender groups and added them as summary columns in the main fact table."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Included life expectancy values by gender as separate columns in the main demographic fact table."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved query performance for analytics at the cost of increased storage due to data duplication and wider tables."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified data model for BI tools and reporting, but reduced flexibility for ad-hoc queries that may require different levels of granularity."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Loss of normalization benefits like update consistency and minimal redundancy, which may complicate ETL processes and data maintenance."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical queries often aggregate poverty and inequality metrics (from survey) alongside demographic and economic indicators (from demography, economy, etc.) grouped by region or country."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting dashboards typically display time-series trends for a country combining education, employment, health, and population data across years."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Users frequently filter or group results by region, requiring a join between country and region tables in most queries."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries analyzing income distribution use both survey-level data and decile breakdowns, which are tightly coupled."
+      }
+    ]
+  }
+}
+
+```sql
+-- Denormalized schema DDL script
+
+-- 1. Country Dimension Table
+CREATE TABLE IF NOT EXISTS public.dim_country (
+    country_code character varying NOT NULL PRIMARY KEY,
+    country_name character varying,
+    region_code character varying NOT NULL,
+    region_name character varying NOT NULL
+);
+
+-- 2. Survey Fact Table with Deciles
+CREATE TABLE IF NOT EXISTS public.fact_survey (
+    id_survey serial NOT NULL PRIMARY KEY,
+    country_code character varying NOT NULL,
+    survey_year integer,
+    welfare_type character varying,
+    survey_acronym character varying,
+    survey_comparability integer,
+    comparable_spell character varying,
+    poverty_line double precision,
+    headcount double precision,
+    poverty_gap double precision,
+    poverty_severity double precision,
+    gini double precision,
+    reporting_pop integer,
+    reporting_pce double precision,
+    distribution_type character varying,
+    spl double precision,
+    survey_coverage character varying,
+    reporting_level character varying,
+    decile_1_value double precision,
+    decile_1_name character varying,
+    decile_2_value double precision,
+    decile_2_name character varying,
+    decile_3_value double precision,
+    decile_3_name character varying,
+    decile_4_value double precision,
+    decile_4_name character varying,
+    decile_5_value double precision,
+    decile_5_name character varying,
+    decile_6_value double precision,
+    decile_6_name character varying,
+    decile_7_value double precision,
+    decile_7_name character varying,
+    decile_8_value double precision,
+    decile_8_name character varying,
+    decile_9_value double precision,
+    decile_9_name character varying,
+    decile_10_value double precision,
+    decile_10_name character varying
+);
+
+-- 3. Time-Series Country Fact Table (Demographics, Economy, Education, Employment, Health)
+CREATE TABLE IF NOT EXISTS public.fact_country_year (
+    id_fact serial NOT NULL PRIMARY KEY,
+    country_code character varying NOT NULL,
+    year integer NOT NULL,
+    pop_density double precision,
+    urban_pop double precision,
+    rural_pop double precision,
+    net_migration double precision,
+    death_rate double precision,
+    birth_rate double precision,
+    child_emp double precision,
+    unemp double precision,
+    vulnerable_emp double precision,
+    part_time double precision,
+    employers double precision,
+    labor_force_total double precision,
+    labor_force_fem double precision,
+    child_out_of_school double precision,
+    progression_to_sec double precision,
+    expenditure_education double precision,
+    preprim_enroll double precision,
+    prim_enrol double precision,
+    sec_enrol double precision,
+    terti_enrol double precision,
+    gdp double precision,
+    inflation double precision,
+    tax_revenue double precision,
+    hospital_beds double precision,
+    physicians double precision,
+    expenditure_health double precision,
+    pop_male_0_14 double precision,
+    pop_male_15_64 double precision,
+    pop_male_65_plus double precision,
+    pop_female_0_14 double precision,
+    pop_female_15_64 double precision,
+    pop_female_65_plus double precision,
+    life_expectancy_male double precision,
+    life_expectancy_female double precision
+);
+```

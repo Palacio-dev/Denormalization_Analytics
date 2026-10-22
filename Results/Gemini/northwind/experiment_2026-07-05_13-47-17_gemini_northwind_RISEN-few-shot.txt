@@ -1,0 +1,194 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-47-17
+Model: gemini
+Prompt: RISEN-few-shot
+Schema: northwind
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transforms the highly normalized Northwind-style snowflake schema into an analytical model optimized for heavy read queries. The core sales process is materialized into a single wide table (`sales_analytical_dataset`) by collapsing 8 related tables (`order_details`, `orders`, `products`, `categories`, `suppliers`, `customers`, `employees`, `shippers`). This eliminates expensive multi-way joins for the most frequent analytical queries. Many-to-many relationships (`employee_territories` and `customer_demographics`) are flattened into dedicated denormalized bridge tables to prevent cartesian explosion in the main sales fact table while preserving all original attributes.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapsing Relations & Adding Redundant Attributes: Merged `order_details`, `orders`, `products`, `categories`, `suppliers`, `customers`, `employees`, and `shippers` into a single wide table named `sales_analytical_dataset`."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Collapsing Relations: Merged `employee_territories`, `territories`, and `region` into a single table `employee_territories_denormalized` to handle the many-to-many cardinality without distorting the grain of the main sales table."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Collapsing Relations: Merged `customer_customer_demo` and `customer_demographics` into `customer_demographics_denormalized`."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Standalone Dimension: Retained `us_states` as `us_states_denormalized` since it acts as an independent lookup without explicit foreign keys in the original schema."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Adding Derived Attributes: Added `sales_amount` to `sales_analytical_dataset`, precomputed as `order_quantity * order_unit_price * (1 - order_discount)` to speed up revenue aggregations."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Attribute Renaming for Disambiguation: Prefixed shared column names with their source entity names (e.g., `company_name` became `customer_company_name`, `supplier_company_name`, and `shipper_company_name`) to ensure each column name appears exactly once per table."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage Footprint: The wide table design significantly increases data redundancy, as customer, employee, and product details are repeated for every single order line."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Slower Updates/Inserts: Modifying a dimension attribute (e.g., a customer's address) now requires updating potentially thousands of rows in the denormalized sales table instead of a single row in a normalized customer table."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1",
+        "query": "SELECT category_name, supplier_country, SUM(sales_amount) AS total_revenue FROM sales_analytical_dataset GROUP BY category_name, supplier_country ORDER BY total_revenue DESC;"
+      },
+      {
+        "decision_id": "D2",
+        "query": "SELECT s.employee_last_name, et.region_description, COUNT(DISTINCT s.order_id) as total_orders FROM sales_analytical_dataset s JOIN employee_territories_denormalized et ON s.employee_id = et.employee_id GROUP BY s.employee_last_name, et.region_description;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+BEGIN;
+
+-- 1. Main Wide Table for Sales Analytics (Collapsing 8 tables)
+DROP TABLE IF EXISTS public.sales_analytical_dataset CASCADE;
+CREATE TABLE IF NOT EXISTS public.sales_analytical_dataset
+(
+    -- Keys
+    order_id smallint,
+    product_id smallint,
+    customer_id character varying(5) COLLATE pg_catalog."default",
+    employee_id smallint,
+    shipper_id smallint,
+    supplier_id smallint,
+    category_id smallint,
+    
+    -- Orders attributes
+    order_date date,
+    required_date date,
+    shipped_date date,
+    freight real,
+    ship_name character varying(40) COLLATE pg_catalog."default",
+    ship_address character varying(60) COLLATE pg_catalog."default",
+    ship_city character varying(15) COLLATE pg_catalog."default",
+    ship_region character varying(15) COLLATE pg_catalog."default",
+    ship_postal_code character varying(10) COLLATE pg_catalog."default",
+    ship_country character varying(15) COLLATE pg_catalog."default",
+    
+    -- Order Details attributes & Derived attributes
+    order_unit_price real,
+    order_quantity smallint,
+    order_discount real,
+    sales_amount real, -- Derived: order_quantity * order_unit_price * (1 - order_discount)
+    
+    -- Products attributes
+    product_name character varying(40) COLLATE pg_catalog."default",
+    product_quantity_per_unit character varying(20) COLLATE pg_catalog."default",
+    product_unit_price real,
+    product_units_in_stock smallint,
+    product_units_on_order smallint,
+    product_reorder_level smallint,
+    product_discontinued integer,
+    
+    -- Categories attributes
+    category_name character varying(15) COLLATE pg_catalog."default",
+    category_description text COLLATE pg_catalog."default",
+    category_picture bytea,
+    
+    -- Suppliers attributes
+    supplier_company_name character varying(40) COLLATE pg_catalog."default",
+    supplier_contact_name character varying(30) COLLATE pg_catalog."default",
+    supplier_contact_title character varying(30) COLLATE pg_catalog."default",
+    supplier_address character varying(60) COLLATE pg_catalog."default",
+    supplier_city character varying(15) COLLATE pg_catalog."default",
+    supplier_region character varying(15) COLLATE pg_catalog."default",
+    supplier_postal_code character varying(10) COLLATE pg_catalog."default",
+    supplier_country character varying(15) COLLATE pg_catalog."default",
+    supplier_phone character varying(24) COLLATE pg_catalog."default",
+    supplier_fax character varying(24) COLLATE pg_catalog."default",
+    supplier_homepage text COLLATE pg_catalog."default",
+    
+    -- Customers attributes
+    customer_company_name character varying(40) COLLATE pg_catalog."default",
+    customer_contact_name character varying(30) COLLATE pg_catalog."default",
+    customer_contact_title character varying(30) COLLATE pg_catalog."default",
+    customer_address character varying(60) COLLATE pg_catalog."default",
+    customer_city character varying(15) COLLATE pg_catalog."default",
+    customer_region character varying(15) COLLATE pg_catalog."default",
+    customer_postal_code character varying(10) COLLATE pg_catalog."default",
+    customer_country character varying(15) COLLATE pg_catalog."default",
+    customer_phone character varying(24) COLLATE pg_catalog."default",
+    customer_fax character varying(24) COLLATE pg_catalog."default",
+    
+    -- Employees attributes
+    employee_last_name character varying(20) COLLATE pg_catalog."default",
+    employee_first_name character varying(10) COLLATE pg_catalog."default",
+    employee_title character varying(30) COLLATE pg_catalog."default",
+    employee_title_of_courtesy character varying(25) COLLATE pg_catalog."default",
+    employee_birth_date date,
+    employee_hire_date date,
+    employee_address character varying(60) COLLATE pg_catalog."default",
+    employee_city character varying(15) COLLATE pg_catalog."default",
+    employee_region character varying(15) COLLATE pg_catalog."default",
+    employee_postal_code character varying(10) COLLATE pg_catalog."default",
+    employee_country character varying(15) COLLATE pg_catalog."default",
+    employee_home_phone character varying(24) COLLATE pg_catalog."default",
+    employee_extension character varying(4) COLLATE pg_catalog."default",
+    employee_photo bytea,
+    employee_notes text COLLATE pg_catalog."default",
+    employee_reports_to smallint,
+    employee_photo_path character varying(255) COLLATE pg_catalog."default",
+    
+    -- Shippers attributes
+    shipper_company_name character varying(40) COLLATE pg_catalog."default",
+    shipper_phone character varying(24) COLLATE pg_catalog."default"
+);
+
+-- 2. Denormalized Employee Territories (Collapsing employee_territories, territories, region)
+DROP TABLE IF EXISTS public.employee_territories_denormalized CASCADE;
+CREATE TABLE IF NOT EXISTS public.employee_territories_denormalized
+(
+    employee_id smallint,
+    territory_id character varying(20) COLLATE pg_catalog."default",
+    territory_description character varying(60) COLLATE pg_catalog."default",
+    region_id smallint,
+    region_description character varying(60) COLLATE pg_catalog."default"
+);
+
+-- 3. Denormalized Customer Demographics (Collapsing customer_customer_demo, customer_demographics)
+DROP TABLE IF EXISTS public.customer_demographics_denormalized CASCADE;
+CREATE TABLE IF NOT EXISTS public.customer_demographics_denormalized
+(
+    customer_id character varying(5) COLLATE pg_catalog."default",
+    customer_type_id character varying(5) COLLATE pg_catalog."default",
+    customer_desc text COLLATE pg_catalog."default"
+);
+
+-- 4. US States Denormalized (Standalone lookup preserved)
+DROP TABLE IF EXISTS public.us_states_denormalized CASCADE;
+CREATE TABLE IF NOT EXISTS public.us_states_denormalized
+(
+    state_id smallint,
+    state_name character varying(100) COLLATE pg_catalog."default",
+    state_abbr character varying(2) COLLATE pg_catalog."default",
+    state_region character varying(50) COLLATE pg_catalog."default"
+);
+
+COMMIT;
+```

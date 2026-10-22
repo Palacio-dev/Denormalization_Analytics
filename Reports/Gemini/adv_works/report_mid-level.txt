@@ -1,0 +1,690 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 68
+  - Total Attributes: 279
+    * department: 4 columns
+    * employee: 15 columns
+    * employeedepartmenthistory: 6 columns
+    * employeepayhistory: 5 columns
+    * jobcandidate: 4 columns
+    * shift: 5 columns
+    * address: 9 columns
+    * addresstype: 4 columns
+    * businessentity: 3 columns
+    * businessentityaddress: 5 columns
+    * businessentitycontact: 5 columns
+    * contacttype: 3 columns
+    * countryregion: 3 columns
+    * emailaddress: 5 columns
+    * password: 5 columns
+    * person: 13 columns
+    * personphone: 4 columns
+    * phonenumbertype: 3 columns
+    * stateprovince: 8 columns
+    * billofmaterials: 9 columns
+    * culture: 3 columns
+    * document: 13 columns
+    * illustration: 3 columns
+    * location: 5 columns
+    * product: 25 columns
+    * productcategory: 4 columns
+    * productcosthistory: 5 columns
+    * productdescription: 4 columns
+    * productdocument: 3 columns
+    * productinventory: 7 columns
+    * productlistpricehistory: 5 columns
+    * productmodel: 6 columns
+    * productmodelillustration: 3 columns
+    * productmodelproductdescriptionculture: 4 columns
+    * productphoto: 6 columns
+    * productproductphoto: 4 columns
+    * productreview: 8 columns
+    * productsubcategory: 5 columns
+    * scrapreason: 3 columns
+    * transactionhistory: 9 columns
+    * transactionhistoryarchive: 9 columns
+    * unitmeasure: 3 columns
+    * workorder: 9 columns
+    * workorderrouting: 12 columns
+    * productvendor: 11 columns
+    * purchaseorderdetail: 9 columns
+    * purchaseorderheader: 12 columns
+    * shipmethod: 6 columns
+    * vendor: 8 columns
+    * countryregioncurrency: 3 columns (junction table - excluded from attribute analysis)
+    * creditcard: 6 columns
+    * currency: 3 columns
+    * currencyrate: 7 columns
+    * customer: 6 columns
+    * personcreditcard: 3 columns
+    * salesorderdetail: 10 columns
+    * salesorderheader: 25 columns
+    * salesorderheadersalesreason: 3 columns (junction table - excluded from attribute analysis)
+    * salesperson: 9 columns
+    * salespersonquotahistory: 5 columns
+    * salesreason: 4 columns
+    * salestaxrate: 7 columns
+    * salesterritory: 10 columns
+    * salesterritoryhistory: 6 columns
+    * shoppingcartitem: 6 columns
+    * specialoffer: 11 columns
+    * specialofferproduct: 4 columns
+    * store: 6 columns
+
+  Note: 2 junction table(s) detected and excluded from attribute analysis:
+    - countryregioncurrency
+    - salesorderheadersalesreason
+
+Denormalized Model:
+  - Tables: 10
+  - Total Attributes: 105
+    * dim_date: 10 columns
+    * dim_product: 18 columns
+    * dim_customer: 14 columns
+    * dim_employee: 14 columns
+    * dim_vendor: 12 columns
+    * dim_sales_territory: 5 columns
+    * dim_promotion: 10 columns
+    * fact_sales: 16 columns
+    * fact_purchases: 12 columns
+    * fact_inventory: 8 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Normalized model has MORE attributes (105 vs 279)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: departmentid (SERIAL) -> department_group (VARCHAR(50))
+  - Type mismatch: name ("NAME") -> day_of_week (INTEGER)
+  - Type mismatch: groupname ("NAME") -> territory_name (VARCHAR(50))
+  - Type mismatch: nationalidnumber (CHARACTER) -> national_id_number (VARCHAR(15))
+  - Type mismatch: jobtitle (CHARACTER) -> job_title (VARCHAR(50))
+  - Type mismatch: maritalstatus (CHARACTER(1)) -> marital_status (CHAR(1))
+  - Type mismatch: gender (CHARACTER(1)) -> gender (CHAR(1))
+  - Type mismatch: salariedflag ("FLAG") -> salaried_flag (BOOLEAN)
+  - Type mismatch: currentflag ("FLAG") -> country_region_name (VARCHAR(50))
+  - Type mismatch: startdate (DATE) -> customer_name (VARCHAR(150))
+  - Type mismatch: enddate (DATE) -> vendor_key (SERIAL)
+  - Type mismatch: rate (NUMERIC) -> date_key (INTEGER)
+  - Type mismatch: shiftid (SERIAL) -> shift_name (VARCHAR(50))
+  - Type mismatch: name ("NAME") -> month_name (VARCHAR(20))
+  - Type mismatch: starttime (TIME) -> subcategory_name (VARCHAR(50))
+  - Type mismatch: endtime (TIME) -> vendor_name (VARCHAR(50))
+  - Type mismatch: addressid (SERIAL) -> address_line1 (VARCHAR(60))
+  - Type mismatch: addressline1 (CHARACTER) -> address_line1 (VARCHAR(60))
+  - Type mismatch: addressline2 (CHARACTER) -> address_line2 (VARCHAR(60))
+  - Type mismatch: city (CHARACTER) -> city (VARCHAR(30))
+  - Type mismatch: postalcode (CHARACTER) -> postal_code (VARCHAR(15))
+  - Type mismatch: name ("NAME") -> day_name (VARCHAR(20))
+  - Type mismatch: businessentityid (SERIAL) -> business_entity_id (INTEGER)
+  - Type mismatch: countryregioncode (CHARACTER) -> country_region_name (VARCHAR(50))
+  - Type mismatch: emailaddress (CHARACTER) -> email_address (VARCHAR(50))
+  - Type mismatch: persontype (CHARACTER(2)) -> territory_key (SERIAL)
+  - Type mismatch: title (CHARACTER) -> city (VARCHAR(30))
+  - Type mismatch: firstname ("NAME") -> first_name (VARCHAR(50))
+  - Type mismatch: middlename ("NAME") -> model_name (VARCHAR(50))
+  - Type mismatch: lastname ("NAME") -> last_name (VARCHAR(50))
+  - Type mismatch: phonenumber ("PHONE") -> phone_number (VARCHAR(25))
+  - Type mismatch: stateprovinceid (SERIAL) -> state_province_name (VARCHAR(50))
+  - Type mismatch: stateprovincecode (CHARACTER(3)) -> state_province_name (VARCHAR(50))
+  - Type mismatch: filename (CHARACTER) -> category_name (VARCHAR(50))
+  - Type mismatch: document (BYTEA) -> is_current (BOOLEAN)
+  - Type mismatch: documentnode (CHARACTER) -> department_name (VARCHAR(50))
+  - Type mismatch: costrate (NUMERIC) -> customer_key (SERIAL)
+  - Type mismatch: productnumber (CHARACTER) -> product_number (VARCHAR(25))
+  - Type mismatch: color (CHARACTER) -> color (VARCHAR(15))
+  - Type mismatch: size (CHARACTER) -> size (VARCHAR(5))
+  - Type mismatch: productline (CHARACTER(2)) -> product_line (VARCHAR(2))
+  - Type mismatch: class (CHARACTER(2)) -> class (VARCHAR(2))
+  - Type mismatch: style (CHARACTER(2)) -> style (VARCHAR(2))
+  - Type mismatch: description (CHARACTER) -> description (VARCHAR(255))
+  - Type mismatch: quantity (SMALLINT) -> quarter (INTEGER)
+  - Type mismatch: "primary" ("FLAG") -> territory_group (VARCHAR(50))
+  - Type mismatch: reviewername ("NAME") -> territory_name (VARCHAR(50))
+  - Type mismatch: transactionid (SERIAL) -> transaction_id (INTEGER)
+  - Type mismatch: transactiontype (CHARACTER(1)) -> transaction_type (CHAR(1))
+  - Type mismatch: workorderid (SERIAL) -> territory_group (VARCHAR(50))
+  - Type mismatch: orderqty (INTEGER) -> order_qty (SMALLINT)
+  - Type mismatch: duedate (TIMESTAMP) -> full_date (DATE)
+  - Type mismatch: productid (INTEGER) -> product_name (VARCHAR(50))
+  - Type mismatch: minorderqty (INTEGER) -> employee_key (SERIAL)
+  - Type mismatch: purchaseorderdetailid (SERIAL) -> purchase_order_detail_id (INTEGER)
+  - Type mismatch: purchaseorderid (SERIAL) -> purchase_order_id (INTEGER)
+  - Type mismatch: accountnumber ("ACCOUNTNUMBER") -> account_number (VARCHAR(15))
+  - Type mismatch: preferredvendorstatus ("FLAG") -> preferred_vendor_status (BOOLEAN)
+  - Type mismatch: activeflag ("FLAG") -> active_flag (BOOLEAN)
+  - Type mismatch: cardtype (CHARACTER) -> customer_type (VARCHAR(15))
+  - Type mismatch: expmonth (SMALLINT) -> day_of_month (INTEGER)
+  - Type mismatch: expyear (SMALLINT) -> year (INTEGER)
+  - Type mismatch: currencycode (CHARACTER(3)) -> country_region_code (VARCHAR(3))
+  - Type mismatch: customerid (SERIAL) -> customer_id (INTEGER)
+  - Type mismatch: storeid (INTEGER) -> is_weekend (BOOLEAN)
+  - Type mismatch: salesorderdetailid (SERIAL) -> sales_order_detail_id (INTEGER)
+  - Type mismatch: salesorderid (SERIAL) -> sales_order_id (INTEGER)
+  - Type mismatch: totaldue (NUMERIC) -> postal_code (VARCHAR(15))
+  - Type mismatch: bonus (NUMERIC) -> month (INTEGER)
+  - Type mismatch: salesreasonid (SERIAL) -> salesperson_key (INTEGER)
+  - Type mismatch: territoryid (SERIAL) -> territory_id (INTEGER)
+  - Type mismatch: specialofferid (SERIAL) -> special_offer_id (INTEGER)
+  - Type mismatch: type (CHARACTER) -> type (VARCHAR(50))
+  - Type mismatch: category (CHARACTER) -> category (VARCHAR(50))
+--------------------------------------------------------------------------------
+Completeness Ratio:        0.38
+Data Type Preservation:    0.30
+Avg Levenshtein Distance:  3.44
+BLEU Score:                0.02
+ROUGE-1:                   0.14
+METEOR Score:              0.03
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: fact_sales, fact_purchases, fact_inventory
+Dimension Tables Detected: dim_date, dim_product, dim_customer, dim_employee, dim_vendor, dim_sales_territory, dim_promotion
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected 3 Fact tables. Evaluating as a GALAXY SCHEMA.
+  - FACT FK VIOLATION: Foreign Key 'ship_date_key' in Fact 'fact_sales' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'ship_date_key' in Fact 'fact_purchases' allows NULL values.
+  - DIMENSION NULL WARNING: Attribute 'color' in 'dim_product' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'size' in 'dim_product' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'weight' in 'dim_product' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'product_line' in 'dim_product' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'class' in 'dim_product' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'style' in 'dim_product' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'subcategory_name' in 'dim_product' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'category_name' in 'dim_product' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'model_name' in 'dim_product' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'sell_start_date' in 'dim_product' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'sell_end_date' in 'dim_product' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'is_current' in 'dim_product' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'email_address' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'phone_number' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'address_line1' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'address_line2' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'city' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'state_province_name' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'country_region_name' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'postal_code' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'territory_name' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'territory_group' in 'dim_customer' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'national_id_number' in 'dim_employee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'job_title' in 'dim_employee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'birth_date' in 'dim_employee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'marital_status' in 'dim_employee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'gender' in 'dim_employee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'hire_date' in 'dim_employee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'salaried_flag' in 'dim_employee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'first_name' in 'dim_employee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'last_name' in 'dim_employee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'department_name' in 'dim_employee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'department_group' in 'dim_employee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'shift_name' in 'dim_employee' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'account_number' in 'dim_vendor' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'vendor_name' in 'dim_vendor' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'credit_rating' in 'dim_vendor' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'preferred_vendor_status' in 'dim_vendor' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'active_flag' in 'dim_vendor' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'address_line1' in 'dim_vendor' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'city' in 'dim_vendor' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'state_province_name' in 'dim_vendor' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'country_region_name' in 'dim_vendor' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'postal_code' in 'dim_vendor' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'max_qty' in 'dim_promotion' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * fact_sales: 9 Numeric, 0 Text
+  * fact_purchases: 7 Numeric, 0 Text
+  * fact_inventory: 5 Numeric, 1 Text
+  * dim_date: 6 Numeric, 4 Text
+  * dim_product: 5 Numeric, 13 Text
+  * dim_customer: 2 Numeric, 12 Text
+  * dim_employee: 2 Numeric, 12 Text
+  * dim_vendor: 3 Numeric, 9 Text
+  * dim_sales_territory: 2 Numeric, 3 Text
+  * dim_promotion: 5 Numeric, 5 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  "group" "primary" accountnumber accountnumber activeflag actualcost actualcost actualcost actualenddate actualresourcehrs actualstartdate additionalcontactinfo addressid addressline1 addressline2 addresstypeid availability averageleadtime averagerate billofmaterialsid bin birthdate bomlevel bonus businessentityid businessentityid businessentityid businessentityid cardnumber cardtype carriertrackingnumber catalogdescription category changenumber city class color comment comments commissionpct contacttypeid costlastyear costrate costytd countryregioncode creditcardapprovalcode creditcardid creditrating cultureid currencycode currencyratedate currencyrateid currentflag customerid daystomanufacture demographics demographics departmentid description description diagram discontinueddate discountpct document documentnode documentnode documentsummary duedate duedate duedate emailaddress emailaddress emailaddressid emailpromotion enddate enddate enddate enddate enddate enddate enddate endofdayrate endtime expmonth expyear fileextension filename finishedgoodsflag firstname folderflag freight freight gender groupname hiredate illustrationid illustrationid instructions isonlystateprovinceflag jobcandidateid jobtitle largephoto largephotofilename lastname lastreceiptcost lastreceiptdate listprice listprice locationid loginid makeflag maritalstatus maxorderqty maxqty middlename minorderqty minqty name name name name name name name name name name name name name name name name name name name name name name namestyle nationalidnumber onlineorderflag onorderqty operationsequence orderdate orderdate orderqty orderqty orderqty organizationnode passwordhash passwordsalt payfrequency perassemblyqty personid persontype phonenumber phonenumbertypeid plannedcost postalcode preferredvendorstatus productcategoryid productdescriptionid productdescriptionid productid productid productid productline productmodelid productmodelid productmodelid productmodelid productnumber productphotoid productphotoid productreviewid productsubcategoryid purchaseorderdetailid purchaseorderid purchaseordernumber purchasingwebserviceurl quantity quantity quantity quantity quotadate rate ratechangedate rating reasontype receivedqty referenceorderid referenceorderid referenceorderlineid referenceorderlineid rejectedqty reorderpoint resume reviewdate reviewername revision revisionnumber revisionnumber safetystocklevel salariedflag saleslastyear saleslastyear salesorderdetailid salesorderid salesquota salesquota salesreasonid salestaxrateid salesytd salesytd scheduledenddate scheduledstartdate scrappedqty scrapreasonid sellenddate sellstartdate shelf shiftid shipbase shipdate shipdate shipmethodid shiprate shoppingcartid shoppingcartitemid sickleavehours size spatiallocation specialofferid standardcost standardcost standardprice startdate startdate startdate startdate startdate startdate startdate starttime stateprovincecode stateprovinceid status status status storeid style subtotal subtotal suffix taxamt taxamt taxrate taxtype territoryid thumbnailphoto thumbnailphotofilename title title totaldue transactiondate transactiondate transactionid transactionid transactiontype transactiontype type unitmeasurecode unitprice unitprice unitpricediscount vacationhours weight workorderid
+
+Denormalized Model (Combined Text):
+  account_number active_flag actual_cost address_line1 address_line1 address_line2 allocated_freight allocated_tax_amt birth_date business_entity_id business_entity_id category category_name city city class color country_region_code country_region_name country_region_name credit_rating customer_id customer_key customer_name customer_type date_key day_name day_of_month day_of_week department_group department_name description discount_pct email_address employee_key end_date first_name full_date gender hire_date is_current is_weekend job_title last_name line_total line_total list_price marital_status max_qty min_qty model_name month month_name national_id_number order_qty order_qty phone_number postal_code postal_code preferred_vendor_status product_id product_key product_line product_name product_number promotion_key purchase_order_detail_id purchase_order_id quantity quarter received_qty reference_order_id reference_order_line_id rejected_qty salaried_flag sales_order_detail_id sales_order_id salesperson_key sell_end_date sell_start_date shift_name size special_offer_id standard_cost start_date state_province_name state_province_name style subcategory_name territory_group territory_group territory_id territory_key territory_name territory_name transaction_id transaction_type type unit_price unit_price unit_price_discount vendor_key vendor_name weight year
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 105 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    departmentid SERIAL
+  Denormalized:  department_group VARCHAR(50)
+
+Pair 2:
+  Relational:    name "NAME"
+  Denormalized:  day_of_week INTEGER
+
+Pair 3:
+  Relational:    groupname "NAME"
+  Denormalized:  territory_name VARCHAR(50)
+
+Pair 4:
+  Relational:    businessentityid INTEGER
+  Denormalized:  business_entity_id INTEGER
+
+Pair 5:
+  Relational:    nationalidnumber CHARACTER
+  Denormalized:  national_id_number VARCHAR(15)
+
+Pair 6:
+  Relational:    jobtitle CHARACTER
+  Denormalized:  job_title VARCHAR(50)
+
+Pair 7:
+  Relational:    birthdate DATE
+  Denormalized:  birth_date DATE
+
+Pair 8:
+  Relational:    maritalstatus CHARACTER(1)
+  Denormalized:  marital_status CHAR(1)
+
+Pair 9:
+  Relational:    gender CHARACTER(1)
+  Denormalized:  gender CHAR(1)
+
+Pair 10:
+  Relational:    hiredate DATE
+  Denormalized:  hire_date DATE
+
+Pair 11:
+  Relational:    salariedflag "FLAG"
+  Denormalized:  salaried_flag BOOLEAN
+
+Pair 12:
+  Relational:    currentflag "FLAG"
+  Denormalized:  country_region_name VARCHAR(50)
+
+Pair 13:
+  Relational:    startdate DATE
+  Denormalized:  customer_name VARCHAR(150)
+
+Pair 14:
+  Relational:    enddate DATE
+  Denormalized:  vendor_key SERIAL
+
+Pair 15:
+  Relational:    rate NUMERIC
+  Denormalized:  date_key INTEGER
+
+Pair 16:
+  Relational:    shiftid SERIAL
+  Denormalized:  shift_name VARCHAR(50)
+
+Pair 17:
+  Relational:    name "NAME"
+  Denormalized:  month_name VARCHAR(20)
+
+Pair 18:
+  Relational:    starttime TIME
+  Denormalized:  subcategory_name VARCHAR(50)
+
+Pair 19:
+  Relational:    endtime TIME
+  Denormalized:  vendor_name VARCHAR(50)
+
+Pair 20:
+  Relational:    addressid SERIAL
+  Denormalized:  address_line1 VARCHAR(60)
+
+Pair 21:
+  Relational:    addressline1 CHARACTER
+  Denormalized:  address_line1 VARCHAR(60)
+
+Pair 22:
+  Relational:    addressline2 CHARACTER
+  Denormalized:  address_line2 VARCHAR(60)
+
+Pair 23:
+  Relational:    city CHARACTER
+  Denormalized:  city VARCHAR(30)
+
+Pair 24:
+  Relational:    postalcode CHARACTER
+  Denormalized:  postal_code VARCHAR(15)
+
+Pair 25:
+  Relational:    name "NAME"
+  Denormalized:  day_name VARCHAR(20)
+
+Pair 26:
+  Relational:    businessentityid SERIAL
+  Denormalized:  business_entity_id INTEGER
+
+Pair 27:
+  Relational:    countryregioncode CHARACTER
+  Denormalized:  country_region_name VARCHAR(50)
+
+Pair 28:
+  Relational:    emailaddress CHARACTER
+  Denormalized:  email_address VARCHAR(50)
+
+Pair 29:
+  Relational:    persontype CHARACTER(2)
+  Denormalized:  territory_key SERIAL
+
+Pair 30:
+  Relational:    title CHARACTER
+  Denormalized:  city VARCHAR(30)
+
+Pair 31:
+  Relational:    firstname "NAME"
+  Denormalized:  first_name VARCHAR(50)
+
+Pair 32:
+  Relational:    middlename "NAME"
+  Denormalized:  model_name VARCHAR(50)
+
+Pair 33:
+  Relational:    lastname "NAME"
+  Denormalized:  last_name VARCHAR(50)
+
+Pair 34:
+  Relational:    phonenumber "PHONE"
+  Denormalized:  phone_number VARCHAR(25)
+
+Pair 35:
+  Relational:    stateprovinceid SERIAL
+  Denormalized:  state_province_name VARCHAR(50)
+
+Pair 36:
+  Relational:    stateprovincecode CHARACTER(3)
+  Denormalized:  state_province_name VARCHAR(50)
+
+Pair 37:
+  Relational:    startdate TIMESTAMP
+  Denormalized:  start_date TIMESTAMP
+
+Pair 38:
+  Relational:    enddate TIMESTAMP
+  Denormalized:  end_date TIMESTAMP
+
+Pair 39:
+  Relational:    filename CHARACTER
+  Denormalized:  category_name VARCHAR(50)
+
+Pair 40:
+  Relational:    document BYTEA
+  Denormalized:  is_current BOOLEAN
+
+Pair 41:
+  Relational:    documentnode CHARACTER
+  Denormalized:  department_name VARCHAR(50)
+
+Pair 42:
+  Relational:    locationid SERIAL
+  Denormalized:  promotion_key SERIAL
+
+Pair 43:
+  Relational:    costrate NUMERIC
+  Denormalized:  customer_key SERIAL
+
+Pair 44:
+  Relational:    productid SERIAL
+  Denormalized:  product_key SERIAL
+
+Pair 45:
+  Relational:    productnumber CHARACTER
+  Denormalized:  product_number VARCHAR(25)
+
+Pair 46:
+  Relational:    color CHARACTER
+  Denormalized:  color VARCHAR(15)
+
+Pair 47:
+  Relational:    standardcost NUMERIC
+  Denormalized:  standard_cost NUMERIC
+
+Pair 48:
+  Relational:    listprice NUMERIC
+  Denormalized:  list_price NUMERIC
+
+Pair 49:
+  Relational:    size CHARACTER
+  Denormalized:  size VARCHAR(5)
+
+Pair 50:
+  Relational:    weight NUMERIC(8, 2)
+  Denormalized:  weight NUMERIC(8, 2)
+
+Pair 51:
+  Relational:    productline CHARACTER(2)
+  Denormalized:  product_line VARCHAR(2)
+
+Pair 52:
+  Relational:    class CHARACTER(2)
+  Denormalized:  class VARCHAR(2)
+
+Pair 53:
+  Relational:    style CHARACTER(2)
+  Denormalized:  style VARCHAR(2)
+
+Pair 54:
+  Relational:    sellstartdate TIMESTAMP
+  Denormalized:  sell_start_date TIMESTAMP
+
+Pair 55:
+  Relational:    sellenddate TIMESTAMP
+  Denormalized:  sell_end_date TIMESTAMP
+
+Pair 56:
+  Relational:    description CHARACTER
+  Denormalized:  description VARCHAR(255)
+
+Pair 57:
+  Relational:    quantity SMALLINT
+  Denormalized:  quarter INTEGER
+
+Pair 58:
+  Relational:    "primary" "FLAG"
+  Denormalized:  territory_group VARCHAR(50)
+
+Pair 59:
+  Relational:    reviewername "NAME"
+  Denormalized:  territory_name VARCHAR(50)
+
+Pair 60:
+  Relational:    transactionid SERIAL
+  Denormalized:  transaction_id INTEGER
+
+Pair 61:
+  Relational:    referenceorderid INTEGER
+  Denormalized:  reference_order_id INTEGER
+
+Pair 62:
+  Relational:    referenceorderlineid INTEGER
+  Denormalized:  reference_order_line_id INTEGER
+
+Pair 63:
+  Relational:    transactiontype CHARACTER(1)
+  Denormalized:  transaction_type CHAR(1)
+
+Pair 64:
+  Relational:    quantity INTEGER
+  Denormalized:  quantity INTEGER
+
+Pair 65:
+  Relational:    actualcost NUMERIC
+  Denormalized:  actual_cost NUMERIC
+
+Pair 66:
+  Relational:    productid INTEGER
+  Denormalized:  product_id INTEGER
+
+Pair 67:
+  Relational:    workorderid SERIAL
+  Denormalized:  territory_group VARCHAR(50)
+
+Pair 68:
+  Relational:    orderqty INTEGER
+  Denormalized:  order_qty SMALLINT
+
+Pair 69:
+  Relational:    duedate TIMESTAMP
+  Denormalized:  full_date DATE
+
+Pair 70:
+  Relational:    productid INTEGER
+  Denormalized:  product_name VARCHAR(50)
+
+Pair 71:
+  Relational:    minorderqty INTEGER
+  Denormalized:  employee_key SERIAL
+
+Pair 72:
+  Relational:    purchaseorderdetailid SERIAL
+  Denormalized:  purchase_order_detail_id INTEGER
+
+Pair 73:
+  Relational:    orderqty SMALLINT
+  Denormalized:  order_qty SMALLINT
+
+Pair 74:
+  Relational:    unitprice NUMERIC
+  Denormalized:  unit_price NUMERIC
+
+Pair 75:
+  Relational:    receivedqty NUMERIC(8, 2)
+  Denormalized:  received_qty NUMERIC(8, 2)
+
+Pair 76:
+  Relational:    rejectedqty NUMERIC(8, 2)
+  Denormalized:  rejected_qty NUMERIC(8, 2)
+
+Pair 77:
+  Relational:    purchaseorderid SERIAL
+  Denormalized:  purchase_order_id INTEGER
+
+Pair 78:
+  Relational:    subtotal NUMERIC
+  Denormalized:  line_total NUMERIC
+
+Pair 79:
+  Relational:    taxamt NUMERIC
+  Denormalized:  allocated_tax_amt NUMERIC
+
+Pair 80:
+  Relational:    freight NUMERIC
+  Denormalized:  allocated_freight NUMERIC
+
+Pair 81:
+  Relational:    accountnumber "ACCOUNTNUMBER"
+  Denormalized:  account_number VARCHAR(15)
+
+Pair 82:
+  Relational:    creditrating SMALLINT
+  Denormalized:  credit_rating SMALLINT
+
+Pair 83:
+  Relational:    preferredvendorstatus "FLAG"
+  Denormalized:  preferred_vendor_status BOOLEAN
+
+Pair 84:
+  Relational:    activeflag "FLAG"
+  Denormalized:  active_flag BOOLEAN
+
+Pair 85:
+  Relational:    cardtype CHARACTER
+  Denormalized:  customer_type VARCHAR(15)
+
+Pair 86:
+  Relational:    expmonth SMALLINT
+  Denormalized:  day_of_month INTEGER
+
+Pair 87:
+  Relational:    expyear SMALLINT
+  Denormalized:  year INTEGER
+
+Pair 88:
+  Relational:    currencycode CHARACTER(3)
+  Denormalized:  country_region_code VARCHAR(3)
+
+Pair 89:
+  Relational:    customerid SERIAL
+  Denormalized:  customer_id INTEGER
+
+Pair 90:
+  Relational:    storeid INTEGER
+  Denormalized:  is_weekend BOOLEAN
+
+Pair 91:
+  Relational:    salesorderdetailid SERIAL
+  Denormalized:  sales_order_detail_id INTEGER
+
+Pair 92:
+  Relational:    unitprice NUMERIC
+  Denormalized:  unit_price NUMERIC
+
+Pair 93:
+  Relational:    unitpricediscount NUMERIC
+  Denormalized:  unit_price_discount NUMERIC
+
+Pair 94:
+  Relational:    salesorderid SERIAL
+  Denormalized:  sales_order_id INTEGER
+
+Pair 95:
+  Relational:    subtotal NUMERIC
+  Denormalized:  line_total NUMERIC
+
+Pair 96:
+  Relational:    totaldue NUMERIC
+  Denormalized:  postal_code VARCHAR(15)
+
+Pair 97:
+  Relational:    bonus NUMERIC
+  Denormalized:  month INTEGER
+
+Pair 98:
+  Relational:    salesreasonid SERIAL
+  Denormalized:  salesperson_key INTEGER
+
+Pair 99:
+  Relational:    territoryid SERIAL
+  Denormalized:  territory_id INTEGER
+
+Pair 100:
+  Relational:    specialofferid SERIAL
+  Denormalized:  special_offer_id INTEGER
+
+Pair 101:
+  Relational:    discountpct NUMERIC
+  Denormalized:  discount_pct NUMERIC
+
+Pair 102:
+  Relational:    type CHARACTER
+  Denormalized:  type VARCHAR(50)
+
+Pair 103:
+  Relational:    category CHARACTER
+  Denormalized:  category VARCHAR(50)
+
+Pair 104:
+  Relational:    minqty INTEGER
+  Denormalized:  min_qty INTEGER
+
+Pair 105:
+  Relational:    maxqty INTEGER
+  Denormalized:  max_qty INTEGER
+
+
+================================================================================

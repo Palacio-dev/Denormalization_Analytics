@@ -1,0 +1,87 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-18-42
+Model: gemini
+Prompt: OBT
+Schema: employees
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy adopts a ONE-BIG-TABLE model, consolidating the highly normalized HR schema (employee, department, salary, title, and their associative tables) into a single wide table. This eliminates the need for complex, multi-table JOINs when querying employee histories, salaries, and titles, significantly improving read performance for analytical workloads.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged 'employee', 'department', 'department_employee', 'department_manager', 'salary', and 'title' tables into a single denormalized table named 'employee_analytics'."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Introduced a new surrogate primary key 'record_id' to uniquely identify each flattened record, as the original composite keys are no longer applicable in a fully denormalized structure."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Renamed 'id' from 'employee' to 'employee_id' and 'id' from 'department' to 'department_id' to resolve ambiguity and represent them as standard attributes."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Prefixed 'from_date' and 'to_date' columns with their source table/entity names (e.g., 'dept_emp_from_date', 'salary_from_date') to prevent column name collisions."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Renamed 'amount' from the 'salary' table to 'salary_amount' for clarity in the flattened context."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "High data redundancy: Employee personal details (name, birth date) and department names are duplicated across every salary, title, and department change record, increasing storage costs."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update anomalies: Modifying an employee's name or a department's name requires updating multiple rows instead of a single record in a dimension table."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "Q1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Point-in-time employee profile retrieval: Fetching an employee's active department, title, and salary for a specific date without executing 5 separate JOINs."
+      },
+      {
+        "decision_id": "Q2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Departmental salary aggregations over time: Calculating average salaries per department per year, which previously required joining salary, employee, department_employee, and department tables."
+      }
+    ]
+  }
+}
+```
+
+```sql
+CREATE TABLE IF NOT EXISTS employees.employee_analytics
+(
+    record_id BIGSERIAL PRIMARY KEY,
+    employee_id bigint NOT NULL,
+    birth_date date NOT NULL,
+    first_name character varying(14) COLLATE pg_catalog."default" NOT NULL,
+    last_name character varying(16) COLLATE pg_catalog."default" NOT NULL,
+    gender employees.employee_gender NOT NULL,
+    hire_date date NOT NULL,
+    department_id character(4) COLLATE pg_catalog."default",
+    dept_name character varying(40) COLLATE pg_catalog."default",
+    dept_emp_from_date date,
+    dept_emp_to_date date,
+    dept_mgr_from_date date,
+    dept_mgr_to_date date,
+    salary_amount bigint,
+    salary_from_date date,
+    salary_to_date date,
+    title character varying(50) COLLATE pg_catalog."default",
+    title_from_date date,
+    title_to_date date
+);
+```

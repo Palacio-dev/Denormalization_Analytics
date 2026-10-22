@@ -1,0 +1,133 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-27-00
+Model: ollama_api
+Prompt: senior
+Schema: harperdb
+==================================================
+
+{
+  "section_1": {
+    "summary": "The normalized schema consists of three tables: users, entitlements, and a bridge table user_entitlements. This structure is typical for OLTP systems but creates multiple join paths that are inefficient for OLAP queries. The denormalization strategy focuses on collapsing the many-to-many relationship into a single fact-like table enriched with dimensional attributes. This approach leverages dimensional modeling to create a star schema where the central fact table captures user entitlement activity, and dimensions are embedded directly into it to reduce joins and improve query performance.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge the user_entitlements bridge table into a denormalized fact table that directly associates users with entitlements, flattening the many-to-many relationship."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Absorb all entitlement attributes into the new fact table to eliminate joins to the entitlements table during querying."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Retain user_id as a foreign key in the fact table to maintain traceability to the users table, which remains unchanged."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added surrogate key entitlement_sk to the entitlements dimension to support slowly changing dimensions (SCD Type 2) if needed in future."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Derived activeFlag into a boolean-like indicator (e.g., IsActive) for better analytical clarity."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Renamed featureType and packageType to more descriptive names like FeatureTypeCode and PackageTypeCode to clarify they are categorical codes."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Denormalization introduces redundancy by duplicating entitlement data for each user-entitlement association, increasing storage but improving read performance."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update and maintenance complexity increases slightly due to duplication, but since this is an analytical model, it is optimized for batch ETL rather than real-time updates."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "The model sacrifices normalization for performance, which is acceptable in OLAP environments where data is refreshed periodically."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting on active user entitlements by feature or package type requires joining users, user_entitlements, and entitlements. Denormalization eliminates these joins."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregating total use counts or limits by feature or package type benefits from pre-joined dimensional attributes."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Filtering entitlements by active status or date ranges is simplified by embedding these attributes in the fact table."
+      }
+    ]
+  }
+}
+
+---
+
+### Denormalized Schema DDL
+
+```sql
+-- Dimension Table: DimUser
+CREATE TABLE DimUser (
+    user_sk INT IDENTITY(1,1) PRIMARY KEY,
+    user_id INT NOT NULL,
+    created_date DATE DEFAULT GETDATE()
+);
+
+-- Dimension Table: DimEntitlement
+CREATE TABLE DimEntitlement (
+    entitlement_sk INT IDENTITY(1,1) PRIMARY KEY,
+    entitlement_id INT NOT NULL,
+    activeDate DATE,
+    inactiveDate DATE,
+    useLimit INT,
+    useCount INT,
+    FeatureTypeCode VARCHAR(4),
+    PackageTypeCode VARCHAR(4),
+    IsActive BIT,
+    created_date DATE DEFAULT GETDATE()
+);
+
+-- Fact Table: FactUserEntitlement
+CREATE TABLE FactUserEntitlement (
+    user_sk INT,
+    entitlement_sk INT,
+    user_id INT NOT NULL,
+    entitlement_id INT NOT NULL,
+    activeDate DATE,
+    inactiveDate DATE,
+    useLimit INT,
+    useCount INT,
+    FeatureTypeCode VARCHAR(4),
+    PackageTypeCode VARCHAR(4),
+    IsActive BIT,
+    PRIMARY KEY (user_sk, entitlement_sk),
+    FOREIGN KEY (user_sk) REFERENCES DimUser(user_sk),
+    FOREIGN KEY (entitlement_sk) REFERENCES DimEntitlement(entitlement_sk)
+);
+
+-- Index Recommendations
+CREATE INDEX IX_FactUserEntitlement_IsActive ON FactUserEntitlement(IsActive);
+CREATE INDEX IX_FactUserEntitlement_FeatureType ON FactUserEntitlement(FeatureTypeCode);
+CREATE INDEX IX_FactUserEntitlement_PackageType ON FactUserEntitlement(PackageTypeCode);
+
+-- Partitioning Recommendation
+-- Partition FactUserEntitlement by activeDate or a date-based surrogate for large-scale analytics
+```
+
+### Notes:
+- **Surrogate Keys**: Introduced in dimension tables to support SCD and improve join performance.
+- **Embedded Dimensions**: Dimensional attributes are copied into the fact table to reduce joins.
+- **Indexing**: Supports common analytical filters such as active status and feature/package types.
+- **Partitioning**: Recommended on date-based columns for large-scale query optimization.
+- **ETL Strategy**: The fact table should be populated via batch ETL that reads from the OLTP source and applies business logic to derive IsActive and other computed fields.

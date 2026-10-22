@@ -1,0 +1,255 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_09-25-49
+Model: ollama_local
+Prompt: mid-level
+Schema: ex04
+==================================================
+
+### Analysis and Redesign Strategy
+
+#### Section 1: Schema Analysis and Denormalization Strategy
+
+**1. Analysis of Current Structure**
+The provided schema is a classic **Third Normal Form (3NF)** design. It separates data into distinct entities:
+*   **Dimensions:** `country`, `region`, `demography`, `employment`, `education`, `economy`, `health`, `survey`.
+*   **Facts (Implicit):** Tables like `survey`, `demography`, `employment`, etc., act as fact tables but are highly normalized (e.g., `demography` has `year` and `country_code` as separate columns without a composite key linking them tightly to specific measures).
+*   **Granularity Issues:** The `demography`, `employment`, `education`, and `economy` tables lack a unified time-series dimension key. Queries requiring year-over-year analysis across multiple domains require joining these disparate fact tables on `(year, country_code)`, which is inefficient.
+*   **Join Complexity:** A typical dashboard query (e.g., "GDP vs. Unemployment vs. Education for 2020") requires joining 6+ tables, resulting in significant latency and potential cardinality explosion issues during aggregation.
+
+**2. Structural Decisions**
+To optimize for read-heavy workloads, we will adopt a **Star Schema** with a highly denormalized **Fact Table** approach.
+
+*   **Decision D1: Create a Unified `fact_country_indicators` Table.**
+    *   Instead of multiple normalized fact tables, we consolidate `survey`, `demography`, `employment`, `education`, `economy`, and `health` into a single massive fact table.
+    *   **Rationale:** This eliminates the need for `JOIN`s on `(year, country_code)` for almost all analytical queries. The table becomes the single source of truth for country-level metrics.
+*   **Decision D2: Denormalize Dimensions into the Fact Table.**
+    *   Move `country_code`, `region_code`, `survey_acronym`, and `year` directly into the fact table.
+    *   **Rationale:** Since the grain is effectively "Country-Year-Indicator", repeating these dimensions in the fact table avoids the join overhead.
+*   **Decision D3: Handle Region Hierarchy.**
+    *   Since `region_code` is foreign to `country_code`, we include `region_code` in the fact table. If a country has multiple regions, the data will be repeated (one row per country-region-year-indicator combination), which is acceptable for analytical reporting unless region-level granularity is strictly required.
+*   **Decision D4: Flatten Demographic and Health Dimensions.**
+    *   The `demography` and `life_expectancy` tables currently link via `id_demography`. We flatten this by embedding `gender`, `pop_density`, etc., directly into the fact table rows, indexed by `country_code` and `year`.
+
+**3. Attribute-Level Changes**
+*   **Decision A1: Add `year` and `country_code` to all indicator columns.**
+    *   Currently, `demography` has `year` and `country_code` but `employment` does not (it has `id_employment` which implies a unique ID but not necessarily a composite key of year/country). We standardize the grain to `Country-Year-Indicator`.
+*   **Decision A2: Remove Foreign Keys from Fact Table.**
+    *   The new `fact_country_indicators` table will not have foreign keys pointing to dimension tables. It stands alone.
+*   **Decision A3: Add Derived/Calculated Columns.**
+    *   Add `region_name` directly if not present, or keep `region_code` if the mapping is 1:1. We will assume 1:1 for simplicity in this denormalization unless specified otherwise, repeating `region_name` in the fact table.
+
+**4. Trade-offs**
+*   **Tradeoff T1: Storage vs. Query Speed.**
+    *   *Impact:* The denormalized table will be significantly larger in size than the sum of the original normalized tables due to data repetition (especially for countries with multiple regions or demographic breakdowns).
+    *   *Mitigation:* Use appropriate columnar storage formats (e.g., Parquet, Delta Lake) or compression.
+*   **Tradeoff T2: Data Integrity Constraints.**
+    *   *Impact:* Removing foreign keys reduces the ability to enforce referential integrity at the database level (e.g., preventing a "survey" from referencing a non-existent country).
+    *   *Mitigation:* Rely on application-layer validation and data quality pipelines (e.g., Great Expectations) rather than SQL constraints.
+*   **Tradeoff T3: Update Complexity.**
+    *   *Impact:* Updating a single country's GDP affects only one row in the new schema, which is good. However, if we previously had a separate `economy` table, the update logic is simpler, but the schema design itself is more rigid regarding the grain.
+
+---
+
+#### Section 2: Query Patterns
+
+**1. Decision D1 Motivation**
+*   **Pattern Type:** `provided` (Based on typical BI requirements)
+*   **Description:** "Cross-Domain Aggregation". Users frequently ask for "Total GDP, Unemployment Rate, and Literacy Rate for all countries in 2020". In the normalized schema, this requires a complex `JOIN` across 5 different tables on `country_code` and `year`. In the denormalized schema, this is a simple `GROUP BY` on the single `fact_country_indicators` table.
+
+---
+
+### Complete SQL DDL Creation Script
+
+```sql
+-- Drop existing tables if they exist to ensure a clean state for the new schema
+DROP TABLE IF EXISTS public.fact_country_indicators;
+DROP TABLE IF EXISTS public.country;
+DROP TABLE IF EXISTS public.region;
+DROP TABLE IF EXISTS public.survey;
+DROP TABLE IF EXISTS public.demography;
+DROP TABLE IF EXISTS public.employment;
+DROP TABLE IF EXISTS public.education;
+DROP TABLE IF EXISTS public.economy;
+DROP TABLE IF EXISTS public.health;
+DROP TABLE IF EXISTS public.life_expectancy;
+DROP TABLE IF EXISTS public.decile;
+
+-- 1. Create the Unified Fact Table
+-- This table consolidates all indicators. The grain is Country-Year-Indicator.
+-- Dimensions (Country, Region, Year) are denormalized into this table.
+CREATE TABLE IF NOT EXISTS public.fact_country_indicators (
+    id_country integer NOT NULL, -- Using a surrogate key for the country to handle duplicates if needed, 
+                                 -- though we will rely on country_code for most joins.
+    -- However, to keep it simple and aligned with the original 'country_code' usage:
+    country_code character varying(10) NOT NULL,
+    region_code character varying(10),
+    region_name character varying(100),
+    survey_acronym character varying(50),
+    welfare_type character varying(50),
+    survey_comparability integer,
+    comparable_spell character varying(50),
+    poverty_line double precision,
+    headcount double precision,
+    poverty_gap double precision,
+    poverty_severity double precision,
+    gini double precision,
+    reporting_pop integer,
+    reporting_pce double precision,
+    distribution_type character varying(50),
+    spl double precision,
+    survey_year integer,
+    survey_coverage character varying(50),
+    reporting_level character varying(50),
+    
+    -- Demography Fields (Year, Country, Gender, Age/Group)
+    demography_year integer,
+    demography_gender character varying(10),
+    demography_pop_density double precision,
+    demography_urban_pop double precision,
+    demography_rural_pop double precision,
+    demography_net_migration double precision,
+    demography_death_rate double precision,
+    demography_birth_rate double precision,
+    
+    -- Employment Fields
+    employment_child_emp double precision,
+    employment_unemp double precision,
+    employment_vulnerable_emp double precision,
+    employment_part_time double precision,
+    employment_employers double precision,
+    employment_labor_force_total double precision,
+    employment_labor_force_fem double precision,
+    
+    -- Education Fields
+    education_child_out_of_school double precision,
+    education_progression_to_sec double precision,
+    education_expenditure double precision,
+    education_preprim_enroll double precision,
+    education_prim_enrol double precision,
+    education_sec_enrol double precision,
+    education_terti_enrol double precision,
+    
+    -- Economy Fields
+    economy_gdp double precision,
+    economy_inflation double precision,
+    economy_tax_revenue double precision,
+    
+    -- Health Fields
+    health_hospital_beds double precision,
+    health_physicians double precision,
+    health_expenditure double precision,
+    
+    -- Life Expectancy Fields
+    life_expectancy_gender character varying(10),
+    life_expectancy_value double precision,
+    
+    -- Primary Key
+    PRIMARY KEY (country_code, demography_year, survey_year, demography_gender, life_expectancy_gender)
+);
+
+-- Note: The primary key is complex because a single country/year might have multiple rows 
+-- depending on gender, survey type, or specific demographic breakdowns. 
+-- If the original data was 1:1 per country/year, the key simplifies. 
+-- We assume the original tables had 1 row per country/year/indicator.
+
+-- 2. Create a simplified Country Dimension Table (Optional, for filtering)
+-- While the fact table contains country_code, a dedicated dimension table can speed up filtering
+-- if used with a materialized view or if strict referential integrity is desired via application logic.
+CREATE TABLE IF NOT EXISTS public.dim_country (
+    country_code character varying(10) NOT NULL,
+    country_name character varying(100),
+    region_code character varying(10),
+    PRIMARY KEY (country_code)
+);
+
+-- 3. Create a simplified Region Dimension Table
+CREATE TABLE IF NOT EXISTS public.dim_region (
+    region_code character varying(10) NOT NULL,
+    region_name character varying(100),
+    PRIMARY KEY (region_code)
+);
+
+-- 4. Create a simplified Survey Dimension Table
+CREATE TABLE IF NOT EXISTS public.dim_survey (
+    id_survey integer NOT NULL,
+    country_code character varying(10) NOT NULL,
+    welfare_type character varying(50),
+    survey_acronym character varying(50),
+    survey_comparability integer,
+    comparable_spell character varying(50),
+    poverty_line double precision,
+    headcount double precision,
+    poverty_gap double precision,
+    poverty_severity double precision,
+    gini double precision,
+    reporting_pop integer,
+    reporting_pce double precision,
+    distribution_type character varying(50),
+    spl double precision,
+    survey_year integer,
+    survey_coverage character varying(50),
+    reporting_level character varying(50),
+    PRIMARY KEY (id_survey)
+);
+
+-- 5. Create a simplified Demography Dimension Table (Used for grouping by gender/age if needed)
+CREATE TABLE IF NOT EXISTS public.dim_demography (
+    id_demography integer NOT NULL,
+    year integer NOT NULL,
+    country_code character varying(10) NOT NULL,
+    demography_gender character varying(10),
+    PRIMARY KEY (id_demography)
+);
+
+-- 6. Create a simplified Employment Dimension Table
+CREATE TABLE IF NOT EXISTS public.dim_employment (
+    id_employment integer NOT NULL,
+    year integer NOT NULL,
+    country_code character varying(10) NOT NULL,
+    PRIMARY KEY (id_employment)
+);
+
+-- 7. Create a simplified Education Dimension Table
+CREATE TABLE IF NOT EXISTS public.dim_education (
+    id_education integer NOT NULL,
+    year integer NOT NULL,
+    country_code character varying(10) NOT NULL,
+    PRIMARY KEY (id_education)
+);
+
+-- 8. Create a simplified Economy Dimension Table
+CREATE TABLE IF NOT EXISTS public.dim_economy (
+    id_economy integer NOT NULL,
+    year integer NOT NULL,
+    country_code character varying(10) NOT NULL,
+    PRIMARY KEY (id_economy)
+);
+
+-- 9. Create a simplified Health Dimension Table
+CREATE TABLE IF NOT EXISTS public.dim_health (
+    id_health integer NOT NULL,
+    country_code character varying(10) NOT NULL,
+    year integer NOT NULL,
+    PRIMARY KEY (id_health)
+);
+
+-- 10. Create a simplified Life Expectancy Dimension Table
+CREATE TABLE IF NOT EXISTS public.dim_life_expectancy (
+    id_life_expectancy integer NOT NULL,
+    id_demography integer NOT NULL,
+    demography_gender character varying(10),
+    life_expectancy_value double precision,
+    PRIMARY KEY (id_life_expectancy)
+);
+
+-- 11. Create a simplified Decile Dimension Table
+CREATE TABLE IF NOT EXISTS public.dim_decile (
+    id_decile integer NOT NULL,
+    value double precision,
+    name character varying(50),
+    id_survey integer NOT NULL,
+    PRIMARY KEY (id_decile)
+);
+
+-- End of DDL Script
+```

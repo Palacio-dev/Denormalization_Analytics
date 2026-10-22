@@ -1,0 +1,201 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-30-09
+Model: gemini
+Prompt: RISEN
+Schema: ex04
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on optimizing heavy analytical reads by eliminating complex join bottlenecks. The original schema relies heavily on snowflake-like relationships where indicators (economy, health, education, employment, demography) and dimensions (country, region) are highly normalized. By applying 'Collapsing Relations', we merge all macro-indicators sharing the same logical grain (country + year) into a single wide fact table (`fact_country_yearly_indicators`). Furthermore, we apply 'Adding Redundant Attributes' to embed the geographical hierarchy (`country_name`, `region_code`, `region_name`) directly into all resulting fact tables. Tables with finer granularity (such as `population`, `life_expectancy`, and `decile`) are maintained as separate fact tables but are enriched with contextual dimension attributes and parent-level identifiers to allow single-table analytical queries.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapsing Relations: Merged `economy`, `health`, `education`, `employment`, and `demography` into a single wide table `fact_country_yearly_indicators`. All these tables share a 1:1 logical relationship at the `country_code` and `year` grain."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Adding Redundant Attributes: Flattened the `region` and `country` dimension tables and embedded their attributes (`country_name`, `region_code`, `region_name`) into all new fact tables to eliminate dimension joins."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Collapsing Relations: Merged `survey` and `decile` into a single `fact_survey_decile` table. This denormalizes the 1:N relationship, repeating survey-level metrics for each decile to allow immediate slicing of poverty/welfare metrics by decile without joins."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Collapsing Relations: Replaced the surrogate `id_demography` in `population` and `life_expectancy` with the semantic grain (`country_code` and `year`) to create standalone `fact_population` and `fact_life_expectancy` tables, removing the need for the intermediate `demography` table entirely."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Renamed `expenditure` from the `health` table to `health_expenditure` and `expenditure` from the `education` table to `edu_expenditure` to prevent column ambiguity in the merged `fact_country_yearly_indicators` table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Renamed `value` and `name` from the `decile` table to `decile_value` and `decile_name` in `fact_survey_decile` to provide clear semantic meaning."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Renamed `value` from `life_expectancy` to `life_expectancy_value` and `number` from `population` to `population_number` to improve clarity in their respective denormalized tables."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added `country_name`, `region_code`, and `region_name` as redundant attributes to `fact_country_yearly_indicators`, `fact_survey_decile`, `fact_population`, and `fact_life_expectancy`."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage Footprint: Duplicating string attributes like `country_name` and `region_name` across millions of rows in fact tables increases disk usage compared to storing them once in dimension tables."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If a region's name or a country's name changes, the update must be propagated across all rows in multiple fact tables instead of a single row in a normalized dimension table. This is generally acceptable in OLAP/analytical environments where data is mostly append-only."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1",
+        "query": "SELECT country_name, year, gdp, health_expenditure, edu_child_out_of_school, emp_unemp FROM fact_country_yearly_indicators WHERE region_name = 'Sub-Saharan Africa' AND year = 2020; -- (Avoids joining 7 separate tables)"
+      },
+      {
+        "decision_id": "D3",
+        "query": "SELECT country_name, survey_year, welfare_type, decile_name, decile_value, gini FROM fact_survey_decile WHERE country_code = 'BRA' ORDER BY survey_year DESC; -- (Avoids joining survey, decile, country, and region)"
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- ==============================================================================
+-- DENORMALIZED ANALYTICAL SCHEMA (PostgreSQL)
+-- ==============================================================================
+
+-- 1. Wide Fact Table for Yearly Country Macro-Indicators
+-- Collapses: economy, health, education, employment, demography, country, region
+CREATE TABLE IF NOT EXISTS public.fact_country_yearly_indicators
+(
+    country_code character varying NOT NULL,
+    year integer NOT NULL,
+    country_name character varying,
+    region_code character varying NOT NULL,
+    region_name character varying NOT NULL,
+    
+    -- Economy Attributes
+    gdp double precision,
+    inflation double precision,
+    tax_revenue double precision,
+    
+    -- Health Attributes
+    health_hospital_beds double precision,
+    health_physicians double precision,
+    health_expenditure double precision,
+    
+    -- Education Attributes
+    edu_child_out_of_school double precision,
+    edu_progression_to_sec double precision,
+    edu_expenditure double precision,
+    edu_preprim_enroll double precision,
+    edu_prim_enrol double precision,
+    edu_sec_enrol double precision,
+    edu_terti_enrol double precision,
+    
+    -- Employment Attributes
+    emp_child_emp double precision,
+    emp_unemp double precision,
+    emp_vulnerable_emp double precision,
+    emp_part_time double precision,
+    emp_employers double precision,
+    emp_labor_force_total double precision,
+    emp_labor_force_fem double precision,
+    
+    -- Demography Attributes
+    demo_pop_density double precision,
+    demo_urban_pop double precision,
+    demo_rural_pop double precision,
+    demo_net_migration double precision,
+    demo_death_rate double precision,
+    demo_birth_rate double precision,
+    
+    PRIMARY KEY (country_code, year)
+);
+
+-- 2. Fact Table for Survey and Decile Data
+-- Collapses: survey, decile, country, region
+CREATE TABLE IF NOT EXISTS public.fact_survey_decile
+(
+    id_fact_survey_decile serial NOT NULL,
+    id_survey integer NOT NULL,
+    id_decile integer,
+    country_code character varying NOT NULL,
+    country_name character varying,
+    region_code character varying NOT NULL,
+    region_name character varying NOT NULL,
+    
+    -- Survey Attributes
+    survey_year integer,
+    welfare_type character varying,
+    survey_acronym character varying,
+    survey_comparability integer,
+    comparable_spell character varying,
+    poverty_line double precision,
+    headcount double precision,
+    poverty_gap double precision,
+    poverty_severity double precision,
+    gini double precision,
+    reporting_pop integer,
+    reporting_pce double precision,
+    distribution_type character varying,
+    spl double precision,
+    survey_coverage character varying,
+    reporting_level character varying,
+    
+    -- Decile Attributes
+    decile_value double precision,
+    decile_name character varying,
+    
+    PRIMARY KEY (id_fact_survey_decile)
+);
+
+-- 3. Fact Table for Population Demographics
+-- Collapses: population, demography (keys), country, region
+CREATE TABLE IF NOT EXISTS public.fact_population
+(
+    id_population serial NOT NULL,
+    country_code character varying NOT NULL,
+    year integer NOT NULL,
+    country_name character varying,
+    region_code character varying NOT NULL,
+    region_name character varying NOT NULL,
+    
+    -- Population Attributes
+    pop_ages character varying,
+    gender character varying,
+    population_number double precision,
+    
+    PRIMARY KEY (id_population)
+);
+
+-- 4. Fact Table for Life Expectancy
+-- Collapses: life_expectancy, demography (keys), country, region
+CREATE TABLE IF NOT EXISTS public.fact_life_expectancy
+(
+    id_life_expectancy serial NOT NULL,
+    country_code character varying NOT NULL,
+    year integer NOT NULL,
+    country_name character varying,
+    region_code character varying NOT NULL,
+    region_name character varying NOT NULL,
+    
+    -- Life Expectancy Attributes
+    gender character varying,
+    life_expectancy_value double precision,
+    
+    PRIMARY KEY (id_life_expectancy)
+);
+```

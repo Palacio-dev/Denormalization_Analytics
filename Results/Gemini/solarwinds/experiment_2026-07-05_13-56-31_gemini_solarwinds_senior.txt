@@ -1,0 +1,177 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-56-31
+Model: gemini
+Prompt: senior
+Schema: solarwinds
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transitions the 3NF OLTP schema into an analytics-optimized Star Schema (Kimball methodology). The core transformation involves collapsing the header-line item relationship ('orders' and 'order_details') into a single transaction-grain fact table ('fact_sales'). 'customers' and 'products' are transformed into Slowly Changing Dimensions (SCD Type 2) with surrogate keys to track historical changes. A dedicated Date dimension is introduced to enable robust time-series analysis. This design eliminates multi-hop joins, pre-calculates critical metrics, and optimizes the schema for columnar BI workloads.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge 'orders' and 'order_details' into a single 'fact_sales' table at the order-line grain. Reduces join complexity by eliminating the header-to-line-item join."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Create a centralized 'dim_date' table. The 'order_date' from the OLTP 'orders' table is replaced by a 'date_sk' foreign key in the fact table, enabling complex calendar-based filtering."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Introduce Surrogate Keys (SKs) for 'dim_customer' and 'dim_product' to decouple the analytical model from source system natural keys and support historical tracking (SCD Type 2)."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Derive and materialize 'total_amount' (quantity * price) directly in 'fact_sales' to prevent BI tools from performing row-level math during large aggregations."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Embed 'unit_price' at the time of sale into 'fact_sales'. This preserves the historical transaction value regardless of future price changes in the 'products' table."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Retain 'order_id' and 'order_detail_id' in 'fact_sales' as Degenerate Dimensions (DD) to preserve traceability back to the OLTP source system."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Add SCD Type 2 auditing columns ('valid_from', 'valid_to', 'is_current') to 'dim_customer' and 'dim_product'."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Storage Redundancy: Materializing 'unit_price' and 'total_amount' in the fact table increases storage footprint, traded off for significantly faster read/aggregation performance."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "ETL Complexity: Implementing Surrogate Keys and SCD Type 2 logic requires more complex data pipelines compared to simple trunc-and-load or upsert operations."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Update Anomaly Risk: Because 'fact_sales' is denormalized, any retroactive changes to historical order line items in the OLTP system will require targeted updates or restatements in the OLAP fact table."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Calculate total revenue and quantity sold by customer and product. Merging orders and details eliminates a massive join at query time."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Year-over-Year (YoY), Month-over-Month (MoM), and Day-of-Week sales trend analysis. Supported by joining fact_sales to dim_date."
+      },
+      {
+        "decision_id": "A1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Dashboard KPI widgets requiring sub-second SUM(total_amount) across millions of rows. Pre-calculating this metric avoids CPU-heavy on-the-fly multiplication."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Point-in-time reporting (e.g., 'What was the customer's address at the time they made this purchase?'). Handled via SCD Type 2 surrogate keys."
+      }
+    ]
+  }
+}
+```
+
+### Analytical Physical Model DDL (PostgreSQL / Standard Data Warehouse SQL)
+
+```sql
+-- ==============================================================================
+-- DIMENSIONAL MODEL DDL (OLAP)
+-- Target Architecture: Star Schema
+-- ==============================================================================
+
+-- 1. Date Dimension
+-- Enables robust time-series analysis, holiday tracking, and fiscal calendars.
+CREATE TABLE dim_date (
+    date_sk INT PRIMARY KEY, -- Format: YYYYMMDD (e.g., 20231025)
+    full_date DATE NOT NULL,
+    calendar_year INT NOT NULL,
+    calendar_quarter INT NOT NULL,
+    calendar_month INT NOT NULL,
+    month_name VARCHAR(20) NOT NULL,
+    day_of_month INT NOT NULL,
+    day_of_week INT NOT NULL,
+    day_name VARCHAR(20) NOT NULL,
+    is_weekend BOOLEAN NOT NULL
+);
+
+-- 2. Customer Dimension (SCD Type 2)
+-- Tracks historical changes to customer profiles (e.g., address changes).
+CREATE TABLE dim_customer (
+    customer_sk SERIAL PRIMARY KEY,      -- Surrogate Key
+    customer_id INT NOT NULL,            -- Natural Key (Source OLTP)
+    customer_name VARCHAR(100),
+    customer_email VARCHAR(100),
+    customer_address TEXT,
+    -- SCD Type 2 Metadata
+    valid_from TIMESTAMP NOT NULL,
+    valid_to TIMESTAMP NOT NULL DEFAULT '9999-12-31 23:59:59',
+    is_current BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+-- Index for ETL lookups on Natural Key
+CREATE INDEX idx_dim_customer_nk ON dim_customer(customer_id);
+
+-- 3. Product Dimension (SCD Type 2)
+-- Tracks historical changes to product names and baseline prices.
+CREATE TABLE dim_product (
+    product_sk SERIAL PRIMARY KEY,       -- Surrogate Key
+    product_id INT NOT NULL,             -- Natural Key (Source OLTP)
+    product_name VARCHAR(100),
+    current_price DECIMAL(10,2),
+    -- SCD Type 2 Metadata
+    valid_from TIMESTAMP NOT NULL,
+    valid_to TIMESTAMP NOT NULL DEFAULT '9999-12-31 23:59:59',
+    is_current BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+-- Index for ETL lookups on Natural Key
+CREATE INDEX idx_dim_product_nk ON dim_product(product_id);
+
+-- 4. Sales Fact Table (Transaction Grain)
+-- Merges 'orders' and 'order_details'. 
+-- Partitioned by date to optimize time-based queries and data lifecycle management.
+CREATE TABLE fact_sales (
+    sales_sk BIGSERIAL,                  -- Optional Fact Surrogate Key (Useful for some BI tools)
+    date_sk INT NOT NULL REFERENCES dim_date(date_sk),
+    customer_sk INT NOT NULL REFERENCES dim_customer(customer_sk),
+    product_sk INT NOT NULL REFERENCES dim_product(product_sk),
+    
+    -- Degenerate Dimensions (Traceability to OLTP)
+    order_id INT NOT NULL,
+    order_detail_id INT NOT NULL,
+    
+    -- Measures
+    quantity INT NOT NULL,
+    unit_price DECIMAL(10,2) NOT NULL,   -- Captured at time of transaction
+    total_amount DECIMAL(12,2) NOT NULL, -- Pre-calculated: quantity * unit_price
+    
+    PRIMARY KEY (date_sk, sales_sk)      -- Composite PK required for table partitioning in Postgres
+) PARTITION BY RANGE (date_sk);
+
+-- Partitioning Example (Creating a partition for Q1 2024)
+CREATE TABLE fact_sales_2024_q1 PARTITION OF fact_sales
+    FOR VALUES FROM (20240101) TO (20240401);
+
+-- Clustering / Indexing Recommendations for OLAP
+-- Creating indexes on foreign keys to speed up Star Joins and Group By aggregations.
+CREATE INDEX idx_fact_sales_customer ON fact_sales(customer_sk);
+CREATE INDEX idx_fact_sales_product ON fact_sales(product_sk);
+
+-- Note on Columnar Databases (e.g., Snowflake, Redshift, BigQuery):
+-- If deploying to a modern cloud data warehouse, traditional B-Tree indexes are usually omitted.
+-- Instead, you would use Cluster Keys / Sort Keys. 
+-- Example for Snowflake: ALTER TABLE fact_sales CLUSTER BY (date_sk, customer_sk);
+-- Example for Redshift: COMPOUND SORTKEY(date_sk, customer_sk, product_sk);
+```

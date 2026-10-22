@@ -1,0 +1,208 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-14-37
+Model: gemini
+Prompt: RISEN
+Schema: employees
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on optimizing heavy read operations typical in HR analytics, such as querying current employee states and historical trends. The highly normalized original schema requires up to 5 joins to retrieve a complete profile of an employee's current role, salary, and department. To resolve this, we apply 'Adding Derived Attributes' to create a wide `employee_profile` table containing precomputed current-state data. We also apply 'Collapsing Relations' by merging `department_employee` and `department_manager` into a single `department_history` table. Finally, we use 'Adding Redundant Attributes' to push employee names and department names into the historical tables, eliminating the need to join back to the dimension tables for time-series reporting.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapse Relations: Merge `department_employee` and `department_manager` into a single `department_history` table. A new `role` column (e.g., 'Employee', 'Manager') is introduced to maintain semantic equivalence and distinguish the source of the relationship."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Preserve Dimensions for Reconstructibility: Retain a `dim_department` table to ensure departments with no assigned employees are not lost, satisfying the strict information preservation constraint, while still pushing `dept_name` into fact tables."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Add Derived Attributes: Add `current_department_id`, `current_dept_name`, `current_title`,
+        `current_salary`, and `is_manager` to the `employee_profile` (formerly `employee`) table to eliminate joins for 
+        current-state queries."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Add Redundant Attributes: Inject `employee_first_name` and `employee_last_name` into `salary_history`, 
+        `title_history`, and `department_history` to allow standalone querying of historical facts."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Add Redundant Attributes: Inject `dept_name` from the original `department` table into the new `department_history` table."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage Footprint: Storing redundant text columns (`employee_first_name`, `employee_last_name`, `dept_name`) across millions of historical rows will increase the database size."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies & ETL Complexity: If an employee's name or a department's name changes, the update must be cascaded across all historical records. Furthermore, ETL pipelines must now compute and maintain the 'current_*' derived attributes in the `employee_profile` table."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "A1",
+        "query": "SELECT id, first_name, last_name, current_title, current_salary, current_dept_name FROM employees.employee_profile WHERE current_dept_name = 'Sales' AND is_manager = false;"
+      },
+      {
+        "decision_id": "D1",
+        "query": "SELECT dept_name, role, COUNT(DISTINCT employee_id) as headcount FROM employees.department_history WHERE CURRENT_DATE BETWEEN from_date AND to_date GROUP BY dept_name, role;"
+      },
+      {
+        "decision_id": "A2",
+        "query": "SELECT employee_first_name, employee_last_name, amount, from_date, to_date FROM employees.salary_history WHERE amount > 100000 ORDER BY from_date DESC;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- ==============================================================================
+-- DENORMALIZED ANALYTICAL SCHEMA
+-- ==============================================================================
+
+CREATE SCHEMA IF NOT EXISTS employees;
+
+-- Create custom types and sequences required by the schema
+DO $$ BEGIN
+    CREATE TYPE employees.employee_gender AS ENUM ('M', 'F');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+CREATE SEQUENCE IF NOT EXISTS employees.id_employee_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+-- ------------------------------------------------------------------------------
+-- 1. DIMENSION: DEPARTMENT (Retained to preserve empty departments)
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS employees.dim_department
+(
+    id character(4) COLLATE pg_catalog."default" NOT NULL,
+    dept_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT pk_dim_department PRIMARY KEY (id)
+);
+
+-- ------------------------------------------------------------------------------
+-- 2. WIDE TABLE: EMPLOYEE PROFILE (Base + Derived Current State)
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS employees.employee_profile
+(
+    id bigint NOT NULL DEFAULT nextval('employees.id_employee_seq'::regclass),
+    birth_date date NOT NULL,
+    first_name character varying(14) COLLATE pg_catalog."default" NOT NULL,
+    last_name character varying(16) COLLATE pg_catalog."default" NOT NULL,
+    gender employees.employee_gender NOT NULL,
+    hire_date date NOT NULL,
+    
+    -- Derived Attributes (Technique 2)
+    current_department_id character(4) COLLATE pg_catalog."default",
+    current_dept_name character varying(40) COLLATE pg_catalog."default",
+    current_title character varying(50) COLLATE pg_catalog."default",
+    current_salary bigint,
+    is_manager boolean DEFAULT false,
+    
+    CONSTRAINT pk_employee_profile PRIMARY KEY (id)
+);
+
+-- ------------------------------------------------------------------------------
+-- 3. FACT/HISTORY: DEPARTMENT ASSIGNMENTS (Collapsed Relations)
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS employees.department_history
+(
+    employee_id bigint NOT NULL,
+    department_id character(4) COLLATE pg_catalog."default" NOT NULL,
+    role character varying(20) COLLATE pg_catalog."default" NOT NULL, -- e.g., 'Employee' or 'Manager'
+    from_date date NOT NULL,
+    to_date date NOT NULL,
+    
+    -- Redundant Attributes (Technique 1)
+    dept_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    employee_first_name character varying(14) COLLATE pg_catalog."default" NOT NULL,
+    employee_last_name character varying(16) COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Preserving the original grain of the two collapsed tables
+    CONSTRAINT pk_department_history PRIMARY KEY (employee_id, department_id, role)
+);
+
+-- ------------------------------------------------------------------------------
+-- 4. FACT/HISTORY: SALARY
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS employees.salary_history
+(
+    employee_id bigint NOT NULL,
+    from_date date NOT NULL,
+    to_date date NOT NULL,
+    amount bigint NOT NULL,
+    
+    -- Redundant Attributes (Technique 1)
+    employee_first_name character varying(14) COLLATE pg_catalog."default" NOT NULL,
+    employee_last_name character varying(16) COLLATE pg_catalog."default" NOT NULL,
+    
+    CONSTRAINT pk_salary_history PRIMARY KEY (employee_id, from_date)
+);
+
+-- ------------------------------------------------------------------------------
+-- 5. FACT/HISTORY: TITLE
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS employees.title_history
+(
+    employee_id bigint NOT NULL,
+    title character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    from_date date NOT NULL,
+    to_date date,
+    
+    -- Redundant Attributes (Technique 1)
+    employee_first_name character varying(14) COLLATE pg_catalog."default" NOT NULL,
+    employee_last_name character varying(16) COLLATE pg_catalog."default" NOT NULL,
+    
+    CONSTRAINT pk_title_history PRIMARY KEY (employee_id, title, from_date)
+);
+
+-- ------------------------------------------------------------------------------
+-- FOREIGN KEYS & INDEXES
+-- ------------------------------------------------------------------------------
+ALTER TABLE IF EXISTS employees.department_history
+    ADD CONSTRAINT fk_dept_hist_emp FOREIGN KEY (employee_id)
+    REFERENCES employees.employee_profile (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE CASCADE;
+
+ALTER TABLE IF EXISTS employees.department_history
+    ADD CONSTRAINT fk_dept_hist_dept FOREIGN KEY (department_id)
+    REFERENCES employees.dim_department (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE CASCADE;
+
+ALTER TABLE IF EXISTS employees.salary_history
+    ADD CONSTRAINT fk_sal_hist_emp FOREIGN KEY (employee_id)
+    REFERENCES employees.employee_profile (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE CASCADE;
+
+ALTER TABLE IF EXISTS employees.title_history
+    ADD CONSTRAINT fk_title_hist_emp FOREIGN KEY (employee_id)
+    REFERENCES employees.employee_profile (id) MATCH SIMPLE
+    ON UPDATE RESTRICT
+    ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS idx_dept_hist_dept_id
+    ON employees.department_history(department_id);
+
+CREATE INDEX IF NOT EXISTS idx_emp_prof_curr_dept
+    ON employees.employee_profile(current_department_id);
+```

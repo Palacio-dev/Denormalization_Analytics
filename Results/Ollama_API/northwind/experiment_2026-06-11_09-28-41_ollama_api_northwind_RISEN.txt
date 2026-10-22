@@ -1,0 +1,276 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_09-28-41
+Model: ollama_api
+Prompt: RISEN
+Schema: northwind
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on collapsing relations and adding redundant attributes to reduce JOIN overhead for frequent analytical and operational queries. Key decisions include merging customer demographics with customers, embedding product and category information into order details, and flattening employee-territory-region hierarchies. Derived attributes like total order value are added to precompute aggregations. Vertical partitioning is not applied due to moderate column counts and semantic cohesion.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge customer_demographics and customer_customer_demo into the customers table to eliminate joins for customer type analysis."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Embed product and category details into order_details to avoid joins with products and categories tables for sales analysis."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Collapse territories, region, and employee_territories into employees to flatten geographic hierarchy for reporting."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Add derived attribute 'total_price' to order_details to precompute (unit_price * quantity * (1 - discount))."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Embed supplier information into products to avoid supplier join in product-supplier queries."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Embed shipper company name into orders to avoid join with shippers table for order fulfillment analysis."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added customer_desc from customer_demographics to customers table as a redundant attribute."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added product_name, category_id, category_name, supplier_id, supplier_company_name to order_details as redundant attributes."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added territory_description and region_description to employees table as redundant attributes."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added total_price (derived) to order_details, computed as unit_price * quantity * (1 - discount)."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Added supplier_company_name to products table as a redundant attribute."
+      },
+      {
+        "decision_id": "A6",
+        "description": "Added shipper_company_name to orders table as a redundant attribute."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved read performance at the cost of increased storage and more complex write operations due to data duplication."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified queries and reduced JOINs, but potential for data inconsistency if redundant attributes are not updated in sync."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Precomputed aggregations (e.g., total_price) reduce runtime computation but require maintenance on data change."
+      },
+      {
+        "tradeoff_id": "T4",
+        "description": "Schema becomes less normalized, making future structural changes more complex."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Frequent queries joining customers with demographics to analyze customer segments."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Sales analysis queries joining order_details with products and categories to get product names and category info."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Employee performance or regional sales reports joining employees with territories and regions."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Order item value analysis requiring computed total price per line item."
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Product sourcing analysis joining products with suppliers."
+      },
+      {
+        "decision_id": "D6",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Order fulfillment analysis joining orders with shippers to get shipper names."
+      }
+    ]
+  }
+}
+
+```sql
+-- Denormalized Schema
+
+CREATE TABLE IF NOT EXISTS public.categories
+(
+    category_id smallint NOT NULL,
+    category_name character varying(15) COLLATE pg_catalog."default" NOT NULL,
+    description text COLLATE pg_catalog."default",
+    picture bytea,
+    CONSTRAINT pk_categories PRIMARY KEY (category_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.customers
+(
+    customer_id character varying(5) COLLATE pg_catalog."default" NOT NULL,
+    company_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    contact_name character varying(30) COLLATE pg_catalog."default",
+    contact_title character varying(30) COLLATE pg_catalog."default",
+    address character varying(60) COLLATE pg_catalog."default",
+    city character varying(15) COLLATE pg_catalog."default",
+    region character varying(15) COLLATE pg_catalog."default",
+    postal_code character varying(10) COLLATE pg_catalog."default",
+    country character varying(15) COLLATE pg_catalog."default",
+    phone character varying(24) COLLATE pg_catalog."default",
+    fax character varying(24) COLLATE pg_catalog."default",
+    customer_type_id character varying(5) COLLATE pg_catalog."default",
+    customer_desc text COLLATE pg_catalog."default",
+    CONSTRAINT pk_customers PRIMARY KEY (customer_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.employees
+(
+    employee_id smallint NOT NULL,
+    last_name character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    first_name character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    title character varying(30) COLLATE pg_catalog."default",
+    title_of_courtesy character varying(25) COLLATE pg_catalog."default",
+    birth_date date,
+    hire_date date,
+    address character varying(60) COLLATE pg_catalog."default",
+    city character varying(15) COLLATE pg_catalog."default",
+    region character varying(15) COLLATE pg_catalog."default",
+    postal_code character varying(10) COLLATE pg_catalog."default",
+    country character varying(15) COLLATE pg_catalog."default",
+    home_phone character varying(24) COLLATE pg_catalog."default",
+    extension character varying(4) COLLATE pg_catalog."default",
+    photo bytea,
+    notes text COLLATE pg_catalog."default",
+    reports_to smallint,
+    photo_path character varying(255) COLLATE pg_catalog."default",
+    territory_id character varying(20) COLLATE pg_catalog."default",
+    territory_description character varying(60) COLLATE pg_catalog."default",
+    region_id smallint,
+    region_description character varying(60) COLLATE pg_catalog."default",
+    CONSTRAINT pk_employees PRIMARY KEY (employee_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.order_details
+(
+    order_id smallint NOT NULL,
+    product_id smallint NOT NULL,
+    unit_price real NOT NULL,
+    quantity smallint NOT NULL,
+    discount real NOT NULL,
+    total_price real NOT NULL,
+    product_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    category_id smallint,
+    category_name character varying(15) COLLATE pg_catalog."default",
+    supplier_id smallint,
+    supplier_company_name character varying(40) COLLATE pg_catalog."default",
+    CONSTRAINT pk_order_details PRIMARY KEY (order_id, product_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.orders
+(
+    order_id smallint NOT NULL,
+    customer_id character varying(5) COLLATE pg_catalog."default",
+    employee_id smallint,
+    order_date date,
+    required_date date,
+    shipped_date date,
+    ship_via smallint,
+    freight real,
+    ship_name character varying(40) COLLATE pg_catalog."default",
+    ship_address character varying(60) COLLATE pg_catalog."default",
+    ship_city character varying(15) COLLATE pg_catalog."default",
+    ship_region character varying(15) COLLATE pg_catalog."default",
+    ship_postal_code character varying(10) COLLATE pg_catalog."default",
+    ship_country character varying(15) COLLATE pg_catalog."default",
+    shipper_company_name character varying(40) COLLATE pg_catalog."default",
+    CONSTRAINT pk_orders PRIMARY KEY (order_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.products
+(
+    product_id smallint NOT NULL,
+    product_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    supplier_id smallint,
+    supplier_company_name character varying(40) COLLATE pg_catalog."default",
+    category_id smallint,
+    category_name character varying(15) COLLATE pg_catalog."default",
+    quantity_per_unit character varying(20) COLLATE pg_catalog."default",
+    unit_price real,
+    units_in_stock smallint,
+    units_on_order smallint,
+    reorder_level smallint,
+    discontinued integer NOT NULL,
+    CONSTRAINT pk_products PRIMARY KEY (product_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.region
+(
+    region_id smallint NOT NULL,
+    region_description character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT pk_region PRIMARY KEY (region_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.shippers
+(
+    shipper_id smallint NOT NULL,
+    company_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    phone character varying(24) COLLATE pg_catalog."default",
+    CONSTRAINT pk_shippers PRIMARY KEY (shipper_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.suppliers
+(
+    supplier_id smallint NOT NULL,
+    company_name character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    contact_name character varying(30) COLLATE pg_catalog."default",
+    contact_title character varying(30) COLLATE pg_catalog."default",
+    address character varying(60) COLLATE pg_catalog."default",
+    city character varying(15) COLLATE pg_catalog."default",
+    region character varying(15) COLLATE pg_catalog."default",
+    postal_code character varying(10) COLLATE pg_catalog."default",
+    country character varying(15) COLLATE pg_catalog."default",
+    phone character varying(24) COLLATE pg_catalog."default",
+    fax character varying(24) COLLATE pg_catalog."default",
+    homepage text COLLATE pg_catalog."default",
+    CONSTRAINT pk_suppliers PRIMARY KEY (supplier_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.territories
+(
+    territory_id character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    territory_description character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    region_id smallint NOT NULL,
+    CONSTRAINT pk_territories PRIMARY KEY (territory_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.us_states
+(
+    state_id smallint NOT NULL,
+    state_name character varying(100) COLLATE pg_catalog."default",
+    state_abbr character varying(2) COLLATE pg_catalog."default",
+    state_region character varying(50) COLLATE pg_catalog."default",
+    CONSTRAINT pk_usstates PRIMARY KEY (state_id)
+);
+```

@@ -1,0 +1,846 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 37
+  - Total Attributes: 139
+    * alteracoes: 10 columns
+    * autores: 5 columns
+    * colecoes_anexas: 5 columns
+    * coletores: 5 columns
+    * coletores_complementares: 4 columns
+    * configuracao: 7 columns
+    * enderecos: 7 columns
+    * especies: 7 columns
+    * estados: 6 columns
+    * familias: 5 columns
+    * fase_sucessional: 4 columns
+    * generos: 5 columns
+    * herbarios: 8 columns
+    * historico_acessos: 3 columns
+    * identificadores: 4 columns
+    * locais_coleta: 7 columns
+    * migrations: 2 columns
+    * paises: 5 columns
+    * reflora: 6 columns
+    * reinos: 4 columns
+    * relevos: 4 columns
+    * remessas: 7 columns
+    * retirada_exsiccata_tombos: 7 columns
+    * solos: 4 columns
+    * specieslink: 6 columns
+    * sub_especies: 8 columns
+    * sub_familias: 6 columns
+    * telefones: 3 columns
+    * tipos: 4 columns
+    * tipos_usuarios: 4 columns
+    * tombo_alteracoes_antigas: 4 columns
+    * tombos: 39 columns
+    * tombos_fotos: 9 columns
+    * tombos_identificadores: 3 columns (junction table - excluded from attribute analysis)
+    * usuarios: 12 columns
+    * variedades: 8 columns
+    * vegetacoes: 4 columns
+
+  Note: 1 junction table(s) detected and excluded from attribute analysis:
+    - tombos_identificadores
+
+Denormalized Model:
+  - Tables: 36
+  - Total Attributes: 178
+    * tombos_denorm: 54 columns
+    * tombo_json_data: 6 columns
+    * alteracoes_denorm: 10 columns
+    * reflora_denorm: 6 columns
+    * specieslink_denorm: 6 columns
+    * autores: 5 columns
+    * colecoes_anexas: 5 columns
+    * coletores: 5 columns
+    * configuracao: 7 columns
+    * enderecos: 7 columns
+    * estados: 6 columns
+    * familias: 5 columns
+    * fase_sucessional: 4 columns
+    * generos: 5 columns
+    * herbarios: 8 columns
+    * historico_acessos: 3 columns
+    * identificadores: 4 columns
+    * locais_coleta: 7 columns
+    * migrations: 2 columns
+    * paises: 5 columns
+    * reinos: 4 columns
+    * relevos: 4 columns
+    * remessas: 7 columns
+    * retirada_exsiccata_tombos: 7 columns
+    * solos: 4 columns
+    * sub_especies: 8 columns
+    * sub_familias: 6 columns
+    * telefones: 3 columns
+    * tipos: 4 columns
+    * tipos_usuarios: 4 columns
+    * tombo_alteracoes_antigas: 4 columns
+    * tombos_fotos: 9 columns
+    * tombos_identificadores: 3 columns
+    * usuarios: 12 columns
+    * variedades: 8 columns
+    * vegetacoes: 4 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Denormalized model has MORE attributes (139 vs 178)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: observacao (CHARACTER) -> observacao (TEXT)
+  - Type mismatch: id (SERIAL) -> id (BIGSERIAL)
+  - Type mismatch: tombo_json (TEXT) -> tipo_id (BIGINT)
+  - Type mismatch: id (BIGSERIAL) -> id (SERIAL)
+  - Type mismatch: observacao (TEXT) -> observacao (CHARACTER)
+  - Type mismatch: tombo_json (TEXT) -> solo_id (BIGINT)
+  - Type mismatch: nome (CHARACTER) -> source_id (BIGINT)
+--------------------------------------------------------------------------------
+Completeness Ratio:        1.28
+Data Type Preservation:    0.95
+Avg Levenshtein Distance:  0.21
+BLEU Score:                0.76
+ROUGE-1:                   0.80
+METEOR Score:              0.94
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: alteracoes_denorm, retirada_exsiccata_tombos, tombos_identificadores, usuarios
+Dimension Tables Detected: tombos_denorm, tombo_json_data, reflora_denorm, specieslink_denorm, autores, colecoes_anexas, coletores, configuracao, enderecos, estados, familias, fase_sucessional, generos, herbarios, historico_acessos, identificadores, locais_coleta, migrations, paises, reinos, relevos, remessas, solos, sub_especies, sub_familias, telefones, tipos, tipos_usuarios, tombo_alteracoes_antigas, tombos_fotos, variedades, vegetacoes
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected 4 Fact tables. Evaluating as a GALAXY SCHEMA.
+  - GALAXY VIOLATION: Fact table 'alteracoes_denorm' has an FK pointing to Fact 'public.usuarios'. Facts must only join to Dimensions.
+  - FACT FK VIOLATION: Foreign Key 'tombo_json_id' in Fact 'alteracoes_denorm' allows NULL values.
+  - PAYLOAD WARNING: Fact table 'alteracoes_denorm' contains more text attributes (6) than numeric measures (1).
+  - PAYLOAD WARNING: Fact table 'retirada_exsiccata_tombos' contains more text attributes (5) than numeric measures (0).
+  - PAYLOAD WARNING: Fact table 'usuarios' contains more text attributes (9) than numeric measures (1).
+  - DIMENSION NULL WARNING: Attribute 'data_tombo' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'data_coleta_dia' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'observacao' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nomes_populares' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'numero_coleta' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'latitude' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'longitude' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'altitude' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'entidade_id' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'local_coleta_id' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'variedade_id' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'tipo_id' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'data_identificacao_dia' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'data_identificacao_mes' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'data_identificacao_ano' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'situacao' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'especie_id' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'genero_id' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'familia_id' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'sub_familia_id' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'sub_especie_id' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nome_cientifico' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'colecao_anexa_id' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'data_coleta_mes' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'data_coleta_ano' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'solo_id' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'relevo_id' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'vegetacao_id' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'ativo' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'taxon' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'rascunho' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'coletor_id' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'descricao' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'unicata' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'cidade_id' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'fase_sucessional_id' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'familia_nome' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'genero_nome' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'especie_nome' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'sub_familia_nome' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'sub_especie_nome' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'variedade_nome' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'local_coleta_descricao' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'fase_sucessional_nome' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'entidade_nome' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'entidade_sigla' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'entidade_logradouro' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'entidade_numero' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'entidade_cidade_nome' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'coletor_nome' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'coletor_complementares' in 'tombos_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'tombo_json' in 'tombo_json_data' allows NULLs. Consider demanding default values.
+  - SNOWFLAKE VIOLATION: Dimension 'reflora_denorm' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'cod_barra' in 'reflora_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'tombo_json_id' in 'reflora_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'ja_comparou' in 'reflora_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'ja_requisitou' in 'reflora_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nro_requisicoes' in 'reflora_denorm' allows NULLs. Consider demanding default values.
+  - SNOWFLAKE VIOLATION: Dimension 'specieslink_denorm' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'cod_barra' in 'specieslink_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'tombo_json_id' in 'specieslink_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'ja_comparou' in 'specieslink_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'ja_requisitou' in 'specieslink_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nro_requisicoes' in 'specieslink_denorm' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'observacao' in 'autores' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'observacoes' in 'colecoes_anexas' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'email' in 'coletores' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'hora_fim' in 'configuracao' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'periodicidade' in 'configuracao' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'data_proxima_atualizacao' in 'configuracao' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nome_arquivo' in 'configuracao' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'servico' in 'configuracao' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'numero' in 'enderecos' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'complemento' in 'enderecos' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'cidade_id' in 'enderecos' allows NULLs. Consider demanding default values.
+  - SNOWFLAKE VIOLATION: Dimension 'estados' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'sigla' in 'estados' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'created_at' in 'estados' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'updated_at' in 'estados' allows NULLs. Consider demanding default values.
+  - SNOWFLAKE VIOLATION: Dimension 'herbarios' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'caminho_logotipo' in 'herbarios' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'email' in 'herbarios' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'endereco_id' in 'herbarios' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'created_at' in 'identificadores' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'updated_at' in 'identificadores' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'descricao' in 'locais_coleta' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'cidade_id' in 'locais_coleta' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'fase_sucessional_id' in 'locais_coleta' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'fase_numero' in 'locais_coleta' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'sigla' in 'paises' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'created_at' in 'paises' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'updated_at' in 'paises' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'observacao' in 'remessas' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'data_envio' in 'remessas' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'genero_id' in 'sub_especies' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'autor_id' in 'sub_especies' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'autor_id' in 'sub_familias' allows NULLs. Consider demanding default values.
+  - SNOWFLAKE VIOLATION: Dimension 'telefones' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'tipo' in 'tipos_usuarios' allows NULLs. Consider demanding default values.
+  - SNOWFLAKE VIOLATION: Dimension 'tombo_alteracoes_antigas' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'data' in 'tombo_alteracoes_antigas' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'descricao' in 'tombo_alteracoes_antigas' allows NULLs. Consider demanding default values.
+  - SNOWFLAKE VIOLATION: Dimension 'tombos_fotos' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'codigo_barra' in 'tombos_fotos' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'num_barra' in 'tombos_fotos' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'caminho_foto' in 'tombos_fotos' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'sequencia' in 'tombos_fotos' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'autor_id' in 'variedades' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'genero_id' in 'variedades' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * alteracoes_denorm: 1 Numeric, 6 Text
+  * retirada_exsiccata_tombos: 0 Numeric, 5 Text
+  * tombos_identificadores: 1 Numeric, 0 Text
+  * usuarios: 1 Numeric, 9 Text
+  * tombos_denorm: 27 Numeric, 27 Text
+  * tombo_json_data: 2 Numeric, 4 Text
+  * reflora_denorm: 3 Numeric, 3 Text
+  * specieslink_denorm: 3 Numeric, 3 Text
+  * autores: 1 Numeric, 4 Text
+  * colecoes_anexas: 1 Numeric, 4 Text
+  * coletores: 1 Numeric, 4 Text
+  * configuracao: 1 Numeric, 6 Text
+  * enderecos: 2 Numeric, 5 Text
+  * estados: 2 Numeric, 4 Text
+  * familias: 2 Numeric, 3 Text
+  * fase_sucessional: 1 Numeric, 3 Text
+  * generos: 2 Numeric, 3 Text
+  * herbarios: 2 Numeric, 6 Text
+  * historico_acessos: 2 Numeric, 1 Text
+  * identificadores: 1 Numeric, 3 Text
+  * locais_coleta: 4 Numeric, 3 Text
+  * migrations: 0 Numeric, 2 Text
+  * paises: 1 Numeric, 4 Text
+  * reinos: 1 Numeric, 3 Text
+  * relevos: 1 Numeric, 3 Text
+  * remessas: 3 Numeric, 4 Text
+  * solos: 1 Numeric, 3 Text
+  * sub_especies: 5 Numeric, 3 Text
+  * sub_familias: 3 Numeric, 3 Text
+  * telefones: 2 Numeric, 1 Text
+  * tipos: 1 Numeric, 3 Text
+  * tipos_usuarios: 1 Numeric, 3 Text
+  * tombo_alteracoes_antigas: 2 Numeric, 2 Text
+  * tombos_fotos: 3 Numeric, 6 Text
+  * variedades: 5 Numeric, 3 Text
+  * vegetacoes: 1 Numeric, 3 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  altitude applied_at ativo ativo caminho_foto caminho_logotipo cidade_id cidade_id cidade_id cod_barra cod_barra codigo_barra coletor_id complementares complemento data data_coleta_ano data_coleta_dia data_coleta_mes data_criacao data_envio data_identificacao_ano data_identificacao_dia data_identificacao_mes data_proxima_atualizacao data_tombo data_vencimento descricao descricao descricao devolvido em_vivo email email email entidade_destino_id fase_sucessional_id hcf hora_fim hora_inicio id id id id id id id id id id id id id id id id id id id id id id id id id id id id id id identificacao ja_comparou ja_comparou ja_requisitou ja_requisitou latitude logradouro longitude name nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome_arquivo nome_cientifico nomes_populares nro_requisicoes nro_requisicoes num_barra numero numero numero numero_coleta observacao observacao observacao observacao observacoes periodicidade ra rascunho reino_id senha sequencia sequencia servico sigla sigla sigla situacao status taxon telefone tipo tipo tipo token_troca_senha token_troca_senha_expiracao tombo_json tombo_json tombo_json unicata usuario_id variedade_id
+
+Denormalized Model (Combined Text):
+  altitude applied_at ativo ativo autor_id autor_id autor_id caminho_foto caminho_logotipo cidade_id cidade_id cidade_id cod_barra cod_barra codigo_barra colecao_anexa_id coletor_complementares coletor_id coletor_nome complemento data data_coleta_ano data_coleta_dia data_coleta_mes data_criacao data_envio data_identificacao_ano data_identificacao_dia data_identificacao_mes data_proxima_atualizacao data_tombo data_vencimento descricao descricao descricao devolvido em_vivo email email email entidade_cidade_nome entidade_destino_id entidade_id entidade_logradouro entidade_nome entidade_numero entidade_sigla especie_id especie_id especie_id especie_nome familia_id familia_id familia_id familia_id familia_id familia_nome fase_numero fase_sucessional_id fase_sucessional_id fase_sucessional_nome genero_id genero_id genero_id genero_nome hcf herbario_id hora_fim hora_inicio id id id id id id id id id id id id id id id id id id id id id id id id id id id id id id identificacao ja_comparou ja_comparou ja_requisitou ja_requisitou latitude local_coleta_descricao local_coleta_id logradouro longitude name nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome nome_arquivo nome_cientifico nomes_populares nro_requisicoes nro_requisicoes num_barra numero numero numero numero_coleta observacao observacao observacao observacao observacoes periodicidade ra rascunho reino_id relevo_id senha sequencia sequencia servico sigla sigla sigla situacao solo_id source_id source_table status sub_especie_id sub_especie_nome sub_familia_id sub_familia_nome taxon telefone tipo tipo tipo tipo_id token_troca_senha token_troca_senha_expiracao tombo_json unicata usuario_id variedade_id variedade_nome vegetacao_id
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 139 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 2:
+  Relational:    status ALTERACOES_STATUS
+  Denormalized:  status ALTERACOES_STATUS
+
+Pair 3:
+  Relational:    observacao TEXT
+  Denormalized:  observacao TEXT
+
+Pair 4:
+  Relational:    tombo_json TEXT
+  Denormalized:  tombo_json TEXT
+
+Pair 5:
+  Relational:    ativo BOOLEAN
+  Denormalized:  ativo BOOLEAN
+
+Pair 6:
+  Relational:    identificacao BOOLEAN
+  Denormalized:  identificacao BOOLEAN
+
+Pair 7:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 8:
+  Relational:    nome CHARACTER
+  Denormalized:  nome CHARACTER
+
+Pair 9:
+  Relational:    observacao CHARACTER
+  Denormalized:  observacao TEXT
+
+Pair 10:
+  Relational:    tipo COLECOES_ANEXAS_TIPO
+  Denormalized:  tipo COLECOES_ANEXAS_TIPO
+
+Pair 11:
+  Relational:    observacoes TEXT
+  Denormalized:  observacoes TEXT
+
+Pair 12:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 13:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 14:
+  Relational:    nome CHARACTER
+  Denormalized:  nome CHARACTER
+
+Pair 15:
+  Relational:    email CHARACTER
+  Denormalized:  email CHARACTER
+
+Pair 16:
+  Relational:    complementares CHARACTER
+  Denormalized:  coletor_complementares CHARACTER
+
+Pair 17:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 18:
+  Relational:    hora_inicio CHARACTER
+  Denormalized:  hora_inicio CHARACTER
+
+Pair 19:
+  Relational:    hora_fim CHARACTER
+  Denormalized:  hora_fim CHARACTER
+
+Pair 20:
+  Relational:    periodicidade CONFIGURACAO_PERIODICIDADE
+  Denormalized:  periodicidade CONFIGURACAO_PERIODICIDADE
+
+Pair 21:
+  Relational:    data_proxima_atualizacao CHARACTER
+  Denormalized:  data_proxima_atualizacao CHARACTER
+
+Pair 22:
+  Relational:    nome_arquivo CHARACTER
+  Denormalized:  nome_arquivo CHARACTER
+
+Pair 23:
+  Relational:    servico CONFIGURACAO_SERVICO
+  Denormalized:  servico CONFIGURACAO_SERVICO
+
+Pair 24:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 25:
+  Relational:    logradouro CHARACTER
+  Denormalized:  logradouro CHARACTER
+
+Pair 26:
+  Relational:    numero CHARACTER
+  Denormalized:  numero CHARACTER
+
+Pair 27:
+  Relational:    complemento TEXT
+  Denormalized:  complemento TEXT
+
+Pair 28:
+  Relational:    cidade_id BIGINT
+  Denormalized:  cidade_id BIGINT
+
+Pair 29:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 30:
+  Relational:    nome CHARACTER
+  Denormalized:  nome CHARACTER
+
+Pair 31:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 32:
+  Relational:    nome CHARACTER
+  Denormalized:  nome CHARACTER
+
+Pair 33:
+  Relational:    sigla CHARACTER(4)
+  Denormalized:  sigla CHARACTER(4)
+
+Pair 34:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 35:
+  Relational:    nome CHARACTER
+  Denormalized:  nome CHARACTER
+
+Pair 36:
+  Relational:    reino_id BIGINT
+  Denormalized:  reino_id BIGINT
+
+Pair 37:
+  Relational:    numero BIGINT
+  Denormalized:  numero BIGINT
+
+Pair 38:
+  Relational:    nome CHARACTER
+  Denormalized:  nome CHARACTER
+
+Pair 39:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 40:
+  Relational:    nome CHARACTER
+  Denormalized:  nome CHARACTER
+
+Pair 41:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 42:
+  Relational:    nome CHARACTER
+  Denormalized:  nome CHARACTER
+
+Pair 43:
+  Relational:    caminho_logotipo TEXT
+  Denormalized:  caminho_logotipo TEXT
+
+Pair 44:
+  Relational:    sigla CHARACTER
+  Denormalized:  sigla CHARACTER
+
+Pair 45:
+  Relational:    email CHARACTER
+  Denormalized:  email CHARACTER
+
+Pair 46:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 47:
+  Relational:    data_criacao TIMESTAMP
+  Denormalized:  data_criacao TIMESTAMP
+
+Pair 48:
+  Relational:    usuario_id BIGINT
+  Denormalized:  usuario_id BIGINT
+
+Pair 49:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 50:
+  Relational:    nome CHARACTER
+  Denormalized:  nome CHARACTER
+
+Pair 51:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 52:
+  Relational:    descricao TEXT
+  Denormalized:  descricao TEXT
+
+Pair 53:
+  Relational:    cidade_id BIGINT
+  Denormalized:  cidade_id BIGINT
+
+Pair 54:
+  Relational:    name CHARACTER
+  Denormalized:  name CHARACTER
+
+Pair 55:
+  Relational:    applied_at TIMESTAMP
+  Denormalized:  applied_at TIMESTAMP
+
+Pair 56:
+  Relational:    id SERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 57:
+  Relational:    nome CHARACTER
+  Denormalized:  nome CHARACTER
+
+Pair 58:
+  Relational:    sigla CHARACTER(4)
+  Denormalized:  sigla CHARACTER(4)
+
+Pair 59:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 60:
+  Relational:    cod_barra CHARACTER
+  Denormalized:  cod_barra CHARACTER
+
+Pair 61:
+  Relational:    tombo_json TEXT
+  Denormalized:  tipo_id BIGINT
+
+Pair 62:
+  Relational:    ja_comparou BOOLEAN
+  Denormalized:  ja_comparou BOOLEAN
+
+Pair 63:
+  Relational:    ja_requisitou BOOLEAN
+  Denormalized:  ja_requisitou BOOLEAN
+
+Pair 64:
+  Relational:    nro_requisicoes BIGINT
+  Denormalized:  nro_requisicoes BIGINT
+
+Pair 65:
+  Relational:    id BIGSERIAL
+  Denormalized:  id SERIAL
+
+Pair 66:
+  Relational:    nome CHARACTER
+  Denormalized:  nome CHARACTER
+
+Pair 67:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 68:
+  Relational:    nome CHARACTER
+  Denormalized:  nome CHARACTER
+
+Pair 69:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 70:
+  Relational:    observacao TEXT
+  Denormalized:  observacao CHARACTER
+
+Pair 71:
+  Relational:    data_envio TIMESTAMP
+  Denormalized:  data_envio TIMESTAMP
+
+Pair 72:
+  Relational:    entidade_destino_id BIGINT
+  Denormalized:  entidade_destino_id BIGINT
+
+Pair 73:
+  Relational:    tipo RETIRADA_EXSICCATA_TOMBOS_TIPO
+  Denormalized:  tipo RETIRADA_EXSICCATA_TOMBOS_TIPO
+
+Pair 74:
+  Relational:    data_vencimento TIMESTAMP
+  Denormalized:  data_vencimento TIMESTAMP
+
+Pair 75:
+  Relational:    devolvido BOOLEAN
+  Denormalized:  devolvido BOOLEAN
+
+Pair 76:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 77:
+  Relational:    nome CHARACTER
+  Denormalized:  nome CHARACTER
+
+Pair 78:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 79:
+  Relational:    cod_barra CHARACTER
+  Denormalized:  cod_barra CHARACTER
+
+Pair 80:
+  Relational:    tombo_json TEXT
+  Denormalized:  solo_id BIGINT
+
+Pair 81:
+  Relational:    ja_comparou BOOLEAN
+  Denormalized:  ja_comparou BOOLEAN
+
+Pair 82:
+  Relational:    ja_requisitou BOOLEAN
+  Denormalized:  ja_requisitou BOOLEAN
+
+Pair 83:
+  Relational:    nro_requisicoes BIGINT
+  Denormalized:  nro_requisicoes BIGINT
+
+Pair 84:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 85:
+  Relational:    nome CHARACTER
+  Denormalized:  nome CHARACTER
+
+Pair 86:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 87:
+  Relational:    nome CHARACTER
+  Denormalized:  nome CHARACTER
+
+Pair 88:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 89:
+  Relational:    numero CHARACTER
+  Denormalized:  numero CHARACTER
+
+Pair 90:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 91:
+  Relational:    nome CHARACTER
+  Denormalized:  nome CHARACTER
+
+Pair 92:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 93:
+  Relational:    tipo CHARACTER
+  Denormalized:  tipo CHARACTER
+
+Pair 94:
+  Relational:    sequencia BIGINT
+  Denormalized:  sequencia BIGINT
+
+Pair 95:
+  Relational:    data DATE
+  Denormalized:  data DATE
+
+Pair 96:
+  Relational:    descricao TEXT
+  Denormalized:  descricao TEXT
+
+Pair 97:
+  Relational:    hcf BIGSERIAL
+  Denormalized:  hcf BIGSERIAL
+
+Pair 98:
+  Relational:    data_tombo TIMESTAMP
+  Denormalized:  data_tombo TIMESTAMP
+
+Pair 99:
+  Relational:    data_coleta_dia BIGINT
+  Denormalized:  data_coleta_dia BIGINT
+
+Pair 100:
+  Relational:    observacao TEXT
+  Denormalized:  observacao TEXT
+
+Pair 101:
+  Relational:    nomes_populares TEXT
+  Denormalized:  nomes_populares TEXT
+
+Pair 102:
+  Relational:    numero_coleta BIGINT
+  Denormalized:  numero_coleta BIGINT
+
+Pair 103:
+  Relational:    latitude DOUBLE
+  Denormalized:  latitude DOUBLE
+
+Pair 104:
+  Relational:    longitude DOUBLE
+  Denormalized:  longitude DOUBLE
+
+Pair 105:
+  Relational:    altitude DOUBLE
+  Denormalized:  altitude DOUBLE
+
+Pair 106:
+  Relational:    variedade_id BIGINT
+  Denormalized:  variedade_id BIGINT
+
+Pair 107:
+  Relational:    data_identificacao_dia SMALLINT
+  Denormalized:  data_identificacao_dia SMALLINT
+
+Pair 108:
+  Relational:    data_identificacao_mes SMALLINT
+  Denormalized:  data_identificacao_mes SMALLINT
+
+Pair 109:
+  Relational:    data_identificacao_ano INTEGER
+  Denormalized:  data_identificacao_ano INTEGER
+
+Pair 110:
+  Relational:    situacao TOMBOS_SITUACAO
+  Denormalized:  situacao TOMBOS_SITUACAO
+
+Pair 111:
+  Relational:    nome_cientifico TEXT
+  Denormalized:  nome_cientifico TEXT
+
+Pair 112:
+  Relational:    data_coleta_mes BIGINT
+  Denormalized:  data_coleta_mes BIGINT
+
+Pair 113:
+  Relational:    data_coleta_ano BIGINT
+  Denormalized:  data_coleta_ano BIGINT
+
+Pair 114:
+  Relational:    ativo BOOLEAN
+  Denormalized:  ativo BOOLEAN
+
+Pair 115:
+  Relational:    taxon CHARACTER
+  Denormalized:  taxon CHARACTER
+
+Pair 116:
+  Relational:    rascunho BOOLEAN
+  Denormalized:  rascunho BOOLEAN
+
+Pair 117:
+  Relational:    coletor_id BIGINT
+  Denormalized:  coletor_id BIGINT
+
+Pair 118:
+  Relational:    descricao TEXT
+  Denormalized:  descricao TEXT
+
+Pair 119:
+  Relational:    unicata BOOLEAN
+  Denormalized:  unicata BOOLEAN
+
+Pair 120:
+  Relational:    cidade_id BIGINT
+  Denormalized:  cidade_id BIGINT
+
+Pair 121:
+  Relational:    fase_sucessional_id BIGINT
+  Denormalized:  fase_sucessional_id BIGINT
+
+Pair 122:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 123:
+  Relational:    codigo_barra CHARACTER
+  Denormalized:  codigo_barra CHARACTER
+
+Pair 124:
+  Relational:    num_barra CHARACTER
+  Denormalized:  num_barra CHARACTER
+
+Pair 125:
+  Relational:    caminho_foto TEXT
+  Denormalized:  caminho_foto TEXT
+
+Pair 126:
+  Relational:    em_vivo BOOLEAN
+  Denormalized:  em_vivo BOOLEAN
+
+Pair 127:
+  Relational:    sequencia BIGINT
+  Denormalized:  sequencia BIGINT
+
+Pair 128:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 129:
+  Relational:    nome CHARACTER
+  Denormalized:  nome CHARACTER
+
+Pair 130:
+  Relational:    ra CHARACTER
+  Denormalized:  ra CHARACTER
+
+Pair 131:
+  Relational:    email CHARACTER
+  Denormalized:  email CHARACTER
+
+Pair 132:
+  Relational:    senha CHARACTER
+  Denormalized:  senha CHARACTER
+
+Pair 133:
+  Relational:    telefone CHARACTER
+  Denormalized:  telefone CHARACTER
+
+Pair 134:
+  Relational:    token_troca_senha CHARACTER
+  Denormalized:  token_troca_senha CHARACTER
+
+Pair 135:
+  Relational:    token_troca_senha_expiracao TIMESTAMP
+  Denormalized:  token_troca_senha_expiracao TIMESTAMP
+
+Pair 136:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 137:
+  Relational:    nome CHARACTER
+  Denormalized:  nome CHARACTER
+
+Pair 138:
+  Relational:    id BIGSERIAL
+  Denormalized:  id BIGSERIAL
+
+Pair 139:
+  Relational:    nome CHARACTER
+  Denormalized:  source_id BIGINT
+
+
+================================================================================

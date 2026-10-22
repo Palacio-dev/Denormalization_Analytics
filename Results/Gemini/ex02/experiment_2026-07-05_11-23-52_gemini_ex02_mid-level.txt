@@ -1,0 +1,238 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-23-52
+Model: gemini
+Prompt: mid-level
+Schema: ex02
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transforms the highly normalized transactional schema into a Star Schema optimized for OLAP/BI workloads. The core approach involves consolidating 1:1 relationships (such as cleaning events, locations, and waste collection details) into a single Fact table to eliminate unnecessary joins. Additionally, small lookup tables (biome, management category, administrative sphere) are flattened directly into the Conservation Unit dimension. A Date dimension is introduced to support robust time-series analysis.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidate 'mutirao_de_limpeza', 'coleta_de_lixo', and 'local_de_coleta' into a single fact table named 'fact_mutirao_limpeza'. These tables share a 1:1 relationship based on 'id_mutirao'."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Denormalize 'bioma', 'categoria_manejo', and 'esfera_administrativa' into a comprehensive dimension table named 'dim_unidade_conservacao'. This removes three joins when analyzing conservation unit metrics."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Rename and adapt the 'regiao' table into 'dim_geografia' to serve as a standard geographic dimension for both cleaning efforts and conservation units."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Create a new 'dim_tempo' (Date Dimension) to replace the raw 'data_do_ocorrido' date field, enabling rich temporal aggregations (Year, Month, Quarter) without runtime functions."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Rename 'instituicao_organizadora' to 'dim_instituicao' to conform to dimensional modeling naming conventions."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added 'id_tempo' (integer surrogate key, e.g., YYYYMMDD) to 'fact_mutirao_limpeza' to link with the new 'dim_tempo' table, replacing the raw 'data_do_ocorrido' date column."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Derived attributes 'ano', 'mes', 'trimestre', and 'dia_semana' were added to 'dim_tempo' to facilitate BI drill-downs."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Removed surrogate keys 'id_bioma', 'id_manejo', and 'id_esfera' from the analytical model, replacing them with their respective descriptive text fields ('bioma_nome', 'manejo_categoria', 'esfera_tipo') directly inside 'dim_unidade_conservacao'."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Flattened all waste metrics (plastico, borracha, madeira, etc.) and 'local_de_coleta.nome' directly as columns in 'fact_mutirao_limpeza'."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage Footprint: Flattening text descriptions (like biome names and management categories) into 'dim_unidade_conservacao' increases the storage size compared to storing integer foreign keys."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies (Slowly Changing Dimensions): If the name of a biome or administrative sphere changes, multiple rows in 'dim_unidade_conservacao' will need to be updated instead of a single row in a normalized lookup table."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Wide Fact Table: Combining the event details, location name, and all waste metrics creates a wider fact table, which is highly optimal for columnar databases but might consume more memory in traditional row-based RDBMS if a query selects 'SELECT *'."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Total waste collected by type (e.g., plastic, glass) per state and year. This motivated the creation of 'fact_mutirao_limpeza' linked to 'dim_geografia' and 'dim_tempo', eliminating the need to join the waste collection table with the event table."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregating total marine and continental area of conservation units by biome and administrative sphere. This motivated flattening the biome and sphere lookups directly into 'dim_unidade_conservacao'."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Comparing the number of cleaning event participants quarter-over-quarter or year-over-year. This motivated the introduction of the 'dim_tempo' table."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Script for the Denormalized Schema
+
+```sql
+-- ==============================================================================
+-- DENORMALIZED ANALYTICAL SCHEMA (STAR SCHEMA)
+-- Optimized for OLAP / BI Workloads
+-- ==============================================================================
+
+BEGIN;
+
+-- ------------------------------------------------------------------------------
+-- 1. DIMENSION: dim_tempo (Date Dimension)
+-- Supports time-series analysis, drill-downs by year, quarter, month, etc.
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.dim_tempo
+(
+    id_tempo integer NOT NULL, -- Format: YYYYMMDD
+    data_completa date NOT NULL,
+    ano integer NOT NULL,
+    mes integer NOT NULL,
+    trimestre integer NOT NULL,
+    dia_semana text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT dim_tempo_pkey PRIMARY KEY (id_tempo)
+);
+
+-- ------------------------------------------------------------------------------
+-- 2. DIMENSION: dim_geografia (Geography Dimension)
+-- Replaces the 'regiao' table.
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.dim_geografia
+(
+    id_municipio integer NOT NULL,
+    municipio_nome text COLLATE pg_catalog."default" NOT NULL,
+    estado text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT dim_geografia_pkey PRIMARY KEY (id_municipio)
+);
+
+-- ------------------------------------------------------------------------------
+-- 3. DIMENSION: dim_instituicao (Organizer Dimension)
+-- Replaces 'instituicao_organizadora'.
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.dim_instituicao
+(
+    id_instituicao integer NOT NULL,
+    nome text COLLATE pg_catalog."default" NOT NULL,
+    carater text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT dim_instituicao_pkey PRIMARY KEY (id_instituicao)
+);
+
+-- ------------------------------------------------------------------------------
+-- 4. DIMENSION / FACTLESS FACT: dim_unidade_conservacao
+-- Denormalizes 'unidade_de_conservacao', 'bioma', 'categoria_manejo', 
+-- and 'esfera_administrativa' into a single wide table.
+-- Contains area measures, allowing it to be queried as a secondary fact table.
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.dim_unidade_conservacao
+(
+    id_uc integer NOT NULL,
+    nome_uc text COLLATE pg_catalog."default" NOT NULL,
+    ano_de_criacao integer,
+    
+    -- Measures (Can be aggregated)
+    area_soma_biomas double precision,
+    area_soma_biomas_continentais double precision,
+    area_marinha double precision,
+    
+    -- Denormalized Lookups
+    bioma_nome text COLLATE pg_catalog."default",
+    manejo_categoria text COLLATE pg_catalog."default",
+    manejo_categoria_iucn text COLLATE pg_catalog."default",
+    manejo_plano text COLLATE pg_catalog."default",
+    esfera_tipo text COLLATE pg_catalog."default",
+    
+    -- Foreign Keys
+    id_municipio integer,
+    
+    CONSTRAINT dim_unidade_conservacao_pkey PRIMARY KEY (id_uc),
+    CONSTRAINT dim_uc_id_municipio_fkey FOREIGN KEY (id_municipio)
+        REFERENCES public.dim_geografia (id_municipio) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+);
+
+-- ------------------------------------------------------------------------------
+-- 5. FACT: fact_mutirao_limpeza (Cleaning Efforts Fact Table)
+-- Consolidates 'mutirao_de_limpeza', 'coleta_de_lixo', and 'local_de_coleta'.
+-- Contains all metrics related to a cleaning event.
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.fact_mutirao_limpeza
+(
+    id_mutirao integer NOT NULL,
+    
+    -- Foreign Keys to Dimensions
+    id_tempo integer NOT NULL,
+    id_municipio integer,
+    id_instituicao integer,
+    
+    -- Event Attributes (Degenerate Dimensions / Details)
+    local_coleta_nome text COLLATE pg_catalog."default",
+    horario_de_inicio time without time zone,
+    duracao_total time without time zone,
+    
+    -- Measures
+    numero_aproximado_de_participantes integer,
+    qtd_plastico integer DEFAULT 0,
+    qtd_borracha integer DEFAULT 0,
+    qtd_madeira integer DEFAULT 0,
+    qtd_produtos_texteis integer DEFAULT 0,
+    qtd_papel integer DEFAULT 0,
+    qtd_metal integer DEFAULT 0,
+    qtd_vidro integer DEFAULT 0,
+    qtd_materiais_de_pesca integer DEFAULT 0,
+    qtd_outros_residuos integer DEFAULT 0,
+    
+    CONSTRAINT fact_mutirao_limpeza_pkey PRIMARY KEY (id_mutirao),
+    
+    CONSTRAINT fact_mutirao_id_tempo_fkey FOREIGN KEY (id_tempo)
+        REFERENCES public.dim_tempo (id_tempo) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION,
+        
+    CONSTRAINT fact_mutirao_id_municipio_fkey FOREIGN KEY (id_municipio)
+        REFERENCES public.dim_geografia (id_municipio) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION,
+        
+    CONSTRAINT fact_mutirao_id_instituicao_fkey FOREIGN KEY (id_instituicao)
+        REFERENCES public.dim_instituicao (id_instituicao) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+);
+
+-- ------------------------------------------------------------------------------
+-- 6. INDEXES FOR ANALYTICAL QUERIES
+-- Creating indexes on Foreign Keys to speed up Star Schema Joins.
+-- ------------------------------------------------------------------------------
+CREATE INDEX IF NOT EXISTS idx_fact_mutirao_tempo 
+    ON public.fact_mutirao_limpeza(id_tempo);
+
+CREATE INDEX IF NOT EXISTS idx_fact_mutirao_municipio 
+    ON public.fact_mutirao_limpeza(id_municipio);
+
+CREATE INDEX IF NOT EXISTS idx_fact_mutirao_instituicao 
+    ON public.fact_mutirao_limpeza(id_instituicao);
+
+CREATE INDEX IF NOT EXISTS idx_dim_uc_municipio 
+    ON public.dim_unidade_conservacao(id_municipio);
+
+END;
+```

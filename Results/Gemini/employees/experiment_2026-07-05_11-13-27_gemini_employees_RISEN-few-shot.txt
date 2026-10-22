@@ -1,0 +1,93 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-13-27
+Model: gemini
+Prompt: RISEN-few-shot
+Schema: employees
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on optimizing read-heavy analytical queries by collapsing the highly normalized HR schema into a single One-Big-Table (OBT). This eliminates the need for expensive multi-way joins between employees, salaries, titles, and departments. Redundant attributes are added to materialize joins, and derived attributes are introduced to speed up common filtering.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Collapsing Relations: Merged 'employee', 'department', 'department_employee', 'department_manager', 'salary', and 'title' tables into a single denormalized table named 'employee_analytics_obt'."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Adding Redundant Attributes: Duplicated 'dept_name' from the 'department' table into 'dept_emp_dept_name'
+         and 'dept_manager_dept_name' to distinguish between a department an employee works in versus one they manage."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Attribute Disambiguation: Renamed shared columns like 'from_date' and 'to_date' by prefixing them with 
+        their source table names (e.g., 'salary_from_date', 'title_to_date') to avoid ambiguity and preserve semantic equivalence."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Adding Derived Attributes: Added a boolean 'is_active_employee' column to precompute if the employee
+         is currently active, optimizing current headcount queries."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage / Data Redundancy: Storing every combination of salary, title, and department changes per employee in a single wide table creates a Cartesian product of intervals, significantly increasing storage requirements."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: Modifying an employee's core attribute (e.g., last name) requires updating multiple historical rows in the denormalized table instead of a single row in the original normalized employee table."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1",
+        "query": "SELECT dept_emp_dept_name, title, AVG(salary_amount) AS avg_salary FROM employees.employee_analytics_obt WHERE is_active_employee = true GROUP BY dept_emp_dept_name, title ORDER BY avg_salary DESC;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+BEGIN;
+
+DROP TABLE IF EXISTS employees.employee_analytics_obt CASCADE;
+
+CREATE TABLE IF NOT EXISTS employees.employee_analytics_obt
+(
+    employee_id bigint NOT NULL,
+    employee_first_name character varying(14) COLLATE pg_catalog."default" NOT NULL,
+    employee_last_name character varying(16) COLLATE pg_catalog."default" NOT NULL,
+    employee_birth_date date NOT NULL,
+    employee_gender employees.employee_gender NOT NULL,
+    employee_hire_date date NOT NULL,
+    
+    title character varying(50) COLLATE pg_catalog."default",
+    title_from_date date,
+    title_to_date date,
+    
+    salary_amount bigint,
+    salary_from_date date,
+    salary_to_date date,
+    
+    dept_emp_department_id character(4) COLLATE pg_catalog."default",
+    dept_emp_dept_name character varying(40) COLLATE pg_catalog."default",
+    dept_emp_from_date date,
+    dept_emp_to_date date,
+    
+    dept_manager_department_id character(4) COLLATE pg_catalog."default",
+    dept_manager_dept_name character varying(40) COLLATE pg_catalog."default",
+    dept_manager_from_date date,
+    dept_manager_to_date date,
+
+    is_active_employee boolean
+);
+
+END;
+```

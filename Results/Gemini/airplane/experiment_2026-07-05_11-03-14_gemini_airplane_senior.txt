@@ -1,0 +1,268 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-03-14
+Model: gemini
+Prompt: senior
+Schema: airplane
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The analytical modeling strategy transitions the highly normalized 3NF OLTP schema into a Star Schema 
+    optimized for OLAP workloads. The core approach involves creating two primary fact tables at different granularities 
+    (Flight Execution and Passenger Ticket Segments) to serve distinct business processes without forcing complex 
+    aggregations at query time. Reference tables are flattened into Type 1/Type 2 dimensions. JSONB and Point data types 
+    are extracted into native scalar columns to maximize compatibility with BI platforms (e.g., Tableau, PowerBI) and 
+    columnar storage engines. The design prioritizes read performance, join elimination, and pre-calculation of 
+    standard metrics (like delays and seat capacities).",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidate 'bookings', 'tickets', 'ticket_flights', and 'boarding_passes' into a single grain 
+        fact table: 'fact_ticket_flights'. This reduces a 4-table join to 0, providing a single view of revenue, passenger 
+        load, and boarding metrics per flight segment."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Create a distinct 'fact_flights' table from the 'flights' source table. This serves as a fact table 
+        for operational metrics (on-time performance, route analysis) independent of ticket sales, avoiding massive data 
+        duplication that would occur if flight timings were only stored at the passenger-ticket grain."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Denormalize 'seats' into 'dim_aircrafts' via pre-aggregation. Instead of a billion-row join to check 
+        aircraft capacity, 'dim_aircrafts' will contain pre-calculated columns like 'total_seats', 'economy_seats', and 
+        'business_seats'."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Extract 'dim_passengers' from the 'tickets' table. While tickets are transactional, passengers are 
+        entities. Creating a distinct passenger dimension with a surrogate key allows for cross-booking analysis 
+        (e.g., frequent flyer behavior, lifetime value)."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Flatten JSONB columns ('model' in aircrafts_data, 'airport_name' and 'city' in airports_data, 
+        'contact_data' in tickets) into standard VARCHAR columns to ensure BI tool compatibility and enable columnar compression."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Split the 'coordinates' POINT column in 'airports_data' into two distinct NUMERIC columns: 
+        'latitude' and 'longitude' for standard geospatial analytical processing."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Derive analytical metrics in 'fact_flights': 'departure_delay_mins' and 'arrival_delay_mins' by 
+        calculating the difference between scheduled and actual timestamps during the ETL process."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Introduce Surrogate Keys (SKs) for all dimensions (e.g., aircraft_sk, airport_sk) to insulate 
+        the data warehouse from source system key changes and to support potential Slowly Changing Dimensions (SCD Type 2) 
+        in the future."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Storage Redundancy vs. Query Performance: Consolidating booking header data (book_date, total_amount) into the ticket-flight grain introduces data duplication. However, it eliminates massive joins and allows immediate slicing of revenue by flight, which is a critical OLAP requirement."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "ETL Complexity vs. BI Simplicity: Pre-calculating delays and seat aggregations pushes complexity into the ETL pipeline (dbt, Airflow, etc.). The tradeoff is accepted because it guarantees a single source of truth and drastically reduces BI compute costs."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Revenue analysis: 'Show me total revenue by travel class, flight route, and booking date.' Motivated the creation of fact_ticket_flights to avoid joining bookings -> tickets -> ticket_flights -> flights."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Operational performance: 'What is the average departure delay for flights leaving JFK on Fridays?' Motivated fact_flights and the derived delay_mins columns."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Load factor analysis: 'What percentage of available seats were sold on flight X?' Motivated pre-aggregating seat counts into dim_aircrafts so it can be easily compared against fact_ticket_flights counts."
+      },
+      {
+        "decision_id": "A1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Geospatial dashboarding: 'Plot all destination airports on a map sized by passenger volume.' Motivated extracting coordinates into explicit latitude/longitude columns."
+      }
+    ]
+  }
+}
+```
+
+### Analytical Physical Model DDL (PostgreSQL Syntax)
+
+```sql
+-- ==============================================================================
+-- DIMENSIONAL MODEL DDL (OLAP)
+-- Schema: analytics
+-- ==============================================================================
+
+CREATE SCHEMA IF NOT EXISTS analytics;
+
+-- ------------------------------------------------------------------------------
+-- 1. DIMENSIONS
+-- ------------------------------------------------------------------------------
+
+-- Dim Date (Standard Date Dimension)
+CREATE TABLE IF NOT EXISTS analytics.dim_date (
+    date_sk INT NOT NULL,
+    full_date DATE NOT NULL,
+    day_of_week INT NOT NULL,
+    day_name VARCHAR(10) NOT NULL,
+    month_num INT NOT NULL,
+    month_name VARCHAR(10) NOT NULL,
+    quarter INT NOT NULL,
+    year INT NOT NULL,
+    is_weekend BOOLEAN NOT NULL,
+    CONSTRAINT dim_date_pkey PRIMARY KEY (date_sk)
+);
+
+-- Dim Aircrafts
+-- Flattened JSON, Pre-aggregated seat counts from source 'seats' table
+CREATE TABLE IF NOT EXISTS analytics.dim_aircrafts (
+    aircraft_sk BIGSERIAL NOT NULL,
+    aircraft_code CHAR(3) NOT NULL,
+    model_en VARCHAR(100) NOT NULL,
+    model_ru VARCHAR(100),
+    range_km INT NOT NULL,
+    total_seats INT NOT NULL DEFAULT 0,
+    economy_seats INT NOT NULL DEFAULT 0,
+    business_seats INT NOT NULL DEFAULT 0,
+    first_class_seats INT NOT NULL DEFAULT 0,
+    valid_from TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    valid_to TIMESTAMP WITH TIME ZONE DEFAULT '9999-12-31 23:59:59',
+    is_current BOOLEAN DEFAULT TRUE,
+    CONSTRAINT dim_aircrafts_pkey PRIMARY KEY (aircraft_sk)
+);
+CREATE INDEX idx_dim_aircrafts_code ON analytics.dim_aircrafts(aircraft_code);
+
+-- Dim Airports
+-- Flattened JSON, split coordinates, added SK
+CREATE TABLE IF NOT EXISTS analytics.dim_airports (
+    airport_sk BIGSERIAL NOT NULL,
+    airport_code CHAR(3) NOT NULL,
+    airport_name_en VARCHAR(150) NOT NULL,
+    airport_name_ru VARCHAR(150),
+    city_en VARCHAR(100) NOT NULL,
+    city_ru VARCHAR(100),
+    longitude NUMERIC(10, 6) NOT NULL,
+    latitude NUMERIC(10, 6) NOT NULL,
+    timezone VARCHAR(50) NOT NULL,
+    CONSTRAINT dim_airports_pkey PRIMARY KEY (airport_sk)
+);
+CREATE INDEX idx_dim_airports_code ON analytics.dim_airports(airport_code);
+
+-- Dim Passengers
+-- Extracted from tickets, flattened contact_data JSON
+CREATE TABLE IF NOT EXISTS analytics.dim_passengers (
+    passenger_sk BIGSERIAL NOT NULL,
+    passenger_id VARCHAR(20) NOT NULL,
+    passenger_name VARCHAR(150) NOT NULL,
+    email VARCHAR(150),
+    phone VARCHAR(50),
+    CONSTRAINT dim_passengers_pkey PRIMARY KEY (passenger_sk)
+);
+CREATE INDEX idx_dim_passengers_id ON analytics.dim_passengers(passenger_id);
+
+-- ------------------------------------------------------------------------------
+-- 2. FACTS
+-- ------------------------------------------------------------------------------
+
+-- Fact Flights (Operational Grain)
+-- Granularity: One row per flight execution
+-- Partitioning: By scheduled departure month
+CREATE TABLE IF NOT EXISTS analytics.fact_flights (
+    flight_sk BIGSERIAL NOT NULL,
+    flight_id INT NOT NULL,
+    flight_no CHAR(6) NOT NULL,
+    scheduled_departure_date_sk INT NOT NULL,
+    scheduled_arrival_date_sk INT NOT NULL,
+    departure_airport_sk BIGINT NOT NULL,
+    arrival_airport_sk BIGINT NOT NULL,
+    aircraft_sk BIGINT NOT NULL,
+    scheduled_departure TIMESTAMP WITH TIME ZONE NOT NULL,
+    scheduled_arrival TIMESTAMP WITH TIME ZONE NOT NULL,
+    actual_departure TIMESTAMP WITH TIME ZONE,
+    actual_arrival TIMESTAMP WITH TIME ZONE,
+    departure_delay_mins INT, -- Derived: actual_departure - scheduled_departure
+    arrival_delay_mins INT,   -- Derived: actual_arrival - scheduled_arrival
+    status VARCHAR(20) NOT NULL,
+    is_cancelled BOOLEAN NOT NULL DEFAULT FALSE,
+    CONSTRAINT fact_flights_pkey PRIMARY KEY (flight_sk, scheduled_departure)
+) PARTITION BY RANGE (scheduled_departure);
+
+-- Foreign Keys for Fact Flights
+ALTER TABLE analytics.fact_flights ADD CONSTRAINT fk_ff_dep_airport FOREIGN KEY (departure_airport_sk) REFERENCES analytics.dim_airports(airport_sk);
+ALTER TABLE analytics.fact_flights ADD CONSTRAINT fk_ff_arr_airport FOREIGN KEY (arrival_airport_sk) REFERENCES analytics.dim_airports(airport_sk);
+ALTER TABLE analytics.fact_flights ADD CONSTRAINT fk_ff_aircraft FOREIGN KEY (aircraft_sk) REFERENCES analytics.dim_aircrafts(aircraft_sk);
+ALTER TABLE analytics.fact_flights ADD CONSTRAINT fk_ff_dep_date FOREIGN KEY (scheduled_departure_date_sk) REFERENCES analytics.dim_date(date_sk);
+
+-- Clustering/Indexing for Fact Flights
+CREATE INDEX idx_ff_dep_airport ON analytics.fact_flights(departure_airport_sk);
+CREATE INDEX idx_ff_arr_airport ON analytics.fact_flights(arrival_airport_sk);
+CREATE INDEX idx_ff_aircraft ON analytics.fact_flights(aircraft_sk);
+
+
+-- Fact Ticket Flights (Financial / Passenger Grain)
+-- Granularity: One row per passenger per flight segment
+-- Consolidates: bookings, tickets, ticket_flights, boarding_passes
+-- Partitioning: By booking date
+CREATE TABLE IF NOT EXISTS analytics.fact_ticket_flights (
+    ticket_flight_sk BIGSERIAL NOT NULL,
+    ticket_no CHAR(13) NOT NULL,
+    flight_sk BIGINT NOT NULL,
+    passenger_sk BIGINT NOT NULL,
+    book_date_sk INT NOT NULL,
+    book_ref CHAR(6) NOT NULL,
+    book_date TIMESTAMP WITH TIME ZONE NOT NULL,
+    fare_conditions VARCHAR(10) NOT NULL,
+    amount NUMERIC(10, 2) NOT NULL,
+    booking_total_amount NUMERIC(10, 2) NOT NULL, -- Denormalized from bookings
+    boarding_no INT,                              -- Denormalized from boarding_passes
+    seat_no VARCHAR(4),                           -- Denormalized from boarding_passes
+    has_boarded BOOLEAN NOT NULL DEFAULT FALSE,   -- Derived: TRUE if boarding_no is not null
+    CONSTRAINT fact_ticket_flights_pkey PRIMARY KEY (ticket_flight_sk, book_date)
+) PARTITION BY RANGE (book_date);
+
+-- Foreign Keys for Fact Ticket Flights
+ALTER TABLE analytics.fact_ticket_flights ADD CONSTRAINT fk_ftf_passenger FOREIGN KEY (passenger_sk) REFERENCES analytics.dim_passengers(passenger_sk);
+ALTER TABLE analytics.fact_ticket_flights ADD CONSTRAINT fk_ftf_book_date FOREIGN KEY (book_date_sk) REFERENCES analytics.dim_date(date_sk);
+-- Note: flight_sk FK is omitted here to avoid cross-partition FK complexity in standard Postgres, 
+-- but logically joins to fact_flights(flight_sk).
+
+-- Clustering/Indexing for Fact Ticket Flights
+CREATE INDEX idx_ftf_flight_sk ON analytics.fact_ticket_flights(flight_sk);
+CREATE INDEX idx_ftf_passenger_sk ON analytics.fact_ticket_flights(passenger_sk);
+CREATE INDEX idx_ftf_fare_conditions ON analytics.fact_ticket_flights(fare_conditions);
+
+-- ------------------------------------------------------------------------------
+-- 3. PARTITION CREATION (Example for current year)
+-- ------------------------------------------------------------------------------
+
+-- Example partitions for fact_flights
+CREATE TABLE analytics.fact_flights_2023_h1 PARTITION OF analytics.fact_flights
+    FOR VALUES FROM ('2023-01-01 00:00:00Z') TO ('2023-07-01 00:00:00Z');
+    
+CREATE TABLE analytics.fact_flights_2023_h2 PARTITION OF analytics.fact_flights
+    FOR VALUES FROM ('2023-07-01 00:00:00Z') TO ('2024-01-01 00:00:00Z');
+
+-- Example partitions for fact_ticket_flights
+CREATE TABLE analytics.fact_ticket_flights_2023_h1 PARTITION OF analytics.fact_ticket_flights
+    FOR VALUES FROM ('2023-01-01 00:00:00Z') TO ('2023-07-01 00:00:00Z');
+    
+CREATE TABLE analytics.fact_ticket_flights_2023_h2 PARTITION OF analytics.fact_ticket_flights
+    FOR VALUES FROM ('2023-07-01 00:00:00Z') TO ('2024-01-01 00:00:00Z');
+```

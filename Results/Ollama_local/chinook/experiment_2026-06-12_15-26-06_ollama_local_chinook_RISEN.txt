@@ -1,0 +1,171 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_15-26-06
+Model: ollama_local
+Prompt: RISEN
+Schema: chinook
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on the 'Invoice' and 'Track' domains, which are the primary drivers for analytical reporting (e.g., 'Top Albums by Artist', 'Invoice Totals by Genre', 'Playlist composition'). The strategy employs **Adding Redundant Attributes** to materialize the most frequent JOINs (Customer/Invoice/InvoiceLine/Track/Album/Artist) into a single 'Fact_Invoice_Detailed' table. It also utilizes **Adding Derived Attributes** to pre-calculate the 'UnitPrice' on the Track level to avoid redundant calculations in the InvoiceLine, and **Collapsing Relations** by merging Track, Genre, Media, and Album details into the Fact table. Vertical partitioning is not applied as the fact table remains within reasonable size limits for analytical workloads.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Created a new denormalized fact table 'Fact_Invoice_Detailed' that consolidates data from 'Invoice', 'InvoiceLine', 'Track', 'Album', 'Artist', 'Genre', 'MediaType', and 'Customer'. This eliminates the need for complex joins in analytical queries."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Created a new dimension table 'Dim_Customer_Detailed' that consolidates 'Customer' and 'Employee' (SupportRep) data to avoid joining two dimension tables for customer support context."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Created a new dimension table 'Dim_Music_Details' that consolidates 'Track', 'Album', 'Artist', 'Genre', and 'MediaType' into a single table to simplify music-related queries."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant attributes to 'Fact_Invoice_Detailed': 'AlbumTitle', 'ArtistName', 'GenreName', 'MediaTypeName', 'AlbumArtistId', 'TrackAlbumId', 'TrackGenreId', 'TrackMediaTypeId'. Also added 'CustomerFirstName', 'CustomerLastName', 'CustomerCompany', 'CustomerAddress', 'CustomerCity', 'CustomerState', 'CustomerCountry', 'CustomerPostalCode', 'CustomerPhone', 'CustomerFax', 'CustomerEmail', 'SupportRepLastName', 'SupportRepFirstName', 'SupportRepTitle'."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added redundant attribute 'UnitPrice' to 'Fact_Invoice_Detailed' (copied from Track) to avoid recalculating UnitPrice * Quantity during aggregation, assuming the price per track is constant."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Removed redundant columns from 'Fact_Invoice_Detailed' that are already present in the source tables but are now physically stored elsewhere (e.g., 'BillingAddress', 'BillingCity', etc. are kept in the fact table as they are part of the invoice record, but 'TrackId' and 'InvoiceLineId' are kept as keys). Note: No columns were dropped from the logical model, only moved."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Increased Write Complexity vs. Read Performance. The denormalized schema requires more complex INSERT/UPDATE logic to maintain data consistency (copying attributes from source tables), but it drastically reduces Read latency for analytical queries by eliminating JOIN operations."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Storage Overhead vs. Cache Efficiency. The denormalized tables store duplicate data (e.g., artist names repeated in every album record), increasing storage footprint. However, this improves CPU cache efficiency and reduces I/O latency for sequential scans."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Business Query: 'List all invoices with full customer details, album titles, artist names, and genre names.' (Requires joining Invoice, Customer, InvoiceLine, Track, Album, Artist, Genre)."
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical Query: 'Calculate total revenue per artist per genre, including album titles and media types.' (Requires aggregating across multiple dimensions)."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Business Query: 'Find customers with a specific support representative, including their address and contact info.' (Joins Customer and Employee)."
+      }
+    ]
+  }
+}
+```
+
+### Complete SQL DDL Creation Script for Denormalized Schema
+
+```sql
+-- Denormalized Schema for Improved Read Performance
+-- Strategy: Fact table consolidation for Invoice/Track/Album/Artist/Genre/Media/SupportRep
+
+BEGIN;
+
+-- 1. Denormalized Dimension: Customer + Support Rep
+CREATE TABLE IF NOT EXISTS public."Dim_Customer_Detailed"
+(
+    "CustomerId" integer NOT NULL,
+    "FirstName" character varying(40) COLLATE pg_catalog."default" NOT NULL,
+    "LastName" character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    "Company" character varying(80) COLLATE pg_catalog."default",
+    "Address" character varying(70) COLLATE pg_catalog."default",
+    "City" character varying(40) COLLATE pg_catalog."default",
+    "State" character varying(40) COLLATE pg_catalog."default",
+    "Country" character varying(40) COLLATE pg_catalog."default",
+    "PostalCode" character varying(10) COLLATE pg_catalog."default",
+    "Phone" character varying(24) COLLATE pg_catalog."default",
+    "Fax" character varying(24) COLLATE pg_catalog."default",
+    "Email" character varying(60) COLLATE pg_catalog."default" NOT NULL,
+    "SupportRepLastName" character varying(20) COLLATE pg_catalog."default",
+    "SupportRepFirstName" character varying(20) COLLATE pg_catalog."default",
+    "SupportRepTitle" character varying(30) COLLATE pg_catalog."default",
+    CONSTRAINT "PK_Dim_Customer_Detailed" PRIMARY KEY ("CustomerId")
+);
+
+-- 2. Denormalized Dimension: Music Details (Track + Album + Artist + Genre + MediaType)
+CREATE TABLE IF NOT EXISTS public."Dim_Music_Details"
+(
+    "TrackId" integer NOT NULL,
+    "Name" character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    "AlbumTitle" character varying(160) COLLATE pg_catalog."default",
+    "ArtistName" character varying(120) COLLATE pg_catalog."default",
+    "AlbumArtistId" integer,
+    "GenreName" character varying(120) COLLATE pg_catalog."default",
+    "GenreId" integer,
+    "MediaTypeName" character varying(120) COLLATE pg_catalog."default",
+    "MediaTypeId" integer,
+    "Composer" character varying(220) COLLATE pg_catalog."default",
+    "Milliseconds" integer NOT NULL,
+    "Bytes" integer,
+    "UnitPrice" numeric(10, 2) NOT NULL, -- Redundant attribute derived from Track
+    "AlbumId" integer, -- Redundant attribute for join elimination
+    "TrackAlbumId" integer, -- Redundant attribute for join elimination
+    "TrackGenreId" integer, -- Redundant attribute for join elimination
+    "TrackMediaTypeId" integer, -- Redundant attribute for join elimination
+    CONSTRAINT "PK_Dim_Music_Details" PRIMARY KEY ("TrackId")
+);
+
+-- 3. Denormalized Fact Table: Invoice + InvoiceLine + Music + Customer
+CREATE TABLE IF NOT EXISTS public."Fact_Invoice_Detailed"
+(
+    "InvoiceId" integer NOT NULL,
+    "InvoiceDate" timestamp without time zone NOT NULL,
+    "Total" numeric(10, 2) NOT NULL,
+    "CustomerId" integer NOT NULL,
+    "BillingAddress" character varying(70) COLLATE pg_catalog."default",
+    "BillingCity" character varying(40) COLLATE pg_catalog."default",
+    "BillingState" character varying(40) COLLATE pg_catalog."default",
+    "BillingCountry" character varying(40) COLLATE pg_catalog."default",
+    "BillingPostalCode" character varying(10) COLLATE pg_catalog."default",
+    "FirstName" character varying(40) COLLATE pg_catalog."default" NOT NULL, -- Customer First Name
+    "LastName" character varying(20) COLLATE pg_catalog."default" NOT NULL, -- Customer Last Name
+    "Company" character varying(80) COLLATE pg_catalog."default", -- Customer Company
+    "Address" character varying(70) COLLATE pg_catalog."default", -- Customer Address
+    "City" character varying(40) COLLATE pg_catalog."default", -- Customer City
+    "State" character varying(40) COLLATE pg_catalog."default", -- Customer State
+    "Country" character varying(40) COLLATE pg_catalog."default", -- Customer Country
+    "PostalCode" character varying(10) COLLATE pg_catalog."default", -- Customer Postal Code
+    "Phone" character varying(24) COLLATE pg_catalog."default", -- Customer Phone
+    "Fax" character varying(24) COLLATE pg_catalog."default", -- Customer Fax
+    "Email" character varying(60) COLLATE pg_catalog."default" NOT NULL, -- Customer Email
+    "SupportRepLastName" character varying(20) COLLATE pg_catalog."default", -- Support Rep Last Name
+    "SupportRepFirstName" character varying(20) COLLATE pg_catalog."default", -- Support Rep First Name
+    "SupportRepTitle" character varying(30) COLLATE pg_catalog."default", -- Support Rep Title
+    "TrackId" integer NOT NULL, -- Key to join music details
+    "UnitPrice" numeric(10, 2) NOT NULL, -- Redundant attribute (pre-calculated from Track)
+    "Quantity" integer NOT NULL,
+    "AlbumTitle" character varying(160) COLLATE pg_catalog."default", -- Redundant
+    "ArtistName" character varying(120) COLLATE pg_catalog."default", -- Redundant
+    "GenreName" character varying(120) COLLATE pg_catalog."default", -- Redundant
+    "MediaTypeName" character varying(120) COLLATE pg_catalog."default", -- Redundant
+    "Composer" character varying(220) COLLATE pg_catalog."default", -- Redundant
+    CONSTRAINT "PK_Fact_Invoice_Detailed" PRIMARY KEY ("InvoiceId", "TrackId")
+);
+
+-- Indexes for Denormalized Schema
+CREATE INDEX IF NOT EXISTS "IX_Dim_Customer_Detailed_CustomerId" ON public."Dim_Customer_Detailed"("CustomerId");
+CREATE INDEX IF NOT EXISTS "IX_Dim_Music_Details_TrackId" ON public."Dim_Music_Details"("TrackId");
+CREATE INDEX IF NOT EXISTS "IX_Fact_Invoice_Detailed_InvoiceId" ON public."Fact_Invoice_Detailed"("InvoiceId");
+CREATE INDEX IF NOT EXISTS "IX_Fact_Invoice_Detailed_CustomerId" ON public."Fact_Invoice_Detailed"("CustomerId");
+CREATE INDEX IF NOT EXISTS "IX_Fact_Invoice_Detailed_TrackId" ON public."Fact_Invoice_Detailed"("TrackId");
+
+-- End of Transaction
+END;
+```

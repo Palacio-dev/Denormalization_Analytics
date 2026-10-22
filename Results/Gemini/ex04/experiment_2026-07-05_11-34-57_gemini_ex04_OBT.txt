@@ -1,0 +1,166 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-34-57
+Model: gemini
+Prompt: OBT
+Schema: ex04
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "To optimize read performance for heavy analytical workloads, the normalized relational model has been denormalized into a ONE-BIG-TABLE (OBT) architecture. By pre-joining all dimensional and fact data (Geography, Demography, Economy, Education, Health, Employment, and Surveys) into a single flat structure, we eliminate the need for expensive multi-table JOINs. A unified temporal dimension ('year') and spatial dimension ('country_code') act as the primary grain, while multi-valued dimensions (like deciles and population age/gender brackets) are flattened alongside them. This drastically reduces query latency for aggregations and correlations across different socio-economic indicators.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidated all 11 tables (country, region, survey, decile, demography, employment, education, economy, population, life_expectancy, health) into a single denormalized table named 'global_development_indicators'."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Unified the temporal dimensions. The 'year' column from demography, employment, education, economy, and health, along with 'survey_year' from the survey table, have been merged into a single 'year' column to align all annual metrics."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Unified the spatial dimensions by consolidating 'country_code' and 'region_code' across all tables into single representative columns in the OBT."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Dropped all original Primary Keys and Foreign Keys to comply with the OBT model, introducing a single surrogate Primary Key ('id_record') to uniquely identify each flattened observation."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Renamed 'name' from the 'decile' table to 'decile_name' to avoid ambiguity with 'country_name' and 'region_name'."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Renamed 'value' from the 'decile' and 'life_expectancy' tables to 'decile_value' and 'life_expectancy_value' respectively."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Renamed 'expenditure' from the 'education' and 'health' tables to 'education_expenditure' and 'health_expenditure' to distinguish the metrics."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Renamed 'gender' from the 'population' and 'life_expectancy' tables to 'population_gender' and 'life_expectancy_gender'."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Renamed 'number' from the 'population' table to 'population_number' for clearer semantic meaning."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy: Macro-level indicators (like GDP, inflation, and country names) will be repeated across multiple rows for countries that have granular sub-dimensions (e.g., multiple deciles or population age groups in the same year), increasing storage costs."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Sparsity and Nulls: Because deciles, population demographics, and life expectancy are independent multi-valued dimensions, flattening them into a single row per country/year will result in a sparse table with many NULLs, depending on how the ETL handles the Cartesian products."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Update Anomalies: Modifying a dimensional attribute (e.g., correcting a region's name or a historical GDP figure) will require updating thousands of rows instead of a single record in a normalized table."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Cross-domain correlation queries: Analyzing the impact of macroeconomic factors (GDP, inflation) and health/education expenditures on poverty metrics (Gini, headcount) over time. The OBT avoids an 8-table JOIN."
+      },
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Demographic and wealth distribution analysis: Comparing population brackets (age, gender) against income deciles and employment rates by region. The OBT allows simple GROUP BY operations without traversing complex relationships."
+      }
+    ]
+  }
+}
+```
+
+```sql
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS public.global_development_indicators
+(
+    id_record serial NOT NULL,
+    country_code character varying NOT NULL,
+    country_name character varying,
+    region_code character varying NOT NULL,
+    region_name character varying NOT NULL,
+    year integer,
+    
+    -- Survey & Poverty Metrics
+    welfare_type character varying,
+    survey_acronym character varying,
+    survey_comparability integer,
+    comparable_spell character varying,
+    poverty_line double precision,
+    headcount double precision,
+    poverty_gap double precision,
+    poverty_severity double precision,
+    gini double precision,
+    reporting_pop integer,
+    reporting_pce double precision,
+    distribution_type character varying,
+    spl double precision,
+    survey_coverage character varying,
+    reporting_level character varying,
+    
+    -- Decile Metrics
+    decile_name character varying,
+    decile_value double precision,
+    
+    -- Demography Metrics
+    pop_density double precision,
+    urban_pop double precision,
+    rural_pop double precision,
+    net_migration double precision,
+    death_rate double precision,
+    birth_rate double precision,
+    
+    -- Population Metrics
+    pop_ages character varying,
+    population_gender character varying,
+    population_number double precision,
+    
+    -- Life Expectancy Metrics
+    life_expectancy_gender character varying,
+    life_expectancy_value double precision,
+    
+    -- Employment Metrics
+    child_emp double precision,
+    unemp double precision,
+    vulnerable_emp double precision,
+    part_time double precision,
+    employers double precision,
+    labor_force_total double precision,
+    labor_force_fem double precision,
+    
+    -- Education Metrics
+    child_out_of_school double precision,
+    progression_to_sec double precision,
+    education_expenditure double precision,
+    preprim_enroll double precision,
+    prim_enrol double precision,
+    sec_enrol double precision,
+    terti_enrol double precision,
+    
+    -- Economy Metrics
+    gdp double precision,
+    inflation double precision,
+    tax_revenue double precision,
+    
+    -- Health Metrics
+    hospital_beds double precision,
+    physicians double precision,
+    health_expenditure double precision,
+    
+    PRIMARY KEY (id_record)
+);
+
+END;
+```

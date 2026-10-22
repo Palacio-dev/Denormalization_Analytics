@@ -1,0 +1,217 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_08-50-20
+Model: ollama_api
+Prompt: mid-level
+Schema: HFC
+==================================================
+
+{
+  "section_1": {
+    "summary": "The original schema is a normalized OLTP structure optimized for transactional consistency. For analytical purposes, we will denormalize it into a star schema with one main fact table (tombos) and several dimensional tables. This approach reduces the number of joins required for common analytical queries while preserving data integrity and usability. We consolidate related entities such as taxonomy (reino, familia, genero, especie, sub_especie, variedade), location hierarchy (pais, estado, cidade, local_coleta), and user-related metadata (usuario, tipo_usuario, herbario). Additionally, we flatten many-to-many relationships like tombo_identificadores and tombo_fotos into the main fact table using delimited lists or JSON where appropriate.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Main Fact Table: 'tombos' becomes the central fact table, representing herbarium specimens. All relevant foreign keys are replaced with denormalized dimension attributes."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Taxonomy Dimension Consolidation: Reino, Familia, Genero, Especie, Sub_Especie, Variedade, and Sub_Familia are consolidated into a single 'dim_taxonomia' table to reduce joins during species-level analysis."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Location Dimension Consolidation: Pais, Estado, Cidade, and Locais_Coleta are merged into a single 'dim_localizacao' table to simplify geographic analysis."
+      },
+      {
+        "decision_id": "D4",
+        "description": "User & Herbarium Dimension Consolidation: Usuarios, Tipos_Usuarios, and Herbarios are combined into a 'dim_usuario_herbario' table to support user and institutional analytics."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Date Dimension Creation: Created a 'dim_data' table to support time-based aggregations on data_tombo, data_coleta, and data_identificacao fields."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Flattening Many-to-Many Relationships: Tombo_Identificadores and Tombo_Fotos are flattened into the main 'tombos' fact table using JSON arrays to preserve analytical flexibility without joins."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived attribute 'nome_completo_taxonomia' in tombos fact table by concatenating reino, familia, genero, especie, sub_especie, variedade."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added derived attribute 'localizacao_completa' in tombos fact table by concatenating pais, estado, cidade, and descricao_local_coleta."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Converted data_coleta_dia, data_coleta_mes, data_coleta_ano into a single DATE column 'data_coleta' in tombos."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Converted data_identificacao_dia, data_identificacao_mes, data_identificacao_ano into a single DATE column 'data_identificacao' in tombos."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Added JSON array column 'identificadores' in tombos to store identificador names and order."
+      },
+      {
+        "decision_id": "A6",
+        "description": "Added JSON array column 'fotos' in tombos to store foto paths and metadata."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased storage footprint due to denormalization and duplication of dimensional data in the fact table. However, this is acceptable for analytical workloads where read performance is prioritized over storage efficiency."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Loss of strict referential integrity at the physical level; referential integrity must now be enforced at ETL time or via application logic."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Updates to dimensional data (e.g., changing a species name) now require updates across multiple rows in the fact table, increasing ETL complexity."
+      },
+      {
+        "tradeoff_id": "T4",
+        "description": "Use of JSON for nested data (identificadores, fotos) may limit some SQL operations compared to fully relational structures, but provides flexibility for analytical queries."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Count of tombos per family, genus, or species over time to analyze collection growth."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analysis of tombos by geographic location (country, state, city) to understand collection distribution."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting on tombos identified by specific users or institutions to track expert contributions."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregation of tombos by collection date or identification date for temporal analysis."
+      },
+      {
+        "decision_id": "D5",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Drill-down analysis of tombos with multiple identifications or photos for quality control or research purposes."
+      }
+    ]
+  }
+}
+
+-- Denormalized Analytical Schema DDL
+CREATE TABLE IF NOT EXISTS public.dim_data (
+    data_id BIGINT PRIMARY KEY,
+    data_completa DATE,
+    ano INT,
+    mes INT,
+    dia INT,
+    trimestre INT,
+    dia_da_semana INT,
+    nome_mes VARCHAR(20),
+    nome_dia_semana VARCHAR(20)
+);
+
+CREATE TABLE IF NOT EXISTS public.dim_taxonomia (
+    taxonomia_id BIGSERIAL PRIMARY KEY,
+    reino_id BIGINT,
+    reino_nome VARCHAR(200),
+    familia_id BIGINT,
+    familia_nome VARCHAR(200),
+    genero_id BIGINT,
+    genero_nome VARCHAR(200),
+    especie_id BIGINT,
+    especie_nome VARCHAR(200),
+    sub_especie_id BIGINT,
+    sub_especie_nome VARCHAR(255),
+    variedade_id BIGINT,
+    variedade_nome VARCHAR(200),
+    sub_familia_id BIGINT,
+    sub_familia_nome VARCHAR(300),
+    autor_nome VARCHAR(200),
+    nome_completo_taxonomia TEXT
+);
+
+CREATE TABLE IF NOT EXISTS public.dim_localizacao (
+    localizacao_id BIGSERIAL PRIMARY KEY,
+    pais_id INT,
+    pais_nome VARCHAR(255),
+    estado_id BIGINT,
+    estado_nome VARCHAR(255),
+    cidade_id BIGINT,
+    cidade_nome VARCHAR(200),
+    local_coleta_id BIGINT,
+    descricao_local_coleta TEXT,
+    localizacao_completa TEXT
+);
+
+CREATE TABLE IF NOT EXISTS public.dim_usuario_herbario (
+    usuario_herbario_id BIGSERIAL PRIMARY KEY,
+    usuario_id BIGINT,
+    usuario_nome VARCHAR(200),
+    tipo_usuario_id BIGINT,
+    tipo_usuario_nome VARCHAR(100),
+    herbario_id BIGINT,
+    herbario_nome VARCHAR(200),
+    herbario_sigla VARCHAR(80)
+);
+
+CREATE TABLE IF NOT EXISTS public.dim_tipo (
+    tipo_id BIGINT PRIMARY KEY,
+    tipo_nome VARCHAR(250)
+);
+
+CREATE TABLE IF NOT EXISTS public.dim_colecao_anexa (
+    colecao_anexa_id BIGINT PRIMARY KEY,
+    tipo_colecao colecoes_anexas_tipo,
+    observacoes TEXT
+);
+
+CREATE TABLE IF NOT EXISTS public.fact_tombos (
+    hcf BIGINT PRIMARY KEY,
+    data_tombo DATE,
+    data_tombo_id BIGINT REFERENCES public.dim_data(data_id),
+    data_coleta DATE,
+    data_coleta_id BIGINT REFERENCES public.dim_data(data_id),
+    data_identificacao DATE,
+    data_identificacao_id BIGINT REFERENCES public.dim_data(data_id),
+    numero_coleta BIGINT,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    altitude DOUBLE PRECISION,
+    observacao TEXT,
+    nomes_populares TEXT,
+    nome_cientifico TEXT,
+    situacao tombos_situacao,
+    ativo BOOLEAN,
+    rascunho BOOLEAN,
+    unicata BOOLEAN,
+    descricao TEXT,
+    taxonomia_id BIGINT REFERENCES public.dim_taxonomia(taxonomia_id),
+    localizacao_id BIGINT REFERENCES public.dim_localizacao(localizacao_id),
+    usuario_herbario_id BIGINT REFERENCES public.dim_usuario_herbario(usuario_herbario_id),
+    tipo_id BIGINT REFERENCES public.dim_tipo(tipo_id),
+    colecao_anexa_id BIGINT REFERENCES public.dim_colecao_anexa(colecao_anexa_id),
+    solo_nome VARCHAR(300),
+    relevo_nome VARCHAR(300),
+    vegetacao_nome VARCHAR(300),
+    fase_sucessional_nome VARCHAR(200),
+    coletor_nome VARCHAR(255),
+    coletores_complementares TEXT,
+    identificadores JSONB,
+    fotos JSONB,
+    qtde_alteracoes INT DEFAULT 0,
+    qtde_fotos INT DEFAULT 0,
+    qtde_identificadores INT DEFAULT 0
+);

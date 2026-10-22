@@ -1,0 +1,114 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-45-11
+Model: gemini
+Prompt: junior
+Schema: ex07
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy involves collapsing the highly normalized snowflake schema into a single flat table (One Big Table - OBT) designed for OLAP (Online Analytical Processing). By embedding the descriptive attributes of Owners, Rivers, Locations, Municipalities, and States directly into the main Power Plant (Usina) table, we completely eliminate the need for 5 separate joins during analytical queries, drastically improving read performance for reporting tools.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge 'Proprietarios' (Owners) and 'Rios' (Rivers) directly into the target 'Usina_Analytics' table. This removes two dimension tables."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Flatten the geographic hierarchy ('Localizacoes', 'Municipios', 'Estados') into the target 'Usina_Analytics' table. Because a location can span up to two municipalities, both municipality names and their respective states (UF) are added as separate columns."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Removed foreign keys 'id_proprietario', 'id_rio', and 'id_localizacao'. Replaced them with descriptive string columns: 'proprietario_nome', 'rio_nome', 'municipio1_nome', 'uf1', 'municipio2_nome', and 'uf2'."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Consolidated coordinate columns. The source schema had 'lat'/'long' in 'Usina' and 'latitude'/'longitude' in 'Localizacoes'. These are merged into a single 'latitude' and 'longitude' pair in the denormalized table to avoid confusion and redundancy."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Completely removed the 'Estados' entity attributes other than 'uf', as the state abbreviation ('uf') is already sufficient for regional analytics and was the only attribute in the 'Estados' table."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage Space: Storing long string names (e.g., municipality names, owner names) repeatedly for every power plant will consume more disk space compared to storing integer foreign keys."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies / ETL Overhead: If an owner changes their corporate name, or a municipality changes its name, the update must be applied to multiple rows in the denormalized table rather than a single row in a dimension table. This shifts the processing burden from read-time (joins) to write-time (ETL updates)."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Geospatial and Regional Aggregation: Business users frequently group total power capacity (potkw) by State (uf1) or Municipality (municipio1_nome) to analyze regional energy distribution."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Filtering by Entity: Analysts often filter power plants by River (rio_nome) and Owner (proprietario_nome) to assess environmental impact or corporate market share, requiring fast text-based filtering without joining multiple tables."
+      }
+    ]
+  }
+}
+```
+
+### SQL DDL Script for the Denormalized Schema
+
+```sql
+-- ==============================================================================
+-- Denormalized Schema for Analytics and Reporting (One Big Table)
+-- ==============================================================================
+
+-- Drop the table if it already exists to allow clean recreation
+DROP TABLE IF EXISTS public."Usina_Analytics";
+
+-- Create the denormalized flat table
+CREATE TABLE public."Usina_Analytics" (
+    usina_id INTEGER PRIMARY KEY,
+    usina_nome VARCHAR NOT NULL,
+    
+    -- Power metrics
+    potkw FLOAT,
+    potfis FLOAT,
+    
+    -- Temporal data
+    iniciop DATE,
+    atualizacao DATE,
+    estagio VARCHAR,
+    
+    -- Consolidated Geospatial data
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    
+    -- Denormalized Owner (Proprietario) data
+    proprietario_nome VARCHAR,
+    
+    -- Denormalized River (Rio) data
+    rio_nome VARCHAR,
+    
+    -- Denormalized Location data (Primary Municipality and State)
+    municipio1_nome VARCHAR,
+    uf1 CHAR(2),
+    
+    -- Denormalized Location data (Secondary Municipality and State, if applicable)
+    municipio2_nome VARCHAR,
+    uf2 CHAR(2)
+);
+
+-- Create indexes to optimize the inferred analytical query patterns
+CREATE INDEX idx_usina_analytics_uf1 ON public."Usina_Analytics"(uf1);
+CREATE INDEX idx_usina_analytics_proprietario ON public."Usina_Analytics"(proprietario_nome);
+CREATE INDEX idx_usina_analytics_rio ON public."Usina_Analytics"(rio_nome);
+CREATE INDEX idx_usina_analytics_estagio ON public."Usina_Analytics"(estagio);
+
+COMMIT;
+```

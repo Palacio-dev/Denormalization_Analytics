@@ -1,0 +1,295 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_10-54-06
+Model: gemini
+Prompt: senior
+Schema: adv_works
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The objective is to transform the highly normalized 3NF AdventureWorks OLTP schema into a Kimball-style Star Schema optimized for OLAP workloads. The strategy focuses on dimension flattening (absorbing snowflakes like Category/Subcategory and Geography), merging header-detail transaction tables into unified fact tables at the lowest grain (line item), and introducing surrogate keys to insulate the analytical model from source system changes and support Slowly Changing Dimensions (SCDs).",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Flatten Product Hierarchy: Consolidated production.product, production.productsubcategory, production.productcategory, and production.productmodel into a single analytics.dim_product table to eliminate three expensive joins during product-based aggregations."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Consolidate Customer and Geography: Merged sales.customer, person.person, sales.store, person.businessentityaddress, person.address, person.stateprovince, and person.countryregion into analytics.dim_customer. This resolves the complex polymorphic person/store relationships into a clean, flat customer dimension."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge Sales Header and Detail: Combined sales.salesorderheader and sales.salesorderdetail into analytics.fact_sales. The grain is set to the individual order line item, which provides maximum flexibility for slicing and dicing."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Merge Purchase Header and Detail: Combined purchasing.purchaseorderheader and purchasing.purchaseorderdetail into analytics.fact_purchases to analyze vendor performance and procurement costs."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Create Conformed Date Dimension: Introduced analytics.dim_date to replace scattered timestamp columns, enabling consistent cross-subject area time-series analysis (e.g., comparing Sales vs. Purchases by Quarter)."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Introduced integer Surrogate Keys (e.g., product_key, customer_key) for all dimensions to optimize join performance and enable SCD Type 2 historical tracking."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Pre-calculated derived metrics in fact tables: Added 'sales_amount' (orderqty * unitprice * (1 - unitpricediscount)) to fact_sales to eliminate runtime calculations."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Standardized status flags: Converted boolean/flag columns (e.g., onlineorderflag) into descriptive text attributes ('Online', 'Offline') in dimensions to improve BI tool usability."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Storage vs. Read Performance: Flattening wide dimensions (like Customer and Product) introduces significant data redundancy, increasing storage costs. However, this is offset by massive reductions in CPU/Memory usage during query execution due to join elimination."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "ETL Complexity vs. Query Simplicity: The burden of resolving complex polymorphic joins (e.g., Person vs. Store) and maintaining hierarchies is shifted to the ETL pipeline. This makes the data pipeline more complex but drastically simplifies the SQL required by end-users and BI tools."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Revenue and margin analysis by Product Category and Subcategory over time. Flattening the product dimension prevents a 4-table join every time a user drills down from Category to Product."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Geospatial sales performance (e.g., 'Top 10 Cities by Sales Volume'). Embedding geography directly into the Customer and Territory dimensions allows instant aggregation without traversing the complex Address/StateProvince/CountryRegion snowflake."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Market Basket Analysis and Line-Item Profitability. By setting the fact table grain to the order line, analysts can easily calculate average order value, items per order, and product affinity."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Vendor reliability and lead-time analysis. Joining fact_purchases to dim_vendor allows procurement teams to analyze rejected quantities and total spend per vendor."
+      }
+    ]
+  }
+}
+```
+
+### Analytical Physical Model DDL (PostgreSQL)
+
+```sql
+-- ==============================================================================
+-- Target Architecture: Kimball Star Schema
+-- Schema Name: analytics
+-- Objective: Optimized for OLAP workloads, BI integrations, and fast aggregations
+-- ==============================================================================
+
+CREATE SCHEMA IF NOT EXISTS analytics;
+
+-- ==============================================================================
+-- DIMENSIONS
+-- ==============================================================================
+
+-- 1. Date Dimension (Conformed)
+CREATE TABLE analytics.dim_date (
+    date_key INT NOT NULL, -- Format: YYYYMMDD
+    full_date DATE NOT NULL,
+    day_of_week SMALLINT NOT NULL,
+    day_name VARCHAR(10) NOT NULL,
+    day_of_month SMALLINT NOT NULL,
+    day_of_year SMALLINT NOT NULL,
+    week_of_year SMALLINT NOT NULL,
+    month_number SMALLINT NOT NULL,
+    month_name VARCHAR(10) NOT NULL,
+    calendar_quarter SMALLINT NOT NULL,
+    calendar_year SMALLINT NOT NULL,
+    is_weekend BOOLEAN NOT NULL,
+    is_holiday BOOLEAN NOT NULL DEFAULT FALSE,
+    CONSTRAINT pk_dim_date PRIMARY KEY (date_key)
+);
+COMMENT ON TABLE analytics.dim_date IS 'Conformed date dimension for all time-series analysis.';
+
+-- 2. Product Dimension (Flattened Hierarchy)
+CREATE TABLE analytics.dim_product (
+    product_key SERIAL NOT NULL, -- Surrogate Key
+    product_id INT NOT NULL,     -- Business Key
+    product_name VARCHAR(50) NOT NULL,
+    product_number VARCHAR(25) NOT NULL,
+    color VARCHAR(15) DEFAULT 'N/A',
+    standard_cost NUMERIC(19,4),
+    list_price NUMERIC(19,4),
+    size VARCHAR(5) DEFAULT 'N/A',
+    weight NUMERIC(8,2),
+    product_line VARCHAR(20),
+    product_class VARCHAR(20),
+    product_style VARCHAR(20),
+    subcategory_name VARCHAR(50) DEFAULT 'N/A',
+    category_name VARCHAR(50) DEFAULT 'N/A',
+    model_name VARCHAR(50) DEFAULT 'N/A',
+    is_salable BOOLEAN NOT NULL,
+    is_manufactured BOOLEAN NOT NULL,
+    valid_from TIMESTAMP NOT NULL DEFAULT NOW(),
+    valid_to TIMESTAMP DEFAULT '9999-12-31',
+    is_current BOOLEAN NOT NULL DEFAULT TRUE,
+    CONSTRAINT pk_dim_product PRIMARY KEY (product_key)
+);
+COMMENT ON TABLE analytics.dim_product IS 'SCD Type 2 dimension containing flattened product, subcategory, category, and model data.';
+
+-- 3. Customer Dimension (Flattened Person/Store & Geography)
+CREATE TABLE analytics.dim_customer (
+    customer_key SERIAL NOT NULL, -- Surrogate Key
+    customer_id INT NOT NULL,     -- Business Key
+    customer_type VARCHAR(15) NOT NULL, -- 'Store' or 'Individual'
+    customer_name VARCHAR(150) NOT NULL, -- Store Name or Person Full Name
+    email_address VARCHAR(50),
+    phone_number VARCHAR(25),
+    address_line1 VARCHAR(60),
+    city VARCHAR(30),
+    state_province_code CHAR(3),
+    state_province_name VARCHAR(50),
+    country_region_code VARCHAR(3),
+    country_region_name VARCHAR(50),
+    postal_code VARCHAR(15),
+    valid_from TIMESTAMP NOT NULL DEFAULT NOW(),
+    valid_to TIMESTAMP DEFAULT '9999-12-31',
+    is_current BOOLEAN NOT NULL DEFAULT TRUE,
+    CONSTRAINT pk_dim_customer PRIMARY KEY (customer_key)
+);
+COMMENT ON TABLE analytics.dim_customer IS 'SCD Type 2 dimension containing customer demographics and flattened geography.';
+
+-- 4. Employee Dimension (Flattened HR Data)
+CREATE TABLE analytics.dim_employee (
+    employee_key SERIAL NOT NULL, -- Surrogate Key
+    business_entity_id INT NOT NULL, -- Business Key
+    employee_name VARCHAR(150) NOT NULL,
+    job_title VARCHAR(50) NOT NULL,
+    hire_date DATE NOT NULL,
+    gender CHAR(1),
+    marital_status CHAR(1),
+    is_salaried BOOLEAN,
+    department_name VARCHAR(50),
+    department_group VARCHAR(50),
+    shift_name VARCHAR(50),
+    valid_from TIMESTAMP NOT NULL DEFAULT NOW(),
+    valid_to TIMESTAMP DEFAULT '9999-12-31',
+    is_current BOOLEAN NOT NULL DEFAULT TRUE,
+    CONSTRAINT pk_dim_employee PRIMARY KEY (employee_key)
+);
+COMMENT ON TABLE analytics.dim_employee IS 'SCD Type 2 dimension containing employee and current department/shift data.';
+
+-- 5. Territory Dimension
+CREATE TABLE analytics.dim_territory (
+    territory_key SERIAL NOT NULL,
+    territory_id INT NOT NULL,
+    territory_name VARCHAR(50) NOT NULL,
+    territory_group VARCHAR(50) NOT NULL,
+    country_region_code VARCHAR(3) NOT NULL,
+    CONSTRAINT pk_dim_territory PRIMARY KEY (territory_key)
+);
+
+-- 6. Vendor Dimension
+CREATE TABLE analytics.dim_vendor (
+    vendor_key SERIAL NOT NULL,
+    business_entity_id INT NOT NULL,
+    vendor_name VARCHAR(50) NOT NULL,
+    account_number VARCHAR(15) NOT NULL,
+    credit_rating SMALLINT NOT NULL,
+    is_preferred BOOLEAN NOT NULL,
+    is_active BOOLEAN NOT NULL,
+    CONSTRAINT pk_dim_vendor PRIMARY KEY (vendor_key)
+);
+
+-- ==============================================================================
+-- FACT TABLES
+-- ==============================================================================
+
+-- 1. Fact Sales (Grain: Sales Order Line Item)
+-- Partitioning Strategy: Range partitioned by order_date_key for fast time-based querying
+CREATE TABLE analytics.fact_sales (
+    sales_key BIGSERIAL NOT NULL,
+    order_date_key INT NOT NULL,
+    due_date_key INT NOT NULL,
+    ship_date_key INT NOT NULL,
+    customer_key INT NOT NULL,
+    employee_key INT NOT NULL, -- Salesperson
+    territory_key INT NOT NULL,
+    product_key INT NOT NULL,
+    sales_order_id INT NOT NULL,
+    sales_order_detail_id INT NOT NULL,
+    is_online_order BOOLEAN NOT NULL,
+    order_qty SMALLINT NOT NULL,
+    unit_price NUMERIC(19,4) NOT NULL,
+    unit_price_discount NUMERIC(19,4) NOT NULL DEFAULT 0.0,
+    sales_amount NUMERIC(19,4) NOT NULL, -- Derived: order_qty * unit_price * (1 - unit_price_discount)
+    tax_amount NUMERIC(19,4) NOT NULL,   -- Allocated from header
+    freight_amount NUMERIC(19,4) NOT NULL, -- Allocated from header
+    total_due NUMERIC(19,4) NOT NULL,    -- Derived: sales_amount + tax + freight
+    CONSTRAINT pk_fact_sales PRIMARY KEY (sales_key, order_date_key)
+) PARTITION BY RANGE (order_date_key);
+
+COMMENT ON TABLE analytics.fact_sales IS 'Fact table for sales transactions at the line-item grain.';
+
+-- 2. Fact Purchases (Grain: Purchase Order Line Item)
+CREATE TABLE analytics.fact_purchases (
+    purchase_key BIGSERIAL NOT NULL,
+    order_date_key INT NOT NULL,
+    ship_date_key INT NOT NULL,
+    vendor_key INT NOT NULL,
+    employee_key INT NOT NULL, -- Buyer
+    product_key INT NOT NULL,
+    purchase_order_id INT NOT NULL,
+    purchase_order_detail_id INT NOT NULL,
+    order_qty SMALLINT NOT NULL,
+    received_qty NUMERIC(8,2) NOT NULL,
+    rejected_qty NUMERIC(8,2) NOT NULL,
+    unit_price NUMERIC(19,4) NOT NULL,
+    line_total NUMERIC(19,4) NOT NULL, -- Derived: order_qty * unit_price
+    CONSTRAINT pk_fact_purchases PRIMARY KEY (purchase_key, order_date_key)
+) PARTITION BY RANGE (order_date_key);
+
+COMMENT ON TABLE analytics.fact_purchases IS 'Fact table for procurement transactions at the line-item grain.';
+
+-- ==============================================================================
+-- FOREIGN KEYS & INDEXING (OLAP Optimization)
+-- ==============================================================================
+
+-- Fact Sales FKs
+ALTER TABLE analytics.fact_sales ADD CONSTRAINT fk_fact_sales_order_date FOREIGN KEY (order_date_key) REFERENCES analytics.dim_date(date_key);
+ALTER TABLE analytics.fact_sales ADD CONSTRAINT fk_fact_sales_customer FOREIGN KEY (customer_key) REFERENCES analytics.dim_customer(customer_key);
+ALTER TABLE analytics.fact_sales ADD CONSTRAINT fk_fact_sales_employee FOREIGN KEY (employee_key) REFERENCES analytics.dim_employee(employee_key);
+ALTER TABLE analytics.fact_sales ADD CONSTRAINT fk_fact_sales_territory FOREIGN KEY (territory_key) REFERENCES analytics.dim_territory(territory_key);
+ALTER TABLE analytics.fact_sales ADD CONSTRAINT fk_fact_sales_product FOREIGN KEY (product_key) REFERENCES analytics.dim_product(product_key);
+
+-- Fact Purchases FKs
+ALTER TABLE analytics.fact_purchases ADD CONSTRAINT fk_fact_purchases_order_date FOREIGN KEY (order_date_key) REFERENCES analytics.dim_date(date_key);
+ALTER TABLE analytics.fact_purchases ADD CONSTRAINT fk_fact_purchases_vendor FOREIGN KEY (vendor_key) REFERENCES analytics.dim_vendor(vendor_key);
+ALTER TABLE analytics.fact_purchases ADD CONSTRAINT fk_fact_purchases_employee FOREIGN KEY (employee_key) REFERENCES analytics.dim_employee(employee_key);
+ALTER TABLE analytics.fact_purchases ADD CONSTRAINT fk_fact_purchases_product FOREIGN KEY (product_key) REFERENCES analytics.dim_product(product_key);
+
+-- Bitmap/B-Tree Indexes for heavily filtered/joined Dimension Keys in Fact tables
+CREATE INDEX idx_fact_sales_date ON analytics.fact_sales(order_date_key);
+CREATE INDEX idx_fact_sales_customer ON analytics.fact_sales(customer_key);
+CREATE INDEX idx_fact_sales_product ON analytics.fact_sales(product_key);
+CREATE INDEX idx_fact_sales_territory ON analytics.fact_sales(territory_key);
+
+CREATE INDEX idx_fact_purchases_date ON analytics.fact_purchases(order_date_key);
+CREATE INDEX idx_fact_purchases_vendor ON analytics.fact_purchases(vendor_key);
+CREATE INDEX idx_fact_purchases_product ON analytics.fact_purchases(product_key);
+
+-- ==============================================================================
+-- PARTITION CREATION (Example for Year 2013 and 2014)
+-- ==============================================================================
+CREATE TABLE analytics.fact_sales_2013 PARTITION OF analytics.fact_sales FOR VALUES FROM (20130101) TO (20140101);
+CREATE TABLE analytics.fact_sales_2014 PARTITION OF analytics.fact_sales FOR VALUES FROM (20140101) TO (20150101);
+
+CREATE TABLE analytics.fact_purchases_2013 PARTITION OF analytics.fact_purchases FOR VALUES FROM (20130101) TO (20140101);
+CREATE TABLE analytics.fact_purchases_2014 PARTITION OF analytics.fact_purchases FOR VALUES FROM (20140101) TO (20150101);
+```

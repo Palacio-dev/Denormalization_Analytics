@@ -1,0 +1,157 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-40-56
+Model: gemini
+Prompt: mid-level
+Schema: ex06
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transforms the highly normalized, operational-like schema into a dimensional Star Schema optimized for read-heavy OLAP workloads. The original model suffered from excessive normalization (e.g., separating UF and MUNICIPIO, IES and CURSO) and isolated metric tables (IDEB, ENADE, SAEB) linked through a bridging ANO table. The new design consolidates hierarchical dimensions to eliminate costly joins and flattens all metrics into a central fact table. Additionally, it corrects a domain modeling flaw in the source by allowing facts to link to either Higher Education (Courses) or Basic Education (Schools), while providing a direct link to the Location dimension to avoid snowflake queries.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidate source tables UF and MUNICIPIO into a single target table dim_location to reduce geographic joins."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Consolidate source tables IES and CURSO into a single target table dim_course to allow querying course and institution attributes together without joining."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Convert source table ESCOLA into target table dim_school as a standalone dimension for basic education."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Flatten source tables ANO, ENADE, SAEB, and IDEB into a single target table fact_evaluation to centralize all analytical measures."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Moved pre-aggregated municipal metrics (media_ideb, media_saeb, media_enade, total_participantes, qtd_ies, qtd_escolas) from MUNICIPIO to dim_location as dimension attributes."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added id_location foreign key to fact_evaluation to enable direct geographic aggregations without traversing dim_course or dim_school."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added id_school foreign key to fact_evaluation to properly associate basic education metrics (SAEB, IDEB) to schools, resolving a missing link in the source ANO table."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Wide Fact Table Sparsity: Combining ENADE (Higher Ed) with SAEB/IDEB (Basic Ed) in one fact table introduces NULLs, as a single record will rarely populate all metrics. This trades storage efficiency for a simpler, unified query interface."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Data Duplication in Dimensions: Denormalizing UF into Location and IES into Course duplicates state and institution attributes across multiple rows. This increases storage footprint and potential update anomalies, but significantly improves read performance."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyze average ENADE scores by State, Municipality, and Institution Network (rede) over time."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Compare IDEB and SAEB performance trends across different basic education schools within a specific municipality."
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- ==============================================================================
+-- ANALYTICAL SCHEMA DDL (STAR SCHEMA)
+-- ==============================================================================
+
+-- 1. DIMENSION: LOCATION
+-- Consolidates UF and MUNICIPIO to avoid geographic joins.
+DROP TABLE IF EXISTS dim_location CASCADE;
+CREATE TABLE dim_location (
+    id_location INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_municipio INT NOT NULL,
+    nome_municipio VARCHAR(100) NOT NULL,
+    id_uf INT NOT NULL,
+    sigla_uf VARCHAR(2) NOT NULL,
+    nome_uf VARCHAR(100) NOT NULL,
+    uf_qtd_habitantes INT,
+    municipio_qtd_ies INT,
+    municipio_qtd_escolas INT,
+    municipio_media_ideb REAL,
+    municipio_media_saeb REAL,
+    municipio_media_enade REAL,
+    municipio_total_participantes INT
+);
+
+-- 2. DIMENSION: COURSE (Higher Education)
+-- Consolidates IES and CURSO to allow fast filtering by institution attributes.
+DROP TABLE IF EXISTS dim_course CASCADE;
+CREATE TABLE dim_course (
+    id_course_dim INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_curso INT NOT NULL,
+    nome_curso VARCHAR(100) NOT NULL,
+    id_ies INT NOT NULL,
+    nome_ies VARCHAR(100) NOT NULL,
+    sigla_ies VARCHAR(20),
+    codigo_ies INT NOT NULL,
+    rede_ies VARCHAR(100) NOT NULL
+);
+
+-- 3. DIMENSION: SCHOOL (Basic Education)
+-- Preserves ESCOLA as a dimension for basic education metrics.
+DROP TABLE IF EXISTS dim_school CASCADE;
+CREATE TABLE dim_school (
+    id_school_dim INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_escola INT NOT NULL,
+    nome_escola VARCHAR(100) NOT NULL,
+    cod_escola INT NOT NULL,
+    rede_escola VARCHAR(100) NOT NULL
+);
+
+-- 4. FACT: EVALUATION
+-- Flattens ANO, ENADE, SAEB, and IDEB into a single unified fact table.
+-- Links directly to location, course, and school to avoid snowflake joins.
+DROP TABLE IF EXISTS fact_evaluation CASCADE;
+CREATE TABLE fact_evaluation (
+    id_fact INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ano INT NOT NULL,
+    
+    -- Foreign Keys to Dimensions
+    id_location INT NOT NULL REFERENCES dim_location(id_location),
+    id_course_dim INT REFERENCES dim_course(id_course_dim),
+    id_school_dim INT REFERENCES dim_school(id_school_dim),
+
+    -- ENADE Measures (Higher Education)
+    enade_total_inscritos INT,
+    enade_total_concluintes INT,
+    enade_nota_bruta_ce REAL,
+    enade_nota_padronizada_ce REAL,
+    enade_nota_bruta_fg REAL,
+    enade_nota_padronizada_fg REAL,
+    enade_nota_enade_continua REAL,
+    enade_nota_enade_faixa REAL,
+
+    -- SAEB Measures (Basic Education)
+    saeb_nota_mat REAL,
+    saeb_nota_port REAL,
+    saeb_nota_padrao REAL,
+
+    -- IDEB Measures (Basic Education)
+    ideb_rend_1 REAL,
+    ideb_rend_2 REAL,
+    ideb_rend_3 REAL,
+    ideb_rend_4 REAL,
+    ideb_ind_rend REAL,
+    ideb_nota_ideb REAL
+);
+```

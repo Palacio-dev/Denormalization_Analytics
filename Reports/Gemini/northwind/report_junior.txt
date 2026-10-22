@@ -1,0 +1,286 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 14
+  - Total Attributes: 79
+    * categories: 4 columns
+    * customer_customer_demo: 2 columns (junction table - excluded from attribute analysis)
+    * customer_demographics: 2 columns
+    * customers: 11 columns
+    * employee_territories: 2 columns (junction table - excluded from attribute analysis)
+    * employees: 18 columns
+    * order_details: 5 columns
+    * orders: 14 columns
+    * products: 10 columns
+    * region: 2 columns
+    * shippers: 3 columns
+    * suppliers: 12 columns
+    * territories: 3 columns
+    * us_states: 4 columns
+
+  Note: 2 junction table(s) detected and excluded from attribute analysis:
+    - customer_customer_demo
+    - employee_territories
+
+Denormalized Model:
+  - Tables: 4
+  - Total Attributes: 43
+    * dim_customers: 10 columns
+    * dim_products: 10 columns
+    * dim_employees: 10 columns
+    * fact_sales: 16 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Normalized model has MORE attributes (43 vs 79)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: home_phone (CHARACTER) -> sales_amount (REAL)
+  - Type mismatch: region_id (SMALLINT) -> regions_summary (TEXT)
+  - Type mismatch: region_description (CHARACTER) -> category_description (TEXT)
+  - Type mismatch: supplier_id (SMALLINT) -> supplier_name (CHARACTER)
+  - Type mismatch: territory_id (CHARACTER) -> territories_summary (TEXT)
+--------------------------------------------------------------------------------
+Completeness Ratio:        0.54
+Data Type Preservation:    0.88
+Avg Levenshtein Distance:  1.67
+BLEU Score:                0.33
+ROUGE-1:                   0.63
+METEOR Score:              0.40
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: fact_sales
+Dimension Tables Detected: dim_customers, dim_products, dim_employees
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected exactly 1 Fact table. Evaluating as a standard STAR SCHEMA.
+  - FACT FK VIOLATION: Foreign Key 'customer_id' in Fact 'fact_sales' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'employee_id' in Fact 'fact_sales' allows NULL values.
+  - PAYLOAD WARNING: Fact table 'fact_sales' contains more text attributes (7) than numeric measures (6).
+  - DIMENSION NULL WARNING: Attribute 'contact_name' in 'dim_customers' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'contact_title' in 'dim_customers' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'address' in 'dim_customers' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'city' in 'dim_customers' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'region' in 'dim_customers' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'postal_code' in 'dim_customers' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'country' in 'dim_customers' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'demographics_summary' in 'dim_customers' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'category_name' in 'dim_products' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'category_description' in 'dim_products' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'supplier_name' in 'dim_products' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'supplier_country' in 'dim_products' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'quantity_per_unit' in 'dim_products' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'unit_price' in 'dim_products' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'units_in_stock' in 'dim_products' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'title' in 'dim_employees' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'hire_date' in 'dim_employees' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'city' in 'dim_employees' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'region' in 'dim_employees' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'country' in 'dim_employees' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'manager_name' in 'dim_employees' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'territories_summary' in 'dim_employees' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'regions_summary' in 'dim_employees' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * fact_sales: 6 Numeric, 7 Text
+  * dim_customers: 0 Numeric, 10 Text
+  * dim_products: 4 Numeric, 6 Text
+  * dim_employees: 1 Numeric, 9 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  address address address birth_date category_id category_name city city city company_name company_name company_name contact_name contact_name contact_title contact_title country country country customer_desc customer_id customer_type_id description discontinued discount employee_id extension fax fax first_name freight hire_date home_phone homepage last_name notes order_date order_id phone phone phone photo photo_path picture postal_code postal_code postal_code product_id product_name quantity quantity_per_unit region region region region_description region_id reorder_level required_date ship_address ship_city ship_country ship_name ship_postal_code ship_region shipped_date shipper_id state_abbr state_id state_name state_region supplier_id territory_description territory_id title title_of_courtesy unit_price unit_price units_in_stock units_on_order
+
+Denormalized Model (Combined Text):
+  address category_description category_name city city company_name contact_name contact_title country country customer_id demographics_summary discontinued discount employee_id freight full_name hire_date manager_name order_date order_id postal_code product_id product_name quantity quantity_per_unit region region regions_summary required_date sales_amount ship_city ship_country ship_region shipped_date shipper_name supplier_country supplier_name territories_summary title unit_price unit_price units_in_stock
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 43 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    category_name CHARACTER
+  Denormalized:  category_name CHARACTER
+
+Pair 2:
+  Relational:    description TEXT
+  Denormalized:  demographics_summary TEXT
+
+Pair 3:
+  Relational:    customer_id CHARACTER
+  Denormalized:  customer_id CHARACTER
+
+Pair 4:
+  Relational:    company_name CHARACTER
+  Denormalized:  company_name CHARACTER
+
+Pair 5:
+  Relational:    contact_name CHARACTER
+  Denormalized:  contact_name CHARACTER
+
+Pair 6:
+  Relational:    contact_title CHARACTER
+  Denormalized:  contact_title CHARACTER
+
+Pair 7:
+  Relational:    address CHARACTER
+  Denormalized:  address CHARACTER
+
+Pair 8:
+  Relational:    city CHARACTER
+  Denormalized:  city CHARACTER
+
+Pair 9:
+  Relational:    region CHARACTER
+  Denormalized:  region CHARACTER
+
+Pair 10:
+  Relational:    postal_code CHARACTER
+  Denormalized:  postal_code CHARACTER
+
+Pair 11:
+  Relational:    country CHARACTER
+  Denormalized:  country CHARACTER
+
+Pair 12:
+  Relational:    employee_id SMALLINT
+  Denormalized:  employee_id SMALLINT
+
+Pair 13:
+  Relational:    last_name CHARACTER
+  Denormalized:  full_name CHARACTER
+
+Pair 14:
+  Relational:    title CHARACTER
+  Denormalized:  title CHARACTER
+
+Pair 15:
+  Relational:    hire_date DATE
+  Denormalized:  hire_date DATE
+
+Pair 16:
+  Relational:    city CHARACTER
+  Denormalized:  city CHARACTER
+
+Pair 17:
+  Relational:    region CHARACTER
+  Denormalized:  region CHARACTER
+
+Pair 18:
+  Relational:    country CHARACTER
+  Denormalized:  country CHARACTER
+
+Pair 19:
+  Relational:    home_phone CHARACTER
+  Denormalized:  sales_amount REAL
+
+Pair 20:
+  Relational:    unit_price REAL
+  Denormalized:  unit_price REAL
+
+Pair 21:
+  Relational:    quantity SMALLINT
+  Denormalized:  quantity SMALLINT
+
+Pair 22:
+  Relational:    discount REAL
+  Denormalized:  discount REAL
+
+Pair 23:
+  Relational:    order_id SMALLINT
+  Denormalized:  order_id SMALLINT
+
+Pair 24:
+  Relational:    order_date DATE
+  Denormalized:  order_date DATE
+
+Pair 25:
+  Relational:    required_date DATE
+  Denormalized:  required_date DATE
+
+Pair 26:
+  Relational:    shipped_date DATE
+  Denormalized:  shipped_date DATE
+
+Pair 27:
+  Relational:    freight REAL
+  Denormalized:  freight REAL
+
+Pair 28:
+  Relational:    ship_name CHARACTER
+  Denormalized:  shipper_name CHARACTER
+
+Pair 29:
+  Relational:    ship_city CHARACTER
+  Denormalized:  ship_city CHARACTER
+
+Pair 30:
+  Relational:    ship_region CHARACTER
+  Denormalized:  ship_region CHARACTER
+
+Pair 31:
+  Relational:    ship_country CHARACTER
+  Denormalized:  ship_country CHARACTER
+
+Pair 32:
+  Relational:    product_id SMALLINT
+  Denormalized:  product_id SMALLINT
+
+Pair 33:
+  Relational:    product_name CHARACTER
+  Denormalized:  product_name CHARACTER
+
+Pair 34:
+  Relational:    quantity_per_unit CHARACTER
+  Denormalized:  quantity_per_unit CHARACTER
+
+Pair 35:
+  Relational:    unit_price REAL
+  Denormalized:  unit_price REAL
+
+Pair 36:
+  Relational:    units_in_stock SMALLINT
+  Denormalized:  units_in_stock SMALLINT
+
+Pair 37:
+  Relational:    discontinued INTEGER
+  Denormalized:  discontinued INTEGER
+
+Pair 38:
+  Relational:    region_id SMALLINT
+  Denormalized:  regions_summary TEXT
+
+Pair 39:
+  Relational:    region_description CHARACTER
+  Denormalized:  category_description TEXT
+
+Pair 40:
+  Relational:    supplier_id SMALLINT
+  Denormalized:  supplier_name CHARACTER
+
+Pair 41:
+  Relational:    country CHARACTER
+  Denormalized:  supplier_country CHARACTER
+
+Pair 42:
+  Relational:    territory_id CHARACTER
+  Denormalized:  territories_summary TEXT
+
+Pair 43:
+  Relational:    state_name CHARACTER
+  Denormalized:  manager_name CHARACTER
+
+
+================================================================================

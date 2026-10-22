@@ -1,0 +1,128 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_10-15-38
+Model: ollama_local
+Prompt: junior
+Schema: harperdb
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on collapsing the three related tables (`users`, `entitlements`, and `user_entitlements`) into a single, wide table (`user_entitlements_flat`). This eliminates the need for joins when retrieving user entitlement data, which is critical for analytical reporting. The `users` table is merged into the join table because it contains no other necessary attributes for reporting. The `entitlements` table is expanded to include the join table's specific columns to ensure data consistency without referencing back.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge the `users` and `user_entitlements` tables into a single entity. Since the `users` table contains only the `id`, it acts primarily as a foreign key reference in the `user_entitlements` table. We will inline the `user_id` directly into the new table.",
+        "source_tables": ["users", "user_entitlements"],
+        "target_tables": ["user_entitlements_flat"]
+      },
+      {
+        "decision_id": "D2",
+        "description": "Expand the `entitlements` table columns into the `user_entitlements` table. Instead of joining to `entitlements` to get feature details, we copy all relevant columns from `entitlements` into the denormalized table.",
+        "source_tables": ["entitlements"],
+        "target_tables": ["user_entitlements_flat"]
+      },
+      {
+        "decision_id": "D3",
+        "description": "Remove foreign key constraints and primary key constraints on the composite `(user_id, entitlement_id)` to simplify the schema for an analytics warehouse. We replace the composite PK with a simple `id` or use a surrogate key, though for simplicity in a denormalized view, we will just list the columns without strict relational PKs to allow flexible querying.",
+        "source_tables": ["user_entitlements"],
+        "target_tables": ["user_entitlements_flat"]
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Add columns `user_id`, `featureType`, `packageType`, `activeDate`, `inactiveDate`, `useLimit`, `useCount`, and `activeFlag` to the `user_entitlements` table. These are currently stored in separate tables.",
+        "affected_table": "user_entitlements_flat",
+        "action": "ADD_COLUMNS"
+      },
+      {
+        "decision_id": "A2",
+        "description": "Remove the `id` column from the `users` table as it is no longer needed as a standalone table.",
+        "affected_table": "users",
+        "action": "DROP_TABLE"
+      },
+      {
+        "decision_id": "A3",
+        "description": "Remove the `id` column from the `entitlements` table as it is no longer needed as a standalone table.",
+        "affected_table": "entitlements",
+        "action": "DROP_TABLE"
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Reduced Query Performance for Writes vs. Improved Read Performance. While this schema allows for single-table queries (O(1) joins), it significantly increases write volume and storage requirements due to data duplication.",
+        "impact": "Storage and Write Latency"
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Loss of Referential Integrity. In a denormalized analytics schema, we often drop foreign keys. This means we cannot enforce that a `user_id` actually exists in the original `users` table or that an `entitlement_id` is valid in the original `entitlements` table. Data consistency must be managed via application logic or ETL processes.",
+        "impact": "Data Integrity"
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+      "decision_id": "D1",
+      "query_pattern_type": "provided",
+      "query_pattern_description": "Reporting dashboard requiring a list of all active users with their feature usage statistics in a single result set. Original SQL required: SELECT u.*, e.* FROM users u JOIN user_entitlements ue ON u.id = ue.user_id JOIN entitlements e ON ue.entitlement_id = e.id WHERE e.activeFlag = 1."
+    },
+    {
+      "decision_id": "D2",
+      "query_pattern_type": "inferred",
+      "query_pattern_description": "Ad-hoc analysis requiring aggregation of usage counts per feature type across all packages. With the denormalized schema, this can be done with: SELECT featureType, SUM(useCount) as total_usage FROM user_entitlements_flat GROUP BY featureType."
+    }
+  ]
+  }
+}
+
+```
+
+### Complete SQL DDL Creation Script for the Denormalized Schema
+
+```sql
+-- Drop existing tables if they exist to ensure a clean state
+DROP TABLE IF EXISTS entitlements;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS user_entitlements;
+
+-- Create the denormalized schema
+-- We create a single table that holds all the data previously spread across three tables.
+-- This eliminates the need for JOINs when querying user entitlement details.
+
+CREATE TABLE user_entitlements_flat (
+    id INT PRIMARY KEY, -- Surrogate key for the denormalized record
+    user_id INT,
+    entitlement_id INT,
+    activeDate DATE,
+    inactiveDate DATE,
+    useLimit INT,
+    useCount INT,
+    featureType VARCHAR(4),
+    packageType VARCHAR(4),
+    activeFlag INT
+);
+
+-- Note: In a production data warehouse, we might not enforce strict PK constraints on 
+-- the composite (user_id, entitlement_id) if we are using a star schema approach, 
+-- but keeping a simple PK is fine for an analytics model to ensure uniqueness of rows.
+
+-- Insert sample data to demonstrate the structure
+-- First, let's assume we have existing data in the old tables and populate the new one.
+-- For this script, we will just insert representative data directly.
+
+INSERT INTO user_entitlements_flat (
+    id, user_id, entitlement_id, activeDate, inactiveDate, 
+    useLimit, useCount, featureType, packageType, activeFlag
+) VALUES 
+    (1, 101, 201, '2023-01-01', NULL, 100, 50, 'API', 'STANDARD', 1),
+    (2, 101, 202, '2023-01-01', NULL, 10, 2, 'EMAIL', 'BASIC', 1),
+    (3, 102, 201, '2023-06-01', NULL, 100, 80, 'API', 'PREMIUM', 1),
+    (4, 103, 203, '2023-02-15', '2023-05-01', 50, 10, 'SUPPORT', 'ENTERPRISE', 0);
+
+-- Verification Query (Optional, to show how the new schema works)
+-- This query now returns all data in a single pass without JOINs.
+SELECT * FROM user_entitlements_flat;
+```

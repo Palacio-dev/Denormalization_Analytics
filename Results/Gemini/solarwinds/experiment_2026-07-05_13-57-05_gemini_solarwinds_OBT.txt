@@ -1,0 +1,90 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-57-05
+Model: gemini
+Prompt: OBT
+Schema: solarwinds
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy follows the ONE-BIG-TABLE MODEL, consolidating the 'customers', 'orders', 'products', and 'order_details' tables into a single wide table. The grain of this new table is at the 'order_details' level, which represents the lowest level of granularity in the original relational model. This eliminates the need for expensive multi-table JOINs during read-heavy analytical queries.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged 'customers', 'orders', 'products', and 'order_details' into a single table named 'denormalized_sales'."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Set 'order_detail_id' as the single Primary Key for the new table, as it represents the lowest level of granularity."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Removed all Foreign Key constraints (customer_id, order_id, product_id) to comply with the ONE-BIG-TABLE constraint and optimize for read performance."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Retained all non-key attributes from 'customers' (customer_name, customer_email, customer_address)."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Retained all non-key attributes from 'orders' (order_date)."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Retained all non-key attributes from 'products' (product_name, price)."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Retained all non-key attributes from 'order_details' (quantity)."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Retained former primary and foreign keys (customer_id, order_id, product_id) as standard integer columns to preserve data reconstructibility and semantic equivalence."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage / Data Redundancy: Customer details (name, email, address) and Product details (name, price) will be duplicated for every single item purchased in an order."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: Updating a customer's address or a product's price will now require modifying multiple rows instead of a single row in a normalized dimension table."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "Q1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Sales Reporting and Aggregation: Queries calculating total revenue (price * quantity) grouped by product, customer, or order_date. The denormalized table prevents joining 4 tables for these heavy aggregations."
+      },
+      {
+        "decision_id": "Q2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Customer Order History: Fetching a complete list of products, quantities, and dates for a specific customer. This now requires a simple SELECT and filter on customer_id without any JOINs."
+      }
+    ]
+  }
+}
+```
+
+```sql
+CREATE TABLE denormalized_sales (
+  order_detail_id SERIAL PRIMARY KEY,
+  order_id INT,
+  customer_id INT,
+  customer_name VARCHAR(100),
+  customer_email VARCHAR(100),
+  customer_address TEXT,
+  order_date DATE,
+  product_id INT,
+  product_name VARCHAR(100),
+  price DECIMAL(10,2),
+  quantity INT
+);
+```

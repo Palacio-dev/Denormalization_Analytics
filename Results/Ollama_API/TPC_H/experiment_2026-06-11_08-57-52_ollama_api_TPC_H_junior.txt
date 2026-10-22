@@ -1,0 +1,238 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_08-57-52
+Model: ollama_api
+Prompt: junior
+Schema: TPC_H
+==================================================
+
+{
+  "section_1": {
+    "summary": "This denormalization strategy focuses on reducing the number of joins required for common analytical queries by merging dimensionally-related tables into centralized fact tables. The LINEITEM table is treated as the central fact table and is joined with ORDERS, CUSTOMER, NATION, REGION, PART, SUPPLIER, and PARTSUPP to create a comprehensive denormalized fact table for analytics. Additional smaller denormalized tables are also created for faster lookups.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge LINEITEM (fact) with ORDERS to create a LINEITEM_WITH_ORDERS table containing order-level details like order date, status, and clerk."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge LINEITEM_WITH_ORDERS with CUSTOMER to include customer attributes such as name, market segment, and account balance."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge the result with NATION and REGION to enrich customer data with nation and region names and comments."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Merge with PART to include part details like name, brand, type, and retail price."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Merge with SUPPLIER to include supplier name, address, phone, and account balance."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Merge with NATION and REGION again to enrich supplier data with nation and region information."
+      },
+      {
+        "decision_id": "D7",
+        "description": "Merge with PARTSUPP to include supply cost and available quantity for each line item."
+      },
+      {
+        "decision_id": "D8",
+        "description": "Create a denormalized SUPPLIER_DIM table by joining SUPPLIER with NATION and REGION for fast supplier lookups."
+      },
+      {
+        "decision_id": "D9",
+        "description": "Create a denormalized CUSTOMER_DIM table by joining CUSTOMER with NATION and REGION for fast customer lookups."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added O_ORDERDATE, O_ORDERSTATUS, O_CLERK, etc. from ORDERS into LINEITEM."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added C_NAME, C_MKTSEGMENT, C_ACCTBAL, etc. from CUSTOMER into LINEITEM."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added N_NAME (customer nation), R_NAME (customer region) into LINEITEM."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Added P_NAME, P_BRAND, P_TYPE, P_RETAILPRICE, etc. from PART into LINEITEM."
+      },
+      {
+        "decision_id": "A5",
+        "description": "Added S_NAME, S_ADDRESS, S_PHONE, S_ACCTBAL, etc. from SUPPLIER into LINEITEM."
+      },
+      {
+        "decision_id": "A6",
+        "description": "Added N_NAME (supplier nation), R_NAME (supplier region) into LINEITEM."
+      },
+      {
+        "decision_id": "A7",
+        "description": "Added PS_SUPPLYCOST, PS_AVAILQTY from PARTSUPP into LINEITEM."
+      },
+      {
+        "decision_id": "A8",
+        "description": "Added derived columns like LINEITEM_EXTENDED_AMOUNT = L_QUANTITY * L_EXTENDEDPRICE and LINEITEM_DISCOUNTED_AMOUNT = L_EXTENDEDPRICE * (1 - L_DISCOUNT)."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Storage increases significantly due to denormalization and duplication of data across rows."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Write/update performance decreases because multiple tables must be updated to maintain consistency."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Query performance for analytics improves significantly due to fewer joins and precomputed values."
+      },
+      {
+        "tradeoff_id": "T4",
+        "description": "Schema becomes less flexible to changes in source dimensions; any change in NATION or REGION affects multiple tables."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries analyzing revenue by customer segment, region, and order date, requiring joins from LINEITEM to ORDERS, CUSTOMER, NATION, and REGION."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries analyzing part performance across suppliers and regions, requiring joins from LINEITEM to PART, SUPPLIER, NATION, and REGION."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries calculating supply cost vs. sales price, requiring joins from LINEITEM to PARTSUPP."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Queries reporting on supplier performance and availability, requiring joins from LINEITEM to SUPPLIER, NATION, and REGION."
+      }
+    ]
+  }
+}
+
+```sql
+-- Denormalized Fact Table: LINEITEM_ANALYTICS
+CREATE TABLE LINEITEM_ANALYTICS (
+    -- LINEITEM attributes
+    L_ORDERKEY          INTEGER NOT NULL,
+    L_PARTKEY           INTEGER NOT NULL,
+    L_SUPPKEY           INTEGER NOT NULL,
+    L_LINENUMBER        INTEGER NOT NULL,
+    L_QUANTITY          DECIMAL(15,2) NOT NULL,
+    L_EXTENDEDPRICE     DECIMAL(15,2) NOT NULL,
+    L_DISCOUNT          DECIMAL(15,2) NOT NULL,
+    L_TAX               DECIMAL(15,2) NOT NULL,
+    L_RETURNFLAG        CHAR(1) NOT NULL,
+    L_LINESTATUS        CHAR(1) NOT NULL,
+    L_SHIPDATE          DATE NOT NULL,
+    L_COMMITDATE        DATE NOT NULL,
+    L_RECEIPTDATE       DATE NOT NULL,
+    L_SHIPINSTRUCT      CHAR(25) NOT NULL,
+    L_SHIPMODE          CHAR(10) NOT NULL,
+    L_COMMENT           VARCHAR(44) NOT NULL,
+
+    -- ORDERS attributes
+    O_CUSTKEY           INTEGER NOT NULL,
+    O_ORDERSTATUS       CHAR(1) NOT NULL,
+    O_TOTALPRICE        DECIMAL(15,2) NOT NULL,
+    O_ORDERDATE         DATE NOT NULL,
+    O_ORDERPRIORITY     CHAR(15) NOT NULL,
+    O_CLERK             CHAR(15) NOT NULL,
+    O_SHIPPRIORITY      INTEGER NOT NULL,
+    O_COMMENT           VARCHAR(79) NOT NULL,
+
+    -- CUSTOMER attributes
+    C_NAME              VARCHAR(25) NOT NULL,
+    C_ADDRESS           VARCHAR(40) NOT NULL,
+    C_PHONE             CHAR(15) NOT NULL,
+    C_ACCTBAL           DECIMAL(15,2) NOT NULL,
+    C_MKTSEGMENT        CHAR(10) NOT NULL,
+    C_CUST_NATION_KEY   INTEGER NOT NULL,
+    C_CUST_NATION_NAME  CHAR(25) NOT NULL,
+    C_CUST_NATION_COMMENT VARCHAR(152),
+    C_CUST_REGION_KEY   INTEGER NOT NULL,
+    C_CUST_REGION_NAME  CHAR(25) NOT NULL,
+    C_CUST_REGION_COMMENT VARCHAR(152),
+    C_COMMENT           VARCHAR(117) NOT NULL,
+
+    -- PART attributes
+    P_NAME              VARCHAR(55) NOT NULL,
+    P_MFGR              CHAR(25) NOT NULL,
+    P_BRAND             CHAR(10) NOT NULL,
+    P_TYPE              VARCHAR(25) NOT NULL,
+    P_SIZE              INTEGER NOT NULL,
+    P_CONTAINER         CHAR(10) NOT NULL,
+    P_RETAILPRICE       DECIMAL(15,2) NOT NULL,
+    P_COMMENT           VARCHAR(23) NOT NULL,
+
+    -- SUPPLIER attributes
+    S_NAME              CHAR(25) NOT NULL,
+    S_ADDRESS           VARCHAR(40) NOT NULL,
+    S_PHONE             CHAR(15) NOT NULL,
+    S_ACCTBAL           DECIMAL(15,2) NOT NULL,
+    S_SUPP_NATION_KEY   INTEGER NOT NULL,
+    S_SUPP_NATION_NAME  CHAR(25) NOT NULL,
+    S_SUPP_NATION_COMMENT VARCHAR(152),
+    S_SUPP_REGION_KEY   INTEGER NOT NULL,
+    S_SUPP_REGION_NAME  CHAR(25) NOT NULL,
+    S_SUPP_REGION_COMMENT VARCHAR(152),
+    S_COMMENT           VARCHAR(101) NOT NULL,
+
+    -- PARTSUPP attributes
+    PS_AVAILQTY         INTEGER NOT NULL,
+    PS_SUPPLYCOST       DECIMAL(15,2) NOT NULL,
+    PS_PARTSUPP_COMMENT VARCHAR(199) NOT NULL,
+
+    -- Derived attributes
+    LINEITEM_EXTENDED_AMOUNT   DECIMAL(15,2) NOT NULL,
+    LINEITEM_DISCOUNTED_AMOUNT DECIMAL(15,2) NOT NULL
+);
+
+-- Denormalized Dimension Table: CUSTOMER_DIM
+CREATE TABLE CUSTOMER_DIM (
+    C_CUSTKEY           INTEGER NOT NULL,
+    C_NAME              VARCHAR(25) NOT NULL,
+    C_ADDRESS           VARCHAR(40) NOT NULL,
+    C_PHONE             CHAR(15) NOT NULL,
+    C_ACCTBAL           DECIMAL(15,2) NOT NULL,
+    C_MKTSEGMENT        CHAR(10) NOT NULL,
+    C_NATIONKEY         INTEGER NOT NULL,
+    C_NATION_NAME       CHAR(25) NOT NULL,
+    C_NATION_COMMENT    VARCHAR(152),
+    C_REGIONKEY         INTEGER NOT NULL,
+    C_REGION_NAME       CHAR(25) NOT NULL,
+    C_REGION_COMMENT    VARCHAR(152),
+    C_COMMENT           VARCHAR(117) NOT NULL
+);
+
+-- Denormalized Dimension Table: SUPPLIER_DIM
+CREATE TABLE SUPPLIER_DIM (
+    S_SUPPKEY           INTEGER NOT NULL,
+    S_NAME              CHAR(25) NOT NULL,
+    S_ADDRESS           VARCHAR(40) NOT NULL,
+    S_PHONE             CHAR(15) NOT NULL,
+    S_ACCTBAL           DECIMAL(15,2) NOT NULL,
+    S_NATIONKEY         INTEGER NOT NULL,
+    S_NATION_NAME       CHAR(25) NOT NULL,
+    S_NATION_COMMENT    VARCHAR(152),
+    S_REGIONKEY         INTEGER NOT NULL,
+    S_REGION_NAME       CHAR(25) NOT NULL,
+    S_REGION_COMMENT    VARCHAR(152),
+    S_COMMENT           VARCHAR(101) NOT NULL
+);
+```

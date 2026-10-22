@@ -1,0 +1,92 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-04_01-25-58
+Model: ollama_local
+Prompt: OBT
+Schema: harperdb
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy adopts the 'One-Big-Table' approach to eliminate join operations on the `user_entitlements` junction table and the `users` table. By consolidating all data into a single flat table, we ensure that read-heavy analytical queries (e.g., 'List all active features for every user' or 'Calculate usage statistics per package type') can be executed with a single table scan, drastically reducing I/O and query latency. All Foreign Keys are removed, and unique constraints are inferred to maintain data integrity at the application or logical level.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged the `entitlements`, `users`, and `user_entitlements` tables into a single table named `user_entitlements_flat`. The `users` table is effectively absorbed because every row in the final schema must have a `user_id`."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Removed all Foreign Key constraints and the composite Primary Key from `user_entitlements`. Instead, a unique constraint on `(user_id, entitlement_id)` is added to enforce the one-to-many relationship semantics originally present."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Removed the `activeDate`, `inactiveDate`, and `activeFlag` columns from the `entitlements` table and replaced them with a single `status` column (ENUM or VARCHAR) to represent the state of the entitlement for that specific user."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added a derived attribute `status` (VARCHAR) to replace `activeDate`, `inactiveDate`, and `activeFlag`. Logic: If `activeDate` is NULL and `inactiveDate` is NULL, status is 'ACTIVE'. If `activeDate` is not NULL and `inactiveDate` is NULL, status is 'PAST_DUE'. If `activeDate` is NULL and `inactiveDate` is not NULL, status is 'EXPIRED'. If both exist, status is 'INVALID'. This avoids storing multiple dates per row."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added `user_id` as the sole Primary Key (with `entitlement_id` as a unique index). In the original model, `id` was the PK for entitlements and `user_id` was PK for users. Here, `user_id` serves as the anchor to guarantee that a user is the primary identifier for their specific entitlement record."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Renamed `featureType` to `feature_name` and `packageType` to `package_name` for clarity in the denormalized context, while preserving the VARCHAR(4) data type."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Write Performance vs. Read Performance. While reads are significantly faster (single table scan), writes are slightly slower due to the need to update a single large row rather than two small rows. However, for typical data engineering workloads where reads often outnumber writes, this is the optimal tradeoff."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Schema Rigidity vs. Flexibility. The `status` column assumes the logic of `activeDate`/`inactiveDate` is static. If the business logic for entitlement expiration changes (e.g., adding a grace period), the `status` column would require an application-layer update or a migration, whereas the original `DATE` columns were self-documenting."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Business Query: 'Report the count of active features per package type for all users.' In the normalized model, this requires a JOIN between `user_entitlements`, `entitlements`, and potentially `users`. In the denormalized model, this is a simple GROUP BY on the single table."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Business Query: 'Find users who have expired entitlements.' In the normalized model, this requires filtering `entitlements` and joining via `user_entitlements`. In the denormalized model, this is a direct filter on the `status` column."
+      }
+    ]
+  }
+}
+
+-- Denormalized Schema: user_entitlements_flat
+-- Dialect: PostgreSQL (matches input style with SERIAL, VARCHAR, etc.)
+
+DROP TABLE IF EXISTS user_entitlements_flat CASCADE;
+
+CREATE TABLE user_entitlements_flat (
+    user_id INT NOT NULL,
+    entitlement_id INT NOT NULL,
+    feature_name VARCHAR(4),
+    package_name VARCHAR(4),
+    use_limit INT,
+    use_count INT,
+    status VARCHAR(20), -- Derived from activeDate, inactiveDate, activeFlag
+    -- Composite Primary Key replaced with Single PK + Unique Constraint
+    PRIMARY KEY (user_id),
+    CONSTRAINT uq_user_entitlement UNIQUE (user_id, entitlement_id)
+);
+
+-- Note: The 'status' logic is:
+-- 'ACTIVE': activeDate IS NULL AND inactiveDate IS NULL
+-- 'PAST_DUE': activeDate IS NOT NULL AND inactiveDate IS NULL
+-- 'EXPIRED': activeDate IS NULL AND inactiveDate IS NOT NULL
+-- 'INVALID': activeDate IS NOT NULL AND inactiveDate IS NOT NULL
+
+-- Index for common read patterns (e.g., filtering by status or package)
+CREATE INDEX idx_user_entitlements_status ON user_entitlements_flat (status);
+CREATE INDEX idx_user_entitlements_package ON user_entitlements_flat (package_name);

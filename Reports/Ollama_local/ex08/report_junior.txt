@@ -1,0 +1,353 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 10
+  - Total Attributes: 70
+    * aluno_ifb: 7 columns
+    * curso_ifb: 9 columns
+    * desempenho_enem: 8 columns
+    * escola: 6 columns
+    * indicadores_escolares: 9 columns
+    * localizacao: 3 columns
+    * matricula_ifb: 11 columns
+    * participacao_enem: 7 columns
+    * remuneracao: 8 columns
+    * vinculo_empregaticio: 12 columns
+
+Denormalized Model:
+  - Tables: 4
+  - Total Attributes: 58
+    * matricula_denormalizada: 19 columns
+    * escola_geo: 8 columns
+    * escola_metrics: 18 columns
+    * emprego_aluno: 19 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Normalized model has MORE attributes (58 vs 70)
+  Some information may have been lost in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: id_desempenho (SERIAL) -> co_escola_educacenso (CHARACTER)
+--------------------------------------------------------------------------------
+Completeness Ratio:        0.83
+Data Type Preservation:    0.98
+Avg Levenshtein Distance:  0.36
+BLEU Score:                0.79
+ROUGE-1:                   0.92
+METEOR Score:              0.81
+
+4. OLAP ARCHITECTURE (STAR/GALAXY)
+--------------------------------------------------------------------------------
+Fact Tables Detected: emprego_aluno
+Dimension Tables Detected: matricula_denormalizada, escola_geo, escola_metrics
+
+⚠ Architectural Violations/Warnings:
+  - [i] INFO: Detected exactly 1 Fact table. Evaluating as a standard STAR SCHEMA.
+  - FACT FK VIOLATION: Foreign Key 'id_aluno' in Fact 'emprego_aluno' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'id_remuneracao' in Fact 'emprego_aluno' allows NULL values.
+  - FACT FK VIOLATION: Foreign Key 'id_loc' in Fact 'emprego_aluno' allows NULL values.
+  - SNOWFLAKE VIOLATION: Dimension 'matricula_denormalizada' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'co_ciclo_matricula' in 'matricula_denormalizada' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'periodo' in 'matricula_denormalizada' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'situacao_matricula' in 'matricula_denormalizada' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'tipo_cota' in 'matricula_denormalizada' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'atestado_baixarenda' in 'matricula_denormalizada' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'ano' in 'matricula_denormalizada' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'id_aluno' in 'matricula_denormalizada' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'co_curso' in 'matricula_denormalizada' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'no_curso' in 'matricula_denormalizada' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'co_tipo_curso' in 'matricula_denormalizada' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'tipo_curso' in 'matricula_denormalizada' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'co_tipo_nivel' in 'matricula_denormalizada' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'ds_tipo_nivel' in 'matricula_denormalizada' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'ds_eixo_tecnologico' in 'matricula_denormalizada' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'modalidade_ensino' in 'matricula_denormalizada' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'carga_horaria' in 'matricula_denormalizada' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'unidade_ensino' in 'matricula_denormalizada' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'co_escola_educacenso' in 'matricula_denormalizada' allows NULLs. Consider demanding default values.
+  - SNOWFLAKE VIOLATION: Dimension 'escola_geo' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'no_escola_educacenso' in 'escola_geo' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'tp_dependencia_adm_escola' in 'escola_geo' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'tp_localizacao_escola' in 'escola_geo' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'inse' in 'escola_geo' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'id_loc' in 'escola_geo' allows NULLs. Consider demanding default values.
+  - SNOWFLAKE VIOLATION: Dimension 'escola_metrics' contains 1 Foreign Key(s). It is not fully flattened.
+  - DIMENSION NULL WARNING: Attribute 'nu_media_cn' in 'escola_metrics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nu_media_ch' in 'escola_metrics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nu_media_lp' in 'escola_metrics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nu_media_mt' in 'escola_metrics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nu_media_red' in 'escola_metrics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nu_matriculas' in 'escola_metrics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nu_participantes_nec_esp' in 'escola_metrics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nu_participantes' in 'escola_metrics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nu_taxa_participacao' in 'escola_metrics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nu_taxa_permanencia' in 'escola_metrics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nu_taxa_aprovacao' in 'escola_metrics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nu_taxa_reprovacao' in 'escola_metrics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'nu_taxa_abandono' in 'escola_metrics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'co_escola_educacenso' in 'escola_metrics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'porte_escola' in 'escola_metrics' allows NULLs. Consider demanding default values.
+  - DIMENSION NULL WARNING: Attribute 'pc_formacao_docente' in 'escola_metrics' allows NULLs. Consider demanding default values.
+
+Payload Analysis (Text vs Numeric Metrics):
+  * emprego_aluno: 10 Numeric, 6 Text
+  * matricula_denormalizada: 3 Numeric, 16 Text
+  * escola_geo: 3 Numeric, 5 Text
+  * escola_metrics: 16 Numeric, 2 Text
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  ano ano_rais atestado_baixarenda carga_horaria co_ciclo_matricula co_curso co_escola_educacenso co_tipo_curso co_tipo_nivel data_admissao_declarada data_nascimento ds_eixo_tecnologico ds_tipo_nivel id_aluno id_desempenho id_indicadores id_loc id_matricula id_participacao id_remuneracao id_vinculo idade indicador_vinculo_ativo inse mes_desligamento modalidade_ensino motivo_desligamento municipio nacionalidade no_curso no_escola_educacenso nu_ano nu_ano nu_ano nu_matriculas nu_media_ch nu_media_cn nu_media_lp nu_media_mt nu_media_red nu_participantes nu_participantes_nec_esp nu_taxa_abandono nu_taxa_aprovacao nu_taxa_participacao nu_taxa_permanencia nu_taxa_reprovacao pc_formacao_docente periodo portador_deficiencia porte_escola qtd_hora_contr raca razao_social sexo situacao_matricula tempo_emprego tipo_cota tipo_curso tipo_vinculo_empregaticio tp_dependencia_adm_escola tp_localizacao_escola uf unidade_ensino vl_remun_dezembro_nom vl_remun_dezembro_sm vl_remun_media_nom vl_remun_media_sm vl_salario_contratual vl_ultima_remuneracao_ano
+
+Denormalized Model (Combined Text):
+  ano ano_rais atestado_baixarenda carga_horaria co_ciclo_matricula co_curso co_escola_educacenso co_escola_educacenso co_tipo_curso co_tipo_nivel data_admissao_declarada ds_eixo_tecnologico ds_tipo_nivel id_matricula id_metricas id_vinculo indicador_vinculo_ativo inse mes_desligamento modalidade_ensino motivo_desligamento municipio no_curso no_escola_educacenso nu_ano nu_matriculas nu_media_ch nu_media_cn nu_media_lp nu_media_mt nu_media_red nu_participantes nu_participantes_nec_esp nu_taxa_abandono nu_taxa_aprovacao nu_taxa_participacao nu_taxa_permanencia nu_taxa_reprovacao pc_formacao_docente periodo porte_escola qtd_hora_contr razao_social situacao_matricula tempo_emprego tipo_cota tipo_curso tipo_vinculo_empregaticio tp_dependencia_adm_escola tp_localizacao_escola uf unidade_ensino vl_remun_dezembro_nom vl_remun_dezembro_sm vl_remun_media_nom vl_remun_media_sm vl_salario_contratual vl_ultima_remuneracao_ano
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 58 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    co_curso CHARACTER
+  Denormalized:  co_curso CHARACTER
+
+Pair 2:
+  Relational:    no_curso CHARACTER
+  Denormalized:  no_curso CHARACTER
+
+Pair 3:
+  Relational:    co_tipo_curso CHARACTER
+  Denormalized:  co_tipo_curso CHARACTER
+
+Pair 4:
+  Relational:    tipo_curso CHARACTER
+  Denormalized:  tipo_curso CHARACTER
+
+Pair 5:
+  Relational:    co_tipo_nivel CHARACTER
+  Denormalized:  co_tipo_nivel CHARACTER
+
+Pair 6:
+  Relational:    ds_tipo_nivel CHARACTER
+  Denormalized:  ds_tipo_nivel CHARACTER
+
+Pair 7:
+  Relational:    ds_eixo_tecnologico CHARACTER
+  Denormalized:  ds_eixo_tecnologico CHARACTER
+
+Pair 8:
+  Relational:    modalidade_ensino CHARACTER
+  Denormalized:  modalidade_ensino CHARACTER
+
+Pair 9:
+  Relational:    carga_horaria INTEGER
+  Denormalized:  carga_horaria INTEGER
+
+Pair 10:
+  Relational:    id_desempenho SERIAL
+  Denormalized:  co_escola_educacenso CHARACTER
+
+Pair 11:
+  Relational:    nu_ano INTEGER
+  Denormalized:  nu_ano INTEGER
+
+Pair 12:
+  Relational:    nu_media_cn NUMERIC(6, 2)
+  Denormalized:  nu_media_cn NUMERIC(6, 2)
+
+Pair 13:
+  Relational:    nu_media_ch NUMERIC(6, 2)
+  Denormalized:  nu_media_ch NUMERIC(6, 2)
+
+Pair 14:
+  Relational:    nu_media_lp NUMERIC(6, 2)
+  Denormalized:  nu_media_lp NUMERIC(6, 2)
+
+Pair 15:
+  Relational:    nu_media_mt NUMERIC(6, 2)
+  Denormalized:  nu_media_mt NUMERIC(6, 2)
+
+Pair 16:
+  Relational:    nu_media_red NUMERIC(6, 2)
+  Denormalized:  nu_media_red NUMERIC(6, 2)
+
+Pair 17:
+  Relational:    co_escola_educacenso CHARACTER
+  Denormalized:  co_escola_educacenso CHARACTER
+
+Pair 18:
+  Relational:    no_escola_educacenso CHARACTER
+  Denormalized:  no_escola_educacenso CHARACTER
+
+Pair 19:
+  Relational:    tp_dependencia_adm_escola SMALLINT
+  Denormalized:  tp_dependencia_adm_escola SMALLINT
+
+Pair 20:
+  Relational:    tp_localizacao_escola SMALLINT
+  Denormalized:  tp_localizacao_escola SMALLINT
+
+Pair 21:
+  Relational:    inse CHARACTER
+  Denormalized:  inse CHARACTER
+
+Pair 22:
+  Relational:    nu_taxa_permanencia NUMERIC(6, 2)
+  Denormalized:  nu_taxa_permanencia NUMERIC(6, 2)
+
+Pair 23:
+  Relational:    nu_taxa_aprovacao NUMERIC(5, 2)
+  Denormalized:  nu_taxa_aprovacao NUMERIC(5, 2)
+
+Pair 24:
+  Relational:    nu_taxa_reprovacao NUMERIC(5, 2)
+  Denormalized:  nu_taxa_reprovacao NUMERIC(5, 2)
+
+Pair 25:
+  Relational:    nu_taxa_abandono NUMERIC(5, 2)
+  Denormalized:  nu_taxa_abandono NUMERIC(5, 2)
+
+Pair 26:
+  Relational:    porte_escola CHARACTER
+  Denormalized:  porte_escola CHARACTER
+
+Pair 27:
+  Relational:    pc_formacao_docente NUMERIC(5, 2)
+  Denormalized:  pc_formacao_docente NUMERIC(5, 2)
+
+Pair 28:
+  Relational:    id_loc SERIAL
+  Denormalized:  id_metricas SERIAL
+
+Pair 29:
+  Relational:    uf CHARACTER
+  Denormalized:  uf CHARACTER
+
+Pair 30:
+  Relational:    municipio CHARACTER
+  Denormalized:  municipio CHARACTER
+
+Pair 31:
+  Relational:    id_matricula SERIAL
+  Denormalized:  id_matricula SERIAL
+
+Pair 32:
+  Relational:    co_ciclo_matricula CHARACTER
+  Denormalized:  co_ciclo_matricula CHARACTER
+
+Pair 33:
+  Relational:    periodo CHARACTER
+  Denormalized:  periodo CHARACTER
+
+Pair 34:
+  Relational:    situacao_matricula CHARACTER
+  Denormalized:  situacao_matricula CHARACTER
+
+Pair 35:
+  Relational:    tipo_cota CHARACTER
+  Denormalized:  tipo_cota CHARACTER
+
+Pair 36:
+  Relational:    atestado_baixarenda CHARACTER
+  Denormalized:  atestado_baixarenda CHARACTER
+
+Pair 37:
+  Relational:    ano CHARACTER
+  Denormalized:  ano CHARACTER
+
+Pair 38:
+  Relational:    unidade_ensino CHARACTER
+  Denormalized:  unidade_ensino CHARACTER
+
+Pair 39:
+  Relational:    nu_matriculas INTEGER
+  Denormalized:  nu_matriculas INTEGER
+
+Pair 40:
+  Relational:    nu_participantes_nec_esp INTEGER
+  Denormalized:  nu_participantes_nec_esp INTEGER
+
+Pair 41:
+  Relational:    nu_participantes INTEGER
+  Denormalized:  nu_participantes INTEGER
+
+Pair 42:
+  Relational:    nu_taxa_participacao NUMERIC(5, 2)
+  Denormalized:  nu_taxa_participacao NUMERIC(5, 2)
+
+Pair 43:
+  Relational:    vl_remun_media_nom NUMERIC(10, 2)
+  Denormalized:  vl_remun_media_nom NUMERIC(10, 2)
+
+Pair 44:
+  Relational:    vl_remun_media_sm NUMERIC(10, 2)
+  Denormalized:  vl_remun_media_sm NUMERIC(10, 2)
+
+Pair 45:
+  Relational:    vl_remun_dezembro_nom NUMERIC(10, 2)
+  Denormalized:  vl_remun_dezembro_nom NUMERIC(10, 2)
+
+Pair 46:
+  Relational:    vl_remun_dezembro_sm NUMERIC(10, 2)
+  Denormalized:  vl_remun_dezembro_sm NUMERIC(10, 2)
+
+Pair 47:
+  Relational:    qtd_hora_contr INTEGER
+  Denormalized:  qtd_hora_contr INTEGER
+
+Pair 48:
+  Relational:    vl_ultima_remuneracao_ano NUMERIC(10, 2)
+  Denormalized:  vl_ultima_remuneracao_ano NUMERIC(10, 2)
+
+Pair 49:
+  Relational:    vl_salario_contratual NUMERIC(10, 2)
+  Denormalized:  vl_salario_contratual NUMERIC(10, 2)
+
+Pair 50:
+  Relational:    id_vinculo SERIAL
+  Denormalized:  id_vinculo SERIAL
+
+Pair 51:
+  Relational:    ano_rais INTEGER
+  Denormalized:  ano_rais INTEGER
+
+Pair 52:
+  Relational:    razao_social CHARACTER
+  Denormalized:  razao_social CHARACTER
+
+Pair 53:
+  Relational:    tipo_vinculo_empregaticio CHARACTER
+  Denormalized:  tipo_vinculo_empregaticio CHARACTER
+
+Pair 54:
+  Relational:    data_admissao_declarada DATE
+  Denormalized:  data_admissao_declarada DATE
+
+Pair 55:
+  Relational:    tempo_emprego INTEGER
+  Denormalized:  tempo_emprego INTEGER
+
+Pair 56:
+  Relational:    motivo_desligamento CHARACTER
+  Denormalized:  motivo_desligamento CHARACTER
+
+Pair 57:
+  Relational:    mes_desligamento CHARACTER
+  Denormalized:  mes_desligamento CHARACTER
+
+Pair 58:
+  Relational:    indicador_vinculo_ativo BOOLEAN
+  Denormalized:  indicador_vinculo_ativo BOOLEAN
+
+
+================================================================================

@@ -1,0 +1,263 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_10-46-36
+Model: ollama_local
+Prompt: RISEN
+Schema: ex10
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on eliminating the join overhead between `paises`, `continente`, and `populacao`/`consumo_anual` for analytical queries. The primary bottleneck is the repeated lookup of country and continent metadata for every consumption or population record. We apply 'Adding Redundant Attributes' to create a unified `paises_info` table that embeds continent data, and we create a `consumo_pais_anual` table that embeds country, continent, and population data directly to support high-cardinality aggregations without joins.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Replace `paises` and `continente` with a single denormalized table `paises_info`. This table retains the primary key `id_paises` but redundantly stores `nome`, `fundacao`, and `nome_continente` (derived from the original `continente` join).",
+        "source_tables": ["paises", "continente"],
+        "target_tables": ["paises_info"]
+      },
+      {
+        "decision_id": "D2",
+        "description": "Replace `consumo_anual` and `populacao` with a unified analytical table `consumo_populacao_anual`. This table embeds `id_paises`, `nome`, `fundacao`, `nome_continente`, and `id_continente` (redundant for performance but kept for clarity) into the consumption record.",
+        "source_tables": ["consumo_anual", "paises", "continente", "populacao"],
+        "target_tables": ["consumo_populacao_anual"]
+      },
+      {
+        "decision_id": "D3",
+        "description": "Create a dedicated `populacao_anual` table to store the population data with embedded country and continent attributes, separating it from consumption data to allow distinct indexing strategies if needed, though logically they can be joined via the embedded country info.",
+        "source_tables": ["populacao", "paises", "continente"],
+        "target_tables": ["populacao_anual"]
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant columns `nome_continente` and `id_continente` to the `paises_info` table. Added `nome`, `fundacao`, `nome_continente`, and `id_continente` to the `consumo_populacao_anual` table. Added `id_pop`, `ano`, and `quantidade_hab` to the `populacao_anual` table.",
+        "affected_tables": ["paises_info", "consumo_populacao_anual", "populacao_anual"]
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed foreign key columns (`id_continente`, `tipo_energia`, `id_fonte_energia`) from the main analytical tables. The semantic meaning is preserved via the embedded attributes in the source tables.",
+        "affected_tables": ["consumo_populacao_anual"]
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Increased write volume and storage size due to redundant columns (approx. 30-40% increase in row size for country-related queries). Benefit: Elimination of join latency and simplified query logic for analytical dashboards.",
+        "impact": "High Write Cost, Low Read Latency"
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Data consistency becomes harder to maintain at the application layer (no DB enforced FKs on redundant columns). Benefit: Maximum query performance and flexibility for ad-hoc analytics.",
+        "impact": "Risk of Data Divergence, Max Performance"
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Get total energy consumption by continent for a specific year. Original query required: JOIN consumo_anual -> paises -> continente. New query: SELECT SUM(porcentagem) FROM consumo_populacao_anual WHERE ano = ? GROUP BY nome_continente."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Calculate average population per country and continent. Original query required: JOIN populacao -> paises -> continente. New query: SELECT AVG(quantidade_hab), SUM(quantidade_hab) FROM populacao_anual WHERE ano = ? GROUP BY nome_continente."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Standard reporting query: 'List all countries with their continents and total emissions.' Original: 2-3 JOINs. New: Single table scan on `consumo_populacao_anual`."
+      }
+    ]
+  }
+}
+
+-- ==========================================
+-- DENORMALIZED SCHEMA (PostgreSQL Dialect)
+-- ==========================================
+-- This schema is designed for analytical read performance.
+-- All original data is preserved. No foreign keys are enforced on the denormalized columns
+-- to maximize query flexibility, though referential integrity is maintained via application logic
+-- or triggers if strictly required.
+
+-- --------------------------------------------------------
+-- 1. DENORMALIZED COUNTRY INFO TABLE
+-- --------------------------------------------------------
+-- Combines 'paises' and 'continente' to eliminate the need for JOINs on country metadata.
+CREATE TABLE IF NOT EXISTS public.paises_info
+(
+    id_paises integer NOT NULL,
+    nome character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    fundacao integer NOT NULL,
+    nome_continente character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT paises_info_pkey PRIMARY KEY (id_paises)
+);
+
+-- --------------------------------------------------------
+-- 2. DENORMALIZED CONSUMPTION & POPULATION TABLE
+-- --------------------------------------------------------
+-- Combines 'consumo_anual', 'paises', 'continente', and 'populacao'.
+-- Embeds country name, continent name, and ID to allow single-table aggregation.
+CREATE TABLE IF NOT EXISTS public.consumo_populacao_anual
+(
+    id_consumo integer NOT NULL,
+    id_paises integer NOT NULL,
+    ano integer NOT NULL,
+    porcentagem integer NOT NULL,
+    tipo_energia integer NOT NULL,
+    -- Denormalized Country Attributes
+    nome character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    fundacao integer NOT NULL,
+    nome_continente character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    id_continente integer NOT NULL,
+    -- Denormalized Population Attributes (Embedded for context in this view)
+    id_pop integer NOT NULL,
+    quantidade_hab integer NOT NULL,
+    CONSTRAINT consumo_populacao_anual_pkey PRIMARY KEY (id_consumo),
+    CONSTRAINT consumo_populacao_anual_ano_check CHECK (ano >= 1900 AND ano <= 2100) -- Example constraint
+);
+
+-- --------------------------------------------------------
+-- 3. DENORMALIZED POPULATION ONLY TABLE (Optional but cleaner separation)
+-- --------------------------------------------------------
+-- If we want to keep consumption and population logically separate but still denormalized.
+CREATE TABLE IF NOT EXISTS public.populacao_anual
+(
+    id_pop integer NOT NULL,
+    id_paises integer NOT NULL,
+    ano integer NOT NULL,
+    quantidade_hab integer NOT NULL,
+    -- Denormalized Country Attributes
+    nome character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    fundacao integer NOT NULL,
+    nome_continente character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    id_continente integer NOT NULL,
+    CONSTRAINT populacao_anual_pkey PRIMARY KEY (id_pop)
+);
+
+-- --------------------------------------------------------
+-- 4. SOURCE DATA TABLES (Preserved for reconstruction and reference)
+-- --------------------------------------------------------
+-- These tables are kept to ensure data can be reconstructed and to serve as the 'source of truth'.
+
+CREATE TABLE IF NOT EXISTS public.consumo_anual
+(
+    id_consumo integer NOT NULL,
+    id_paises integer NOT NULL,
+    ano integer NOT NULL,
+    porcentagem integer NOT NULL,
+    tipo_energia integer NOT NULL,
+    CONSTRAINT consumo_anual_pkey PRIMARY KEY (id_consumo)
+);
+
+CREATE TABLE IF NOT EXISTS public.continente
+(
+    id_continente integer NOT NULL,
+    nome character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT continente_pkey PRIMARY KEY (id_continente)
+);
+
+CREATE TABLE IF NOT EXISTS public.emissao_g_efeito_estufa
+(
+    id_emissao integer NOT NULL,
+    id_paises integer NOT NULL,
+    ano integer NOT NULL,
+    quantidade_emitida bigint NOT NULL,
+    CONSTRAINT emissao_g_efeito_estufa_pkey PRIMARY KEY (id_emissao)
+);
+
+CREATE TABLE IF NOT EXISTS public.fonte_energia
+(
+    id_fonte_energia integer NOT NULL,
+    nome character varying(50)[] COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT fonte_energia_pkey PRIMARY KEY (id_fonte_energia)
+);
+
+CREATE TABLE IF NOT EXISTS public.paises
+(
+    id_paises integer NOT NULL,
+    nome character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    fundacao integer NOT NULL,
+    continente integer NOT NULL,
+    CONSTRAINT paises_pkey PRIMARY KEY (id_paises)
+);
+
+CREATE TABLE IF NOT EXISTS public.populacao
+(
+    id_pop integer NOT NULL,
+    id_paises integer NOT NULL,
+    ano integer NOT NULL,
+    quantidade_hab integer NOT NULL,
+    CONSTRAINT populacao_pkey PRIMARY KEY (id_pop)
+);
+
+-- --------------------------------------------------------
+-- MIGRATION SCRIPT: Populate Denormalized Tables
+-- --------------------------------------------------------
+-- This script demonstrates how to populate the new denormalized tables
+-- while ensuring full semantic equivalence with the original data.
+
+-- 1. Populate paises_info
+INSERT INTO public.paises_info (id_paises, nome, fundacao, nome_continente)
+SELECT 
+    p.id_paises, 
+    p.nome, 
+    p.fundacao, 
+    c.nome
+FROM public.paises p
+JOIN public.continente c ON p.continente = c.id_continente;
+
+-- 2. Populate consumo_populacao_anual
+INSERT INTO public.consumo_populacao_anual (
+    id_consumo, id_paises, ano, porcentagem, tipo_energia,
+    nome, fundacao, nome_continente, id_continente,
+    id_pop, quantidade_hab
+)
+SELECT 
+    c.id_consumo, 
+    c.id_paises, 
+    c.ano, 
+    c.porcentagem, 
+    c.tipo_energia,
+    p.nome,
+    p.fundacao,
+    cont.nome,
+    cont.id_continente,
+    pop.id_pop,
+    pop.quantidade_hab
+FROM public.consumo_anual c
+JOIN public.paises p ON c.id_paises = p.id_paises
+JOIN public.continente cont ON p.continente = cont.id_continente
+JOIN public.populacao pop ON c.id_paises = pop.id_paises AND c.ano = pop.ano;
+
+-- 3. Populate populacao_anual (if separate)
+INSERT INTO public.populacao_anual (
+    id_pop, id_paises, ano, quantidade_hab,
+    nome, fundacao, nome_continente, id_continente
+)
+SELECT 
+    pop.id_pop, 
+    pop.id_paises, 
+    pop.ano, 
+    pop.quantidade_hab,
+    p.nome,
+    p.fundacao,
+    cont.nome,
+    cont.id_continente
+FROM public.populacao pop
+JOIN public.paises p ON pop.id_paises = p.id_paises
+JOIN public.continente cont ON p.continente = cont.id_continente;
+
+-- Verification Query
+-- Ensure all original data is present and reconstructible
+SELECT 
+    'Consumption Count' as check_type, COUNT(*) as count,
+    (SELECT COUNT(*) FROM public.consumo_anual) as original_count
+FROM public.consumo_populacao_anual
+UNION ALL
+SELECT 
+    'Population Count' as check_type, COUNT(*),
+    (SELECT COUNT(*) FROM public.populacao) as original_count
+FROM public.populacao_anual;

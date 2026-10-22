@@ -1,0 +1,97 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_10-29-41
+Model: ollama_local
+Prompt: junior
+Schema: solarwinds
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on transforming the normalized 4-table schema (customers, orders, products, order_details) into a single, wide 'fact' table. This eliminates the need for JOIN operations, which are the primary bottleneck in analytical reporting. The strategy merges entity details (customer info, product info) directly into the transactional transaction records (orders and order details).",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge the 'customers' table attributes into the 'orders' table to avoid joining customer details with every order."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge the 'products' table attributes into the 'order_details' table to avoid joining product details with every line item."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Combine 'orders' and 'order_details' into a single 'sales_transactions' table to eliminate the parent-child relationship join."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added columns: customer_name, customer_email, customer_address to the main transaction table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added columns: product_name, price to the line item section of the transaction table."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Removed foreign key columns (customer_id, product_id) and replaced them with derived or redundant data to ensure data consistency without lookups."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Improved read performance (no joins) at the cost of increased write complexity (data must be updated in multiple columns) and higher storage usage due to data duplication."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Loss of referential integrity enforcement via foreign keys; relies on application logic or triggers to keep denormalized columns consistent with the source of truth."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical queries requiring a full view of a sale, such as 'Calculate total revenue per customer including name and address' or 'List all items sold in a specific month with product names and prices'."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Reporting dashboards that aggregate sales data where latency is critical, e.g., 'Total sales by product category for the last quarter'."
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- Denormalized Schema: Sales_Fact_Table
+-- This table consolidates Customers, Orders, Products, and Order_Details into a single wide table
+-- to eliminate JOINs for analytical queries.
+
+CREATE TABLE sales_fact_table (
+    -- Primary Key
+    sale_id SERIAL PRIMARY KEY,
+    
+    -- Order Metadata (Merged from 'orders')
+    order_date DATE,
+    
+    -- Customer Metadata (Merged from 'customers')
+    customer_name VARCHAR(100),
+    customer_email VARCHAR(100),
+    customer_address TEXT,
+    
+    -- Line Item Metadata (Merged from 'order_details' and 'products')
+    product_name VARCHAR(100),
+    price DECIMAL(10,2),
+    quantity INT,
+    
+    -- Derived Calculated Field for Analytics
+    line_total DECIMAL(15,2) GENERATED ALWAYS AS (price * quantity) STORED
+);
+
+-- Note: In a real production environment, you would typically use triggers or application logic 
+-- to ensure customer_name, customer_email, etc., match the actual customer_id, and product_name 
+-- matches the actual product_id, rather than relying on FK constraints.
+```

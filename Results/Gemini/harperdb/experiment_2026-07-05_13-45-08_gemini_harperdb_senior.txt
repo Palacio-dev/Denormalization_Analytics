@@ -1,0 +1,151 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_13-45-08
+Model: gemini
+Prompt: senior
+Schema: harperdb
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The OLTP schema represents a highly normalized 3NF structure with a many-to-many bridge table resolving users and entitlements. For OLAP workloads, this creates unnecessary join overhead and query complexity. The denormalization strategy adopts a 'Wide Denormalized Table' (or Factless-Fact transitioning to a standard Fact table) approach. We will flatten the users, user_entitlements, and entitlements tables into a single analytical fact table: `fact_user_entitlements`. Dimensional attributes (featureType, packageType) are absorbed as degenerate dimensions, while highly mutable attributes (useCount) and thresholds (useLimit) are treated as additive/semi-additive facts. Date fields are converted to integer surrogate keys to conform with an enterprise Date Dimension.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge `users`, `user_entitlements`, and `entitlements` into a single denormalized fact table (`fact_user_entitlements`). This eliminates the need for two joins (Users -> Bridge -> Entitlements) during analytical queries, optimizing read performance for large-scale aggregations."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Convert `activeDate` and `inactiveDate` into smart integer surrogate keys (YYYYMMDD) linking to a standard `dim_date`. This allows for robust time-series analysis, fiscal calendar filtering, and cohort analysis without complex date math."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Add derived metric `remaining_uses` calculated as (`useLimit` - `useCount`). This prevents BI tools from having to calculate this on the fly and standardizes the business logic."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Add derived metric `utilization_pct` calculated as (`useCount` / `useLimit`). This enables immediate filtering for users nearing their limits (e.g., upsell opportunities)."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Rename `activeFlag` to `is_active` and cast as a BOOLEAN (or standard INT indicator) for better semantic clarity in BI layers."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data Redundancy: `featureType` and `packageType` are repeated for every user-entitlement combination. In a columnar OLAP database, this storage overhead is negligible due to high compression (dictionary encoding), but it technically violates 3NF."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If the business definition or historical mapping of a `packageType` changes, multiple rows in the fact table must be updated rather than a single dimension record. This is mitigated by standard OLAP ELT batch overwrite/merge patterns."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Aggregating total `useCount` and `useLimit` by `packageType` and `featureType` to understand product utilization across the entire user base."
+      },
+      {
+        "decision_id": "A2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Identifying users with a `utilization_pct` > 90% to trigger automated sales outreach or system alerts for package upgrades."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Time-series reporting: 'How many active entitlements of featureType X were granted in Q3?' utilizing the enterprise Date Dimension."
+      }
+    ]
+  }
+}
+```
+
+### Analytical Physical Model DDL (SQL)
+
+The following SQL script is designed for a modern columnar OLAP data warehouse (e.g., Snowflake, BigQuery, Databricks, or Redshift). It includes the target denormalized fact table and a standard date dimension for reference.
+
+```sql
+-- ==============================================================================
+-- Target Analytical Schema: OLAP Optimized
+-- ==============================================================================
+
+-- 1. Date Dimension (Standard Reference Table)
+-- Enables advanced time-series slicing without complex date functions in BI.
+CREATE TABLE dim_date (
+    date_sk INT PRIMARY KEY,             -- Format: YYYYMMDD
+    full_date DATE NOT NULL,
+    calendar_year INT NOT NULL,
+    calendar_quarter INT NOT NULL,
+    calendar_month INT NOT NULL,
+    day_of_week INT NOT NULL,
+    is_weekend BOOLEAN NOT NULL
+);
+
+-- 2. Denormalized Fact Table: fact_user_entitlements
+-- Combines users, user_entitlements, and entitlements into a single Wide Table.
+CREATE TABLE fact_user_entitlements (
+    -- Surrogate / Primary Keys
+    user_entitlement_sk VARCHAR(64) PRIMARY KEY,  -- e.g., MD5 hash of user_id + entitlement_id
+    
+    -- Business Keys (Traceability to Source)
+    user_id INT NOT NULL,
+    entitlement_id INT NOT NULL,
+    
+    -- Date Surrogate Keys (Links to dim_date)
+    active_date_sk INT,                           -- YYYYMMDD representation of activeDate
+    inactive_date_sk INT,                         -- YYYYMMDD representation of inactiveDate
+    
+    -- Degenerate Dimensions (Flattened for Group-By performance)
+    feature_type VARCHAR(4),
+    package_type VARCHAR(4),
+    is_active BOOLEAN,                            -- Transformed from activeFlag INT
+    
+    -- Base Facts / Measures
+    use_limit INT,
+    use_count INT,
+    
+    -- Derived Analytical Measures (Pre-calculated to reduce BI compute overhead)
+    remaining_uses INT,                           -- use_limit - use_count
+    utilization_pct DECIMAL(5,4)                  -- use_count / NULLIF(use_limit, 0)
+)
+-- ==============================================================================
+-- Physical Storage Optimization Recommendations (Syntax varies by platform)
+-- ==============================================================================
+-- PARTITIONING: 
+-- Partitioning by the active date allows efficient pruning for time-bound queries.
+-- e.g., PARTITION BY RANGE (active_date_sk) 
+--       (START 20200101 END 20301231 EVERY 10000) -- (Yearly/Monthly depending on volume)
+
+-- CLUSTERING / SORT KEYS:
+-- Clustering by package_type and user_id optimizes the most common filter/join paths.
+-- e.g., CLUSTER BY (package_type, feature_type, user_id);
+;
+
+-- ==============================================================================
+-- ELT Population Logic (Conceptual View)
+-- ==============================================================================
+/*
+CREATE OR REPLACE VIEW vw_load_fact_user_entitlements AS
+SELECT 
+    MD5(CONCAT(ue.user_id, '|', ue.entitlement_id)) AS user_entitlement_sk,
+    ue.user_id,
+    ue.entitlement_id,
+    CAST(TO_CHAR(e.activeDate, 'YYYYMMDD') AS INT) AS active_date_sk,
+    CAST(TO_CHAR(e.inactiveDate, 'YYYYMMDD') AS INT) AS inactive_date_sk,
+    e.featureType AS feature_type,
+    e.packageType AS package_type,
+    CAST(e.activeFlag AS BOOLEAN) AS is_active,
+    e.useLimit AS use_limit,
+    e.useCount AS use_count,
+    (e.useLimit - e.useCount) AS remaining_uses,
+    CAST(e.useCount AS DECIMAL) / NULLIF(e.useLimit, 0) AS utilization_pct
+FROM user_entitlements ue
+JOIN entitlements e ON ue.entitlement_id = e.id;
+*/
+```

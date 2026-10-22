@@ -1,0 +1,109 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_11-19-40
+Model: gemini
+Prompt: RISEN-few-shot
+Schema: ex02
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on optimizing read performance for analytical queries by eliminating expensive JOIN operations. The original schema consists of two main analytical subjects (or 'facts') that do not directly relate to each other except through a shared geographical dimension (regiao). Therefore, the strategy uses 'Collapsing Relations' (Technique 3) to consolidate the 9 normalized tables into 2 wide, flat tables: 'denorm_unidade_conservacao' and 'denorm_mutirao_limpeza'. Additionally, 'Adding Derived Attributes' (Technique 2) is applied to precompute the total amount of garbage collected, accelerating aggregation queries.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Applied 'Collapsing Relations' (Technique 3) to merge 'unidade_de_conservacao' (base fact) with its descriptive dimensions: 'bioma', 'categoria_manejo', 'esfera_administrativa', and 'regiao'. This forms a single wide table 'denorm_unidade_conservacao'."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Applied 'Collapsing Relations' (Technique 3) to merge 'mutirao_de_limpeza' (base fact) with its 1:1 extensions ('coleta_de_lixo', 'local_de_coleta') and its dimensions ('instituicao_organizadora', 'regiao'). This forms a single wide table 'denorm_mutirao_limpeza'."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Renamed attributes that shared the name 'nome' across multiple source tables to prevent ambiguity. Prefixed them with their source entity context: 'uc_nome', 'bioma_nome', 'municipio_nome', 'instituicao_nome', and 'local_coleta_nome'."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Applied 'Adding Derived Attributes' (Technique 2) by creating a new column 'total_lixo_coletado' in 'denorm_mutirao_limpeza'. This column represents the precomputed sum of all specific garbage type columns (plastico, borracha, madeira, etc.), avoiding repetitive SUM() operations across multiple columns during analytical queries."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage and Data Redundancy: Dimension data such as 'regiao' (municipality and state names), 'bioma', and 'instituicao_organizadora' are now duplicated across multiple rows and between the two new tables."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If a dimension attribute changes (e.g., a municipality changes its name or an institution changes its character), the update must be applied to every row in the denormalized tables where that entity is referenced, rather than in a single dimension table."
+      }
+    ]
+  },
+  "section_2": {
+    "queries": [
+      {
+        "decision_id": "D1",
+        "query": "SELECT municipio_nome, estado, bioma_nome, manejo_categoria, COUNT(id_uc) as total_ucs, SUM(area_soma_biomas) as area_total FROM denorm_unidade_conservacao GROUP BY municipio_nome, estado, bioma_nome, manejo_categoria ORDER BY area_total DESC;"
+      },
+      {
+        "decision_id": "D2",
+        "query": "SELECT instituicao_nome, estado, SUM(total_lixo_coletado) as volume_total_recolhido, AVG(numero_aproximado_de_participantes) as media_participantes FROM denorm_mutirao_limpeza GROUP BY instituicao_nome, estado ORDER BY volume_total_recolhido DESC;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+BEGIN;
+
+-- Denormalized Table 1: Unidades de Conservação
+-- Collapses: unidade_de_conservacao, bioma, categoria_manejo, esfera_administrativa, regiao
+CREATE TABLE IF NOT EXISTS public.denorm_unidade_conservacao
+(
+    id_uc integer NOT NULL,
+    uc_nome text COLLATE pg_catalog."default" NOT NULL,
+    ano_de_criacao integer,
+    area_soma_biomas double precision,
+    area_soma_biomas_continentais double precision,
+    area_marinha double precision,
+    bioma_nome text COLLATE pg_catalog."default",
+    municipio_nome text COLLATE pg_catalog."default",
+    estado text COLLATE pg_catalog."default",
+    manejo_categoria text COLLATE pg_catalog."default",
+    manejo_categoria_iucn text COLLATE pg_catalog."default",
+    manejo_plano text COLLATE pg_catalog."default",
+    esfera_tipo text COLLATE pg_catalog."default",
+    CONSTRAINT denorm_unidade_conservacao_pkey PRIMARY KEY (id_uc)
+);
+
+-- Denormalized Table 2: Mutirões de Limpeza
+-- Collapses: mutirao_de_limpeza, coleta_de_lixo, local_de_coleta, instituicao_organizadora, regiao
+CREATE TABLE IF NOT EXISTS public.denorm_mutirao_limpeza
+(
+    id_mutirao integer NOT NULL,
+    data_do_ocorrido date NOT NULL,
+    horario_de_inicio time without time zone NOT NULL,
+    numero_aproximado_de_participantes integer,
+    duracao_total time without time zone NOT NULL,
+    local_coleta_nome text COLLATE pg_catalog."default",
+    municipio_nome text COLLATE pg_catalog."default",
+    estado text COLLATE pg_catalog."default",
+    instituicao_nome text COLLATE pg_catalog."default",
+    instituicao_carater text COLLATE pg_catalog."default",
+    lixo_plastico integer,
+    lixo_borracha integer,
+    lixo_madeira integer,
+    lixo_produtos_texteis integer,
+    lixo_papel integer,
+    lixo_metal integer,
+    lixo_vidro integer,
+    lixo_materiais_de_pesca integer,
+    lixo_outros_residuos integer,
+    total_lixo_coletado integer, -- Derived Attribute
+    CONSTRAINT denorm_mutirao_limpeza_pkey PRIMARY KEY (id_mutirao)
+);
+
+END;
+```

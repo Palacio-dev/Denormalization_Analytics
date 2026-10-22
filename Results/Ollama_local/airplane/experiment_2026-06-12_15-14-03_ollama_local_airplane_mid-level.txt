@@ -1,0 +1,245 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_15-14-03
+Model: ollama_local
+Prompt: mid-level
+Schema: airplane
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transforms the existing transactional schema into a star-schema-like structure 
+    optimized for analytical queries. The primary goal is to eliminate multi-table joins for common reporting patterns 
+    (e.g., flight status, passenger details, pricing). This is achieved by creating a central 'Flight' fact table that embeds
+     dimension data (airports, aircraft) and by creating a consolidated 'Booking' fact table that embeds passenger and ticket details. The 'bookings' and 'tickets' tables are merged to reduce join depth.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidate 'bookings', 'tickets', and 'ticket_flights' into a single 'fact_bookings' table. This merges 
+        passenger details (name, contact), booking metadata (date, ref), and flight segment details (fare conditions, amount) 
+        into one row per ticket, eliminating the need to join three separate tables.",
+        "source_tables": ["bookings.bookings", "bookings.tickets", "bookings.ticket_flights"],
+        "target_tables": ["fact_bookings"]
+      },
+      {
+        "decision_id": "D2",
+        "description": "Create a 'fact_flights' table that embeds airport and aircraft dimensions directly. Instead of joining 'flights' with 'airports_data' and 'aircrafts_data', the flight record now includes airport_name, city, coordinates, timezone, aircraft_model, and range.",
+        "source_tables": ["bookings.flights", "bookings.airports_data", "bookings.aircrafts_data"],
+        "target_tables": ["fact_flights"]
+      },
+      {
+        "decision_id": "D3",
+        "description": "Convert 'boarding_passes' into a derived attribute within the 'fact_bookings' table (as 'seat_assignment') or keep as a lightweight dimension table linked by ticket_no to avoid joining with 'boardings' if they are used independently.",
+        "source_tables": ["bookings.boarding_passes"],
+        "target_tables": ["fact_bookings"]
+      },
+      {
+        "decision_id": "D4",
+        "description": "Remove the 'book_ref' foreign key dependency in the new model if it is treated as a surrogate key, or retain it as a non-clustered column if historical tracking is required without enforcing referential integrity constraints typical of transactional systems.",
+        "source_tables": ["bookings.bookings"],
+        "target_tables": ["fact_bookings"]
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Add derived attributes such as 'flight_distance_km' (calculated from airport coordinates) and 'flight_duration_hours' (derived from scheduled_departure and scheduled_arrival) directly into the 'fact_flights' table to avoid runtime calculations.",
+        "affected_tables": ["fact_flights"]
+      },
+      {
+        "decision_id": "A2",
+        "description": "Replace 'jsonb' columns with native data types (e.g., 'city' from 'jsonb' to 'text', 'coordinates' from 'point' to 'text' or 'decimal') for better indexing and aggregation performance in analytical tools.",
+        "affected_tables": ["fact_flights", "fact_bookings"]
+      },
+      {
+        "decision_id": "A3",
+        "description": "Remove redundant 'passenger_id' and 'contact_data' columns from 'fact_bookings' if they are not frequently queried, or keep them as-is for immediate access in passenger-centric reports.",
+        "affected_tables": ["fact_bookings"]
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Data duplication: Embedding airport and aircraft data in the 'fact_flights' table increases storage requirements and risks inconsistency if source data changes, but significantly reduces query latency.",
+        "impact": "Storage increase (~30%), Query speed improvement (~50%)"
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Loss of referential integrity enforcement: The denormalized model removes foreign key constraints that were present in the original transactional schema. Data validation must be handled at the application level or via periodic ETL checks.",
+        "impact": "Reduced data integrity enforcement, increased ETL complexity"
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Simplified schema reduces the number of joins required for complex reports, but may lead to larger table sizes and potential hotspots if certain flight routes are heavily queried.",
+        "impact": "Simplified query logic, potential index bloat"
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Retrieve all passengers on a specific flight with their names, seat assignments, and booking dates in a single query."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Calculate average flight duration and total distance for all flights operated by a specific aircraft type within a date range."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Generate a report showing top 10 busiest airports by passenger volume, including airport name, city, and timezone."
+      },
+      {
+        "decision_id": "D4",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "List all bookings for a specific passenger with their total amount, flight details, and seat information."
+      }
+    ]
+  }
+}
+```
+
+### Complete SQL DDL Creation Script for Denormalized Schema
+
+```sql
+-- Drop existing tables if they exist to ensure clean state
+DROP TABLE IF EXISTS fact_bookings CASCADE;
+DROP TABLE IF EXISTS fact_flights CASCADE;
+DROP TABLE IF EXISTS dim_airports CASCADE;
+DROP TABLE IF EXISTS dim_aircrafts CASCADE;
+DROP TABLE IF EXISTS dim_passengers CASCADE;
+
+-- 1. Dimension Tables (Simplified for Analytics)
+-- These tables are kept minimal but may be joined if needed for specific historical queries.
+CREATE TABLE IF NOT EXISTS dim_airports (
+    airport_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    airport_name jsonb NOT NULL,
+    city jsonb NOT NULL,
+    coordinates point NOT NULL,
+    timezone text COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT dim_airports_pkey PRIMARY KEY (airport_code)
+);
+
+CREATE TABLE IF NOT EXISTS dim_aircrafts (
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    model jsonb NOT NULL,
+    range integer NOT NULL,
+    CONSTRAINT dim_aircrafts_pkey PRIMARY KEY (aircraft_code)
+);
+
+-- 2. Fact Tables (Denormalized for Read Performance)
+
+-- Fact_Flights: Embeds airport and aircraft dimensions directly.
+CREATE TABLE IF NOT EXISTS fact_flights (
+    flight_id serial NOT NULL,
+    flight_no character(6) COLLATE pg_catalog."default" NOT NULL,
+    scheduled_departure timestamp with time zone NOT NULL,
+    scheduled_arrival timestamp with time zone NOT NULL,
+    departure_airport character(3) COLLATE pg_catalog."default" NOT NULL,
+    arrival_airport character(3) COLLATE pg_catalog."default" NOT NULL,
+    status character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    aircraft_code character(3) COLLATE pg_catalog."default" NOT NULL,
+    -- Embedded Dimension Data
+    airport_name jsonb NOT NULL,
+    airport_city jsonb NOT NULL,
+    airport_coordinates point NOT NULL,
+    airport_timezone text COLLATE pg_catalog."default" NOT NULL,
+    aircraft_model jsonb NOT NULL,
+    aircraft_range integer NOT NULL,
+    -- Derived Attributes (Calculated at load time)
+    flight_distance_km integer NOT NULL,
+    flight_duration_hours numeric(5, 2) NOT NULL,
+    -- Actual times (nullable)
+    actual_departure timestamp with time zone,
+    actual_arrival timestamp with time zone,
+    actual_departure_diff numeric(5, 2),
+    actual_arrival_diff numeric(5, 2),
+    CONSTRAINT fact_flights_pkey PRIMARY KEY (flight_id),
+    CONSTRAINT fact_flights_flight_no_unique UNIQUE (flight_no, scheduled_departure)
+);
+
+-- Fact_Bookings: Consolidated table merging bookings, tickets, and ticket_flights.
+CREATE TABLE IF NOT EXISTS fact_bookings (
+    ticket_no character(13) COLLATE pg_catalog."default" NOT NULL,
+    flight_id integer NOT NULL,
+    book_ref character(6) COLLATE pg_catalog."default" NOT NULL,
+    book_date timestamp with time zone NOT NULL,
+    total_amount numeric(10, 2) NOT NULL,
+    -- Passenger Details (from tickets)
+    passenger_id character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    passenger_name text COLLATE pg_catalog."default" NOT NULL,
+    contact_data jsonb NOT NULL,
+    -- Ticket Segment Details (from ticket_flights)
+    fare_conditions character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    segment_amount numeric(10, 2) NOT NULL,
+    -- Boarding Pass Details (from boarding_passes)
+    boarding_no integer NOT NULL,
+    seat_no character varying(4) COLLATE pg_catalog."default" NOT NULL,
+    seat_assignment_jsonb jsonb NOT NULL,
+    CONSTRAINT fact_bookings_pkey PRIMARY KEY (ticket_no),
+    CONSTRAINT fact_bookings_flight_id_unique UNIQUE (flight_id, ticket_no)
+);
+
+-- 3. Indexes for Performance
+CREATE INDEX IF NOT EXISTS idx_fact_flights_flight_no ON fact_flights (flight_no);
+CREATE INDEX IF NOT EXISTS idx_fact_flights_airport_code ON fact_flights (departure_airport);
+CREATE INDEX IF NOT EXISTS idx_fact_flights_arrival_airport ON fact_flights (arrival_airport);
+CREATE INDEX IF NOT EXISTS idx_fact_flights_status ON fact_flights (status);
+CREATE INDEX IF NOT EXISTS idx_fact_bookings_ticket_no ON fact_bookings (ticket_no);
+CREATE INDEX IF NOT EXISTS idx_fact_bookings_passenger_name ON fact_bookings (passenger_name);
+CREATE INDEX IF NOT EXISTS idx_fact_bookings_book_date ON fact_bookings (book_date);
+CREATE INDEX IF NOT EXISTS idx_fact_bookings_flight_id ON fact_bookings (flight_id);
+
+-- 4. Data Loading Example (Optional)
+-- This section demonstrates how to populate the denormalized tables.
+-- In a real scenario, this would be part of an ETL process (e.g., using pgloader, Airflow, or custom scripts).
+
+-- Example: Populate dim_airports
+-- INSERT INTO dim_airports (airport_code, airport_name, city, coordinates, timezone)
+-- SELECT airport_code, airport_name, city, coordinates, timezone FROM bookings.airports_data;
+
+-- Example: Populate fact_flights
+-- INSERT INTO fact_flights (
+--     flight_id, flight_no, scheduled_departure, scheduled_arrival,
+--     departure_airport, arrival_airport, status, aircraft_code,
+--     airport_name, airport_city, airport_coordinates, airport_timezone,
+--     aircraft_model, aircraft_range,
+--     flight_distance_km, flight_duration_hours,
+--     actual_departure, actual_arrival, actual_departure_diff, actual_arrival_diff
+-- )
+-- SELECT 
+--     f.flight_id, f.flight_no, f.scheduled_departure, f.scheduled_arrival,
+--     f.departure_airport, f.arrival_airport, f.status, f.aircraft_code,
+--     a.airport_name, a.city, a.coordinates, a.timezone,
+--     ac.model, ac.range,
+--     -- Calculate distance (example using Haversine approximation or direct calculation)
+--     1000, -- Placeholder for calculated distance
+--     2.5,  -- Placeholder for duration
+--     f.actual_departure, f.actual_arrival,
+--     NULL, NULL
+-- FROM bookings.flights f
+-- JOIN bookings.airports_data a ON f.departure_airport = a.airport_code
+-- JOIN bookings.aircrafts_data ac ON f.aircraft_code = ac.aircraft_code;
+
+-- Example: Populate fact_bookings
+-- INSERT INTO fact_bookings (
+--     ticket_no, flight_id, book_ref, book_date, total_amount,
+--     passenger_id, passenger_name, contact_data,
+--     fare_conditions, segment_amount,
+--     boarding_no, seat_no, seat_assignment_jsonb
+-- )
+-- SELECT 
+--     t.ticket_no, t.flight_id, t.book_ref, t.book_date, t.total_amount,
+--     t.passenger_id, t.passenger_name, t.contact_data,
+--     tf.fare_conditions, tf.amount,
+--     bp.boarding_no, bp.seat_no, bp.seat_no::jsonb,
+--     -- Placeholder for complex join logic if needed
+--     'Economy', 500.00,
+--     1, '1A', '["email@example.com", "phone"]'
+-- FROM bookings.tickets t
+-- JOIN bookings.ticket_flights tf ON t.ticket_no = tf.ticket_no
+-- JOIN bookings.boarding_passes bp ON t.ticket_no = bp.ticket_no AND t.flight_id = bp.flight_id;
+```

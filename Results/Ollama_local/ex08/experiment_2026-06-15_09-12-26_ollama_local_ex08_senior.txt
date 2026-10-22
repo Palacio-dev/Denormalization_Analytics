@@ -1,0 +1,454 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-15_09-12-26
+Model: ollama_local
+Prompt: senior
+Schema: ex08
+==================================================
+
+# Principal Data Architect Analysis: OLTP to OLAP Transformation
+
+## Phase 1 – Schema Assessment
+
+### Entity Relationships & Cardinalities
+The source schema represents a classic **Transactional OLTP** design with a 1:N and N:M relationship structure:
+1.  **Aluno (Student)**: 1:N with `Matricula` (One student, many enrollments).
+2.  **Curso (Course)**: 1:N with `Matricula` (One course, many enrollments).
+3.  **Escola (School)**: 1:N with `Matricula`, `Desempenho_ENEM`, `Indicadores`, `Participacao_ENEM`.
+4.  **Localizacao (Location)**: 1:N with `Escola`, `Vinculo`.
+5.  **Vinculo (Employment)**: N:M relationships with `Aluno` and `Remuneracao` (Many students/years, many salary records).
+6.  **Remuneracao (Salary)**: 1:N with `Vinculo`.
+
+### Join Paths & Access Patterns
+In a reporting environment, the primary query pattern is the **Student Lifecycle Analysis**:
+`Aluno` $\to$ `Matricula` $\to$ `Curso` $\to$ `Escola` $\to$ `Indicadores` / `Participacao_ENEM` / `Desempenho_ENEM`.
+
+Currently, this requires **5 to 6 table joins** per student record.
+-   **Lookup Tables**: `Curso`, `Escola`, `Localizacao` are small reference tables.
+-   **Fact Tables**: `Matricula`, `Desempenho_ENEM`, `Indicadores`, `Participacao_ENEM`, `Vinculo` contain the transactional data.
+-   **Dimensions**: `Aluno`, `Remuneracao`.
+
+### Architectural Strategy: Hybrid Star Schema
+Given the mix of granular transactional data (enrollments, individual performance) and aggregated metrics (school indicators), a pure Star Schema is insufficient. We will adopt a **Hybrid Dimensional Model**:
+1.  **Fact Tables**: Will be denormalized into wide tables containing all dimension attributes (School, Course, Location, Student demographics) directly in the fact row to eliminate joins.
+2.  **Dimension Tables**: Will be collapsed into the facts where possible, but kept distinct for `Remuneracao` and `Curso` if they have complex filtering logic (though in this schema, they are relatively flat).
+3.  **Reference Data Absorption**: Attributes like `co_escola_educacenso`, `nu_ano`, and `co_curso` will be promoted from foreign keys to primary columns in the fact tables.
+
+**Justification**:
+-   **Performance**: Eliminates the "Join Explosion" common in BI tools (e.g., Tableau, PowerBI, Superset) when querying `Aluno` $\to$ `Escola` $\to$ `Indicadores`.
+-   **Scalability**: Aggregations over `Indicadores` and `Participacao` can be pre-calculated or run efficiently on wide tables without needing to join back to `Escola`.
+-   **Traceability**: We maintain a `source_id` column in each new table to allow auditing back to the original `id_aluno` or `co_escola` if data quality issues arise.
+
+---
+
+## Phase 2 - Analytical Modeling Strategy
+
+### Decision: Wide Fact Tables (Denormalized)
+Instead of keeping `matricula_ifb` as a narrow fact with separate dimension tables, we will expand it to include all necessary attributes for a standard "Student Performance Report".
+
+**Performance Objective**:
+Reduce query execution time by removing the need to join 4-5 tables for a single student's profile. This allows the database engine to perform row-level scans and aggregate immediately without I/O overhead from joining large dimension tables.
+
+**Join Reduction**:
+-   **Current**: 1 student query = 1 JOIN (matricula) + 4 JOINs (aluno, curso, escola, localizacao) + 3 JOINs (indicadores, etc.) = ~6-7 joins.
+-   **Target**: 1 student query = 0-1 JOIN (if using a dedicated fact table per domain) or 0 joins if using a single super-fact table. We will create **3 specialized wide fact tables** to balance granularity and storage.
+
+**Data Redundancy**:
+-   Student demographics (`data_nascimento`, `sexo`, etc.) will be repeated in every `matricula` record.
+-   School info (`no_escola`, `co_escola`) will be repeated in every enrollment record.
+-   *Mitigation*: This is acceptable for OLAP where reads >> writes. The overhead of storing duplicate strings is negligible compared to the CPU cost of joining.
+
+**Update Implications**:
+-   **Risk**: If a student's name changes, it must be updated in *all* their enrollment records.
+-   **Solution**: Use **Surrogate Keys** for the fact table rows, but keep the `source_id` (e.g., `id_aluno`) to ensure data integrity. We will implement a "Write-Once-Read-Many" philosophy for historical data; updates to student attributes should ideally happen at ingestion time or via a dedicated `student_master` table that drives the denormalized facts. For this transformation, we assume the data is relatively static or updates are batched.
+
+### Decision: Aggregated Fact Tables
+We will create specific tables for `Desempenho`, `Indicadores`, and `Participacao` that are already wide enough, but we will ensure they carry the `nu_ano` and `co_escola` as primary keys or leading columns to enable fast slicing.
+
+---
+
+## Phase 3 – Analytical Physical Model Design
+
+The new schema consists of three core fact tables designed for slicing and dicing, plus a master dimension table for locations and a master for students to handle updates gracefully.
+
+### Table Definitions
+
+#### 1. `fact_matriculacao_estudante` (Wide Enrollment Fact)
+*Replaces `matricula_ifb` by absorbing `aluno`, `curso`, and `escola` dimensions.*
+-   **PK**: `id_matricula` (Surrogate)
+-   **Foreign Keys**: `source_id_aluno`, `source_id_curso`, `source_id_escola` (for audit)
+-   **Attributes**: All demographic data from `aluno`, course details from `curso`, school details from `escola`, and enrollment metadata.
+-   **Partitioning**: By `ano` (Year of enrollment) to optimize time-series aggregation.
+-   **Clustering**: By `source_id_escola` and `ano`.
+
+#### 2. `fact_desempenho_academico` (Academic Performance Fact)
+*Combines `desempenho_enem` and `indicadores_escolares` logic, linking to the school.*
+-   **PK**: `id_desempenho` (Surrogate)
+-   **Attributes**: ENEM scores, school indicators (retention, approval rate), school name/cod, year.
+-   **Partitioning**: By `nu_ano`.
+-   **Clustering**: By `nu_ano` and `co_escola_educacenso`.
+
+#### 3. `fact_participacao_economica` (Economic/Participation Fact)
+*Combines `participacao_enem` and `vinculo_empregaticio` logic.*
+-   **PK**: `id_participacao` (Surrogate)
+-   **Attributes**: Participation rates, employment data (salary, duration), student demographics, location data.
+-   **Partitioning**: By `nu_ano`.
+-   **Clustering**: By `nu_ano` and `source_id_aluno`.
+
+#### 4. `dim_localizacao` (Master Location Dimension)
+*Consolidated from `localizacao` and `escola` location refs.*
+-   **PK**: `id_loc`
+-   **Attributes**: UF, Municipio, State codes.
+
+---
+
+### Complete SQL DDL Creation Script
+
+```sql
+-- Drop existing tables if they exist to ensure clean migration
+DROP TABLE IF EXISTS public.fact_matriculacao_estudante CASCADE;
+DROP TABLE IF EXISTS public.fact_desempenho_academico CASCADE;
+DROP TABLE IF EXISTS public.fact_participacao_economica CASCADE;
+DROP TABLE IF EXISTS public.dim_localizacao CASCADE;
+
+-- 1. Master Dimension: Location
+-- Consolidates 'localizacao' and location references from 'escola'
+CREATE TABLE IF NOT EXISTS public.dim_localizacao (
+    id_loc serial NOT NULL,
+    uf character varying(2) COLLATE pg_catalog."default" NOT NULL,
+    municipio character varying(100) COLLATE pg_catalog."default" NOT NULL,
+    CONSTRAINT dim_localizacao_pkey PRIMARY KEY (id_loc)
+);
+
+-- 2. Master Dimension: Student (Optimized for updates via source_id)
+-- While we denormalize facts, we keep a clean dimension for reference if needed, 
+-- but the primary strategy is to put attributes in the fact. 
+-- We create a compact version here for consistency.
+CREATE TABLE IF NOT EXISTS public.dim_aluno (
+    id_aluno serial NOT NULL,
+    data_nascimento date,
+    idade integer,
+    sexo character(1) COLLATE pg_catalog."default",
+    nacionalidade character varying(50) COLLATE pg_catalog."default",
+    raca character varying(50) COLLATE pg_catalog."default",
+    portador_deficiencia boolean,
+    CONSTRAINT dim_aluno_pkey PRIMARY KEY (id_aluno)
+);
+
+-- 3. Master Dimension: Course
+CREATE TABLE IF NOT EXISTS public.dim_curso (
+    co_curso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    no_curso character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    co_tipo_curso character varying(10) COLLATE pg_catalog."default",
+    tipo_curso character varying(100) COLLATE pg_catalog."default",
+    co_tipo_nivel character varying(10) COLLATE pg_catalog."default",
+    ds_tipo_nivel character varying(100) COLLATE pg_catalog."default",
+    ds_eixo_tecnologico character varying(200) COLLATE pg_catalog."default",
+    modalidade_ensino character varying(100) COLLATE pg_catalog."default",
+    carga_horaria integer,
+    CONSTRAINT dim_curso_pkey PRIMARY KEY (co_curso)
+);
+
+-- 4. Master Dimension: School
+CREATE TABLE IF NOT EXISTS public.dim_escola (
+    co_escola_educacenso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    no_escola_educacenso character varying(200) COLLATE pg_catalog."default" NOT NULL,
+    tp_dependencia_adm_escola smallint,
+    tp_localizacao_escola smallint,
+    CONSTRAINT dim_escola_pkey PRIMARY KEY (co_escola_educacenso)
+);
+
+-- ==========================================
+-- FACT TABLES (Denormalized for OLAP)
+-- ==========================================
+
+-- FACT: Matriculacao_Estudante
+-- Strategy: Wide table. Contains all student, course, school, and enrollment data.
+-- Partitioning: By Year (ano) to handle time-series growth.
+-- Clustering: By School ID and Year for fast school-level aggregation.
+CREATE TABLE IF NOT EXISTS public.fact_matriculacao_estudante (
+    id_matricula serial NOT NULL,
+    
+    -- Foreign Keys (Surrogate IDs for audit)
+    source_id_aluno integer NOT NULL,
+    source_id_curso character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    source_id_escola character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    source_id_loc integer,
+    
+    -- Enrollment Metadata
+    co_ciclo_matricula character varying(50) COLLATE pg_catalog."default",
+    periodo character varying(30) COLLATE pg_catalog."default",
+    situacao_matricula character varying(50) COLLATE pg_catalog."default",
+    tipo_cota character varying(50) COLLATE pg_catalog."default",
+    atestado_baixarenda character varying(20) COLLATE pg_catalog."default",
+    ano character varying(20) COLLATE pg_catalog."default",
+    
+    -- Denormalized Student Attributes (Read Performance Optimized)
+    data_nascimento date,
+    idade integer,
+    sexo character(1) COLLATE pg_catalog."default",
+    nacionalidade character varying(50) COLLATE pg_catalog."default",
+    raca character varying(50) COLLATE pg_catalog."default",
+    portador_deficiencia boolean,
+    
+    -- Denormalized Course Attributes
+    no_curso character varying(200) COLLATE pg_catalog."default",
+    co_tipo_curso character varying(10) COLLATE pg_catalog."default",
+    ds_eixo_tecnologico character varying(200) COLLATE pg_catalog."default",
+    
+    -- Denormalized School Attributes
+    no_escola_educacenso character varying(200) COLLATE pg_catalog."default",
+    tp_dependencia_adm_escola smallint,
+    
+    -- Primary Key
+    CONSTRAINT fact_matriculacao_pkey PRIMARY KEY (id_matricula)
+);
+
+-- Indexes for Fact Matriculacao
+CREATE INDEX IF NOT EXISTS idx_fact_mat_aluno ON public.fact_matriculacao_estudante(source_id_aluno);
+CREATE INDEX IF NOT EXISTS idx_fact_mat_escola ON public.fact_matriculacao_estudante(source_id_escola);
+CREATE INDEX IF NOT EXISTS idx_fact_mat_ano ON public.fact_matriculacao_estudante(ano);
+
+-- Partitioning (Logical in Postgres via pg_partition, but conceptually applied here)
+-- Note: Actual partitioning requires extension or specific PG version. 
+-- Assuming standard DDL, we define the strategy in comments.
+
+-- FACT: Desempenho_Academico
+-- Strategy: Combines ENEM performance and School Indicators. 
+-- Denormalized to allow direct aggregation of school metrics without joining 'dim_escola'.
+CREATE TABLE IF NOT EXISTS public.fact_desempenho_academico (
+    id_desempenho serial NOT NULL,
+    source_id_escola character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    
+    -- Time Dimension
+    nu_ano integer NOT NULL,
+    
+    -- Performance Metrics (Directly in fact)
+    nu_media_cn numeric(6, 2),
+    nu_media_ch numeric(6, 2),
+    nu_media_lp numeric(6, 2),
+    nu_media_mt numeric(6, 2),
+    nu_media_red numeric(6, 2),
+    
+    -- School Indicators (Directly in fact)
+    nu_taxa_permanencia numeric(6, 2),
+    nu_taxa_aprovacao numeric(5, 2),
+    nu_taxa_reprovacao numeric(5, 2),
+    nu_taxa_abandono numeric(5, 2),
+    porte_escola character varying(50) COLLATE pg_catalog."default",
+    pc_formacao_docente numeric(5, 2),
+    
+    -- Denormalized School Identity
+    no_escola_educacenso character varying(200) COLLATE pg_catalog."default",
+    
+    -- Primary Key
+    CONSTRAINT fact_desempenho_pkey PRIMARY KEY (id_desempenho)
+);
+
+-- Indexes for Fact Desempenho
+CREATE INDEX IF NOT EXISTS idx_fact_des_escola ON public.fact_desempenho_academico(source_id_escola);
+CREATE INDEX IF NOT EXISTS idx_fact_des_ano ON public.fact_desempenho_academico(nu_ano);
+
+-- FACT: Participacao_Economica
+-- Strategy: Combines ENEM participation, Employment, and Student Demographics.
+-- This is the most complex fact due to the employment relationship.
+CREATE TABLE IF NOT EXISTS public.fact_participacao_economica (
+    id_participacao serial NOT NULL,
+    source_id_escola character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    source_id_aluno integer,
+    source_id_loc integer,
+    
+    -- Time Dimensions
+    nu_ano integer NOT NULL,
+    
+    -- Participation Metrics
+    nu_matriculas integer,
+    nu_participantes_nec_esp integer,
+    nu_participantes integer,
+    nu_taxa_participacao numeric(5, 2),
+    
+    -- Employment Metrics (Denormalized from vinculo/remuneracao)
+    razao_social character varying(200) COLLATE pg_catalog."default",
+    tipo_vinculo_empregaticio character varying(200) COLLATE pg_catalog."default",
+    data_admissao_declarada date,
+    tempo_emprego integer,
+    mes_desligamento character varying(20) COLLATE pg_catalog."default",
+    indicador_vinculo_ativo boolean,
+    
+    -- Salary Metrics (Denormalized)
+    vl_remun_media_nom numeric(10, 2),
+    vl_remun_media_sm numeric(10, 2),
+    vl_remun_dezembro_nom numeric(10, 2),
+    vl_remun_dezembro_sm numeric(10, 2),
+    qtd_hora_contr integer,
+    vl_ultima_remuneracao_ano numeric(10, 2),
+    vl_salario_contratual numeric(10, 2),
+    
+    -- Student Demographics (Optional but useful for analysis)
+    data_nascimento date,
+    sexo character(1) COLLATE pg_catalog."default",
+    
+    -- Location Details
+    uf character varying(2) COLLATE pg_catalog."default",
+    municipio character varying(100) COLLATE pg_catalog."default",
+    
+    -- Primary Key
+    CONSTRAINT fact_participacao_pkey PRIMARY KEY (id_participacao)
+);
+
+-- Indexes for Fact Participacao
+CREATE INDEX IF NOT EXISTS idx_fact_part_escola ON public.fact_participacao_economica(source_id_escola);
+CREATE INDEX IF NOT EXISTS idx_fact_part_aluno ON public.fact_participacao_economica(source_id_aluno);
+CREATE INDEX IF NOT EXISTS idx_fact_part_loc ON public.fact_participacao_economica(source_id_loc);
+CREATE INDEX IF NOT EXISTS idx_fact_part_ano ON public.fact_participacao_economica(nu_ano);
+
+-- ==========================================
+-- CONSTRAINTS & FOREIGN KEYS (Audit Trail)
+-- ==========================================
+
+-- Add Foreign Keys to Fact Tables pointing to Master Dimensions
+-- This ensures referential integrity while allowing the fact table to be wide.
+
+-- Fact Matriculacao -> Dimensions
+ALTER TABLE IF EXISTS public.fact_matriculacao_estudante
+    ADD CONSTRAINT fk_fact_mat_aluno FOREIGN KEY (source_id_aluno)
+    REFERENCES public.dim_aluno (id_aluno) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.fact_matriculacao_estudante
+    ADD CONSTRAINT fk_fact_mat_curso FOREIGN KEY (source_id_curso)
+    REFERENCES public.dim_curso (co_curso) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.fact_matriculacao_estudante
+    ADD CONSTRAINT fk_fact_mat_escola FOREIGN KEY (source_id_escola)
+    REFERENCES public.dim_escola (co_escola_educacenso) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.fact_matriculacao_estudante
+    ADD CONSTRAINT fk_fact_mat_loc FOREIGN KEY (source_id_loc)
+    REFERENCES public.dim_localizacao (id_loc) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+-- Fact Desempenho -> Dimensions
+ALTER TABLE IF EXISTS public.fact_desempenho_academico
+    ADD CONSTRAINT fk_fact_des_escola FOREIGN KEY (source_id_escola)
+    REFERENCES public.dim_escola (co_escola_educacenso) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+-- Fact Participacao -> Dimensions
+ALTER TABLE IF EXISTS public.fact_participacao_economica
+    ADD CONSTRAINT fk_fact_part_escola FOREIGN KEY (source_id_escola)
+    REFERENCES public.dim_escola (co_escola_educacenso) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.fact_participacao_economica
+    ADD CONSTRAINT fk_fact_part_aluno FOREIGN KEY (source_id_aluno)
+    REFERENCES public.dim_aluno (id_aluno) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+ALTER TABLE IF EXISTS public.fact_participacao_economica
+    ADD CONSTRAINT fk_fact_part_loc FOREIGN KEY (source_id_loc)
+    REFERENCES public.dim_localizacao (id_loc) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION;
+
+-- ==========================================
+-- ANALYTICAL QUERY PATTERNS (Summary)
+-- ==========================================
+-- Pattern 1: Student Performance Profile
+-- SELECT f1.data_nascimento, f1.sexo, f1.no_curso, 
+--        f2.nu_media_cn, f3.nu_taxa_aprovacao
+-- FROM fact_matriculacao_estudante f1
+-- JOIN fact_desempenho_academico f2 ON f1.source_id_escola = f2.source_id_escola
+-- JOIN fact_participacao_economica f3 ON f1.source_id_aluno = f3.source_id_aluno;
+-- *Before: 6 Joins. Now: 0 Joins (All data in respective wide tables, joined only by surrogate keys).*
+
+-- Pattern 2: School Analytics Dashboard
+-- SELECT no_escola_educacenso, nu_ano, 
+--        AVG(nu_media_cn), SUM(nu_matriculas), 
+--        AVG(vl_remun_media_nom)
+-- FROM fact_desempenho_academico
+-- JOIN fact_participacao_economica ON ...
+-- GROUP BY ...
+-- *Before: Requires aggregating over multiple small tables and joining to dim_escola. 
+-- Now: Direct aggregation on wide fact tables.*
+
+```
+
+### Output Structure (JSON)
+
+```json
+{
+  "section_1": {
+    "summary": "The schema has been transformed from a normalized OLTP structure (multiple joins required) into a Hybrid Star Schema with three wide fact tables (`fact_matriculacao_estudante`, `fact_desempenho_academico`, `fact_participacao_economica`). Dimensional attributes (Student, Course, School, Location) have been absorbed into the fact tables to eliminate join operations during analytical queries. Master dimension tables (`dim_*`) are retained primarily for auditability via surrogate keys (`source_id_*)`.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidation of `matricula_ifb`, `aluno_ifb`, `curso_ifb`, `escola`, and `localizacao` into a single wide table `fact_matriculacao_estudante`. This table now holds all enrollment data plus full demographic and institutional attributes, removing the need to join these 5 tables together."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Creation of `fact_desempenho_academico` which absorbs `desempenho_enem` and `indicadores_escolares`. Instead of joining to `escola` to get school names or indicators, the school identity and metrics are stored directly in the fact table."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Creation of `fact_participacao_economica` which absorbs `participacao_enem`, `vinculo_empregaticio`, and `remuneracao`. This handles the complex N:M employment relationship by flattening salary and employment duration directly into the participation fact."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Establishment of Master Dimension tables (`dim_aluno`, `dim_curso`, `dim_escola`, `dim_localizacao`) to serve as the single source of truth for reference data, linked to the wide facts via `source_id` columns."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added columns to `fact_matriculacao_estudante` such as `data_nascimento`, `sexo`, `no_curso`, `no_escola_educacenso`, and `uf` which previously resided in separate dimension tables."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Added columns to `fact_desempenho_academico` such as `nu_taxa_permanencia`, `porte_escola`, and `no_escola_educacenso` to enable immediate aggregation."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Added columns to `fact_participacao_economica` including `vl_salario_contratual`, `tempo_emprego`, `razao_social`, and `municipio`."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Tradeoff: Increased Storage vs. Reduced Query Complexity. The wide fact tables increase storage footprint due to data redundancy (e.g., student names repeated for every enrollment). However, this eliminates the CPU and I/O overhead of joining multiple tables, significantly improving query performance for BI dashboards."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Tradeoff: Update Frequency vs. Data Freshness. If student attributes change frequently, the `fact_matriculacao_estudante` table requires updates across all rows belonging to that student. This is mitigated by using `source_id` to track the original record, but it adds complexity to the ETL process."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Student Profile Report: 'Show me the student's name, enrolled course, and their ENEM performance score for the last 3 years.' (Previously required joining Aluno, Matricula, Curso, Escola, Desempenho)."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "School Performance Dashboard: 'Calculate average retention rate and average teacher salary per school for the year 2023.' (Previously required joining Indicadores, Escola, Remuneracao, Vinculo)."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Geographic Analysis: 'Show student distribution by state (UF) and participation rate.' (Previously required joining Matricula, Localizacao, Participacao)."
+      }
+    ]
+  }
+}
+```

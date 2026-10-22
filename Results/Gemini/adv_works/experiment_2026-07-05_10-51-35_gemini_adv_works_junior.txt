@@ -1,0 +1,285 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-05_10-51-35
+Model: gemini
+Prompt: junior
+Schema: adv_works
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The provided schema is a highly normalized OLTP (Online Transaction Processing) database (based on AdventureWorks)
+    designed to minimize redundancy and ensure data integrity. To optimize for analytics and reporting (OLAP), the strategy is to 
+    denormalize the schema into a Dimensional Model (Star Schema). This involves collapsing deep hierarchies 
+    (e.g., Product -> Subcategory -> Category) into flat Dimension tables, and combining header/detail transaction tables 
+    (e.g., SalesOrderHeader and SalesOrderDetail) into granular Fact tables. This drastically reduces the number of JOINs required 
+    for aggregations, improves read performance, and simplifies the query interface for BI tools.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merge `sales.salesorderheader` and `sales.salesorderdetail` into a single `fact_sales` table. This eliminates the need to join header and line-item tables for every sales report."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merge `production.product`, `production.productsubcategory`, `production.productcategory`, and `production.productmodel` into a single `dim_product` table. This flattens the product hierarchy."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merge `sales.customer`, `person.person`, `sales.store`, `person.businessentityaddress`, `person.address`, `person.stateprovince`, and `person.countryregion` into a single `dim_customer` table. This provides a unified view of customer demographics and geography."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Merge `humanresources.employee`, `sales.salesperson`, `person.person`, and `humanresources.department` (via history) into a single `dim_employee` table to analyze employee and sales rep performance without complex joins."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Merge `purchasing.purchaseorderheader` and `purchasing.purchaseorderdetail` into a single `fact_purchases` table to analyze procurement metrics."
+      },
+      {
+        "decision_id": "D6",
+        "description": "Merge `purchasing.vendor` and `person.businessentity` into `dim_vendor`."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived metric `line_total` (calculated as orderqty * unitprice * (1 - unitpricediscount)) to `fact_sales` to prevent recalculation during querying."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed XML columns (`demographics`, `resume`, `catalogdescription`, `instructions`) from the analytical schema, as XML parsing is highly inefficient for columnar/analytical reporting."
+      },
+      {
+        "decision_id": "A3",
+        "description": "Flattened geographical attributes (`city`, `state_province_name`, `country_region_name`) directly into `dim_customer` and `dim_territory`."
+      },
+      {
+        "decision_id": "A4",
+        "description": "Allocated header-level measures (`taxamt`, `freight`) down to the line-item level in `fact_sales` (conceptually, though kept as simple columns for this physical model) or retained them in a separate header-grain fact if exact precision is required. Here, we include them but analysts must be careful with SUMs, or they should be proportionally allocated during ETL."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Increased Storage Space: Denormalization introduces data redundancy (e.g., repeating the category name 'Bikes' for every product in that category, or repeating customer names for every sale)."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Update Anomalies: If a product category name changes, it must be updated in multiple rows in `dim_product` rather than a single row in `productcategory`. This is acceptable in OLAP where data is typically append-only or batch-updated."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "ETL Complexity: Moving data from the highly normalized source to the denormalized target requires robust ETL/ELT pipelines to handle the joins, lookups, and data flattening."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Sales Performance over time by Product Category and Region. Requires aggregating sales amounts grouped by date, category, and geography. The new schema reduces this from a 9-table join to a 4-table join (FactSales, DimProduct, DimCustomer, DimDate)."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Procurement analysis: Vendor performance based on rejected quantities and total spend. The new schema allows querying `fact_purchases` joined to `dim_vendor` directly."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Salesperson conversion and quota tracking. Joining `fact_sales` to `dim_employee` allows immediate comparison of actual sales against the `sales_quota` attribute flattened into the employee dimension."
+      }
+    ]
+  }
+}
+```
+
+### Complete SQL DDL Creation Script for the Denormalized Schema
+
+```sql
+-- Create a new schema for the analytical data warehouse
+CREATE SCHEMA IF NOT EXISTS analytics;
+
+-- ==========================================
+-- DIMENSION TABLES
+-- ==========================================
+
+-- 1. Product Dimension
+-- Combines Product, ProductSubcategory, ProductCategory, and ProductModel
+CREATE TABLE IF NOT EXISTS analytics.dim_product
+(
+    product_key serial PRIMARY KEY,
+    product_id integer NOT NULL,
+    product_name character varying(50) NOT NULL,
+    product_number character varying(25) NOT NULL,
+    color character varying(15),
+    standard_cost numeric NOT NULL,
+    list_price numeric NOT NULL,
+    size character varying(5),
+    weight numeric(8, 2),
+    product_line character(2),
+    class character(2),
+    style character(2),
+    subcategory_name character varying(50),
+    category_name character varying(50),
+    model_name character varying(50),
+    sell_start_date timestamp without time zone,
+    sell_end_date timestamp without time zone,
+    is_current boolean DEFAULT true
+);
+
+COMMENT ON TABLE analytics.dim_product IS 'Flattened product dimension including category and model details.';
+
+-- 2. Customer Dimension
+-- Combines Customer, Person, Store, Address, StateProvince, and CountryRegion
+CREATE TABLE IF NOT EXISTS analytics.dim_customer
+(
+    customer_key serial PRIMARY KEY,
+    customer_id integer NOT NULL,
+    person_type character(2),
+    first_name character varying(50),
+    last_name character varying(50),
+    full_name character varying(100),
+    store_name character varying(50),
+    address_line1 character varying(60),
+    city character varying(30),
+    state_province_code character(3),
+    state_province_name character varying(50),
+    country_region_code character varying(3),
+    country_region_name character varying(50),
+    postal_code character varying(15)
+);
+
+COMMENT ON TABLE analytics.dim_customer IS 'Flattened customer dimension containing both individual and store customers with geographical data.';
+
+-- 3. Employee Dimension
+-- Combines Employee, SalesPerson, Person, and Department
+CREATE TABLE IF NOT EXISTS analytics.dim_employee
+(
+    employee_key serial PRIMARY KEY,
+    employee_id integer NOT NULL, -- Maps to BusinessEntityID
+    national_id_number character varying(15),
+    job_title character varying(50),
+    first_name character varying(50),
+    last_name character varying(50),
+    full_name character varying(100),
+    birth_date date,
+    hire_date date,
+    gender character(1),
+    department_name character varying(50),
+    department_group character varying(50),
+    is_salesperson boolean DEFAULT false,
+    sales_quota numeric,
+    commission_pct numeric,
+    current_flag boolean DEFAULT true
+);
+
+COMMENT ON TABLE analytics.dim_employee IS 'Flattened employee dimension including sales quota for sales representatives.';
+
+-- 4. Vendor Dimension
+-- Combines Vendor and BusinessEntity
+CREATE TABLE IF NOT EXISTS analytics.dim_vendor
+(
+    vendor_key serial PRIMARY KEY,
+    vendor_id integer NOT NULL, -- Maps to BusinessEntityID
+    account_number character varying(15) NOT NULL,
+    vendor_name character varying(50) NOT NULL,
+    credit_rating smallint,
+    preferred_vendor_status boolean,
+    active_flag boolean
+);
+
+COMMENT ON TABLE analytics.dim_vendor IS 'Flattened vendor dimension for purchasing analytics.';
+
+-- 5. Territory Dimension
+-- Combines SalesTerritory and CountryRegion
+CREATE TABLE IF NOT EXISTS analytics.dim_territory
+(
+    territory_key serial PRIMARY KEY,
+    territory_id integer NOT NULL,
+    territory_name character varying(50) NOT NULL,
+    country_region_code character varying(3) NOT NULL,
+    territory_group character varying(50) NOT NULL
+);
+
+COMMENT ON TABLE analytics.dim_territory IS 'Sales territory dimension.';
+
+-- ==========================================
+-- FACT TABLES
+-- ==========================================
+
+-- 6. Fact Sales
+-- Combines SalesOrderHeader and SalesOrderDetail
+CREATE TABLE IF NOT EXISTS analytics.fact_sales
+(
+    sales_key serial PRIMARY KEY,
+    sales_order_id integer NOT NULL,
+    sales_order_detail_id integer NOT NULL,
+    order_date timestamp without time zone NOT NULL,
+    due_date timestamp without time zone NOT NULL,
+    ship_date timestamp without time zone,
+    customer_key integer NOT NULL REFERENCES analytics.dim_customer(customer_key),
+    employee_key integer REFERENCES analytics.dim_employee(employee_key),
+    product_key integer NOT NULL REFERENCES analytics.dim_product(product_key),
+    territory_key integer REFERENCES analytics.dim_territory(territory_key),
+    online_order_flag boolean NOT NULL,
+    order_qty smallint NOT NULL,
+    unit_price numeric NOT NULL,
+    unit_price_discount numeric NOT NULL DEFAULT 0.0,
+    line_total numeric NOT NULL, -- Derived: order_qty * unit_price * (1 - unit_price_discount)
+    header_freight numeric, -- Note: Header level metric, use caution when aggregating
+    header_tax_amt numeric  -- Note: Header level metric, use caution when aggregating
+);
+
+COMMENT ON TABLE analytics.fact_sales IS 'Granular fact table for sales at the line-item level.';
+
+-- 7. Fact Purchases
+-- Combines PurchaseOrderHeader and PurchaseOrderDetail
+CREATE TABLE IF NOT EXISTS analytics.fact_purchases
+(
+    purchase_key serial PRIMARY KEY,
+    purchase_order_id integer NOT NULL,
+    purchase_order_detail_id integer NOT NULL,
+    order_date timestamp without time zone NOT NULL,
+    ship_date timestamp without time zone,
+    vendor_key integer NOT NULL REFERENCES analytics.dim_vendor(vendor_key),
+    employee_key integer NOT NULL REFERENCES analytics.dim_employee(employee_key),
+    product_key integer NOT NULL REFERENCES analytics.dim_product(product_key),
+    order_qty smallint NOT NULL,
+    unit_price numeric NOT NULL,
+    received_qty numeric(8, 2) NOT NULL,
+    rejected_qty numeric(8, 2) NOT NULL,
+    line_total numeric NOT NULL -- Derived: order_qty * unit_price
+);
+
+COMMENT ON TABLE analytics.fact_purchases IS 'Granular fact table for procurement at the line-item level.';
+
+-- 8. Fact Inventory
+-- Derived from ProductInventory and Location
+CREATE TABLE IF NOT EXISTS analytics.fact_inventory
+(
+    inventory_key serial PRIMARY KEY,
+    product_key integer NOT NULL REFERENCES analytics.dim_product(product_key),
+    location_id smallint NOT NULL,
+    location_name character varying(50) NOT NULL,
+    shelf character varying(10) NOT NULL,
+    bin smallint NOT NULL,
+    quantity smallint NOT NULL DEFAULT 0,
+    snapshot_date timestamp without time zone DEFAULT now()
+);
+
+COMMENT ON TABLE analytics.fact_inventory IS 'Fact table representing current or snapshotted inventory levels.';
+
+-- ==========================================
+-- INDEXES FOR PERFORMANCE
+-- ==========================================
+
+CREATE INDEX idx_fact_sales_date ON analytics.fact_sales(order_date);
+CREATE INDEX idx_fact_sales_customer ON analytics.fact_sales(customer_key);
+CREATE INDEX idx_fact_sales_product ON analytics.fact_sales(product_key);
+
+CREATE INDEX idx_fact_purchases_date ON analytics.fact_purchases(order_date);
+CREATE INDEX idx_fact_purchases_vendor ON analytics.fact_purchases(vendor_key);
+CREATE INDEX idx_fact_purchases_product ON analytics.fact_purchases(product_key);
+```

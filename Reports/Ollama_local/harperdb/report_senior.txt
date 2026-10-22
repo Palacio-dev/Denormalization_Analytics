@@ -1,0 +1,97 @@
+================================================================================
+SQL MODEL DENORMALIZATION EVALUATION REPORT
+================================================================================
+
+1. MODEL OVERVIEW
+--------------------------------------------------------------------------------
+Relational Model:
+  - Tables: 3
+  - Total Attributes: 9
+    * entitlements: 8 columns
+    * users: 1 columns
+    * user_entitlements: 2 columns (junction table - excluded from attribute analysis)
+
+  Note: 1 junction table(s) detected and excluded from attribute analysis:
+    - user_entitlements
+
+Denormalized Model:
+  - Tables: 6
+  - Total Attributes: 32
+    * fact_user_entitlement_usage: 10 columns
+    * dim_users: 1 columns
+    * dim_entitlements: 5 columns
+    * fact_analytics_entitlements: 10 columns
+    * users: 1 columns
+    * entitlements: 5 columns
+
+2. COMPLETENESS ANALYSIS
+--------------------------------------------------------------------------------
+⚠ WARNING: Denormalized model has MORE attributes (9 vs 32)
+  New information may have been added in the transition
+
+3. CORRECTNESS EVALUATION
+--------------------------------------------------------------------------------
+
+⚠ Issues Found:
+  - Type mismatch: activeDate (DATE) -> active_flag (INT)
+  - Type mismatch: inactiveDate (DATE) -> is_active_user (BOOLEAN)
+--------------------------------------------------------------------------------
+Completeness Ratio:        3.56
+Data Type Preservation:    0.78
+Avg Levenshtein Distance:  2.33
+BLEU Score:                0.06
+ROUGE-1:                   0.06
+METEOR Score:              0.17
+
+================================================================================
+--------------------------------------------------------------------------------
+Relational Model (Combined Text):
+  activeDate activeFlag featureType id id inactiveDate packageType useCount useLimit
+
+Denormalized Model (Combined Text):
+  PARTITION PARTITION active_flag active_flag active_flag active_flag entitlement_id entitlement_id entity_id feature_type feature_type feature_type feature_type id id is_active is_active_user package_type package_type package_type package_type usage_id use_count use_count use_limit use_limit use_limit use_limit user_id user_id user_id user_id
+
+
+5. ATTRIBUTE PAIRING FOR TYPE VALIDATION
+--------------------------------------------------------------------------------
+
+Identified 9 attribute pairs for type checking:
+
+Pair 1:
+  Relational:    id INT
+  Denormalized:  id INT
+
+Pair 2:
+  Relational:    activeDate DATE
+  Denormalized:  active_flag INT
+
+Pair 3:
+  Relational:    inactiveDate DATE
+  Denormalized:  is_active_user BOOLEAN
+
+Pair 4:
+  Relational:    useLimit INT
+  Denormalized:  use_limit INT
+
+Pair 5:
+  Relational:    useCount INT
+  Denormalized:  use_count INT
+
+Pair 6:
+  Relational:    featureType VARCHAR(4)
+  Denormalized:  feature_type VARCHAR(4)
+
+Pair 7:
+  Relational:    packageType VARCHAR(4)
+  Denormalized:  package_type VARCHAR(4)
+
+Pair 8:
+  Relational:    activeFlag INT
+  Denormalized:  active_flag INT
+
+Pair 9:
+  Relational:    id INT
+  Denormalized:  id INT
+
+
+================================================================================

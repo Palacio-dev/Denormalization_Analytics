@@ -1,0 +1,245 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_14-17-21
+Model: ollama_local
+Prompt: mid-level
+Schema: TPC_H
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy transforms the original star-like schema (which is already relatively normalized for the TPC-H benchmark) into a more optimized analytical model by flattening the `LINEITEM` table and consolidating dimension lookups. While the original schema follows a standard Fact/Dimension pattern, the `LINEITEM` table is highly denormalized internally (containing order, part, supplier, and line details). The new approach creates a single, wide `LINEITEM_FACT` table that includes all necessary join keys and derived measures to eliminate the need for multi-table joins during aggregation. Dimensions (`CUSTOMER`, `NATION`, `REGION`, `PART`, `SUPPLIER`, `ORDERS`) are kept separate but optimized with explicit foreign keys to allow for efficient filtering while avoiding deep join chains.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Consolidated the `LINEITEM` table into a single, highly denormalized fact table (`LINEITEM_FACT`) that includes all original columns plus explicit foreign keys to `ORDERS`, `PART`, `SUPPLIER`, `CUSTOMER`, `NATION`, and `REGION` to prevent join operations during analytical queries."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Kept `ORDERS`, `PART`, `SUPPLIER`, `CUSTOMER`, `NATION`, and `REGION` as distinct dimension tables to maintain data integrity and allow for easy updates, but ensured `LINEITEM_FACT` contains all necessary linking keys."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Removed the need for joins between `LINEITEM`, `ORDERS`, `PART`, and `SUPPLIER` by embedding their keys directly into `LINEITEM_FACT`."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived columns to `LINEITEM_FACT` such as `TOTAL_AMOUNT` (calculated as L_EXTENDEDPRICE * L_QUANTITY * (1 - L_DISCOUNT) * (1 + L_TAX)) to allow for immediate aggregation without re-computation."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed `L_ORDERKEY`, `L_PARTKEY`, and `L_SUPPKEY` from the fact table's primary analysis view logic, relying instead on the embedded foreign keys for grouping."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "A1",
+        "description": "Trade-off: Increased storage size due to redundant foreign keys and pre-calculated measures, which is acceptable for read-heavy workloads but increases write latency and storage costs."
+      },
+      {
+        "tradeoff_id": "A2",
+        "description": "Trade-off: Reduced query complexity and join overhead significantly, improving read performance, but at the cost of data duplication. Updates to any dimension table require corresponding updates in the fact table if not using a separate dimension table."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Aggregation queries (e.g., Total Sales by Nation, Customer, or Product Category) that previously required joining `LINEITEM`, `ORDERS`, `PART`, and `SUPPLIER` are now executed with a single table scan on `LINEITEM_FACT`."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Filtering queries based on customer demographics (e.g., 'Customers in the US with high account balances') can now be executed by joining `LINEITEM_FACT` with `CUSTOMER` and `NATION` tables without needing to traverse the `ORDERS` or `PART` tables first."
+      }
+    ]
+  }
+}
+```
+
+### Complete SQL DDL Creation Script for the Denormalized Schema
+
+```sql
+-- Drop existing tables if they exist to ensure a clean state
+DROP TABLE IF EXISTS LINEITEM_FACT;
+DROP TABLE IF EXISTS ORDERS;
+DROP TABLE IF EXISTS PART;
+DROP TABLE IF EXISTS SUPPLIER;
+DROP TABLE IF EXISTS CUSTOMER;
+DROP TABLE IF EXISTS NATION;
+DROP TABLE IF EXISTS REGION;
+
+-- Create Dimension Tables
+CREATE TABLE NATION (
+    N_NATIONKEY INTEGER NOT NULL,
+    N_NAME CHAR(25) NOT NULL,
+    N_REGIONKEY INTEGER NOT NULL,
+    N_COMMENT VARCHAR(152)
+);
+
+CREATE TABLE REGION (
+    R_REGIONKEY INTEGER NOT NULL,
+    R_NAME CHAR(25) NOT NULL,
+    R_COMMENT VARCHAR(152)
+);
+
+CREATE TABLE PART (
+    P_PARTKEY INTEGER NOT NULL,
+    P_NAME VARCHAR(55) NOT NULL,
+    P_MFGR CHAR(25) NOT NULL,
+    P_BRAND CHAR(10) NOT NULL,
+    P_TYPE VARCHAR(25) NOT NULL,
+    P_SIZE INTEGER NOT NULL,
+    P_CONTAINER CHAR(10) NOT NULL,
+    P_RETAILPRICE DECIMAL(15,2) NOT NULL,
+    P_COMMENT VARCHAR(23) NOT NULL
+);
+
+CREATE TABLE SUPPLIER (
+    S_SUPPKEY INTEGER NOT NULL,
+    S_NAME CHAR(25) NOT NULL,
+    S_ADDRESS VARCHAR(40) NOT NULL,
+    S_NATIONKEY INTEGER NOT NULL,
+    S_PHONE CHAR(15) NOT NULL,
+    S_ACCTBAL DECIMAL(15,2) NOT NULL,
+    S_COMMENT VARCHAR(101) NOT NULL
+);
+
+CREATE TABLE CUSTOMER (
+    C_CUSTKEY INTEGER NOT NULL,
+    C_NAME VARCHAR(25) NOT NULL,
+    C_ADDRESS VARCHAR(40) NOT NULL,
+    C_NATIONKEY INTEGER NOT NULL,
+    C_PHONE CHAR(15) NOT NULL,
+    C_ACCTBAL DECIMAL(15,2) NOT NULL,
+    C_MKTSEGMENT CHAR(10) NOT NULL,
+    C_COMMENT VARCHAR(117) NOT NULL
+);
+
+CREATE TABLE ORDERS (
+    O_ORDERKEY INTEGER NOT NULL,
+    O_CUSTKEY INTEGER NOT NULL,
+    O_ORDERSTATUS CHAR(1) NOT NULL,
+    O_TOTALPRICE DECIMAL(15,2) NOT NULL,
+    O_ORDERDATE DATE NOT NULL,
+    O_ORDERPRIORITY CHAR(15) NOT NULL,
+    O_CLERK CHAR(15) NOT NULL,
+    O_SHIPPRIORITY INTEGER NOT NULL,
+    O_COMMENT VARCHAR(79) NOT NULL
+);
+
+-- Create the Denormalized Fact Table
+-- This table includes all necessary foreign keys and a pre-calculated measure to optimize read performance
+CREATE TABLE LINEITEM_FACT (
+    L_ORDERKEY INTEGER NOT NULL,
+    L_PARTKEY INTEGER NOT NULL,
+    L_SUPPKEY INTEGER NOT NULL,
+    L_LINENUMBER INTEGER NOT NULL,
+    L_QUANTITY DECIMAL(15,2) NOT NULL,
+    L_EXTENDEDPRICE DECIMAL(15,2) NOT NULL,
+    L_DISCOUNT DECIMAL(15,2) NOT NULL,
+    L_TAX DECIMAL(15,2) NOT NULL,
+    L_RETURNFLAG CHAR(1) NOT NULL,
+    L_LINESTATUS CHAR(1) NOT NULL,
+    L_SHIPDATE DATE NOT NULL,
+    L_COMMITDATE DATE NOT NULL,
+    L_RECEIPTDATE DATE NOT NULL,
+    L_SHIPINSTRUCT CHAR(25) NOT NULL,
+    L_SHIPMODE CHAR(10) NOT NULL,
+    L_COMMENT VARCHAR(44) NOT NULL,
+    
+    -- Embedded Foreign Keys for Denormalization
+    O_ORDERKEY INTEGER NOT NULL,
+    O_CUSTKEY INTEGER NOT NULL,
+    O_ORDERSTATUS CHAR(1) NOT NULL,
+    O_TOTALPRICE DECIMAL(15,2) NOT NULL,
+    O_ORDERDATE DATE NOT NULL,
+    O_ORDERPRIORITY CHAR(15) NOT NULL,
+    O_CLERK CHAR(15) NOT NULL,
+    O_SHIPPRIORITY INTEGER NOT NULL,
+    O_COMMENT VARCHAR(79) NOT NULL,
+    
+    P_PARTKEY INTEGER NOT NULL,
+    P_NAME VARCHAR(55) NOT NULL,
+    P_MFGR CHAR(25) NOT NULL,
+    P_BRAND CHAR(10) NOT NULL,
+    P_TYPE VARCHAR(25) NOT NULL,
+    P_SIZE INTEGER NOT NULL,
+    P_CONTAINER CHAR(10) NOT NULL,
+    P_RETAILPRICE DECIMAL(15,2) NOT NULL,
+    P_COMMENT VARCHAR(23) NOT NULL,
+    
+    S_SUPPKEY INTEGER NOT NULL,
+    S_NAME CHAR(25) NOT NULL,
+    S_ADDRESS VARCHAR(40) NOT NULL,
+    S_NATIONKEY INTEGER NOT NULL,
+    S_PHONE CHAR(15) NOT NULL,
+    S_ACCTBAL DECIMAL(15,2) NOT NULL,
+    S_COMMENT VARCHAR(101) NOT NULL,
+    
+    C_CUSTKEY INTEGER NOT NULL,
+    C_NAME VARCHAR(25) NOT NULL,
+    C_ADDRESS VARCHAR(40) NOT NULL,
+    C_NATIONKEY INTEGER NOT NULL,
+    C_PHONE CHAR(15) NOT NULL,
+    C_ACCTBAL DECIMAL(15,2) NOT NULL,
+    C_MKTSEGMENT CHAR(10) NOT NULL,
+    C_COMMENT VARCHAR(117) NOT NULL,
+    
+    N_NATIONKEY INTEGER NOT NULL,
+    N_NAME CHAR(25) NOT NULL,
+    N_REGIONKEY INTEGER NOT NULL,
+    N_COMMENT VARCHAR(152) NOT NULL,
+    
+    R_REGIONKEY INTEGER NOT NULL,
+    R_NAME CHAR(25) NOT NULL,
+    R_COMMENT VARCHAR(152) NOT NULL,
+
+    -- Pre-calculated Measure for Aggregation
+    TOTAL_AMOUNT DECIMAL(15,2) NOT NULL,
+
+    PRIMARY KEY (L_ORDERKEY, L_LINENUMBER),
+    -- Indexes for common analytical queries
+    INDEX IDX_L_ORDERKEY (L_ORDERKEY),
+    INDEX IDX_L_PARTKEY (L_PARTKEY),
+    INDEX IDX_L_SUPPKEY (L_SUPPKEY),
+    INDEX IDX_O_CUSTKEY (O_CUSTKEY),
+    INDEX IDX_P_MFGR (P_MFGR),
+    INDEX IDX_S_NATIONKEY (S_NATIONKEY),
+    INDEX IDX_C_NATIONKEY (C_NATIONKEY),
+    INDEX IDX_N_REGIONKEY (N_REGIONKEY)
+);
+
+-- Insert Sample Data (Optional for demonstration)
+-- In a production environment, this would be populated via ETL processes
+INSERT INTO LINEITEM_FACT (
+    L_ORDERKEY, L_PARTKEY, L_SUPPKEY, L_LINENUMBER, L_QUANTITY, L_EXTENDEDPRICE, 
+    L_DISCOUNT, L_TAX, L_RETURNFLAG, L_LINESTATUS, L_SHIPDATE, L_COMMITDATE, 
+    L_RECEIPTDATE, L_SHIPINSTRUCT, L_SHIPMODE, L_COMMENT,
+    O_ORDERKEY, O_CUSTKEY, O_ORDERSTATUS, O_TOTALPRICE, O_ORDERDATE, O_ORDERPRIORITY, 
+    O_CLERK, O_SHIPPRIORITY, O_COMMENT,
+    P_PARTKEY, P_NAME, P_MFGR, P_BRAND, P_TYPE, P_SIZE, P_CONTAINER, P_RETAILPRICE, P_COMMENT,
+    S_SUPPKEY, S_NAME, S_ADDRESS, S_NATIONKEY, S_PHONE, S_ACCTBAL, S_COMMENT,
+    C_CUSTKEY, C_NAME, C_ADDRESS, C_NATIONKEY, C_PHONE, C_ACCTBAL, C_MKTSEGMENT, C_COMMENT,
+    N_NATIONKEY, N_NAME, N_REGIONKEY, N_COMMENT,
+    R_REGIONKEY, R_NAME, R_COMMENT,
+    TOTAL_AMOUNT
+)
+SELECT 
+    l.L_ORDERKEY, l.L_PARTKEY, l.L_SUPPKEY, l.L_LINENUMBER, l.L_QUANTITY, l.L_EXTENDEDPRICE, 
+    l.L_DISCOUNT, l.L_TAX, l.L_RETURNFLAG, l.L_LINESTATUS, l.L_SHIPDATE, l.L_COMMITDATE, 
+    l.L_RECEIPTDATE, l.L_SHIPINSTRUCT, l.L_SHIPMODE, l.L_COMMENT,
+    l.L_ORDERKEY, l.O_CUSTKEY, l.O_ORDERSTATUS, l.O_TOTALPRICE, l.O_ORDERDATE, l.O_ORDERPRIORITY, 
+    l.O_CLERK, l.O_SHIPPRIORITY, l.O_COMMENT,
+    l.P_PARTKEY, l.P_NAME, l.P_MFGR, l.P_BRAND, l.P_TYPE, l.P_SIZE, l.P_CONTAINER, l.P_RETAILPRICE, l.P_COMMENT,
+    l.S_SUPPKEY, l.S_NAME, l.S_ADDRESS, l.S_NATIONKEY, l.S_PHONE, l.S_ACCTBAL, l.S_COMMENT,
+    l.C_CUSTKEY, l.C_NAME, l.C_ADDRESS, l.C_NATIONKEY, l.C_PHONE, l.C_ACCTBAL, l.C_MKTSEGMENT, l.C_COMMENT,
+    l.N_NATIONKEY, l.N_NAME, l.N_REGIONKEY, l.N_COMMENT,
+    l.R_REGIONKEY, l.R_NAME, l.R_COMMENT,
+    l.L_QUANTITY * l.L_EXTENDEDPRICE * (1 - l.L_DISCOUNT) * (1 + l.L_TAX) -- Pre-calculated measure
+FROM LINEITEM l;
+```

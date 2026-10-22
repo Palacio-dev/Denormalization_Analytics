@@ -1,0 +1,178 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-07-03_22-54-51
+Model: ollama_api
+Prompt: OBT
+Schema: TPC_DS
+==================================================
+
+{
+  "section_1": {
+    "summary": "The denormalization strategy consolidates all normalized tables into a single wide table using the ONE-BIG-TABLE MODEL. This approach eliminates JOIN operations by embedding all relevant attributes directly into one table, significantly improving read performance for analytical queries at the cost of increased storage and write complexity.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged s_purchase and s_purchase_lineitem into a single table by duplicating purchase-level information across each line item."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merged s_catalog_order and s_catalog_order_lineitem into the same wide table, duplicating order header data for each line item."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merged s_web_order and s_web_order_lineitem into the same wide table, duplicating web order header data for each line item."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Included return data from s_store_returns, s_catalog_returns as optional attributes (nullable) in the unified table."
+      },
+      {
+        "decision_id": "D5",
+        "description": "Included inventory data from s_inventory as optional attributes (nullable) in the unified table."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added prefixes to disambiguate column names that appear in multiple source tables (e.g., plin_line_number becomes purchase_line_number, wlin_line_number becomes web_line_number)."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Preserved all original columns from all source tables with no removals; added new derived keys such as 'transaction_id' to uniquely identify each row."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Improved read performance by eliminating JOINs at the expense of increased storage requirements due to data duplication."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Simplified query complexity but increased ETL complexity during data ingestion and updates."
+      },
+      {
+        "tradeoff_id": "T3",
+        "description": "Potential for data inconsistency if not properly managed during updates or inserts due to denormalized structure."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical queries analyzing sales performance by customer, store, or item across purchases, catalogs, and web orders."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Reporting on returns behavior across different channels (store, catalog, web), requiring access to multiple related tables."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Inventory tracking and sales correlation analysis requiring JOINs between orders and inventory levels."
+      }
+    ]
+  }
+}
+
+```sql
+CREATE TABLE denormalized_sales (
+    transaction_id                  VARCHAR(50)             NOT NULL, -- Unique identifier combining order/purchase ID and line number
+    plin_purchase_id                INTEGER,
+    purchase_line_number            INTEGER,
+    plin_item_id                    CHAR(16),
+    plin_promotion_id               CHAR(16),
+    plin_quantity                   INTEGER,
+    plin_sale_price                 NUMERIC(7,2),
+    plin_coupon_amt                 NUMERIC(7,2),
+    plin_comment                    VARCHAR(100),
+    purc_store_id                   CHAR(16),
+    purc_customer_id                CHAR(16),
+    purc_purchase_date              CHAR(10),
+    purc_purchase_time              INTEGER,
+    purc_register_id                INTEGER,
+    purc_clerk_id                   INTEGER,
+    purc_comment                    CHAR(100),
+    cord_order_id                   INTEGER,
+    cord_bill_customer_id           CHAR(16),
+    cord_ship_customer_id           CHAR(16),
+    cord_order_date                 CHAR(10),
+    cord_order_time                 INTEGER,
+    cord_ship_mode_id               CHAR(16),
+    cord_call_center_id             CHAR(16),
+    cord_order_comments             VARCHAR(100),
+    word_order_id                   INTEGER,
+    word_bill_customer_id           CHAR(16),
+    word_ship_customer_id           CHAR(16),
+    word_order_date                 CHAR(10),
+    word_order_time                 INTEGER,
+    word_ship_mode_id               CHAR(16),
+    word_web_site_id                CHAR(16),
+    word_order_comments             CHAR(100),
+    clin_order_id                   INTEGER,
+    catalog_line_number             INTEGER,
+    clin_item_id                    CHAR(16),
+    clin_promotion_id               CHAR(16),
+    clin_quantity                   INTEGER,
+    clin_sales_price                NUMERIC(7,2),
+    clin_coupon_amt                 NUMERIC(7,2),
+    clin_warehouse_id               CHAR(16),
+    clin_ship_date                  CHAR(10),
+    clin_catalog_number             INTEGER,
+    clin_catalog_page_number        INTEGER,
+    clin_ship_cost                  NUMERIC(7,2),
+    wlin_order_id                   INTEGER,
+    web_line_number                 INTEGER,
+    wlin_item_id                    CHAR(16),
+    wlin_promotion_id               CHAR(16),
+    wlin_quantity                   INTEGER,
+    wlin_sales_price                NUMERIC(7,2),
+    wlin_coupon_amt                 NUMERIC(7,2),
+    wlin_warehouse_id               CHAR(16),
+    wlin_ship_date                  CHAR(10),
+    wlin_ship_cost                  NUMERIC(7,2),
+    wlin_web_page_id                CHAR(16),
+    sret_store_id                   CHAR(16),
+    sret_purchase_id               CHAR(16),
+    sret_line_number                INTEGER,
+    sret_item_id                    CHAR(16),
+    sret_customer_id                CHAR(16),
+    sret_return_date                CHAR(10),
+    sret_return_time                CHAR(10),
+    sret_ticket_number              CHAR(20),
+    sret_return_qty                 INTEGER,
+    sret_return_amt                 NUMERIC(7,2),
+    sret_return_tax                 NUMERIC(7,2),
+    sret_return_fee                 NUMERIC(7,2),
+    sret_return_ship_cost           NUMERIC(7,2),
+    sret_refunded_cash              NUMERIC(7,2),
+    sret_reversed_charge            NUMERIC(7,2),
+    sret_store_credit               NUMERIC(7,2),
+    sret_reason_id                  CHAR(16),
+    cret_call_center_id             CHAR(16),
+    cret_order_id                   INTEGER,
+    cret_line_number                INTEGER,
+    cret_item_id                    CHAR(16),
+    cret_return_customer_id         CHAR(16),
+    cret_refund_customer_id         CHAR(16),
+    cret_return_date                CHAR(10),
+    cret_return_time                CHAR(10),
+    cret_return_qty                 INTEGER,
+    cret_return_amt                 NUMERIC(7,2),
+    cret_return_tax                 NUMERIC(7,2),
+    cret_return_fee                 NUMERIC(7,2),
+    cret_return_ship_cost           NUMERIC(7,2),
+    cret_refunded_cash              NUMERIC(7,2),
+    cret_reversed_charge            NUMERIC(7,2),
+    cret_merchant_credit            NUMERIC(7,2),
+    cret_reason_id                  CHAR(16),
+    cret_shipmode_id                CHAR(16),
+    cret_catalog_page_id            CHAR(16),
+    cret_warehouse_id               CHAR(16),
+    invn_warehouse_id               CHAR(16),
+    invn_item_id                    CHAR(16),
+    invn_date                       CHAR(10),
+    invn_qty_on_hand                INTEGER
+);
+```

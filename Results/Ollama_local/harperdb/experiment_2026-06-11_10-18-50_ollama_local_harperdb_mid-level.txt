@@ -1,0 +1,140 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-11_10-18-50
+Model: ollama_local
+Prompt: mid-level
+Schema: harperdb
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The current schema is fully normalized (3NF), separating users, entitlements, and the relationship between them. 
+    For analytical workloads, this results in complex joins and repeated scanning of the `user_entitlements` table. The strategy
+     shifts to a Data Warehouse pattern (Star Schema) where `users` and `entitlements` act as dimensions and the relationship
+      becomes a single Fact table. To optimize read performance, the Fact table is denormalized to include key attributes 
+      from the Dimensions (e.g., `featureType`, `packageType`, `useLimit`) directly, reducing the need for joins. Additionally, the `activeFlag` and date fields are consolidated into the Fact table to enable immediate filtering and aggregation.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Replace the three separate tables (`users`, `entitlements`, `user_entitlements`) with two tables: a `fact_user_entitlements` table and two `dim_*` tables (`dim_users`, `dim_entitlements`). The `fact` table will contain the join key (`user_id`, `entitlement_id`) plus all analytical attributes.",
+        "source_tables": ["users", "entitlements", "user_entitlements"],
+        "target_tables": ["fact_user_entitlements", "dim_users", "dim_entitlements"]
+      },
+      {
+        "decision_id": "D2",
+        "description": "Denormalize `featureType`, `packageType`, `useLimit`, `useCount`, `activeDate`, `inactiveDate`, and `activeFlag` directly into the `fact_user_entitlements` table. This eliminates the need to join the `entitlements` table for these fields.",
+        "source_tables": ["entitlements"],
+        "target_tables": ["fact_user_entitlements"]
+      },
+      {
+        "decision_id": "D3",
+        "description": "Consolidate `id` into `dim_users` and `dim_entitlements` to serve as the primary keys for the fact table, replacing the composite primary key in the original `user_entitlements` table.",
+        "source_tables": ["users", "entitlements"],
+        "target_tables": ["dim_users", "dim_entitlements"]
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added derived or calculated attributes to the Fact table for immediate analysis, such as `days_active` (calculated from `activeDate` and `inactiveDate` if a specific reference date is known, or stored as raw dates for aggregation). The `useCount` is treated as a measure rather than just a count.",
+        "source_tables": ["entitlements"],
+        "target_tables": ["fact_user_entitlements"]
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed the `id` from the `users` and `entitlements` tables in the context of the transactional logic, as they now serve purely as dimension lookup tables. The `id` is promoted to the fact table's primary key columns.",
+        "source_tables": ["users", "entitlements"],
+        "target_tables": ["dim_users", "dim_entitlements"]
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Write performance is reduced because data ingestion requires populating both the Fact table and the Dimension tables, whereas the original schema only required writing to the Fact table (`user_entitlements`).",
+        "impact": "Increased ETL complexity and storage overhead."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Data redundancy exists (e.g., `featureType` is stored in both `dim_entitlements` and `fact_user_entitlements`). This is intentional to speed up reads at the cost of potential data inconsistency if not managed via triggers or CDC.",
+        "impact": "Higher storage usage and risk of data drift."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "provided",
+        "query_pattern_description": "Reporting the total usage count per user for a specific feature type, filtered by active status. In the normalized schema, this requires a JOIN to `entitlements` to get the `featureType`. In the denormalized schema, `featureType` is available directly in the Fact table.",
+        "example_logic": "SELECT user_id, SUM(useCount) as total_usage FROM fact_user_entitlements WHERE featureType = 'X' AND activeFlag = 1 GROUP BY user_id;"
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analyzing the distribution of package types across all users. The denormalization allows this to be a simple aggregation on the Fact table without joining back to the `entitlements` table.",
+        "example_logic": "SELECT packageType, COUNT(*) as user_count FROM fact_user_entitlements GROUP BY packageType;"
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- Drop existing tables if they exist to ensure a clean state
+DROP TABLE IF EXISTS fact_user_entitlements;
+DROP TABLE IF EXISTS dim_entitlements;
+DROP TABLE IF EXISTS dim_users;
+
+-- Create Dimension Tables
+-- These tables hold the descriptive attributes and IDs.
+CREATE TABLE dim_users (
+    user_id INT PRIMARY KEY
+);
+
+CREATE TABLE dim_entitlements (
+    entitlement_id INT PRIMARY KEY,
+    feature_type VARCHAR(4),
+    package_type VARCHAR(4),
+    use_limit INT,
+    active_date DATE,
+    inactive_date DATE,
+    active_flag INT
+);
+
+-- Create Fact Table
+-- This table is denormalized to include key attributes from the dimensions.
+-- It acts as the single source of truth for the relationship and measures.
+CREATE TABLE fact_user_entitlements (
+    user_id INT,
+    entitlement_id INT,
+    feature_type VARCHAR(4),
+    package_type VARCHAR(4),
+    use_limit INT,
+    use_count INT,
+    active_date DATE,
+    inactive_date DATE,
+    active_flag INT,
+    PRIMARY KEY (user_id, entitlement_id),
+    FOREIGN KEY (user_id) REFERENCES dim_users(user_id),
+    FOREIGN KEY (entitlement_id) REFERENCES dim_entitlements(entitlement_id)
+);
+
+-- Load Data Example (Optional, for demonstration)
+-- In a real environment, this would be handled by an ETL tool (e.g., dbt, Airflow, SSIS)
+-- Inserting into Dimensions
+INSERT INTO dim_users (user_id) VALUES (1), (2), (3);
+
+INSERT INTO dim_entitlements (entitlement_id, feature_type, package_type, use_limit, active_date, inactive_date, active_flag)
+VALUES 
+    (1, 'email', 'basic', 100, '2023-01-01', NULL, 1),
+    (2, 'api', 'pro', 5000, '2023-01-01', NULL, 1),
+    (3, 'storage', 'basic', 1GB, '2023-01-01', NULL, 1);
+
+-- Inserting into Fact (Simulating the join)
+INSERT INTO fact_user_entitlements (user_id, entitlement_id, feature_type, package_type, use_limit, use_count, active_date, inactive_date, active_flag)
+VALUES 
+    (1, 1, 'email', 'basic', 100, 50, '2023-01-01', NULL, 1),
+    (1, 2, 'api', 'pro', 5000, 1000, '2023-01-01', NULL, 1),
+    (2, 1, 'email', 'basic', 100, 80, '2023-01-01', NULL, 1),
+    (3, 3, 'storage', 'basic', 1GB, 500GB, '2023-01-01', NULL, 1);
+```

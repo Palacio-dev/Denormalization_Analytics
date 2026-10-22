@@ -1,0 +1,255 @@
+=== EXPERIMENT RESULT ===
+Timestamp: 2026-06-12_09-15-42
+Model: ollama_local
+Prompt: RISEN
+Schema: ex04
+==================================================
+
+```json
+{
+  "section_1": {
+    "summary": "The denormalization strategy focuses on optimizing analytical read performance by collapsing frequently joined tables (specifically those involving Country, Survey, and Demographic data) into wider tables. This eliminates multi-table joins for complex reporting scenarios while preserving all original data semantics. The approach primarily utilizes 'Collapsing Relations' to merge country, survey, and demographic metadata into unified tables, and 'Adding Redundant Attributes' to store calculated metrics (like population counts per age/gender) directly to avoid runtime aggregation.",
+    "structural_decisions": [
+      {
+        "decision_id": "D1",
+        "description": "Merged 'country', 'region', and 'survey' tables into a single 'master_country_survey' table. This table now contains all country identifiers, region mappings, and survey metadata (welfare types, poverty lines, etc.) in one place, removing the need to join these three tables together."
+      },
+      {
+        "decision_id": "D2",
+        "description": "Merged 'demography', 'population', and 'life_expectancy' tables into a single 'master_demographics' table. This table stores demographic year/country keys alongside all age/gender breakdowns, population counts, and life expectancy values, eliminating the need to join the three original tables."
+      },
+      {
+        "decision_id": "D3",
+        "description": "Merged 'health' table with the 'master_country_survey' table. This creates a 'master_health' table that includes country/survey context alongside health metrics, allowing queries to link health data directly to specific surveys without joining back to the master country table."
+      },
+      {
+        "decision_id": "D4",
+        "description": "Created a separate 'master_decile' table. While part of the denormalization, this table remains relatively narrow as it primarily links to the survey, but it is kept distinct to avoid excessive width in the master survey table, though it could potentially be merged if decile data is frequently joined with survey data."
+      }
+    ],
+    "attribute_level_changes": [
+      {
+        "decision_id": "A1",
+        "description": "Added redundant attributes: In 'master_country_survey', added 'region_code' (redundant copy from region table), 'id_survey' (redundant copy from survey table), and specific metric columns (poverty_line, gini, etc.) that were previously only accessible via joins. In 'master_demographics', added 'pop_ages', 'gender', 'number' (from population), 'value' (from life_expectancy), and all demographic rates (birth_rate, death_rate, etc.) into a single wide table."
+      },
+      {
+        "decision_id": "A2",
+        "description": "Removed derived attributes: Removed the need to calculate joins for 'population' counts or 'life_expectancy' values, as they are now pre-stored columns in the 'master_demographics' table."
+      }
+    ],
+    "tradeoffs": [
+      {
+        "tradeoff_id": "T1",
+        "description": "Write Amplification: Inserting new data into the denormalized schema will require inserting redundant data (copies of country codes, region codes, and survey IDs) into multiple tables, increasing the volume of data to be written during ETL processes."
+      },
+      {
+        "tradeoff_id": "T2",
+        "description": "Data Integrity Complexity: While referential integrity is preserved via foreign keys to the primary keys of the original logical entities, the physical schema is now flatter. Any update to a 'master' table requires careful handling to ensure consistency across the redundant columns, although this is mitigated by the fact that the 'master' tables act as the single source of truth for their respective domains."
+      }
+    ]
+  },
+  "section_2": {
+    "query_patterns": [
+      {
+        "decision_id": "D1",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Analytical report: 'Generate a dashboard showing Gini coefficient, poverty gap, and regional coverage for all surveys in Sub-Saharan Africa.' (Previously required JOINs between country, region, and survey tables)."
+      },
+      {
+        "decision_id": "D2",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Demographic analysis: 'Calculate total population by age and gender for a specific country and year, and compare it with life expectancy.' (Previously required JOINs between demography, population, and life_expectancy tables)."
+      },
+      {
+        "decision_id": "D3",
+        "query_pattern_type": "inferred",
+        "query_pattern_description": "Health & Welfare correlation: 'Analyze the relationship between hospital beds per capita and poverty line for surveys conducted in 2020.' (Previously required JOINs between health, country, and survey tables)."
+      }
+    ]
+  }
+}
+```
+
+```sql
+-- Denormalized Schema for Analytical Performance Optimization
+-- Dialect: PostgreSQL (compatible with provided input)
+
+-- ---------------------------------------------------------
+-- 1. Master Country & Survey Table
+-- Merges: country, region, survey
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.master_country_survey
+(
+    country_code character varying NOT NULL,
+    region_code character varying NOT NULL,
+    country_name character varying,
+    id_survey integer NOT NULL,
+    welfare_type character varying,
+    survey_acronym character varying,
+    survey_comparability integer,
+    comparable_spell character varying,
+    poverty_line double precision,
+    headcount double precision,
+    poverty_gap double precision,
+    poverty_severity double precision,
+    gini double precision,
+    reporting_pop integer,
+    reporting_pce double precision,
+    distribution_type character varying,
+    spl double precision,
+    survey_year integer,
+    survey_coverage character varying,
+    reporting_level character varying,
+    PRIMARY KEY (country_code, id_survey)
+);
+
+-- ---------------------------------------------------------
+-- 2. Master Demographics Table
+-- Merges: demography, population, life_expectancy
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.master_demographics
+(
+    id_demography integer NOT NULL,
+    year integer NOT NULL,
+    country_code character varying NOT NULL,
+    pop_density double precision,
+    urban_pop double precision,
+    rural_pop double precision,
+    net_migration double precision,
+    death_rate double precision,
+    birth_rate double precision,
+    pop_ages character varying,
+    gender character varying,
+    "number" double precision,
+    value double precision,
+    PRIMARY KEY (id_demography, year, country_code)
+);
+
+-- ---------------------------------------------------------
+-- 3. Master Health Table
+-- Merges: health + master_country_survey context
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.master_health
+(
+    id_health integer NOT NULL,
+    country_code character varying NOT NULL,
+    year integer NOT NULL,
+    hospital_beds double precision,
+    physicians double precision,
+    expenditure double precision,
+    PRIMARY KEY (id_health, country_code, year)
+);
+
+-- ---------------------------------------------------------
+-- 4. Decile Table
+-- Kept distinct for clarity, but linked to master_country_survey
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.master_decile
+(
+    id_decile integer NOT NULL,
+    value double precision,
+    name character varying,
+    id_survey integer NOT NULL,
+    PRIMARY KEY (id_decile)
+);
+
+-- ---------------------------------------------------------
+-- Employment, Education, Economy Tables
+-- These remain relatively normalized as they don't have 
+-- complex multi-level hierarchies requiring deep denormalization.
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.employment
+(
+    id_employment integer NOT NULL,
+    year integer NOT NULL,
+    country_code character varying NOT NULL,
+    child_emp double precision,
+    unemp double precision,
+    vulnerable_emp double precision,
+    part_time double precision,
+    employers double precision,
+    labor_force_total double precision,
+    labor_force_fem double precision,
+    PRIMARY KEY (id_employment, year, country_code)
+);
+
+CREATE TABLE IF NOT EXISTS public.education
+(
+    id_education integer NOT NULL,
+    year integer NOT NULL,
+    country_code character varying NOT NULL,
+    child_out_of_school double precision,
+    progression_to_sec double precision,
+    expenditure double precision,
+    preprim_enroll double precision,
+    prim_enrol double precision,
+    sec_enrol double precision,
+    terti_enrol double precision,
+    PRIMARY KEY (id_education, year, country_code)
+);
+
+CREATE TABLE IF NOT EXISTS public.economy
+(
+    id_economy integer NOT NULL,
+    year integer NOT NULL,
+    country_code character varying NOT NULL,
+    gdp double precision,
+    inflation double precision,
+    tax_revenue double precision,
+    PRIMARY KEY (id_economy, year, country_code)
+);
+
+-- ---------------------------------------------------------
+-- Foreign Key Constraints (Not Valid for performance, but 
+-- ensure referential integrity for the new schema)
+-- ---------------------------------------------------------
+
+ALTER TABLE IF EXISTS public.master_country_survey
+    ADD FOREIGN KEY (country_code)
+    REFERENCES public.country (country_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+ALTER TABLE IF EXISTS public.master_country_survey
+    ADD FOREIGN KEY (region_code)
+    REFERENCES public.region (region_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+ALTER TABLE IF EXISTS public.master_country_survey
+    ADD FOREIGN KEY (id_survey)
+    REFERENCES public.survey (id_survey) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+ALTER TABLE IF EXISTS public.master_demographics
+    ADD FOREIGN KEY (id_demography)
+    REFERENCES public.demography (id_demography) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+ALTER TABLE IF EXISTS public.master_demographics
+    ADD FOREIGN KEY (country_code)
+    REFERENCES public.country (country_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+ALTER TABLE IF EXISTS public.master_health
+    ADD FOREIGN KEY (country_code)
+    REFERENCES public.country (country_code) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+ALTER TABLE IF EXISTS public.master_decile
+    ADD FOREIGN KEY (id_survey)
+    REFERENCES public.survey (id_survey) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+```
