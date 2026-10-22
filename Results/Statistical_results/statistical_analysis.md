@@ -1,101 +1,94 @@
-# Análise Estatística do Experimento de Desnormalização de Esquemas
+# Statistical Analysis of the Schema Denormalization Experiment
 
-Este documento explica o que o script `analyze_llm_schema_experiment.py` faz e por quê, para servir de referência e, se for útil, como base para a seção de metodologia do artigo.
+This document explains what the `analyze_llm_schema_experiment.py` script does.
 
-## 1. Desenho experimental
+## 1. Experimental Design
 
-O experimento é um **fatorial completo 6 × 3 × 16**, com medidas repetidas dentro de schema:
+The experiment is a **complete 6 × 3 × 16 factorial design**, with repeated measures within schema:
 
-- **6 templates de prompt**: RISEN, RISEN-few-shot, JUNIOR, MID-LEVEL, SENIOR, OBT
-- **3 modelos de LLM**: Gemini 3.1-Pro, qwen3-coder:480b-cloud, qwen3.5:4b
-- **16 schemas relacionais** de referência
+- **6 prompt templates**: RISEN, RISEN-few-shot, JUNIOR, MID-LEVEL, SENIOR, OBT
+- **3 LLM models**: Gemini 3.1-Pro, qwen3-coder:480b-cloud, qwen3.5:4b
+- **16 reference relational schemas**
 
-Cada um dos 16 schemas é desnormalizado sob as 18 combinações de prompt × modelo, gerando **288 observações**. Como o mesmo schema aparece 18 vezes, essas observações **não são independentes** — é isso que motiva o uso de um modelo de efeitos mistos em vez de, por exemplo, uma ANOVA comum.
+Each of the 16 schemas is denormalized under all 18 prompt × model combinations, generating **288 observations**. Since the same schema appears 18 times, these observations **are not independent** — this is what motivates the use of a mixed-effects model instead of, for example, a standard ANOVA.
 
-O script confere isso automaticamente no início (`validate_design`): conta quantos schemas/prompts/modelos foram detectados no CSV, avisa se não bate com o esperado (16/6/3), e reporta se alguma das 288 combinações está faltando.
+The script checks this automatically at the start (`validate_design`): it counts how many schemas/prompts/models were detected in the CSV, warns if this does not match the expected (16/6/3), and reports whether any of the 288 combinations are missing.
 
-## 2. As seis variáveis dependentes
+## 2. The Six Dependent Variables
 
-| Outcome | O que mede | Como é calculado | Faixa | Direção |
+| Outcome | What it measures | How it is calculated | Range | Direction |
 |---|---|---|---|---|
-| `completeness` | Cobertura de atributos | `atributos_gerados / atributos_de_referência` | ≥ 0, sem teto fixo (pode passar de 1 se o LLM gerar atributos a mais) | maior é melhor |
-| `type_correctness` | Corretude de tipos | proporção de atributos **pareados** com tipo correto | [0, 1] | maior é melhor |
-| `field_correctness` | Corretude de nomes de atributos | distância de Levenshtein **média** entre nomes pareados | ≥ 0, sem teto fixo | **menor é melhor** (única métrica invertida) |
-| `bleu` | Similaridade textual | BLEU padrão | [0, 1] | maior é melhor |
-| `rouge` | Similaridade textual | ROUGE padrão | [0, 1] | maior é melhor |
-| `meteor` | Similaridade textual | METEOR padrão | [0, 1] | maior é melhor |
+| `completeness` | Attribute coverage | `generated_attributes / reference_attributes` | ≥ 0, no fixed ceiling (can exceed 1 if the LLM generates extra attributes) | higher is better |
+| `type_correctness` | Type correctness | proportion of **paired** attributes with the correct type | [0, 1] | higher is better |
+| `field_correctness` | Attribute name correctness | **average** Levenshtein distance between paired names | ≥ 0, no fixed ceiling | **lower is better** (the only inverted metric) |
+| `bleu` | Textual similarity | standard BLEU | [0, 1] | higher is better |
+| `rouge` | Textual similarity | standard ROUGE | [0, 1] | higher is better |
+| `meteor` | Textual similarity | standard METEOR | [0, 1] | higher is better |
 
-Nenhuma dessas seis é uma contagem bruta limitada por `total_attributes` — todas já chegam do CSV como razões, proporções ou distâncias médias prontas. Por isso todas são modeladas como variáveis contínuas (ver seção 3), e não como proporções binomiais.
+None of these six is a raw count bounded by `total_attributes` — they all arrive from the CSV already as ratios, proportions, or average distances. For this reason, all of them are modeled as continuous variables (see Section 3), rather than as binomial proportions.
 
-## 3. Modelo estatístico primário
+## 3. Primary Statistical Model
 
-Para cada um dos 6 outcomes, o script ajusta o mesmo modelo:
+For each of the 6 outcomes, the script fits the same model:
 
 ```
 outcome ~ Prompt * Model + (1 | Schema)
 ```
 
-- **Efeitos fixos**: Prompt (6 níveis), Model (3 níveis) e a interação Prompt × Model — testam se o tipo de prompt e o modelo (e a combinação dos dois) afetam o outcome.
-- **Efeito aleatório**: intercepto aleatório por Schema — absorve o fato de que alguns schemas são intrinsecamente "mais fáceis" ou "mais difíceis" de desnormalizar, e modela corretamente a dependência das 18 medidas repetidas dentro de cada schema.
-- É um **Linear Mixed Model (LMM)**, ajustado por máxima verossimilhança (`reml=False`), via `statsmodels`. ML (em vez de REML) foi escolhido para manter os ajustes comparáveis entre outcomes; se em algum momento vocês quiserem estimativas de variância mais precisas para reportar no artigo, REML é a alternativa mais indicada (basta trocar `reml=False` por `reml=True`).
+- **Fixed effects**: Prompt (6 levels), Model (3 levels), and the Prompt × Model interaction — testing whether the prompt type and the model (and their combination) affect the outcome.
+- **Random effect**: random intercept by Schema — absorbs the fact that some schemas are intrinsically "easier" or "harder" to denormalize, and correctly models the dependence among the 18 repeated measures within each schema.
+- It is a **Linear Mixed Model (LMM)**, fitted via maximum likelihood (`reml=False`), using `statsmodels`. ML (instead of REML) was chosen to keep the fits comparable across outcomes; if at some point you want more accurate variance estimates to report in the paper, REML is the preferred alternative (simply change `reml=False` to `reml=True`).
 
-**Ajuste numérico:** o otimizador `lbfgs` converge bem, mas em parte dos ajustes ele produz uma Hessiana aproximada que não é invertível, e o `statsmodels` falha ao calcular os erros-padrão (`Singular matrix`) mesmo com o modelo já convergido. Por isso o script tenta uma cadeia de otimizadores (`lbfgs` → `bfgs` → `cg` → `powell` → `nm`) e usa o primeiro que funcionar — isso é só um detalhe numérico, não muda a especificação do modelo.
+**Numerical adjustment:** the `lbfgs` optimizer converges well, but for some fits it produces an approximate Hessian that is not invertible, causing `statsmodels` to fail when computing standard errors (`Singular matrix`), even though the model has already converged. For this reason, the script tries a chain of optimizers (`lbfgs` → `bfgs` → `cg` → `powell` → `nm`) and uses the first one that works — this is purely a numerical detail and does not change the model specification.
 
-## 4. Diagnóstico de resíduos
+## 4. Residual Diagnostics
 
-Para cada LMM, o script salva dois gráficos (`residuals_<outcome>.png` e `qq_<outcome>.png`):
+For each LMM, the script saves two plots (`residuals_<outcome>.png` and `qq_<outcome>.png`):
 
-- **Resíduos vs. valores ajustados**: para checar não-linearidade ou heterocedasticidade.
-- **QQ-plot normal**: para checar se os resíduos seguem distribuição normal, premissa do LMM.
+- **Residuals vs. fitted values**: to check for non-linearity or heteroscedasticity.
+- **Normal QQ-plot**: to check whether the residuals follow a normal distribution, an assumption of the LMM.
 
-Vale olhar esses gráficos antes de reportar os resultados — se algum outcome mostrar desvio forte de normalidade (por exemplo, `field_correctness`, que é uma distância e tende a ser assimétrica à direita), pode valer a pena transformar a variável (ex. `log1p`) antes de reportar no artigo.
+It is worth examining these plots before reporting the results — if any outcome shows a strong deviation from normality (for instance, `field_correctness`, which is a distance and tends to be right-skewed), it may be worth transforming the variable (e.g., `log1p`) before reporting it in the paper.
 
-## 5. Correção para comparações múltiplas (FDR)
+## 5. Multiple Comparisons Correction (FDR)
 
-Cada LMM testa vários coeficientes (Prompt, Model, e suas interações) — isso é multiplicidade de testes dentro de um único outcome, e há ainda 6 outcomes sendo testados. Para controlar a taxa de falsos positivos, o script agrupa os outcomes em duas **famílias** e aplica a correção de **Benjamini-Hochberg (FDR)** separadamente dentro de cada uma:
+Each LMM tests several coefficients (Prompt, Model, and their interactions) — this constitutes test multiplicity within a single outcome, and there are also 6 outcomes being tested. To control the false positive rate, the script groups the outcomes into two **families** and applies the **Benjamini-Hochberg (FDR)** correction separately within each one:
 
-- **Família estrutural**: `completeness`, `field_correctness`, `type_correctness` → `structural_fdr_results.csv`
-- **Família NLP**: `bleu`, `rouge`, `meteor` → `lmm_fdr_results.csv`
+- **Structural family**: `completeness`, `field_correctness`, `type_correctness` → `structural_fdr_results.csv`
+- **NLP family**: `bleu`, `rouge`, `meteor` → `lmm_fdr_results.csv`
 
-Cada arquivo tem uma linha por coeficiente testado (por outcome), com `p_value` (bruto) e `p_fdr` (corrigido). Os termos de variância do efeito aleatório (`Group Var`) são excluídos dessa correção — eles não são testes de hipótese sobre Prompt/Model.
+Each file has one row per coefficient tested (per outcome), with `p_value` (raw) and `p_fdr` (corrected). The random-effect variance terms (`Group Var`) are excluded from this correction — they are not hypothesis tests about Prompt/Model.
 
-## 6. Comparações pareadas exploratórias (pós-hoc)
+## 6. Exploratory Pairwise Comparisons (Post-hoc)
 
-Além do LMM (que é a análise primária), o script roda comparações pareadas simples via **teste de Wilcoxon** (não-paramétrico), pareando pelo Schema: para cada nível do outro fator (ex. fixando o Model), compara cada par de níveis do fator de interesse (ex. RISEN vs. JUNIOR), usando apenas os schemas presentes nas duas condições. Os p-valores são corrigidos por FDR dentro de cada combinação outcome × fator, e salvos em `posthoc_<outcome>_<fator>.csv`.
+In addition to the LMM (which is the primary analysis), the script runs simple pairwise comparisons via the **Wilcoxon test** (non-parametric), paired by Schema: for each level of the other factor (e.g., fixing Model), it compares each pair of levels of the factor of interest (e.g., RISEN vs. JUNIOR), using only the schemas present in both conditions. The p-values are FDR-corrected within each outcome × factor combination, and saved in `posthoc_<outcome>_<factor>.csv`.
 
-**Importante**: essas comparações são rotuladas como exploratórias no próprio script — a inferência principal do estudo deve vir do LMM (seção 3), que já modela a estrutura de dependência corretamente. O Wilcoxon pareado é útil para uma leitura rápida e intuitiva de "qual prompt ganha de qual", mas não controla pela interação com o outro fator.
+**Important**: these comparisons are labeled as exploratory in the script itself — the study's main inference should come from the LMM (Section 3), which already correctly models the dependence structure. The paired Wilcoxon test is useful for a quick, intuitive reading of "which prompt beats which," but it does not control for the interaction with the other factor.
 
-## 7. Estatísticas descritivas e correlações
+## 7. Descriptive Statistics and Correlations
 
-- `descriptive_statistics.csv`: média, desvio-padrão, mediana, mínimo e máximo de cada outcome, por combinação prompt × modelo.
-- `correlations_structural.csv` / `correlations_nlp.csv`: correlação de Spearman entre os outcomes dentro de cada família (ex.: `completeness` está associado a `bleu`?).
-- `interaction_<outcome>.png`: gráfico de interação (médias por prompt, uma linha por modelo) — boa visualização complementar ao LMM.
+- `descriptive_statistics.csv`: mean, standard deviation, median, minimum, and maximum of each outcome, by prompt × model combination.
+- `correlations_structural.csv` / `correlations_nlp.csv`: Spearman correlation between the outcomes within each family (e.g., is `completeness` associated with `bleu`?).
+- `interaction_<outcome>.png`: interaction plot (means by prompt, one line per model) — a good complementary visualization to the LMM.
 
-## 8. Checagens de qualidade dos dados
+## 8. Data Quality Checks
 
-Antes de qualquer modelagem, o script agora faz três checagens automáticas:
+Before any modeling, the script now performs three automatic checks:
 
-1. **Separador decimal**: converte vírgula → ponto automaticamente se detectar células com vírgula decimal (evita que a coluna inteira vire texto).
-2. **Espaços em branco**: remove espaços extras nos níveis categóricos (schema/prompt/modelo), evitando que, por exemplo, `"RISEN"` e `"RISEN "` sejam contados como níveis diferentes.
-3. **Faixa de valores**: avisa se `bleu`, `rouge`, `meteor` ou `type_correctness` saírem do intervalo `[0, 1]`, o que indica célula corrompida/deslocada na fonte dos dados (não é algo que o script deveria corrigir sozinho — é um sinal para conferir a origem dos dados).
+1. **Decimal separator**: automatically converts comma → period if it detects cells with a decimal comma (preventing the entire column from being read as text).
+2. **Extra whitespace**: removes extra spaces in categorical levels (schema/prompt/model), preventing, for example, `"RISEN"` and `"RISEN "` from being counted as different levels.
+3. **Value range**: warns if `bleu`, `rouge`, `meteor`, or `type_correctness` fall outside the `[0, 1]` range, which indicates a corrupted/shifted cell in the data source (this is not something the script should correct on its own — it is a signal to check the data source).
 
-## 9. Arquivos gerados (`results/`)
+## 9. Generated Files (`results/`)
 
-| Arquivo | Conteúdo |
+| File | Content |
 |---|---|
-| `descriptive_statistics.csv` | Médias/DP/mediana por prompt×modelo, todos os outcomes |
-| `correlations_structural.csv`, `correlations_nlp.csv` | Correlações de Spearman entre outcomes |
-| `lmm_<outcome>.csv` | Resumo completo do LMM ajustado |
-| `lmm_<outcome>_fixed_effects.csv` | Só os coeficientes fixos (Prompt, Model, interação) |
-| `lmm_fdr_results.csv` | P-valores corrigidos (FDR), família NLP |
-| `structural_fdr_results.csv` | P-valores corrigidos (FDR), família estrutural |
-| `posthoc_<outcome>_<fator>.csv` | Comparações pareadas exploratórias (Wilcoxon) |
-| `interaction_<outcome>.png` | Gráfico de interação prompt × modelo |
-| `residuals_<outcome>.png`, `qq_<outcome>.png` | Diagnóstico de resíduos do LMM |
-| `analysis_summary.txt` | Resumo textual da execução |
-
-## 10. Observações para o artigo
-
-- `field_correctness` tem escala invertida em relação aos outros cinco outcomes (menor = melhor, por ser uma distância de edição). Vale deixar isso explícito na legenda de qualquer tabela/gráfico que a inclua ao lado das demais métricas.
-- `completeness` não tem teto natural em 1 — um valor acima de 1 significa que o schema gerado tem mais atributos do que o de referência, não necessariamente que está "mais completo que o máximo". Isso é uma limitação da métrica (contagem, não identidade dos atributos), não do script.
-- O suporte a GLMM binomial (`bambi`/`PyMC`) ainda existe no script (`GLMM_OUTCOMES`/`GLMM_SUCCESS_COLUMNS`), mas está vazio — nenhum dos seis outcomes atuais é uma contagem bruta limitada por `total_attributes`. Ele fica disponível caso surja uma métrica desse tipo no futuro.
+| `descriptive_statistics.csv` | Means/SD/median by prompt×model, all outcomes |
+| `correlations_structural.csv`, `correlations_nlp.csv` | Spearman correlations between outcomes |
+| `lmm_<outcome>.csv` | Full summary of the fitted LMM |
+| `lmm_fdr_results.csv` | FDR-corrected p-values, NLP family |
+| `structural_fdr_results.csv` | FDR-corrected p-values, structural family |
+| `posthoc_<outcome>_<factor>.csv` | Exploratory pairwise comparisons (Wilcoxon) |
+| `interaction_<outcome>.png` | Prompt × model interaction plot |
+| `residuals_<outcome>.png`, `qq_<outcome>.png` | LMM residual diagnostics |
+| `analysis_summary.txt` | Textual summary of the run |
